@@ -65,7 +65,7 @@ if [[ "$INSTALL_DEPS" -eq 1 ]]; then
     echo "Missing $HOMEBREW_PREFIX/bin/brew; run with --bootstrap-brew first" >&2
     exit 1
   fi
-  run arch -x86_64 "$HOMEBREW_PREFIX/bin/brew" install autoconf bison flex pkg-config freetype gettext gnutls
+  run arch -x86_64 "$HOMEBREW_PREFIX/bin/brew" install -y autoconf bison flex pkg-config freetype gettext gnutls
 fi
 
 run mkdir -p "$OGOM/install" "$WINE_SRC/build64"

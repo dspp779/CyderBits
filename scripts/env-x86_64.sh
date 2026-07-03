@@ -16,8 +16,9 @@ export PATH="$LLVM_MINGW/bin:$HOMEBREW_PREFIX/bin:$PATH"
 export HOMEBREW_NO_AUTO_UPDATE=1
 export HOMEBREW_NO_ANALYTICS=1
 export HOMEBREW_NO_ENV_HINTS=1
-# Non-interactive install (Homebrew's equivalent of apt -y). Without this,
-# `brew install` prompts "Do you want to proceed? [y/n]" and background runs hang.
+# Homebrew 4.x defaults to ask-mode ("Do you want to proceed? [y/n]").
+# NONINTERACTIVE/CI alone do not skip it; HOMEBREW_NO_ASK does (same as brew -y).
+export HOMEBREW_NO_ASK=1
 export NONINTERACTIVE=1
 export CI=1
 # Keep caches inside the project (avoid Cursor sandbox temp paths dying mid-build).
