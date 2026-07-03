@@ -1,0 +1,22 @@
+# Build toolchain and outputs
+.brew-x86/
+install/
+sources/wine/build64/
+tests/tmp/
+logs/
+
+# Large local trees (stay on disk; not versioned)
+BlueCrossgateNew/
+sources/
+llvm-mingw-20260616-ucrt-macos-universal/
+cnc-ddraw/
+
+# Archives and binary drops
+*.tar.gz
+*.tar.xz
+*.zip
+ddraw.dll
+mingliu.ttc
+
+# OS / editor noise
+.DS_Store

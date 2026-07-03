@@ -1,0 +1,38 @@
+# Game assets / Wine prefix (large binaries, not source)
+BlueCrossgateNew/
+
+# Prebuilt PE toolchain
+llvm-mingw-20260616-ucrt-macos-universal/
+llvm-mingw-*.tar.xz
+
+# CrossOver sources not needed for BlueCG v1 (keep sources/wine/)
+sources/gstreamer/
+sources/gnutls/
+sources/ghostscript/
+sources/glib/
+sources/moltenvk/
+sources/vkd3d/
+sources/dxvk/
+sources/busybox/
+sources/freetype/
+sources/po4a/
+sources/cabextract/
+sources/android/
+sources/makedep/
+sources/pyxdg/
+sources/htmltextview/
+
+# Project-local build toolchain and outputs
+.brew-x86/
+install/
+sources/wine/build64/
+tests/tmp/
+logs/
+
+# Archives and third-party binary drops
+*.tar.gz
+*.tar.xz
+*.zip
+ddraw.dll
+mingliu.ttc
+cnc-ddraw/
