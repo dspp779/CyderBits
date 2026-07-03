@@ -16,3 +16,8 @@ export PATH="$LLVM_MINGW/bin:$HOMEBREW_PREFIX/bin:$PATH"
 export HOMEBREW_NO_AUTO_UPDATE=1
 export HOMEBREW_NO_ANALYTICS=1
 export HOMEBREW_NO_ENV_HINTS=1
+# Keep caches inside the project (avoid Cursor sandbox temp paths dying mid-build).
+export HOMEBREW_CACHE="$OGOM/.brew-x86/cache"
+export HOMEBREW_LOGS="$OGOM/.brew-x86/logs"
+export HOMEBREW_TEMP="$OGOM/.brew-x86/tmp"
+mkdir -p "$HOMEBREW_CACHE" "$HOMEBREW_LOGS" "$HOMEBREW_TEMP"
