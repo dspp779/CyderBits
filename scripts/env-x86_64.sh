@@ -16,6 +16,10 @@ export PATH="$LLVM_MINGW/bin:$HOMEBREW_PREFIX/bin:$PATH"
 export HOMEBREW_NO_AUTO_UPDATE=1
 export HOMEBREW_NO_ANALYTICS=1
 export HOMEBREW_NO_ENV_HINTS=1
+# Non-interactive install (Homebrew's equivalent of apt -y). Without this,
+# `brew install` prompts "Do you want to proceed? [y/n]" and background runs hang.
+export NONINTERACTIVE=1
+export CI=1
 # Keep caches inside the project (avoid Cursor sandbox temp paths dying mid-build).
 export HOMEBREW_CACHE="$OGOM/.brew-x86/cache"
 export HOMEBREW_LOGS="$OGOM/.brew-x86/logs"
