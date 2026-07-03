@@ -22,7 +22,7 @@ Before any task, the machine must have:
 | Xcode CLT or Xcode | `xcode-select -p` | prints a path |
 | llvm-mingw tree | `test -x llvm-mingw-20260616-ucrt-macos-universal/bin/x86_64-w64-mingw32-clang` | exit 0 |
 | Wine sources | `test -f sources/wine/configure.ac` | exit 0 |
-| Entitlements | `test -f sources/wine/entitlements.plist` | exit 0 |
+| Entitlements | `test -f config/entitlements.plist` | exit 0 (tracked; also mirrored to `sources/wine/entitlements.plist` for local builds) |
 | Game prefix | `test -f BlueCrossgateNew/BlueLauncher.exe` | exit 0 |
 
 If any check fails, stop and fix the host before continuing.
@@ -177,7 +177,7 @@ arch -x86_64 true
 xcode-select -p
 test -x llvm-mingw-20260616-ucrt-macos-universal/bin/x86_64-w64-mingw32-clang
 test -f sources/wine/configure.ac
-test -f sources/wine/entitlements.plist
+test -f config/entitlements.plist
 test -f BlueCrossgateNew/BlueLauncher.exe
 ```
 
@@ -243,7 +243,7 @@ assert_eq "$LLVM_MINGW" "$ROOT/llvm-mingw-20260616-ucrt-macos-universal" "llvm-m
 assert_eq "$WINE_INSTALL" "$ROOT/install/wine-x86_64" "Wine install prefix should stay inside install/"
 assert_eq "$WINE_SRC" "$ROOT/sources/wine" "Wine source tree should point at sources/wine"
 assert_eq "$BLUECG_PREFIX" "$ROOT/BlueCrossgateNew" "Game prefix should point at BlueCrossgateNew"
-assert_eq "$ENTITLEMENTS_PLIST" "$ROOT/sources/wine/entitlements.plist" "entitlements path should match CrossOver wine tree"
+assert_eq "$ENTITLEMENTS_PLIST" "$ROOT/config/entitlements.plist" "entitlements path should use tracked config copy"
 assert_contains "$PATH" "$ROOT/.brew-x86/bin" "PATH should include isolated Homebrew"
 assert_contains "$PATH" "$ROOT/llvm-mingw-20260616-ucrt-macos-universal/bin" "PATH should include llvm-mingw"
 
@@ -280,7 +280,7 @@ export LLVM_MINGW="$OGOM/llvm-mingw-20260616-ucrt-macos-universal"
 export WINE_INSTALL="$OGOM/install/wine-x86_64"
 export WINE_SRC="$OGOM/sources/wine"
 export BLUECG_PREFIX="$OGOM/BlueCrossgateNew"
-export ENTITLEMENTS_PLIST="$WINE_SRC/entitlements.plist"
+export ENTITLEMENTS_PLIST="$OGOM/config/entitlements.plist"
 export ARCH_CMD="arch -x86_64"
 export PATH="$LLVM_MINGW/bin:$HOMEBREW_PREFIX/bin:$PATH"
 ```
