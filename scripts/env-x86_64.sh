@@ -11,3 +11,8 @@ export BLUECG_PREFIX="$OGOM/BlueCrossgateNew"
 export ENTITLEMENTS_PLIST="$OGOM/config/entitlements.plist"
 export ARCH_CMD="arch -x86_64"
 export PATH="$LLVM_MINGW/bin:$HOMEBREW_PREFIX/bin:$PATH"
+# Custom-prefix Homebrew (tarball, no .git) must not auto-update or it fails with:
+# "Error: update-report should not be called directly!"
+export HOMEBREW_NO_AUTO_UPDATE=1
+export HOMEBREW_NO_ANALYTICS=1
+export HOMEBREW_NO_ENV_HINTS=1
