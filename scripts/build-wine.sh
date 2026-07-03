@@ -65,8 +65,30 @@ if [[ "$INSTALL_DEPS" -eq 1 ]]; then
     echo "Missing $HOMEBREW_PREFIX/bin/brew; run with --bootstrap-brew first" >&2
     exit 1
   fi
-  run arch -x86_64 "$HOMEBREW_PREFIX/bin/brew" install -y autoconf bison flex pkg-config freetype gettext gnutls
+  run arch -x86_64 "$HOMEBREW_PREFIX/bin/brew" install -y autoconf bison flex pkgconf freetype gettext gnutls
 fi
+
+# Sanitize PATH so configure/make never pick /opt/homebrew (arm64) pkg-config/libs.
+BUILD_PATH="$LLVM_MINGW/bin:$HOMEBREW_PREFIX/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+
+require_x86_dep() {
+  local pc="$1"
+  if [[ "$DRY_RUN" -eq 1 ]]; then
+    echo "+ require pkg-config $pc via $HOMEBREW_PREFIX"
+    return 0
+  fi
+  if [[ ! -x "$HOMEBREW_PREFIX/bin/pkg-config" ]]; then
+    echo "Missing $HOMEBREW_PREFIX/bin/pkg-config; re-run with --install-deps" >&2
+    exit 1
+  fi
+  if ! arch -x86_64 env PATH="$BUILD_PATH" PKG_CONFIG_LIBDIR="$HOMEBREW_PREFIX/lib/pkgconfig" \
+      "$HOMEBREW_PREFIX/bin/pkg-config" --exists "$pc"; then
+    echo "Missing x86_64 $pc in $HOMEBREW_PREFIX (not /opt/homebrew). Re-run: bash scripts/build-wine.sh --install-deps" >&2
+    exit 1
+  fi
+}
+
+require_x86_dep freetype2
 
 run mkdir -p "$OGOM/install" "$WINE_SRC/build64"
 # Dry-run only prints mkdir; still create dirs so subsequent cd works.
@@ -76,16 +98,18 @@ cd "$WINE_SRC"
 run ./tools/make_requests
 run ./tools/make_specfiles
 run ./tools/make_makefiles
-run arch -x86_64 env PATH="$HOMEBREW_PREFIX/bin:$PATH" autoreconf -f
+run arch -x86_64 env PATH="$BUILD_PATH" autoreconf -f
 
 cd "$WINE_SRC/build64"
 run arch -x86_64 env \
-  PATH="$LLVM_MINGW/bin:$HOMEBREW_PREFIX/bin:$PATH" \
+  PATH="$BUILD_PATH" \
   BISON="$HOMEBREW_PREFIX/opt/bison/bin/bison" \
+  PKG_CONFIG="$HOMEBREW_PREFIX/bin/pkg-config" \
   PKG_CONFIG_PATH="$HOMEBREW_PREFIX/lib/pkgconfig" \
+  PKG_CONFIG_LIBDIR="$HOMEBREW_PREFIX/lib/pkgconfig" \
   ../configure -C --enable-win64 --with-mingw=llvm-mingw --prefix="$WINE_INSTALL"
 
 if [[ "$CONFIGURE_ONLY" -eq 0 ]]; then
-  run arch -x86_64 env PATH="$LLVM_MINGW/bin:$HOMEBREW_PREFIX/bin:$PATH" make -j"$JOBS"
-  run arch -x86_64 env PATH="$LLVM_MINGW/bin:$HOMEBREW_PREFIX/bin:$PATH" make install
+  run arch -x86_64 env PATH="$BUILD_PATH" make -j"$JOBS"
+  run arch -x86_64 env PATH="$BUILD_PATH" make install
 fi

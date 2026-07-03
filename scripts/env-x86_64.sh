@@ -10,7 +10,12 @@ export WINE_SRC="$OGOM/sources/wine"
 export BLUECG_PREFIX="$OGOM/BlueCrossgateNew"
 export ENTITLEMENTS_PLIST="$OGOM/config/entitlements.plist"
 export ARCH_CMD="arch -x86_64"
+# Prefer project toolchains; keep system paths but put .brew-x86 ahead of /opt/homebrew.
 export PATH="$LLVM_MINGW/bin:$HOMEBREW_PREFIX/bin:$PATH"
+# Only search project Homebrew for .pc files (never /opt/homebrew arm64 libs).
+export PKG_CONFIG="$HOMEBREW_PREFIX/bin/pkg-config"
+export PKG_CONFIG_PATH="$HOMEBREW_PREFIX/lib/pkgconfig"
+export PKG_CONFIG_LIBDIR="$HOMEBREW_PREFIX/lib/pkgconfig"
 # Custom-prefix Homebrew (tarball, no .git) must not auto-update or it fails with:
 # "Error: update-report should not be called directly!"
 export HOMEBREW_NO_AUTO_UPDATE=1
