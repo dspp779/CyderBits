@@ -26,5 +26,6 @@ assert_contains "$output" "x86_64" "dry-run archs should include x86_64 PE"
 assert_contains "$output" "--with-mingw=llvm-mingw" "dry-run should use llvm-mingw"
 assert_contains "$output" "make -j" "dry-run should show the compile step"
 assert_contains "$output" "make install" "dry-run should show the install step"
+assert_contains "$output" "bundle-wine-dylibs.sh" "dry-run should bundle relocatable dylibs after install"
 
 echo "PASS test-build-wine"

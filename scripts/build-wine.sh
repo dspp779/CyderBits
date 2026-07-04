@@ -159,8 +159,8 @@ if [[ "$CONFIGURE_ONLY" -eq 0 ]]; then
   run arch -x86_64 env PATH="$BUILD_PATH" PKG_CONFIG_PATH="$PKG_PC_PATH" make -j"$JOBS"
   run arch -x86_64 env PATH="$BUILD_PATH" PKG_CONFIG_PATH="$PKG_PC_PATH" make install
   if [[ "$DRY_RUN" -eq 1 ]]; then
-    echo "+ $SCRIPT_DIR/link-wine-runtime-libs.sh"
+    echo "+ $SCRIPT_DIR/bundle-wine-dylibs.sh"
   else
-    "$SCRIPT_DIR/link-wine-runtime-libs.sh"
+    "$SCRIPT_DIR/bundle-wine-dylibs.sh" "$WINE_INSTALL"
   fi
 fi
