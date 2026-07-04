@@ -53,11 +53,13 @@ These files already exist and encode the indexing / ignore policy:
 
 Prior native-build experience. **Do not automate** these in `scripts/`. Default build uses clean `sources/wine`. If a clean build or run fails, consult this section, decide whether any subset of W1–W3 applies (one, two, or all three), verify each is still appropriate, and prefer a proper fix when one exists.
 
-| ID | Purpose | File | Manual command (from `sources/wine/`) |
-|----|---------|------|----------------------------------------|
-| W1 | Bypass Vulkan soname | `dlls/win32u/vulkan.c` | `sed -i '' 's/SONAME_LIBVULKAN/"libMoltenVK.dylib"/g' dlls/win32u/vulkan.c` |
+| ID | Purpose | File | How to apply |
+|----|---------|------|--------------|
+| W1 | Fallback when `SONAME_LIBVULKAN` undefined | `dlls/win32u/vulkan.c` | `patch -p1 -d sources/wine < patches/w1-win32u-vulkan-soname.patch` (`#ifndef` guard; **not** bare `sed`) |
 | W2 | Stock Metal layer | `dlls/winemac.drv/cocoa_window.m` | `sed -i '' 's/WineMetalLayer/CAMetalLayer/g' dlls/winemac.drv/cocoa_window.m` |
 | W3 | Skip 3D present sync | `dlls/winemac.drv/event.c` | `sed -i '' '/macdrv_client_surface_presented/d' dlls/winemac.drv/event.c` |
+
+**W1 applied (2026-07-04):** clean `#ifndef SONAME_LIBVULKAN` / `#define ... "libMoltenVK.dylib"` after `#include "config.h"`. See `patches/README.md` and `logs/workarounds.md`.
 
 ### When to consider
 
@@ -88,10 +90,10 @@ bash scripts/build-wine.sh
 bash scripts/sign-wine.sh
 ```
 
-Verify clean markers:
+Verify clean markers (after restore, W1 should **not** contain the `#ifndef SONAME_LIBVULKAN` fallback block):
 
 ```bash
-grep -n 'SONAME_LIBVULKAN' sources/wine/dlls/win32u/vulkan.c
+grep -n 'ifndef SONAME_LIBVULKAN' sources/wine/dlls/win32u/vulkan.c || echo 'W1 not applied'
 grep -n 'WineMetalLayer' sources/wine/dlls/winemac.drv/cocoa_window.m
 grep -n 'macdrv_client_surface_presented' sources/wine/dlls/winemac.drv/event.c
 ```

@@ -28,16 +28,18 @@
 
 | ID | 檔案 | 變更 |
 |----|------|------|
-| W1 | `dlls/win32u/vulkan.c` | `SONAME_LIBVULKAN` → `"libMoltenVK.dylib"` |
+| W1 | `dlls/win32u/vulkan.c` | `#ifndef SONAME_LIBVULKAN` → `#define SONAME_LIBVULKAN "libMoltenVK.dylib"`（見 `patches/w1-win32u-vulkan-soname.patch`，不用裸 sed） |
 | W2 | `dlls/winemac.drv/cocoa_window.m` | `WineMetalLayer` → `CAMetalLayer` |
 | W3 | `dlls/winemac.drv/event.c` | 刪除 `macdrv_client_surface_presented` |
 
 規則：
 
 1. 預設乾淨 build；先試正解，workaround 是最後手段
-2. 可依錯誤選用任意子集；套用前記錄用了哪些 ID
-3. 改源碼前手動備份或依賴 tarball 還原
+2. 可依錯誤選用任意子集；套用前記錄用了哪些 ID（`logs/workarounds.md`）
+3. W1 優先用 tracked patch（`patches/`），不要全域 `sed` 替換識別字
 4. 實驗結束後從 `crossover-sources-26.2.0.tar.gz` 還原被改過的檔案，再重編與重簽
+
+**已套用（2026-07-04）：** W1（`#ifndef` 補丁），因 `make` 報 `undeclared identifier 'SONAME_LIBVULKAN'`。
 
 ## 初始 commit 範圍
 

@@ -1,0 +1,18 @@
+--- a/dlls/win32u/vulkan.c
++++ b/dlls/win32u/vulkan.c
+@@ -23,6 +23,15 @@
+ #endif
+ 
+ #include "config.h"
++
++/* When configure finds neither libvulkan nor libMoltenVK, SONAME_LIBVULKAN is
++ * left undefined but this file is still compiled (CrossOver). Provide a macOS
++ * fallback so the build can proceed; runtime dlopen may still fail if MoltenVK
++ * is absent (BlueCG uses DirectDraw and does not need Vulkan).
++ */
++#ifndef SONAME_LIBVULKAN
++#define SONAME_LIBVULKAN "libMoltenVK.dylib"
++#endif
+ 
+ #include <dlfcn.h>
+ #include <pthread.h>
