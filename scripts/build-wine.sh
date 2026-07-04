@@ -65,11 +65,44 @@ if [[ "$INSTALL_DEPS" -eq 1 ]]; then
     echo "Missing $HOMEBREW_PREFIX/bin/brew; run with --bootstrap-brew first" >&2
     exit 1
   fi
-  run arch -x86_64 "$HOMEBREW_PREFIX/bin/brew" install -y autoconf bison flex pkgconf freetype gettext gnutls
+  run arch -x86_64 "$HOMEBREW_PREFIX/bin/brew" install -y autoconf bison flex pkgconf freetype gettext gnutls zlib bzip2
 fi
 
 # Sanitize PATH so configure/make never pick /opt/homebrew (arm64) pkg-config/libs.
 BUILD_PATH="$LLVM_MINGW/bin:$HOMEBREW_PREFIX/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+# keg-only formulae ship .pc under opt/*/lib/pkgconfig
+PKG_PC_PATH="$HOMEBREW_PREFIX/lib/pkgconfig:${HOMEBREW_PREFIX}/opt/zlib/lib/pkgconfig:${HOMEBREW_PREFIX}/opt/bzip2/lib/pkgconfig"
+
+# Homebrew bzip2 is keg-only and may not install a .pc file; freetype2.pc needs it.
+ensure_bzip2_pc() {
+  local pc="$HOMEBREW_PREFIX/lib/pkgconfig/bzip2.pc"
+  local prefix="$HOMEBREW_PREFIX/opt/bzip2"
+  if [[ "$DRY_RUN" -eq 1 ]]; then
+    echo "+ ensure $pc"
+    return 0
+  fi
+  if [[ -f "$pc" || -f "$prefix/lib/pkgconfig/bzip2.pc" ]]; then
+    return 0
+  fi
+  if [[ ! -d "$prefix" ]]; then
+    echo "Missing $prefix; re-run with --install-deps" >&2
+    exit 1
+  fi
+  mkdir -p "$HOMEBREW_PREFIX/lib/pkgconfig"
+  cat > "$pc" <<EOF
+prefix=$prefix
+exec_prefix=\${prefix}
+libdir=\${prefix}/lib
+includedir=\${prefix}/include
+
+Name: bzip2
+Description: bzip2 compression library
+Version: 1.0.8
+Libs: -L\${libdir} -lbz2
+Cflags: -I\${includedir}
+EOF
+  echo "wrote $pc (homebrew bzip2 is keg-only without a .pc)"
+}
 
 require_x86_dep() {
   local pc="$1"
@@ -81,13 +114,17 @@ require_x86_dep() {
     echo "Missing $HOMEBREW_PREFIX/bin/pkg-config; re-run with --install-deps" >&2
     exit 1
   fi
-  if ! arch -x86_64 env PATH="$BUILD_PATH" PKG_CONFIG_LIBDIR="$HOMEBREW_PREFIX/lib/pkgconfig" \
+  if ! arch -x86_64 env PATH="$BUILD_PATH" PKG_CONFIG_PATH="$PKG_PC_PATH" \
       "$HOMEBREW_PREFIX/bin/pkg-config" --exists "$pc"; then
-    echo "Missing x86_64 $pc in $HOMEBREW_PREFIX (not /opt/homebrew). Re-run: bash scripts/build-wine.sh --install-deps" >&2
+    echo "Missing x86_64 $pc in $HOMEBREW_PREFIX (not /opt/homebrew)." >&2
+    arch -x86_64 env PATH="$BUILD_PATH" PKG_CONFIG_PATH="$PKG_PC_PATH" \
+      "$HOMEBREW_PREFIX/bin/pkg-config" --exists --print-errors "$pc" 2>&1 || true
+    echo "Re-run: bash scripts/build-wine.sh --install-deps" >&2
     exit 1
   fi
 }
 
+ensure_bzip2_pc
 require_x86_dep freetype2
 
 run mkdir -p "$OGOM/install" "$WINE_SRC/build64"
@@ -95,21 +132,26 @@ run mkdir -p "$OGOM/install" "$WINE_SRC/build64"
 mkdir -p "$OGOM/install" "$WINE_SRC/build64"
 
 cd "$WINE_SRC"
-run ./tools/make_requests
-run ./tools/make_specfiles
-run ./tools/make_makefiles
-run arch -x86_64 env PATH="$BUILD_PATH" autoreconf -f
+# CrossOver tarball is not a git checkout; make_makefiles requires `git ls-files`.
+# Regenerators are only needed when hacking the wine tree as a git worktree.
+if [[ -e "$WINE_SRC/.git" || -n "${GIT_DIR:-}" ]]; then
+  run ./tools/make_requests
+  run ./tools/make_specfiles
+  run ./tools/make_makefiles
+  run arch -x86_64 env PATH="$BUILD_PATH" autoreconf -f
+else
+  echo "Non-git wine tree; skipping make_requests/make_specfiles/make_makefiles/autoreconf"
+fi
 
 cd "$WINE_SRC/build64"
 run arch -x86_64 env \
   PATH="$BUILD_PATH" \
   BISON="$HOMEBREW_PREFIX/opt/bison/bin/bison" \
   PKG_CONFIG="$HOMEBREW_PREFIX/bin/pkg-config" \
-  PKG_CONFIG_PATH="$HOMEBREW_PREFIX/lib/pkgconfig" \
-  PKG_CONFIG_LIBDIR="$HOMEBREW_PREFIX/lib/pkgconfig" \
+  PKG_CONFIG_PATH="$PKG_PC_PATH" \
   ../configure -C --enable-win64 --with-mingw=llvm-mingw --prefix="$WINE_INSTALL"
 
 if [[ "$CONFIGURE_ONLY" -eq 0 ]]; then
-  run arch -x86_64 env PATH="$BUILD_PATH" make -j"$JOBS"
-  run arch -x86_64 env PATH="$BUILD_PATH" make install
+  run arch -x86_64 env PATH="$BUILD_PATH" PKG_CONFIG_PATH="$PKG_PC_PATH" make -j"$JOBS"
+  run arch -x86_64 env PATH="$BUILD_PATH" PKG_CONFIG_PATH="$PKG_PC_PATH" make install
 fi
