@@ -45,8 +45,13 @@ done
 [[ -d "$TARGET_ROOT" ]] || { echo "Missing install root: $TARGET_ROOT" >&2; exit 1; }
 [[ -f "$ENTITLEMENTS" ]] || { echo "Missing entitlements file: $ENTITLEMENTS" >&2; exit 1; }
 
-run "$XATTR_CMD" -cr "$TARGET_ROOT"
+# Clear quarantine only on regular files. Do not follow symlinks into .brew-x86
+# (runtime lib links); xattr -cr would try to mutate those and fail with EACCES.
+while IFS= read -r -d '' path; do
+  run "$XATTR_CMD" -c "$path" || true
+done < <(find "$TARGET_ROOT" -type f -print0)
 
+# Sign only regular Mach-O files (skip symlinks to Homebrew dylibs).
 while IFS= read -r -d '' path; do
   if "$FILE_CMD" -b "$path" | grep -q 'Mach-O'; then
     run "$CODESIGN_CMD" --force --sign - \

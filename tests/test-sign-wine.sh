@@ -47,8 +47,14 @@ output="$(
 assert_contains "$output" "bin/wine" "dry-run should include wineloader"
 assert_contains "$output" "bin/wineserver" "dry-run should include wineserver"
 
-if [[ "$output" == *"readme.txt"* ]]; then
+if [[ "$output" == *"codesign"*"readme.txt"* ]] || [[ "$output" == *"--options runtime"*"readme.txt"* ]]; then
   echo "non-Mach-O file should not be selected for signing" >&2
+  exit 1
+fi
+
+# Symlinks to brew dylibs must not be xattr'd via -cr (permission errors).
+if [[ "$output" == *"xattr -cr"* ]]; then
+  echo "sign-wine must not use xattr -cr (follows symlinks into Homebrew)" >&2
   exit 1
 fi
 
