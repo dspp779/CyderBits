@@ -4,6 +4,7 @@ install/
 sources/wine/build64/
 tests/tmp/
 logs/
+dist/
 
 # Large local trees (stay on disk; not versioned)
 BlueCrossgateNew/
