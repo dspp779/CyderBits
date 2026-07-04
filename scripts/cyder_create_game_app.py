@@ -422,13 +422,21 @@ def ensure_shared_engine(engine_src: Path) -> Path:
     return dest
 
 
+def wine_locale_env(env: dict[str, str] | None = None) -> dict[str, str]:
+    """Match run-bluecg.sh: force zh_TW so Wine uses CP950 (Big5), not Finder's en_US."""
+    out = dict(env) if env is not None else os.environ.copy()
+    out["LANG"] = "zh_TW.UTF-8"
+    out["LC_ALL"] = "zh_TW.UTF-8"
+    return out
+
+
 def init_bottle(wine_bin: Path, bottle: Path) -> None:
     if (bottle / "system.reg").exists():
         print(f"Bottle exists: {bottle}")
         return
     print(f"Creating bottle: {bottle}")
     bottle.mkdir(parents=True, exist_ok=True)
-    env = os.environ.copy()
+    env = wine_locale_env()
     env["WINEPREFIX"] = str(bottle)
     # Avoid interactive Gecko dialog during bottle init; keep mscoree for .NET launchers.
     env["WINEDLLOVERRIDES"] = "mshtml="
@@ -448,15 +456,80 @@ def init_bottle(wine_bin: Path, bottle: Path) -> None:
     run(["arch", "-x86_64", str(wine_bin.parent / "wineserver"), "-k"], env=env)
 
 
+def apply_mac_hires(wine_bin: Path, prefix: Path, *, enable: bool = True) -> None:
+    """Apply CrossOver-like RetinaMode + LogPixels=192 (+ ClearType RGB). See enable-mac-retina-hires.sh."""
+    wineserver = wine_bin.parent / "wineserver"
+    env = wine_locale_env()
+    env["WINEPREFIX"] = str(prefix.resolve())
+    env["WINESERVER"] = str(wineserver)
+    subprocess.call(
+        ["arch", "-x86_64", str(wineserver), "-k"],
+        env=env,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    if enable:
+        entries = [
+            (r"HKCU\Software\Wine\Mac Driver", "RetinaMode", "REG_SZ", "y"),
+            (r"HKCU\Control Panel\Desktop", "LogPixels", "REG_DWORD", "0xc0"),
+            (r"HKCU\Control Panel\Desktop", "FontSmoothing", "REG_SZ", "2"),
+            (r"HKCU\Control Panel\Desktop", "FontSmoothingType", "REG_DWORD", "2"),
+            (r"HKCU\Control Panel\Desktop", "FontSmoothingGamma", "REG_DWORD", "0x578"),
+            (r"HKCU\Control Panel\Desktop", "FontSmoothingOrientation", "REG_DWORD", "1"),
+        ]
+        label = "ON (RetinaMode=y, DPI=192)"
+    else:
+        entries = [
+            (r"HKCU\Software\Wine\Mac Driver", "RetinaMode", "REG_SZ", "n"),
+            (r"HKCU\Control Panel\Desktop", "LogPixels", "REG_DWORD", "0x60"),
+            (r"HKCU\Control Panel\Desktop", "FontSmoothing", "REG_SZ", "2"),
+            (r"HKCU\Control Panel\Desktop", "FontSmoothingType", "REG_DWORD", "1"),
+            (r"HKCU\Control Panel\Desktop", "FontSmoothingGamma", "REG_DWORD", "0"),
+            (r"HKCU\Control Panel\Desktop", "FontSmoothingOrientation", "REG_DWORD", "1"),
+        ]
+        label = "OFF"
+    for key, name, typ, val in entries:
+        run(
+            [
+                "arch",
+                "-x86_64",
+                str(wine_bin),
+                "reg",
+                "add",
+                key,
+                "/v",
+                name,
+                "/t",
+                typ,
+                "/d",
+                val,
+                "/f",
+            ],
+            env=env,
+        )
+    subprocess.call(
+        ["arch", "-x86_64", str(wineserver), "-k"],
+        env=env,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    print(f"Mac high-res mode {label} -> {prefix}")
+
+
 def write_game_launcher(path: Path) -> None:
+    # Agent-style launcher: start Wine in a new session and exit so the wrapper
+    # does not stay in the Dock (bouncing). Wine shows the Windows EXE icon.
     path.write_text(
         """#!/bin/bash
 set -euo pipefail
+# Force zh_TW like scripts/run-bluecg.sh (Finder often sets en_US → Wine shows ?? for CJK IME).
+export LANG=zh_TW.UTF-8
+export LC_ALL=zh_TW.UTF-8
 SELF="$(cd "$(dirname "$0")" && pwd)"
 RES="$(cd "$SELF/../Resources" && pwd)"
 META="$RES/meta.json"
 
-python3 - "$META" <<'PY'
+exec python3 - "$META" <<'PY'
 import json, os, subprocess, sys
 from pathlib import Path
 
@@ -490,16 +563,30 @@ if not exe.is_file():
 
 env = os.environ.copy()
 env["WINEPREFIX"] = str(prefix)
-env["LANG"] = env.get("LANG", "zh_TW.UTF-8")
+env["LANG"] = "zh_TW.UTF-8"
+env["LC_ALL"] = "zh_TW.UTF-8"
 env["PATH"] = f"{wine_root / 'bin'}:{env.get('PATH', '')}"
+env["WINESERVER"] = str(wine_root / "bin" / "wineserver")
+if meta.get("msync", True):
+    env["WINEMSYNC"] = "1"
 if meta.get("no_gecko_prompt"):
     env["WINEDLLOVERRIDES"] = "mshtml=" + ((";" + env["WINEDLLOVERRIDES"]) if env.get("WINEDLLOVERRIDES") else "")
 
-os.chdir(game_dir)
 cmd = ["arch", "-x86_64", str(wine), str(exe)]
 if meta.get("exe_args"):
     cmd.extend(meta["exe_args"])
-os.execvpe(cmd[0], cmd, env)
+# Detach from the .app process group so the wrapper can exit without killing Wine,
+# and so Dock only keeps Wine's Windows-app icon (not a bouncing CyderGame).
+subprocess.Popen(
+    cmd,
+    env=env,
+    cwd=str(game_dir),
+    start_new_session=True,
+    stdin=subprocess.DEVNULL,
+    stdout=subprocess.DEVNULL,
+    stderr=subprocess.DEVNULL,
+)
+sys.exit(0)
 PY
 """,
         encoding="utf-8",
@@ -536,6 +623,8 @@ def write_info_plist(path: Path, name: str, bundle_id: str, *, has_icon: bool = 
   <string>1</string>
   <key>LSMinimumSystemVersion</key>
   <string>12.0</string>
+  <key>LSUIElement</key>
+  <true/>
   <key>NSHighResolutionCapable</key>
   <true/>
 </dict>
@@ -553,6 +642,8 @@ def create_game_app(
     portable_engine: bool,
     prefix_mode: str,
     no_gecko_prompt: bool,
+    mac_hires: bool,
+    msync: bool,
     engine_src: Path,
 ) -> Path:
     exe = exe.expanduser().resolve()
@@ -594,14 +685,19 @@ def create_game_app(
     if prefix_mode == "bottle":
         bottle = BOTTLES / bottle_id
         init_bottle(wine_bin, bottle)
+        effective_prefix = bottle
     elif prefix_mode == "game_dir":
         bottle_id = ""
+        effective_prefix = effective_game_dir
         # use game directory as prefix; ensure minimal wine files if missing
         if not (effective_game_dir / "system.reg").exists():
             print("Initializing game_dir as WINEPREFIX...")
             init_bottle(wine_bin, effective_game_dir)
     else:
         sys.exit(f"Unknown prefix_mode: {prefix_mode}")
+
+    if mac_hires:
+        apply_mac_hires(wine_bin, effective_prefix, enable=True)
 
     meta = {
         "name": exe.stem,
@@ -614,6 +710,8 @@ def create_game_app(
         "prefix_mode": prefix_mode,
         "bottle_id": bottle_id,
         "no_gecko_prompt": no_gecko_prompt,
+        "mac_hires": mac_hires,
+        "msync": msync,
         "exe_args": [],
     }
     (res / "meta.json").write_text(json.dumps(meta, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
@@ -640,7 +738,10 @@ def create_game_app(
     subprocess.call(["codesign", "--force", "--deep", "--sign", "-", str(app)])
 
     print(f"\nCreated: {app}")
-    print(f"  mode: link={'no' if standalone else 'yes'}  portable_engine={portable_engine}  prefix={prefix_mode}")
+    print(
+        f"  mode: link={'no' if standalone else 'yes'}  portable_engine={portable_engine}  "
+        f"prefix={prefix_mode}  mac_hires={mac_hires}  msync={msync}"
+    )
     return app
 
 
@@ -658,6 +759,16 @@ def main() -> None:
         help="bottle=clean prefix in Application Support; game_dir=use game folder as WINEPREFIX",
     )
     parser.add_argument("--no-gecko-prompt", action="store_true", help="Disable mshtml for this game")
+    parser.add_argument(
+        "--no-mac-hires",
+        action="store_true",
+        help="Do not enable Mac RetinaMode + 200%% DPI in the prefix",
+    )
+    parser.add_argument(
+        "--no-msync",
+        action="store_true",
+        help="Do not set WINEMSYNC=1 (Wine sync performance on macOS)",
+    )
     parser.add_argument("--engine-src", type=Path, default=DEFAULT_ENGINE_SRC)
     args = parser.parse_args()
 
@@ -672,6 +783,11 @@ def main() -> None:
         )
         prefix_mode = "game_dir" if game_dir_prefix else "bottle"
         no_gecko = ask_yes_no("停用 mshtml 以避免 Gecko 安裝提示？（預設否）", default_no=True)
+        mac_hires = ask_yes_no(
+            "啟用 Mac 高解析度模式？（RetinaMode + 200% DPI，建議 Retina 螢幕）",
+            default_no=False,
+        )
+        msync = True  # WINEMSYNC=1 by default; CLI: --no-msync to disable
     else:
         exe = args.exe
         output = args.output
@@ -679,6 +795,8 @@ def main() -> None:
         portable = args.portable_engine
         prefix_mode = args.prefix_mode
         no_gecko = args.no_gecko_prompt
+        mac_hires = not args.no_mac_hires
+        msync = not args.no_msync
 
     if not args.engine_src.is_dir():
         sys.exit(f"Engine source not found: {args.engine_src}\nBuild wine first.")
@@ -690,6 +808,8 @@ def main() -> None:
         portable_engine=portable,
         prefix_mode=prefix_mode,
         no_gecko_prompt=no_gecko,
+        mac_hires=mac_hires,
+        msync=msync,
         engine_src=args.engine_src,
     )
     # Reveal in Finder when GUI

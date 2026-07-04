@@ -78,7 +78,9 @@ WINE_ROOT="$RES/wine"
 PREFIX="$RES/prefix"
 
 export WINEPREFIX="$PREFIX"
-export LANG="${LANG:-zh_TW.UTF-8}"
+# Force zh_TW (Finder often sets en_US → Wine shows ?? for CJK IME).
+export LANG=zh_TW.UTF-8
+export LC_ALL=zh_TW.UTF-8
 export PATH="$WINE_ROOT/bin:$PATH"
 
 # Optional: suppress Gecko dialog (banner HTML only)
