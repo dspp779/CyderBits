@@ -41,6 +41,16 @@
 
 **已套用（2026-07-04）：** W1（`#ifndef` 補丁），因 `make` 報 `undeclared identifier 'SONAME_LIBVULKAN'`。
 
+## Mac 高解析度（對齊 CrossOver）
+
+已驗證設定見 `docs/superpowers/specs/2026-07-04-mac-retina-hires-design.md`：
+
+- `HKCU\Software\Wine\Mac Driver\RetinaMode` = `y`
+- `HKCU\Control Panel\Desktop\LogPixels` = `0xC0`（192 / 200% DPI）
+
+套用：`bash scripts/enable-mac-retina-hires.sh`（`--off` 關閉）。  
+**不要**只靠 winecfg DPI（會讓遊戲畫面留黑邊）。
+
 ## 初始 commit 範圍
 
 - 納入：`docs/superpowers/`、`.gitignore`、`.cursorignore`、`.vscode/`
