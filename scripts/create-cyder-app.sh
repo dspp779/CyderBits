@@ -20,12 +20,44 @@ echo "==> Preparing relocatable Wine engine"
 bash "$SCRIPT_DIR/bundle-wine-dylibs.sh" "$WINE_INSTALL"
 bash "$SCRIPT_DIR/sign-wine.sh"
 
+LOGO_PNG="$OGOM/logo/cyderbits.png"
+[[ -f "$LOGO_PNG" ]] || {
+  echo "Missing app logo at $LOGO_PNG" >&2
+  exit 1
+}
+
 echo "==> Creating $APP"
 rm -rf "$APP"
 mkdir -p "$MACOS" "$RES"
 
 cp "$SCRIPT_DIR/cyder_create_game_app.py" "$RES/cyder_create_game_app.py"
 cp "$ENTITLEMENTS_PLIST" "$RES/entitlements.plist"
+
+echo "==> Building AppIcon.icns from logo/cyderbits.png"
+ICON_WORK="$(mktemp -d "${TMPDIR:-/tmp}/cyder-icon.XXXXXX")"
+ICONSET="$ICON_WORK/AppIcon.iconset"
+mkdir -p "$ICONSET"
+# iconutil expects specific filenames / sizes.
+while IFS=' ' read -r px name; do
+  sips -z "$px" "$px" "$LOGO_PNG" --out "$ICONSET/$name" >/dev/null
+done <<'SIZES'
+16 icon_16x16.png
+32 diana.p@example.org
+32 icon_32x32.png
+64 ivan.p@example.net
+128 icon_128x128.png
+256 wendy.h@example.net
+256 icon_256x256.png
+512 wendy.h@example.net
+512 icon_512x512.png
+1024 walt.e@example.net
+SIZES
+iconutil -c icns "$ICONSET" -o "$RES/AppIcon.icns"
+rm -rf "$ICON_WORK"
+[[ -f "$RES/AppIcon.icns" ]] || {
+  echo "Failed to build AppIcon.icns" >&2
+  exit 1
+}
 
 # Ship scripts needed to install/sign the shared engine on first use
 mkdir -p "$RES/ogom-scripts"
@@ -75,6 +107,8 @@ cat > "$CONTENTS/Info.plist" <<'PLIST'
   <string>6.0</string>
   <key>CFBundleName</key>
   <string>Cyder</string>
+  <key>CFBundleIconFile</key>
+  <string>AppIcon</string>
   <key>CFBundlePackageType</key>
   <string>APPL</string>
   <key>CFBundleShortVersionString</key>
@@ -89,7 +123,7 @@ cat > "$CONTENTS/Info.plist" <<'PLIST'
 </plist>
 PLIST
 
-codesign --force --sign - "$MACOS/Cyder" 2>/dev/null || true
+codesign --force --deep --sign - "$APP" 2>/dev/null || true
 
 echo ""
 echo "Created $APP"

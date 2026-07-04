@@ -29,7 +29,7 @@ python3 scripts/cyder_create_game_app.py --exe ... --prefix-mode game_dir
 ## 流程
 
 1. 開啟 Cyder.app → 選 `.exe` → 選輸出資料夾  
-2. 對話框詢問：standalone / portable engine / game_dir prefix / no gecko  
+2. 以 osascript 對話框依序詢問：standalone / portable engine / game_dir prefix / no gecko  
 3. 首次會把引擎安裝到 `Application Support/Cyder/Engines/wine-x86_64`  
 4. 建立 `遊戲名.app`（內含 `meta.json` + 啟動器）  
 5. 雙擊遊戲 app → 用共用（或內嵌）Wine 啟動  
