@@ -422,11 +422,60 @@ def ensure_shared_engine(engine_src: Path) -> Path:
     return dest
 
 
+def resolve_wine_locale() -> str:
+    """Prefer explicit env, then macOS AppleLocale, then LANG; fallback zh_TW.UTF-8."""
+    fallback = os.environ.get("CYDER_WINE_LOCALE_FALLBACK", "zh_TW.UTF-8")
+
+    def valid(val: str) -> bool:
+        return bool(val) and val not in ("C", "POSIX", "C.UTF-8")
+
+    lc_all = os.environ.get("LC_ALL", "").strip()
+    if valid(lc_all):
+        return lc_all
+
+    try:
+        apple = subprocess.check_output(
+            ["defaults", "read", "-g", "AppleLocale"],
+            text=True,
+            stderr=subprocess.DEVNULL,
+        ).strip()
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        apple = ""
+
+    apple_map = {
+        "zh-Hant_TW": "zh_TW.UTF-8",
+        "zh_TW": "zh_TW.UTF-8",
+        "zh-Hant_HK": "zh_HK.UTF-8",
+        "zh_HK": "zh_HK.UTF-8",
+        "zh-Hans_CN": "zh_CN.UTF-8",
+        "zh-Hant_CN": "zh_CN.UTF-8",
+        "zh_CN": "zh_CN.UTF-8",
+        "ja_JP": "ja_JP.UTF-8",
+        "ja": "ja_JP.UTF-8",
+        "ko_KR": "ko_KR.UTF-8",
+        "ko": "ko_KR.UTF-8",
+    }
+    if apple in apple_map:
+        return apple_map[apple]
+    if apple.startswith("en"):
+        return "en_US.UTF-8"
+    if apple:
+        if "." in apple:
+            return apple.replace("-", "_")
+        return f"{apple.replace('-', '_')}.UTF-8"
+
+    lang = os.environ.get("LANG", "").strip()
+    if valid(lang):
+        return lang
+
+    return fallback
+
+
 def wine_locale_env(env: dict[str, str] | None = None) -> dict[str, str]:
-    """Match run-bluecg.sh: force zh_TW so Wine uses CP950 (Big5), not Finder's en_US."""
     out = dict(env) if env is not None else os.environ.copy()
-    out["LANG"] = "zh_TW.UTF-8"
-    out["LC_ALL"] = "zh_TW.UTF-8"
+    loc = resolve_wine_locale()
+    out["LANG"] = loc
+    out["LC_ALL"] = loc
     return out
 
 
@@ -522,9 +571,6 @@ def write_game_launcher(path: Path) -> None:
     path.write_text(
         """#!/bin/bash
 set -euo pipefail
-# Force zh_TW like scripts/run-bluecg.sh (Finder often sets en_US → Wine shows ?? for CJK IME).
-export LANG=zh_TW.UTF-8
-export LC_ALL=zh_TW.UTF-8
 SELF="$(cd "$(dirname "$0")" && pwd)"
 RES="$(cd "$SELF/../Resources" && pwd)"
 META="$RES/meta.json"
@@ -532,6 +578,45 @@ META="$RES/meta.json"
 exec python3 - "$META" <<'PY'
 import json, os, subprocess, sys
 from pathlib import Path
+
+def resolve_wine_locale():
+    fallback = os.environ.get("CYDER_WINE_LOCALE_FALLBACK", "zh_TW.UTF-8")
+    def valid(val):
+        return bool(val) and val not in ("C", "POSIX", "C.UTF-8")
+    lc_all = os.environ.get("LC_ALL", "").strip()
+    if valid(lc_all):
+        return lc_all
+    try:
+        apple = subprocess.check_output(
+            ["defaults", "read", "-g", "AppleLocale"],
+            text=True,
+            stderr=subprocess.DEVNULL,
+        ).strip()
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        apple = ""
+    apple_map = {
+        "zh-Hant_TW": "zh_TW.UTF-8",
+        "zh_TW": "zh_TW.UTF-8",
+        "zh-Hant_HK": "zh_HK.UTF-8",
+        "zh_HK": "zh_HK.UTF-8",
+        "zh-Hans_CN": "zh_CN.UTF-8",
+        "zh-Hant_CN": "zh_CN.UTF-8",
+        "zh_CN": "zh_CN.UTF-8",
+        "ja_JP": "ja_JP.UTF-8",
+        "ja": "ja_JP.UTF-8",
+        "ko_KR": "ko_KR.UTF-8",
+        "ko": "ko_KR.UTF-8",
+    }
+    if apple in apple_map:
+        return apple_map[apple]
+    if apple.startswith("en"):
+        return "en_US.UTF-8"
+    if apple:
+        return apple.replace("-", "_") + ("" if "." in apple else ".UTF-8")
+    lang = os.environ.get("LANG", "").strip()
+    if valid(lang):
+        return lang
+    return fallback
 
 meta = json.loads(Path(sys.argv[1]).read_text())
 support = Path.home() / "Library/Application Support/Cyder"
@@ -563,8 +648,9 @@ if not exe.is_file():
 
 env = os.environ.copy()
 env["WINEPREFIX"] = str(prefix)
-env["LANG"] = "zh_TW.UTF-8"
-env["LC_ALL"] = "zh_TW.UTF-8"
+loc = resolve_wine_locale()
+env["LANG"] = loc
+env["LC_ALL"] = loc
 env["PATH"] = f"{wine_root / 'bin'}:{env.get('PATH', '')}"
 env["WINESERVER"] = str(wine_root / "bin" / "wineserver")
 if meta.get("msync", True):

@@ -66,6 +66,7 @@ fi
 
 # entitlements for re-sign on target machine
 cp "$ENTITLEMENTS_PLIST" "$RES/entitlements.plist"
+cp "$SCRIPT_DIR/resolve-wine-locale.sh" "$RES/resolve-wine-locale.sh"
 
 cat > "$MACOS/BlueCG" <<'LAUNCHER'
 #!/bin/bash
@@ -78,9 +79,9 @@ WINE_ROOT="$RES/wine"
 PREFIX="$RES/prefix"
 
 export WINEPREFIX="$PREFIX"
-# Force zh_TW (Finder often sets en_US → Wine shows ?? for CJK IME).
-export LANG=zh_TW.UTF-8
-export LC_ALL=zh_TW.UTF-8
+WINE_LOCALE="$(bash "$RES/resolve-wine-locale.sh" 2>/dev/null || echo zh_TW.UTF-8)"
+export LANG="$WINE_LOCALE"
+export LC_ALL="$WINE_LOCALE"
 export PATH="$WINE_ROOT/bin:$PATH"
 
 # Optional: suppress Gecko dialog (banner HTML only)

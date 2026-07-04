@@ -76,7 +76,9 @@ case "$DDRAW_SOURCE" in
 esac
 
 export WINEPREFIX="$PREFIX"
-export LANG=zh_TW.UTF-8
+WINE_LOCALE="$(bash "$SCRIPT_DIR/resolve-wine-locale.sh")"
+export LANG="$WINE_LOCALE"
+export LC_ALL="$WINE_LOCALE"
 export PATH="$WINE_INSTALL/bin:$PATH"
 
 # Session-only: suppress Wine Gecko dialog (does not change prefix registry).
