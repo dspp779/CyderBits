@@ -33,3 +33,15 @@ export HOMEBREW_CACHE="$OGOM/.brew-x86/cache"
 export HOMEBREW_LOGS="$OGOM/.brew-x86/logs"
 export HOMEBREW_TEMP="$OGOM/.brew-x86/tmp"
 mkdir -p "$HOMEBREW_CACHE" "$HOMEBREW_LOGS" "$HOMEBREW_TEMP"
+
+# Wine dlopens relative sonames (libfreetype.6.dylib, libgnutls.30.dylib). Under
+# hardened runtime those only resolve if dyld env vars are allowed (see
+# config/entitlements.plist) and library dirs are on DYLD_*_LIBRARY_PATH.
+_brew_lib_path="$HOMEBREW_PREFIX/lib"
+for _d in "$HOMEBREW_PREFIX"/opt/*/lib; do
+  [[ -d "$_d" ]] || continue
+  _brew_lib_path="$_brew_lib_path:$_d"
+done
+export DYLD_FALLBACK_LIBRARY_PATH="${_brew_lib_path}${DYLD_FALLBACK_LIBRARY_PATH:+:$DYLD_FALLBACK_LIBRARY_PATH}"
+export DYLD_LIBRARY_PATH="${_brew_lib_path}${DYLD_LIBRARY_PATH:+:$DYLD_LIBRARY_PATH}"
+unset _d _brew_lib_path
