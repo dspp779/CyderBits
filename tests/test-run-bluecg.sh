@@ -19,4 +19,12 @@ assert_contains "$output" "ddraw.dll" "copy target should be lowercase ddraw.dll
 assert_contains "$output" "BlueLauncher.exe" "launcher mode should start BlueLauncher.exe by default"
 assert_contains "$output" "arch -x86_64" "launcher should run under Rosetta x86_64"
 
+if [[ "$output" == *"WINEDLLOVERRIDES"* ]]; then
+  echo "default dry-run must not set WINEDLLOVERRIDES" >&2
+  exit 1
+fi
+
+output_no_gecko="$(bash "$ROOT/scripts/run-bluecg.sh" --prefix "$TMP/BlueCrossgateNew" --wine-install "$ROOT/install/wine-x86_64" --no-gecko-prompt --dry-run 2>&1 || true)"
+assert_contains "$output_no_gecko" "WINEDLLOVERRIDES=mshtml=" "dry-run --no-gecko-prompt should disable mshtml for the session"
+
 echo "PASS test-run-bluecg"

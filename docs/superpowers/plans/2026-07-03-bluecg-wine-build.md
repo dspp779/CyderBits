@@ -34,6 +34,8 @@ If any check fails, stop and fix the host before continuing.
 
 **Mac high-resolution (CrossOver-like):** Do **not** use winecfg DPI alone. Use `RetinaMode=y` plus `LogPixels=192` (200% DPI) so UI is sharp and window size stays comparable. Documented in `docs/superpowers/specs/2026-07-04-mac-retina-hires-design.md`; apply with `bash scripts/enable-mac-retina-hires.sh`.
 
+**Gecko prompt (optional):** Default launch may ask to install Wine Gecko (launcher banner HTML only). Leave default as-is. To suppress permanently: `bash scripts/configure-mshtml.sh --disable` (re-enable with `--enable`). For one session: `bash scripts/run-bluecg.sh --no-gecko-prompt`.
+
 ## Already present (do not overwrite carelessly)
 
 These files already exist and encode the indexing / ignore policy:

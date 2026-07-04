@@ -8,6 +8,7 @@ PREFIX="$BLUECG_PREFIX"
 DDRAW_SOURCE="official"
 MODE="launcher"
 DRY_RUN=0
+NO_GECKO_PROMPT=0
 GAME_ARGS=(updated graphicbin:66 graphicinfobin:66 animebin:4 animeinfobin:4 windowmode CGTEXTTC 3Ddevice:1 GAHD)
 
 run() {
@@ -40,6 +41,7 @@ while [[ $# -gt 0 ]]; do
     --soft3d)
       GAME_ARGS=(updated graphicbin:66 graphicinfobin:66 animebin:4 animeinfobin:4 windowmode CGTEXTTC 3Ddevice:0)
       ;;
+    --no-gecko-prompt) NO_GECKO_PROMPT=1 ;;
     --dry-run) DRY_RUN=1 ;;
     *)
       echo "Unknown argument: $1" >&2
@@ -76,6 +78,19 @@ esac
 export WINEPREFIX="$PREFIX"
 export LANG=zh_TW.UTF-8
 export PATH="$WINE_INSTALL/bin:$PATH"
+
+# Session-only: suppress Wine Gecko dialog (does not change prefix registry).
+# For a permanent setting: bash scripts/configure-mshtml.sh --disable
+if [[ "$NO_GECKO_PROMPT" -eq 1 ]]; then
+  if [[ -n "${WINEDLLOVERRIDES:-}" ]]; then
+    export WINEDLLOVERRIDES="mshtml=;${WINEDLLOVERRIDES}"
+  else
+    export WINEDLLOVERRIDES="mshtml="
+  fi
+  if [[ "$DRY_RUN" -eq 1 ]]; then
+    echo "+ export WINEDLLOVERRIDES=${WINEDLLOVERRIDES}"
+  fi
+fi
 
 cd "$PREFIX"
 
