@@ -149,7 +149,11 @@ run arch -x86_64 env \
   BISON="$HOMEBREW_PREFIX/opt/bison/bin/bison" \
   PKG_CONFIG="$HOMEBREW_PREFIX/bin/pkg-config" \
   PKG_CONFIG_PATH="$PKG_PC_PATH" \
-  ../configure -C --enable-win64 --with-mingw=llvm-mingw --prefix="$WINE_INSTALL"
+  ../configure -C \
+    --enable-win64 \
+    --enable-archs=i386,x86_64 \
+    --with-mingw=llvm-mingw \
+    --prefix="$WINE_INSTALL"
 
 if [[ "$CONFIGURE_ONLY" -eq 0 ]]; then
   run arch -x86_64 env PATH="$BUILD_PATH" PKG_CONFIG_PATH="$PKG_PC_PATH" make -j"$JOBS"

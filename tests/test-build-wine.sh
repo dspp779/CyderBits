@@ -20,7 +20,10 @@ if [[ -e "$ROOT/sources/wine/.git" ]]; then
 else
   assert_contains "$output" "Non-git wine tree" "dry-run should skip make_* on tarball sources"
 fi
-assert_contains "$output" "../configure -C --enable-win64 --with-mingw=llvm-mingw" "dry-run should show expected configure flags"
+assert_contains "$output" "--enable-win64" "dry-run should enable win64 host"
+assert_contains "$output" "--enable-archs=i386" "dry-run must build 32-bit PE for BlueCG (PE32)"
+assert_contains "$output" "x86_64" "dry-run archs should include x86_64 PE"
+assert_contains "$output" "--with-mingw=llvm-mingw" "dry-run should use llvm-mingw"
 assert_contains "$output" "make -j" "dry-run should show the compile step"
 assert_contains "$output" "make install" "dry-run should show the install step"
 

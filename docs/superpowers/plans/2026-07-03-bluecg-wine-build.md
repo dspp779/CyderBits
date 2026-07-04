@@ -24,8 +24,11 @@ Before any task, the machine must have:
 | Wine sources | `test -f sources/wine/configure.ac` | exit 0 |
 | Entitlements | `test -f config/entitlements.plist` | exit 0 (tracked; also mirrored to `sources/wine/entitlements.plist` for local builds) |
 | Game prefix | `test -f BlueCrossgateNew/BlueLauncher.exe` | exit 0 |
+| llvm-mingw i686 | `test -x llvm-mingw-*/bin/i686-w64-mingw32-clang` | exit 0 (needed for PE32 / wow64) |
 
 If any check fails, stop and fix the host before continuing.
+
+**PE32 / wow64:** `BlueLauncher.exe` and `bluecg.exe` are 32-bit. Configure must use `--enable-archs=i386,x86_64` (not x86_64 alone), or Wine fails with `failed to load ...\\syswow64\\ntdll.dll` / `c0000135`.
 
 **Prefix risk:** `BlueCrossgateNew/` is an existing commercial CrossOver prefix. Reuse it by default; if G3/G4 fail only with the self-built Wine, suspect leftover registry / DLL overrides and compare against a fresh prefix.
 
