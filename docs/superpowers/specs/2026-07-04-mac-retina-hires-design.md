@@ -34,9 +34,27 @@
 
 [HKEY_CURRENT_USER\Control Panel\Desktop]
 "LogPixels"=dword:000000c0
+
+; ClearType RGB — same as CrossOver / winetricks fontsmooth-rgb.
+; Safe and recommended only when RetinaMode=y (subpixel AA at physical pixel density).
+"FontSmoothing"="2"
+"FontSmoothingType"=dword:00000002
+"FontSmoothingGamma"=dword:00000578
+"FontSmoothingOrientation"=dword:00000001
 ```
 
 （`0xC0` = 192 DPI = 200%。）
+
+### 字型平滑：直接採用 CrossOver，不必另調
+
+| 鍵 | 值 | 意義 |
+|----|-----|------|
+| `FontSmoothing` | `2` | 開啟平滑 |
+| `FontSmoothingType` | `2` | ClearType（非標準灰階） |
+| `FontSmoothingGamma` | `0x578`（1400） | ClearType gamma |
+| `FontSmoothingOrientation` | `1` | RGB 次像素順序（多數 Mac 面板） |
+
+先前在**未開 RetinaMode**時開 ClearType，小字容易糊／碎，是因為在 1× 邏輯像素上做次像素。有 `RetinaMode=y` 後與 CrossOver 相同，**直接用上表即可，無需再改 gamma／orientation**（除非外接特殊 BGR 螢幕且出現色邊，再試 `Orientation=0`）。
 
 ## 套用方式
 
