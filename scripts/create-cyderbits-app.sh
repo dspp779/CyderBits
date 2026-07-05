@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# Build Cyder.app launcher — open Windows EXE with shared prefix.
+# Build CyderBits.app — pick a Windows EXE and wrap it as a macOS app.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/env-x86_64.sh"
 
 OUT_DIR="${1:-$OGOM/dist}"
-APP="$OUT_DIR/Cyder.app"
+APP="$OUT_DIR/CyderBits.app"
 CONTENTS="$APP/Contents"
 MACOS="$CONTENTS/MacOS"
 RES="$CONTENTS/Resources"
@@ -31,8 +31,7 @@ echo "==> Creating $APP"
 rm -rf "$APP"
 mkdir -p "$MACOS" "$RES"
 
-cp "$SCRIPT_DIR/cyder_launcher.py" "$RES/cyder_launcher.py"
-cp "$SCRIPT_DIR/cyder_common.py" "$RES/cyder_common.py"
+cp "$SCRIPT_DIR/cyder_create_game_app.py" "$RES/cyder_create_game_app.py"
 cp "$ENTITLEMENTS_PLIST" "$RES/entitlements.plist"
 
 echo "==> Building AppIcon.icns from ${LOGO_PNG#$OGOM/}"
@@ -60,16 +59,15 @@ rm -rf "$ICON_WORK"
   exit 1
 }
 
-mkdir -p "$RES/ogom-scripts" "$RES/addons/libarchive"
-cp "$SCRIPT_DIR/install-wine-mono.sh" "$RES/ogom-scripts/"
-cp "$SCRIPT_DIR/install-libarchive-tar.sh" "$RES/ogom-scripts/"
-cp "$SCRIPT_DIR/resolve-wine-locale.sh" "$RES/ogom-scripts/"
-
-echo "==> Copying engine payload into Cyder.app (first-run install source)"
+# Ship scripts needed to install/sign the shared engine on first use
+mkdir -p "$RES/ogom-scripts"
+cp "$SCRIPT_DIR/env-x86_64.sh" "$RES/ogom-scripts/"
+cp "$SCRIPT_DIR/bundle-wine-dylibs.sh" "$RES/ogom-scripts/"
+cp "$SCRIPT_DIR/sign-wine.sh" "$RES/ogom-scripts/"
+echo "==> Copying engine payload into CyderBits.app (first-run install source)"
 rsync -a --delete "$WINE_INSTALL/" "$RES/engine-payload/"
-rsync -a "$OGOM/tools/libarchive/" "$RES/addons/libarchive/"
 
-cat > "$MACOS/Cyder" <<'LAUNCHER'
+cat > "$MACOS/CyderBits" <<'LAUNCHER'
 #!/bin/bash
 set -euo pipefail
 SELF="$(cd "$(dirname "$0")" && pwd)"
@@ -77,16 +75,16 @@ RES="$(cd "$SELF/../Resources" && pwd)"
 
 export CYDER_ENGINE_SRC="$RES/engine-payload"
 export CYDER_SCRIPTS="$RES/ogom-scripts"
-export CYDER_LIBARCHIVE_SRC="$RES/addons/libarchive"
 
 export OGOM="$RES"
 export WINE_INSTALL="$RES/engine-payload"
+export HOMEBREW_PREFIX="/nonexistent"
 export ENTITLEMENTS_PLIST="$RES/entitlements.plist"
-export PYTHONUNBUFFERED=1
 
-exec python3 "$RES/cyder_launcher.py" --engine-src "$RES/engine-payload" "$@"
+export PYTHONUNBUFFERED=1
+python3 "$RES/cyder_create_game_app.py" --gui --engine-src "$RES/engine-payload"
 LAUNCHER
-chmod +x "$MACOS/Cyder"
+chmod +x "$MACOS/CyderBits"
 
 cat > "$CONTENTS/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
@@ -96,13 +94,13 @@ cat > "$CONTENTS/Info.plist" <<'PLIST'
   <key>CFBundleDevelopmentRegion</key>
   <string>zh_TW</string>
   <key>CFBundleExecutable</key>
-  <string>Cyder</string>
+  <string>CyderBits</string>
   <key>CFBundleIdentifier</key>
-  <string>local.cyder.app</string>
+  <string>local.cyderbits.app</string>
   <key>CFBundleInfoDictionaryVersion</key>
   <string>6.0</string>
   <key>CFBundleName</key>
-  <string>Cyder</string>
+  <string>CyderBits</string>
   <key>CFBundleIconFile</key>
   <string>AppIcon</string>
   <key>CFBundlePackageType</key>
@@ -115,21 +113,6 @@ cat > "$CONTENTS/Info.plist" <<'PLIST'
   <string>12.0</string>
   <key>NSHighResolutionCapable</key>
   <true/>
-  <key>CFBundleDocumentTypes</key>
-  <array>
-    <dict>
-      <key>CFBundleTypeName</key>
-      <string>Windows Executable</string>
-      <key>CFBundleTypeRole</key>
-      <string>Viewer</string>
-      <key>LSHandlerRank</key>
-      <string>Alternate</string>
-      <key>CFBundleTypeExtensions</key>
-      <array>
-        <string>exe</string>
-      </array>
-    </dict>
-  </array>
 </dict>
 </plist>
 PLIST
@@ -139,4 +122,4 @@ codesign --force --deep --sign - "$APP" 2>/dev/null || true
 echo ""
 echo "Created $APP"
 echo "Open: open \"$APP\""
-echo "CLI:  python3 scripts/cyder_launcher.py --engine-src install/wine-x86_64 /path/to/game.exe"
+echo "CLI:  python3 scripts/cyder_create_game_app.py --gui"
