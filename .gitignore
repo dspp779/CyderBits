@@ -28,3 +28,7 @@ libarchive-2.4.12-1-*.zip
 
 # OS / editor noise
 .DS_Store
+
+# Python
+__pycache__/
+*.py[cod]
