@@ -66,6 +66,12 @@ cp "$SCRIPT_DIR/install-wine-mono.sh" "$RES/ogom-scripts/"
 cp "$SCRIPT_DIR/install-libarchive-tar.sh" "$RES/ogom-scripts/"
 cp "$SCRIPT_DIR/resolve-wine-locale.sh" "$RES/ogom-scripts/"
 cp "$SCRIPT_DIR/enable-mac-retina-hires.sh" "$RES/ogom-scripts/"
+cp "$SCRIPT_DIR/cyder-exe-association.swift" "$RES/ogom-scripts/"
+if swiftc -O -o "$RES/ogom-scripts/cyder-exe-association" "$SCRIPT_DIR/cyder-exe-association.swift" 2>/dev/null; then
+  echo "==> Compiled cyder-exe-association helper"
+else
+  echo "==> Warning: swiftc failed; app will use cyder-exe-association.swift (slower first launch)" >&2
+fi
 chmod +x "$RES/ogom-scripts/cyder_launcher.sh"
 
 echo "==> Copying engine payload into Cyder.app (first-run install source)"
@@ -86,6 +92,8 @@ export OGOM="$RES"
 export WINE_INSTALL="$RES/engine-payload"
 export ENTITLEMENTS_PLIST="$RES/entitlements.plist"
 export CYDER_ENTITLEMENTS="$RES/entitlements.plist"
+export CYDER_APP="$(cd "$SELF/.." && pwd)"
+export CYDER_BUNDLE_ID="local.cyder.app"
 
 exec "$RES/ogom-scripts/cyder_launcher.sh" --engine-src "$RES/engine-payload" "$@"
 LAUNCHER
@@ -130,6 +138,11 @@ cat > "$CONTENTS/Info.plist" <<'PLIST'
       <key>CFBundleTypeExtensions</key>
       <array>
         <string>exe</string>
+      </array>
+      <key>LSItemContentTypes</key>
+      <array>
+        <string>com.microsoft.windows-executable</string>
+        <string>public.executable</string>
       </array>
     </dict>
   </array>

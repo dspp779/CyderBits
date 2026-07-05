@@ -24,11 +24,23 @@ open dist/Cyder.app
 
 | 方式 | 操作 |
 |------|------|
-| **雙擊 Cyder** | 無參數時會跳出檔案選擇器，選取 `.exe` |
+| **雙擊 Cyder** | 無參數時：若尚未將 `.exe` 預設關聯到 Cyder，會先詢問是否設定；之後跳出檔案選擇器 |
 | **拖放** | 將 `.exe` 拖到 Cyder.app 圖示上 |
 | **檔案關聯** | 在 Finder 對 `.exe` 按右鍵 → **打開方式** → 選 Cyder；可設為預設 |
 
 首次執行某 `.exe` 時會自動 bootstrap 共用 prefix（見下節），之後再開其他 `.exe` 不會重複安裝。
+
+### `.exe` 檔案關聯
+
+直接開啟 Cyder（未帶 `.exe` 參數）且尚未關聯時，會詢問是否將所有 `.exe` 預設以 Cyder 開啟：
+
+- **設為預設**：透過系統 Launch Services 設定（`cyder-exe-association` Swift 輔助工具）
+- **略過**：本次不設定，下次仍會詢問
+- **不再詢問**：寫入 `~/Library/Application Support/Cyder/.exe-assoc-declined`
+
+若已關聯、或曾選「不再詢問」，會直接進入檔案選擇器。從 Finder 雙擊 `.exe` 或拖放到 Cyder 時**不會**出現關聯提示。
+
+設定失敗時會提示改用手動：**Finder → 右鍵 .exe → 打開方式 → Cyder → 全部更改**。
 
 ### CLI（開發 / 除錯）
 

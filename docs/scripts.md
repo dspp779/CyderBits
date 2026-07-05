@@ -33,6 +33,7 @@
 | `create-cyder-app.sh` | `dist/Cyder.app`（`.exe` 啟動器 + engine payload + bootstrap） |
 | `cyder_launcher.sh` | 解析 `.exe`、bootstrap SharedPrefix、執行 Wine（Cyder.app 執行時入口） |
 | `cyder-common.sh` | 共用路徑、`ensure_shared_engine`、`bootstrap_shared_prefix`、`run_wine_exe` |
+| `cyder-exe-association.swift` | 查詢/設定 `.exe` 預設開啟程式（建 app 時編譯為二進位） |
 | `cyder_launcher.py` | 開發用 CLI，轉呼叫 `cyder_launcher.sh` |
 | `cyder_common.py` | CyderBits 打包器共用（Python） |
 
@@ -81,6 +82,7 @@ run-bluecg.sh
 | `tests/test-run-bluecg.sh` | `run-bluecg.sh` |
 | `tests/test-verify-bluecg.sh` | `verify-bluecg.sh` |
 | `tests/test-cyder-launcher.sh` | `cyder_launcher.sh --dry-run` |
+| `tests/test-cyder-exe-association.sh` | `cyder-exe-association.swift status` |
 | `tests/test-install-libarchive-tar.sh` | `install-libarchive-tar.sh` |
 | `tests/test-cyder-bootstrap.sh` | `cyder_launcher.sh --bootstrap-only`（需 Wine） |
 

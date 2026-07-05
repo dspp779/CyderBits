@@ -23,6 +23,11 @@ cyder_init_paths() {
   CYDER_SHARED_PREFIX="${CYDER_SHARED_PREFIX:-$CYDER_SUPPORT/SharedPrefix}"
   CYDER_BOOTSTRAP_MARKER="$CYDER_SHARED_PREFIX/.cyder-bootstrap-v1"
   CYDER_DOWNLOADS="$CYDER_SUPPORT/downloads"
+  CYDER_EXE_ASSOC_DECLINED="$CYDER_SUPPORT/.exe-assoc-declined"
+  CYDER_BUNDLE_ID="${CYDER_BUNDLE_ID:-local.cyder.app}"
+  if [[ -d "$here/engine-payload" ]]; then
+    CYDER_APP="${CYDER_APP:-$(cd "$here/.." && pwd)}"
+  fi
 }
 
 cyder_run() {
@@ -205,4 +210,52 @@ cyder_bootstrap_error_dialog() {
   mkdir -p "$(dirname "$log")"
   echo "$1" >"$log"
   osascript -e 'display alert "Cyder 初始化失敗" message "請查看 ~/Library/Application Support/Cyder/Logs/bootstrap-error.log" as warning' 2>/dev/null || true
+}
+
+cyder_exe_association_swift() {
+  local tool="$CYDER_SCRIPTS/cyder-exe-association"
+  local swift="$CYDER_SCRIPTS/cyder-exe-association.swift"
+  if [[ -x "$tool" ]]; then
+    "$tool" "$@"
+  elif [[ -f "$swift" ]]; then
+    swift "$swift" "$@"
+  else
+    return 1
+  fi
+}
+
+cyder_exe_is_associated() {
+  local out
+  out="$(cyder_exe_association_swift status "$CYDER_BUNDLE_ID" 2>/dev/null | tail -1 || true)"
+  [[ "$out" == "associated" ]]
+}
+
+cyder_maybe_prompt_exe_association() {
+  [[ -f "$CYDER_EXE_ASSOC_DECLINED" ]] && return 0
+  cyder_exe_is_associated && return 0
+
+  local swift="$CYDER_SCRIPTS/cyder-exe-association.swift"
+  [[ -f "$swift" ]] || return 0
+
+  local choice
+  choice="$(
+    osascript 2>/dev/null <<'APPLESCRIPT' || true
+display dialog "是否將所有 .exe 檔案預設以 Cyder 開啟？\n\n之後在 Finder 雙擊 .exe 即可直接啟動。" with title "Cyder" buttons {"不再詢問", "略過", "設為預設"} default button 3
+APPLESCRIPT
+  )"
+  [[ -n "$choice" ]] || return 0
+
+  case "$choice" in
+    *設為預設*)
+      local app_path="${CYDER_APP:-}"
+      if cyder_exe_association_swift set "$CYDER_BUNDLE_ID" "$app_path" >/dev/null 2>&1; then
+        return 0
+      fi
+      osascript -e 'display alert "無法設定檔案關聯" message "請在 Finder 對任一 .exe 按右鍵 → 打開方式 → Cyder → 全部更改。" as warning' 2>/dev/null || true
+      ;;
+    *不再詢問*)
+      mkdir -p "$CYDER_SUPPORT"
+      touch "$CYDER_EXE_ASSOC_DECLINED"
+      ;;
+  esac
 }

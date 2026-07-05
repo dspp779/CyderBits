@@ -83,6 +83,7 @@ if [[ ${#EXE_ARGS[@]} -gt 0 ]]; then
 fi
 
 if [[ -z "$exe" && "$DRY_RUN" -eq 0 ]]; then
+  cyder_maybe_prompt_exe_association
   exe="$(cyder_choose_exe)"
 fi
 
