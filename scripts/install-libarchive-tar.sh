@@ -3,8 +3,10 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-OGOM="$(cd "$SCRIPT_DIR/.." && pwd)"
-source "$SCRIPT_DIR/env-x86_64.sh"
+if [[ -f "$SCRIPT_DIR/env-x86_64.sh" ]]; then
+  # shellcheck source=env-x86_64.sh
+  source "$SCRIPT_DIR/env-x86_64.sh"
+fi
 
 PREFIX="${1:-${WINEPREFIX:-}}"
 if [[ "${1:-}" == "--prefix" ]]; then PREFIX="$2"; fi

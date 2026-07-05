@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import subprocess
 import sys
 from pathlib import Path
 
@@ -12,11 +13,12 @@ from cyder_common import (
     ENGINE_NAME,
     ENGINES,
     SHARED_PREFIX,
+    SUPPORT,
     bootstrap_shared_prefix,
+    choose_exe,
     ensure_shared_engine,
     run_wine_exe,
 )
-from cyder_create_game_app import choose_exe
 
 
 def resolve_exe(argv: list[str]) -> Path | None:
@@ -72,7 +74,17 @@ def main() -> None:
 
     engine = ensure_shared_engine(args.engine_src)
     wine = engine / "bin" / "wine"
-    bootstrap_shared_prefix(wine, engine_src=args.engine_src)
+    try:
+        bootstrap_shared_prefix(wine, engine_src=args.engine_src)
+    except subprocess.CalledProcessError as e:
+        log = SUPPORT / "Logs" / "bootstrap-error.log"
+        log.parent.mkdir(parents=True, exist_ok=True)
+        log.write_text(f"{e}\n", encoding="utf-8")
+        msg = f"請查看：{log}"
+        subprocess.call(
+            ["osascript", "-e", f'display alert "Cyder 初始化失敗" message "{msg}" as warning']
+        )
+        sys.exit(1)
     run_wine_exe(wine, exe, prefix=SHARED_PREFIX)
 
 

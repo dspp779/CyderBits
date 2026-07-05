@@ -4,6 +4,7 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 # When launched from Cyder.app, Resources/ is OGOM-like and scripts live in ogom-scripts/.
@@ -45,6 +46,23 @@ MAC_HIRES_REG_ON = [
 def run(cmd: list[str], **kw) -> None:
     print("+", " ".join(str(c) for c in cmd))
     subprocess.check_call(cmd, **kw)
+
+
+def osascript(script: str) -> str:
+    out = subprocess.check_output(["osascript", "-e", script], text=True)
+    return out.strip()
+
+
+def choose_exe() -> Path:
+    script = (
+        'set f to choose file with prompt "選擇 Windows 遊戲執行檔 (.exe)" '
+        'of type {"com.microsoft.windows-executable", "exe", "public.executable"}'
+        "\nPOSIX path of f"
+    )
+    try:
+        return Path(osascript(script)).expanduser()
+    except subprocess.CalledProcessError as e:
+        sys.exit("已取消選檔" if e.returncode else 1)
 
 
 def resolve_wine_locale() -> str:
@@ -245,6 +263,7 @@ def bootstrap_shared_prefix(wine_bin: Path, *, engine_src: Path) -> None:
         env = os.environ.copy()
         env["WINEPREFIX"] = str(prefix)
         env["WINE_INSTALL"] = str(wine_bin.parent.parent)
+        env["CYDER_DOWNLOADS"] = str(SUPPORT / "downloads")
         subprocess.check_call(["bash", str(mono_sh)], env=env)
     tar_sh = SCRIPTS / "install-libarchive-tar.sh"
     if tar_sh.is_file():
@@ -266,13 +285,19 @@ def run_wine_exe(wine_bin: Path, exe: Path, *, prefix: Path) -> None:
     loc = resolve_wine_locale()
     env["LANG"] = loc
     env["LC_ALL"] = loc
+    log_dir = SUPPORT / "Logs"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    log_file = log_dir / "last-launch.log"
     cmd = ["arch", "-x86_64", str(wine_bin), str(exe)]
-    subprocess.Popen(
-        cmd,
-        env=env,
-        cwd=str(exe.parent),
-        start_new_session=True,
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
+    with open(log_file, "w", encoding="utf-8") as log:
+        log.write(f"cmd={' '.join(cmd)}\nWINEPREFIX={prefix}\ncwd={exe.parent}\n\n")
+        log.flush()
+        subprocess.Popen(
+            cmd,
+            env=env,
+            cwd=str(exe.parent),
+            start_new_session=True,
+            stdin=subprocess.DEVNULL,
+            stdout=log,
+            stderr=subprocess.STDOUT,
+        )

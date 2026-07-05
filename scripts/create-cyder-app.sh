@@ -61,6 +61,7 @@ rm -rf "$ICON_WORK"
 }
 
 mkdir -p "$RES/ogom-scripts" "$RES/addons/libarchive"
+cp "$SCRIPT_DIR/env-x86_64.sh" "$RES/ogom-scripts/"
 cp "$SCRIPT_DIR/install-wine-mono.sh" "$RES/ogom-scripts/"
 cp "$SCRIPT_DIR/install-libarchive-tar.sh" "$RES/ogom-scripts/"
 cp "$SCRIPT_DIR/resolve-wine-locale.sh" "$RES/ogom-scripts/"
@@ -83,6 +84,7 @@ export OGOM="$RES"
 export WINE_INSTALL="$RES/engine-payload"
 export ENTITLEMENTS_PLIST="$RES/entitlements.plist"
 export PYTHONUNBUFFERED=1
+export PYTHONPATH="$RES${PYTHONPATH:+:$PYTHONPATH}"
 
 exec python3 "$RES/cyder_launcher.py" --engine-src "$RES/engine-payload" "$@"
 LAUNCHER

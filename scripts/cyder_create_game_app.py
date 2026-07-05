@@ -23,29 +23,14 @@ from cyder_common import (
     OGOM,
     SCRIPTS,
     apply_mac_hires,
+    choose_exe,
     ensure_shared_engine,
     init_bottle,
+    osascript,
     resolve_wine_locale,
     run,
     wine_locale_env,
 )
-
-
-def osascript(script: str) -> str:
-    out = subprocess.check_output(["osascript", "-e", script], text=True)
-    return out.strip()
-
-
-def choose_exe() -> Path:
-    script = (
-        'set f to choose file with prompt "選擇 Windows 遊戲執行檔 (.exe)" '
-        'of type {"com.microsoft.windows-executable", "exe", "public.executable"}'
-        "\nPOSIX path of f"
-    )
-    try:
-        return Path(osascript(script)).expanduser()
-    except subprocess.CalledProcessError as e:
-        sys.exit("已取消選檔" if e.returncode else 1)
 
 
 def choose_output_dir(default: Path) -> Path:
