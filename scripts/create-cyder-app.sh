@@ -20,9 +20,10 @@ echo "==> Preparing relocatable Wine engine"
 bash "$SCRIPT_DIR/bundle-wine-dylibs.sh" "$WINE_INSTALL"
 bash "$SCRIPT_DIR/sign-wine.sh"
 
-LOGO_PNG="$OGOM/logo/cyderbits.png"
+LOGO_PNG="$OGOM/logo/cyderbits-transparent.png"
+[[ -f "$LOGO_PNG" ]] || LOGO_PNG="$OGOM/logo/cyderbits.png"
 [[ -f "$LOGO_PNG" ]] || {
-  echo "Missing app logo at $LOGO_PNG" >&2
+  echo "Missing app logo at logo/cyderbits-transparent.png or logo/cyderbits.png" >&2
   exit 1
 }
 
@@ -33,7 +34,7 @@ mkdir -p "$MACOS" "$RES"
 cp "$SCRIPT_DIR/cyder_create_game_app.py" "$RES/cyder_create_game_app.py"
 cp "$ENTITLEMENTS_PLIST" "$RES/entitlements.plist"
 
-echo "==> Building AppIcon.icns from logo/cyderbits.png"
+echo "==> Building AppIcon.icns from ${LOGO_PNG#$OGOM/}"
 ICON_WORK="$(mktemp -d "${TMPDIR:-/tmp}/cyder-icon.XXXXXX")"
 ICONSET="$ICON_WORK/AppIcon.iconset"
 mkdir -p "$ICONSET"
