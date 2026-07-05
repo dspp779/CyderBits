@@ -21,5 +21,10 @@ downloads/
 ddraw.dll
 mingliu.ttc
 
+# GnuWin libarchive extract at repo root (tracked copy lives in tools/libarchive/)
+libarchive-2.4.12-1-bin/
+libarchive-2.4.12-1-dep/
+libarchive-2.4.12-1-*.zip
+
 # OS / editor noise
 .DS_Store

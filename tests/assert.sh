@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+assert() {
+  "$@" || { echo "ASSERT failed: $*" >&2; exit 1; }
+}
+
 assert_eq() {
   local actual="$1"
   local expected="$2"
