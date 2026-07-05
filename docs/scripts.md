@@ -31,8 +31,10 @@
 | 腳本 | 用途 |
 |------|------|
 | `create-cyder-app.sh` | `dist/Cyder.app`（`.exe` 啟動器 + engine payload + bootstrap） |
-| `cyder_launcher.py` | 解析 `.exe`、bootstrap SharedPrefix、執行 Wine |
-| `cyder_common.py` | 共用路徑、`ensure_shared_engine`、`bootstrap_shared_prefix`、`run_wine_exe` |
+| `cyder_launcher.sh` | 解析 `.exe`、bootstrap SharedPrefix、執行 Wine（Cyder.app 執行時入口） |
+| `cyder-common.sh` | 共用路徑、`ensure_shared_engine`、`bootstrap_shared_prefix`、`run_wine_exe` |
+| `cyder_launcher.py` | 開發用 CLI，轉呼叫 `cyder_launcher.sh` |
+| `cyder_common.py` | CyderBits 打包器共用（Python） |
 
 ## CyderBits 打包
 
@@ -51,15 +53,15 @@ build-wine.sh
 
 create-cyder-app.sh
     → bundle-wine-dylibs.sh, sign-wine.sh
-    → cyder_launcher.py（執行時）
-    → install-wine-mono.sh, install-libarchive-tar.sh（bootstrap）
+    → cyder_launcher.sh（執行時）
+    → install-wine-mono.sh, install-libarchive-tar.sh, enable-mac-retina-hires.sh（bootstrap）
 
 create-cyderbits-app.sh
     → bundle-wine-dylibs.sh, sign-wine.sh
     → cyder_create_game_app.py（執行時）
 
-cyder_launcher.py
-    → cyder_common（ensure_shared_engine, bootstrap_shared_prefix, run_wine_exe）
+cyder_launcher.sh
+    → cyder-common.sh（ensure_shared_engine, bootstrap_shared_prefix, run_wine_exe）
 
 cyder_create_game_app.py
     → cyder_common（ensure_shared_engine, init_bottle, apply_mac_hires）
@@ -78,11 +80,11 @@ run-bluecg.sh
 | `tests/test-sign-wine.sh` | `sign-wine.sh` |
 | `tests/test-run-bluecg.sh` | `run-bluecg.sh` |
 | `tests/test-verify-bluecg.sh` | `verify-bluecg.sh` |
-| `tests/test-cyder-launcher.sh` | `cyder_launcher.py --dry-run` |
+| `tests/test-cyder-launcher.sh` | `cyder_launcher.sh --dry-run` |
 | `tests/test-install-libarchive-tar.sh` | `install-libarchive-tar.sh` |
-| `tests/test-cyder-bootstrap.sh` | `cyder_launcher.py --bootstrap-only`（需 Wine） |
+| `tests/test-cyder-bootstrap.sh` | `cyder_launcher.sh --bootstrap-only`（需 Wine） |
 
-## cyder_launcher.py 旗標
+## cyder_launcher.sh 旗標
 
 ```
 exe [exe ...]          .exe 路徑（可省略 → 檔案選擇器）

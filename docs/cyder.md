@@ -17,7 +17,7 @@ open dist/Cyder.app
 
 - 將 relocatable Wine 打包進 `Cyder.app/Contents/Resources/engine-payload/`
 - 使用 `logo/cyderbits.png` 產生 app 圖示
-- 內含 `cyder_launcher.py`、`cyder_common.py` 與 bootstrap helper（mono、tar、locale）
+- 內含 shell launcher（`cyder_launcher.sh`）與 bootstrap helper（mono、tar、locale、hi-res）
 - 在 `Info.plist` 註冊 `.exe` 檔案關聯（開啟、拖放）
 
 ## 開啟 .exe
@@ -33,14 +33,16 @@ open dist/Cyder.app
 ### CLI（開發 / 除錯）
 
 ```bash
-python3 scripts/cyder_launcher.py --engine-src install/wine-x86_64 /path/to/game.exe
+bash scripts/cyder_launcher.sh --engine-src install/wine-x86_64 /path/to/game.exe
 
 # 只印出路徑，不裝引擎、不啟動
-python3 scripts/cyder_launcher.py /path/to/game.exe --dry-run
+bash scripts/cyder_launcher.sh /path/to/game.exe --dry-run
 
 # 只跑 bootstrap（mono、tar、高解析度）
-python3 scripts/cyder_launcher.py --bootstrap-only --engine-src install/wine-x86_64
+bash scripts/cyder_launcher.sh --bootstrap-only --engine-src install/wine-x86_64
 ```
+
+（`python3 scripts/cyder_launcher.py` 仍可用，會轉呼叫上述 shell 腳本。）
 
 ## SharedPrefix 與 bootstrap
 
@@ -58,7 +60,7 @@ Cyder 使用**全機唯一**的 Wine prefix，所有 `.exe` 共用同一套 Wind
     libarchive-2.4.12/       # tar 安裝來源（LGPL）
 ```
 
-首次啟動（或 marker 不存在）時，`cyder_launcher.py` 會依序：
+首次啟動（或 marker 不存在）時，`cyder_launcher.sh` 會依序：
 
 1. 從 app 內 `engine-payload` 安裝引擎至 `Engines/`（若尚未安裝）
 2. 若 `SharedPrefix/system.reg` 不存在 → `wineboot -u` 建立 prefix

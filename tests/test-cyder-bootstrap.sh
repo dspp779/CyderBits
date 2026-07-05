@@ -15,8 +15,8 @@ SHARED="$TMP/SharedPrefix"
 mkdir -p "$SHARED"
 
 output="$(
-  PYTHONPATH="$ROOT/scripts" CYDER_SHARED_PREFIX="$SHARED" \
-    python3 "$ROOT/scripts/cyder_launcher.py" --bootstrap-only \
+  CYDER_SHARED_PREFIX="$SHARED" \
+    bash "$ROOT/scripts/cyder_launcher.sh" --bootstrap-only \
     --engine-src "$ROOT/install/wine-x86_64" 2>&1
 )"
 assert_contains "$output" "$SHARED" "bootstrap-only should use CYDER_SHARED_PREFIX"

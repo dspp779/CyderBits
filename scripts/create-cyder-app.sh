@@ -31,8 +31,6 @@ echo "==> Creating $APP"
 rm -rf "$APP"
 mkdir -p "$MACOS" "$RES"
 
-cp "$SCRIPT_DIR/cyder_launcher.py" "$RES/cyder_launcher.py"
-cp "$SCRIPT_DIR/cyder_common.py" "$RES/cyder_common.py"
 cp "$ENTITLEMENTS_PLIST" "$RES/entitlements.plist"
 
 echo "==> Building AppIcon.icns from ${LOGO_PNG#$OGOM/}"
@@ -61,10 +59,14 @@ rm -rf "$ICON_WORK"
 }
 
 mkdir -p "$RES/ogom-scripts" "$RES/addons/libarchive"
+cp "$SCRIPT_DIR/cyder_launcher.sh" "$RES/ogom-scripts/"
+cp "$SCRIPT_DIR/cyder-common.sh" "$RES/ogom-scripts/"
 cp "$SCRIPT_DIR/env-x86_64.sh" "$RES/ogom-scripts/"
 cp "$SCRIPT_DIR/install-wine-mono.sh" "$RES/ogom-scripts/"
 cp "$SCRIPT_DIR/install-libarchive-tar.sh" "$RES/ogom-scripts/"
 cp "$SCRIPT_DIR/resolve-wine-locale.sh" "$RES/ogom-scripts/"
+cp "$SCRIPT_DIR/enable-mac-retina-hires.sh" "$RES/ogom-scripts/"
+chmod +x "$RES/ogom-scripts/cyder_launcher.sh"
 
 echo "==> Copying engine payload into Cyder.app (first-run install source)"
 rsync -a --delete "$WINE_INSTALL/" "$RES/engine-payload/"
@@ -83,10 +85,9 @@ export CYDER_LIBARCHIVE_SRC="$RES/addons/libarchive"
 export OGOM="$RES"
 export WINE_INSTALL="$RES/engine-payload"
 export ENTITLEMENTS_PLIST="$RES/entitlements.plist"
-export PYTHONUNBUFFERED=1
-export PYTHONPATH="$RES${PYTHONPATH:+:$PYTHONPATH}"
+export CYDER_ENTITLEMENTS="$RES/entitlements.plist"
 
-exec python3 "$RES/cyder_launcher.py" --engine-src "$RES/engine-payload" "$@"
+exec "$RES/ogom-scripts/cyder_launcher.sh" --engine-src "$RES/engine-payload" "$@"
 LAUNCHER
 chmod +x "$MACOS/Cyder"
 
@@ -141,4 +142,4 @@ codesign --force --deep --sign - "$APP" 2>/dev/null || true
 echo ""
 echo "Created $APP"
 echo "Open: open \"$APP\""
-echo "CLI:  python3 scripts/cyder_launcher.py --engine-src install/wine-x86_64 /path/to/game.exe"
+echo "CLI:  bash scripts/cyder_launcher.sh --engine-src install/wine-x86_64 /path/to/game.exe"
