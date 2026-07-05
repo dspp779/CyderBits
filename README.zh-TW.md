@@ -8,21 +8,34 @@
 
 鎖定 2D 與傳統 Win32 圖形（DirectDraw、GDI）；**尚未**支援 DXVK、Vulkan 與現代 3D 管線。
 
-CyderBits 在 Apple Silicon 上自建 CrossOver 系 Wine，並提供 **Cyder** — 把 `.exe` 包成可雙擊的 macOS `.app`。
+CyderBits 在 Apple Silicon 上自建 CrossOver 系 Wine，並提供兩個工具：**Cyder** — 一鍵啟動 `.exe` — 與 **CyderBits** — 把 `.exe` 包成可雙擊的 macOS `.app`。
 
 **語言：** [English](README.md) · [繁體中文](README.zh-TW.md)
 
-## Cyder（使用者工具）
+## Cyder（啟動器）
 
 | | |
 |---|---|
-| **用途** | 選 Windows `.exe` → 產生 macOS 遊戲 `.app` |
+| **用途** | 直接開啟 Windows `.exe`（共用 SharedPrefix） |
 | **引擎** | 共用 Wine（`~/Library/Application Support/Cyder/Engines/`） |
 | **文件** | [docs/cyder.md](docs/cyder.md) |
 
 ```bash
 bash scripts/create-cyder-app.sh
 open dist/Cyder.app
+```
+
+## CyderBits（打包器）
+
+| | |
+|---|---|
+| **用途** | 選 Windows `.exe` → 產生 macOS 遊戲 `.app` |
+| **Prefix** | 每遊戲 bottle（`~/Library/Application Support/Cyder/Bottles/`，Phase 1） |
+| **文件** | [docs/cyderbits.md](docs/cyderbits.md) |
+
+```bash
+bash scripts/create-cyderbits-app.sh
+open dist/CyderBits.app
 ```
 
 ## 驗證用遊戲
@@ -64,11 +77,16 @@ bash scripts/run-bluecg.sh
 bash scripts/enable-mac-retina-hires.sh   # 可選：Retina + 200% DPI
 ```
 
-### 3. 用 Cyder 包裝 EXE
+### 3. 執行或包裝 EXE
 
 ```bash
+# Cyder 啟動器 — 直接開 .exe
 bash scripts/create-cyder-app.sh
 open dist/Cyder.app
+
+# CyderBits 打包器 — 包成 game .app
+bash scripts/create-cyderbits-app.sh
+open dist/CyderBits.app
 # 或：python3 scripts/cyder_create_game_app.py --gui
 ```
 
@@ -100,7 +118,8 @@ bash tests/test-verify-bluecg.sh
 ## 文件
 
 - [docs/README.md](docs/README.md) — 索引
-- [docs/cyder.md](docs/cyder.md) — Cyder 使用
+- [docs/cyder.md](docs/cyder.md) — Cyder 啟動器
+- [docs/cyderbits.md](docs/cyderbits.md) — CyderBits 打包器
 - [docs/bluecg.md](docs/bluecg.md) — BlueCG 流程
 - [docs/scripts.md](docs/scripts.md) — 腳本參考
 - [docs/superpowers/](docs/superpowers/) — 設計規格

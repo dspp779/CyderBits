@@ -1,6 +1,6 @@
 # Cyder 使用指南
 
-**Cyder**（Old Game on Mac）把 Windows `.exe` 包成 macOS `.app`，透過內建或共用的 Wine 引擎啟動。
+**Cyder** 是 Windows `.exe` 一鍵啟動器：裝一次，直接執行任何 `.exe`，共用全機唯一的 Wine prefix（`SharedPrefix`）。若要包成獨立的 macOS 遊戲 `.app`，請改用 [CyderBits 打包器](cyderbits.md)。
 
 ## 安裝 Cyder.app
 
@@ -17,102 +17,90 @@ open dist/Cyder.app
 
 - 將 relocatable Wine 打包進 `Cyder.app/Contents/Resources/engine-payload/`
 - 使用 `logo/cyderbits.png` 產生 app 圖示
-- 內含 `cyder_create_game_app.py` 與 helper 腳本
+- 內含 `cyder_launcher.py`、`cyder_common.py` 與 bootstrap helper（mono、tar、locale）
+- 在 `Info.plist` 註冊 `.exe` 檔案關聯（開啟、拖放）
 
-## 建立遊戲 App
+## 開啟 .exe
 
-### GUI（Cyder.app）
+| 方式 | 操作 |
+|------|------|
+| **雙擊 Cyder** | 無參數時會跳出檔案選擇器，選取 `.exe` |
+| **拖放** | 將 `.exe` 拖到 Cyder.app 圖示上 |
+| **檔案關聯** | 在 Finder 對 `.exe` 按右鍵 → **打開方式** → 選 Cyder；可設為預設 |
 
-1. 雙擊 **Cyder.app**
-2. 選擇 `.exe` 與輸出資料夾
-3. 依序回答 osascript 對話框：
-   - 複製遊戲檔進 App？（預設 **否**＝連結原路徑）
-   - 內嵌完整 Wine 引擎？（預設 **否**＝共用引擎）
-   - 遊戲目錄當 Wine prefix？（預設 **否**＝獨立 bottle；**BlueCG 請選是**）
-   - 停用 mshtml？（預設 **否**）
-   - 啟用 Mac 高解析度？（預設 **是**：RetinaMode + 200% DPI）
-4. 完成後 Finder 會顯示新建的 `遊戲名.app`
+首次執行某 `.exe` 時會自動 bootstrap 共用 prefix（見下節），之後再開其他 `.exe` 不會重複安裝。
 
-### CLI
+### CLI（開發 / 除錯）
 
 ```bash
-python3 scripts/cyder_create_game_app.py --gui
+python3 scripts/cyder_launcher.py --engine-src install/wine-x86_64 /path/to/game.exe
 
-python3 scripts/cyder_create_game_app.py \
-  --exe /path/to/game.exe \
-  --output ~/Desktop
+# 只印出路徑，不裝引擎、不啟動
+python3 scripts/cyder_launcher.py /path/to/game.exe --dry-run
 
-# BlueCG 範例
-python3 scripts/cyder_create_game_app.py \
-  --exe "$PWD/BlueCrossgateNew/BlueLauncher.exe" \
-  --output ~/Desktop \
-  --prefix-mode game_dir \
-  --no-gecko-prompt
+# 只跑 bootstrap（mono、tar、高解析度）
+python3 scripts/cyder_launcher.py --bootstrap-only --engine-src install/wine-x86_64
 ```
 
-### CLI 旗標
+## SharedPrefix 與 bootstrap
 
-| 旗標 | 說明 |
-|------|------|
-| `--standalone` | 複製整個遊戲目錄進 app |
-| `--portable-engine` | 內嵌完整 Wine 於 app（可攜） |
-| `--prefix-mode bottle` | 預設：乾淨 prefix 於 Application Support |
-| `--prefix-mode game_dir` | 遊戲目錄即 WINEPREFIX（BlueCG） |
-| `--no-gecko-prompt` | `WINEDLLOVERRIDES=mshtml=` |
-| `--no-mac-hires` | 不寫入 RetinaMode / LogPixels=192 |
-| `--no-msync` | 不設 `WINEMSYNC=1` |
-
-## 執行時行為
-
-雙擊遊戲 `.app` 時：
-
-- **語系**：`LC_ALL` → macOS `AppleLocale` → `LANG` → fallback `zh_TW.UTF-8`（見 `scripts/resolve-wine-locale.sh`）
-- **msync**：預設 `WINEMSYNC=1`
-- **Dock**：包裝 app 設 `LSUIElement`（不佔 Dock）；Wine 顯示 EXE 圖示
-- **圖示**：從 EXE 資源擷取最大 icon 轉為 `AppIcon.icns`
-
-## 檔案佈局
+Cyder 使用**全機唯一**的 Wine prefix，所有 `.exe` 共用同一套 Windows 環境：
 
 ```text
 ~/Library/Application Support/Cyder/
-  Engines/wine-x86_64/       # 首次建立遊戲時從 engine-payload 安裝
-  Bottles/<id>/              # bottle 模式的 prefix
-
-MyGame.app/
-  Contents/MacOS/CyderGame   # 啟動器（agent，啟動後結束）
-  Contents/Resources/
-    meta.json                # 遊戲路徑、prefix、bottle_id、選項
-    AppIcon.icns             # 來自 EXE
-    game/                    # 僅 --standalone
-    wine/                    # 僅 --portable-engine
+  Engines/wine-x86_64/       # 共用 Wine（Cyder / CyderBits 預設）
+  SharedPrefix/              # Cyder WINEPREFIX
+    drive_c/windows/mono/    # wine-mono（.NET）
+    drive_c/windows/syswow64/tar.exe   # GnuWin bsdtar（大 zip 解壓）
+    system.reg / user.reg
+    .cyder-bootstrap-v1      # bootstrap 完成 marker
+  Addons/
+    libarchive-2.4.12/       # tar 安裝來源（LGPL）
 ```
 
-### meta.json 範例
+首次啟動（或 marker 不存在）時，`cyder_launcher.py` 會依序：
 
-```json
-{
-  "name": "BlueLauncher",
-  "exe": "/path/to/BlueLauncher.exe",
-  "prefix_mode": "game_dir",
-  "mac_hires": true,
-  "msync": true,
-  "no_gecko_prompt": true
-}
-```
+1. 從 app 內 `engine-payload` 安裝引擎至 `Engines/`（若尚未安裝）
+2. 若 `SharedPrefix/system.reg` 不存在 → `wineboot -u` 建立 prefix
+3. 安裝 **wine-mono**、**syswow64/tar.exe**（含 libarchive DLL）
+4. 寫入 **Mac 高解析度** registry（RetinaMode + LogPixels=192）
+5. 設定 `WINEDLLOVERRIDES=mshtml=`（略過 Gecko 提示）
+6. 寫入 `.cyder-bootstrap-v1`；之後啟動跳過上述步驟
+
+執行時環境：
+
+- `WINEPREFIX` = `SharedPrefix`
+- `cwd` = `.exe` 所在目錄
+- `LANG` / `LC_ALL` = macOS `AppleLocale` → fallback `zh_TW.UTF-8`
+- `WINEMSYNC=1`
+
+遊戲檔**不會**被複製或移動，仍留在原路徑。
+
+## BlueCG 注意事項
+
+BlueCG（魔力寶貝）可透過 Cyder 直接開 `BlueLauncher.exe`；遊戲目錄（如 `BlueCrossgateNew/`）維持原位，Wine 環境來自 `SharedPrefix`。
+
+- 大客戶端 zip（`BlueCG_client.zip`）需要 prefix 內的 `syswow64/tar.exe`；bootstrap 會自動安裝。
+- **共用 prefix 風險**：不同遊戲的 registry、已安裝元件可能互相影響。若某遊戲在 Cyder 下異常，可改用 [CyderBits](cyderbits.md) 建立**獨立 bottle** 的 game `.app`。
+- 開發測試路徑 `bash scripts/run-bluecg.sh`（獨立 `WINEPREFIX`）**不受 Cyder 影響**，仍建議用於建置驗證。
+
+詳見 [bluecg.md](bluecg.md)。
 
 ## 疑難排解
 
 | 現象 | 建議 |
 |------|------|
-| 中文輸入變 `??` | 確認系統語言為繁中；重建 app（會讀 `AppleLocale`）。舊 app 需重建以更新啟動器 |
-| 畫面糊 / 視窗太小 | 建立時啟用高解析度，或對 prefix 執行 `bash scripts/enable-mac-retina-hires.sh` |
-| BlueCG 無法啟動 | 使用 `--prefix-mode game_dir`，並 `--no-gecko-prompt` |
-| Dock 兩個圖示 / 跳動 | 重建 app（新版啟動器已 detach Wine） |
-| 找不到 Wine | 重新開啟 Cyder.app 以安裝共用引擎到 Application Support |
-| Gecko 安裝提示 | 建立時選停用 mshtml，或 `bash scripts/configure-mshtml.sh --disable` |
+| 中文輸入變 `??` | 確認系統語言為繁中；Cyder 會讀 `AppleLocale` |
+| 畫面糊 / 視窗太小 | bootstrap 已啟用高解析度；可對 SharedPrefix 執行 `bash scripts/enable-mac-retina-hires.sh` |
+| 大 zip 解壓失敗 / 找不到 tar | 確認 `SharedPrefix/drive_c/windows/syswow64/tar.exe` 存在；刪除 `.cyder-bootstrap-v1` 後重開 Cyder 觸發 reinstall，或執行 `--bootstrap-only` |
+| 找不到 Wine | 重新開啟 Cyder.app 以安裝共用引擎到 `Engines/` |
+| Gecko 安裝提示 | Cyder 預設已停用 mshtml；若仍出現，對 SharedPrefix 執行 `bash scripts/configure-mshtml.sh --disable` |
+| 多遊戲衝突 / registry 混亂 | 改用 [CyderBits](cyderbits.md) 為該遊戲建立獨立 bottle 的 game `.app` |
+| Dock 圖示 | Cyder 啟動 Wine 程序後即結束；Dock 上顯示的是 Wine / 遊戲視窗 |
 
 ## 相關文件
 
-- [bluecg.md](bluecg.md) — BlueCG 專用設定
+- [cyderbits.md](cyderbits.md) — 打包 `.exe` 為 game `.app`（CyderBits）
+- [bluecg.md](bluecg.md) — BlueCG 開發與驗證
 - [scripts.md](scripts.md) — 腳本參考
-- [superpowers/specs/2026-07-04-cyder-mvp-design.md](superpowers/specs/2026-07-04-cyder-mvp-design.md) — MVP 決策紀錄
+- [superpowers/specs/2026-07-05-cyder-cyderbits-split-design.md](superpowers/specs/2026-07-05-cyder-cyderbits-split-design.md) — 產品分流設計

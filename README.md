@@ -8,21 +8,34 @@
 
 Built for 2D and classic Win32 graphics (DirectDraw, GDI). **DXVK, Vulkan, and modern 3D pipelines are not supported yet.**
 
-CyderBits builds CrossOver-based Wine on Apple Silicon and ships **Cyder** — a tool that wraps `.exe` files as double-clickable macOS `.app` bundles.
+CyderBits builds CrossOver-based Wine on Apple Silicon and ships two tools: **Cyder** — a one-click `.exe` launcher — and **CyderBits** — a packager that wraps `.exe` files as double-clickable macOS `.app` bundles.
 
 **Languages:** [English](README.md) · [繁體中文](README.zh-TW.md)
 
-## Cyder (the app)
+## Cyder (launcher)
 
 | | |
 |---|---|
-| **What** | Pick a Windows `.exe` → get a macOS game `.app` |
+| **What** | Open any Windows `.exe` with one shared Wine prefix |
 | **Engine** | Shared Wine under `~/Library/Application Support/Cyder/Engines/` |
 | **Docs** | [docs/cyder.md](docs/cyder.md) |
 
 ```bash
 bash scripts/create-cyder-app.sh
 open dist/Cyder.app
+```
+
+## CyderBits (packager)
+
+| | |
+|---|---|
+| **What** | Pick a Windows `.exe` → get a macOS game `.app` |
+| **Prefix** | Per-game bottle under `~/Library/Application Support/Cyder/Bottles/` (Phase 1) |
+| **Docs** | [docs/cyderbits.md](docs/cyderbits.md) |
+
+```bash
+bash scripts/create-cyderbits-app.sh
+open dist/CyderBits.app
 ```
 
 ## Validation game
@@ -64,11 +77,16 @@ bash scripts/run-bluecg.sh
 bash scripts/enable-mac-retina-hires.sh   # optional Retina + 200% DPI
 ```
 
-### 3. Wrap any EXE with Cyder
+### 3. Run or wrap any EXE
 
 ```bash
+# Cyder launcher — open .exe directly
 bash scripts/create-cyder-app.sh
 open dist/Cyder.app
+
+# CyderBits packager — wrap .exe as a game .app
+bash scripts/create-cyderbits-app.sh
+open dist/CyderBits.app
 # or: python3 scripts/cyder_create_game_app.py --gui
 ```
 
@@ -100,7 +118,8 @@ bash tests/test-verify-bluecg.sh
 ## Documentation
 
 - [docs/README.md](docs/README.md) — index
-- [docs/cyder.md](docs/cyder.md) — Cyder usage
+- [docs/cyder.md](docs/cyder.md) — Cyder launcher
+- [docs/cyderbits.md](docs/cyderbits.md) — CyderBits packager
 - [docs/bluecg.md](docs/bluecg.md) — BlueCG workflow
 - [docs/scripts.md](docs/scripts.md) — script reference
 - [docs/superpowers/](docs/superpowers/) — design specs

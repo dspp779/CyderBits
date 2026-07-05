@@ -2,13 +2,14 @@
 
 > 專案根目錄：[README.md](../README.md)（English · **CyderBits**）· [README.zh-TW.md](../README.zh-TW.md)（繁中）
 
-**CyderBits** — DirectDraw / GDI 舊遊戲 on Mac；**Cyder** — 包裝 `.exe` 的工具 app。
+**CyderBits** — DirectDraw / GDI 舊遊戲 on Mac；**Cyder** — 一鍵啟動 `.exe`；**CyderBits.app** — 包裝 `.exe` 為 game `.app`。
 
 ## 使用指南
 
 | 文件 | 對象 | 內容 |
 |------|------|------|
-| [cyder.md](cyder.md) | 一般使用者 | Cyder 安裝、建立遊戲 app、選項與疑難排解 |
+| [cyder.md](cyder.md) | 一般使用者 | Cyder 啟動器：開 `.exe`、SharedPrefix、bootstrap |
+| [cyderbits.md](cyderbits.md) | 一般使用者 | CyderBits 打包器：建立 game `.app`、選項與疑難排解 |
 | [bluecg.md](bluecg.md) | 開發 / 驗證 | BlueCG 自建 Wine、執行、高解析度與已知問題 |
 | [scripts.md](scripts.md) | 開發者 | `scripts/` 腳本一覽與依賴關係 |
 
