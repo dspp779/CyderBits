@@ -231,23 +231,36 @@ cyder_exe_is_associated() {
 }
 
 cyder_maybe_prompt_exe_association() {
-  [[ -f "$CYDER_EXE_ASSOC_DECLINED" ]] && return 0
-  cyder_exe_is_associated && return 0
+  if [[ -f "$CYDER_EXE_ASSOC_DECLINED" ]]; then
+    return 0
+  fi
+  if cyder_exe_is_associated; then
+    return 0
+  fi
 
+  local tool="$CYDER_SCRIPTS/cyder-exe-association"
   local swift="$CYDER_SCRIPTS/cyder-exe-association.swift"
-  [[ -f "$swift" ]] || return 0
+  [[ -x "$tool" || -f "$swift" ]] || return 0
 
-  local choice
+  local choice err_log="$CYDER_SUPPORT/Logs/assoc-dialog.log"
+  mkdir -p "$CYDER_SUPPORT/Logs"
   choice="$(
-    osascript 2>/dev/null <<'APPLESCRIPT' || true
+    /usr/bin/osascript 2>"$err_log" <<'APPLESCRIPT' || true
 display dialog "是否將所有 .exe 檔案預設以 Cyder 開啟？\n\n之後在 Finder 雙擊 .exe 即可直接啟動。" with title "Cyder" buttons {"不再詢問", "略過", "設為預設"} default button 3
 APPLESCRIPT
   )"
+  if [[ -z "$choice" && -s "$err_log" ]]; then
+    echo "assoc dialog failed: $(cat "$err_log")" >>"$CYDER_SUPPORT/Logs/assoc-dialog.log"
+  fi
   [[ -n "$choice" ]] || return 0
 
   case "$choice" in
     *設為預設*)
       local app_path="${CYDER_APP:-}"
+      if [[ -z "$app_path" ]]; then
+        osascript -e 'display alert "無法設定檔案關聯" message "找不到 Cyder.app 路徑。" as warning' 2>/dev/null || true
+        return 0
+      fi
       if cyder_exe_association_swift set "$CYDER_BUNDLE_ID" "$app_path" >/dev/null 2>&1; then
         return 0
       fi

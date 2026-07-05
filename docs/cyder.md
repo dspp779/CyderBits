@@ -16,7 +16,7 @@ open dist/Cyder.app
 `create-cyder-app.sh` 會：
 
 - 將 relocatable Wine 打包進 `Cyder.app/Contents/Resources/engine-payload/`
-- 使用 `logo/cyderbits.png` 產生 app 圖示
+- 使用 `logo/cyder-logo.png` 產生 app 圖示
 - 內含 shell launcher（`cyder_launcher.sh`）與 bootstrap helper（mono、tar、locale、hi-res）
 - 在 `Info.plist` 註冊 `.exe` 檔案關聯（開啟、拖放）
 
@@ -41,6 +41,14 @@ open dist/Cyder.app
 若已關聯、或曾選「不再詢問」，會直接進入檔案選擇器。從 Finder 雙擊 `.exe` 或拖放到 Cyder 時**不會**出現關聯提示。
 
 設定失敗時會提示改用手動：**Finder → 右鍵 .exe → 打開方式 → Cyder → 全部更改**。
+
+若先前誤將 `public.executable` 設為 Cyder，可還原：
+
+```bash
+scripts/cyder-exe-association.swift cleanup local.cyder.app dist/Cyder.app
+# 或 app 內建編譯版
+dist/Cyder.app/Contents/Resources/ogom-scripts/cyder-exe-association cleanup local.cyder.app dist/Cyder.app
+```
 
 ### CLI（開發 / 除錯）
 

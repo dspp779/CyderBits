@@ -57,6 +57,10 @@ while [[ $# -gt 0 ]]; do
       break
       ;;
     -*)
+      if [[ "$1" == -psn_* ]]; then
+        shift
+        continue
+      fi
       echo "Unknown option: $1" >&2
       usage >&2
       exit 1

@@ -3,6 +3,8 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Cyder.app runtime exports must not leak into build (OGOM → Resources/, HOMEBREW_PREFIX=/nonexistent).
+unset HOMEBREW_PREFIX OGOM WINE_INSTALL ENTITLEMENTS_PLIST
 source "$SCRIPT_DIR/env-x86_64.sh"
 
 OUT_DIR="${1:-$OGOM/dist}"
@@ -20,10 +22,9 @@ echo "==> Preparing relocatable Wine engine"
 bash "$SCRIPT_DIR/bundle-wine-dylibs.sh" "$WINE_INSTALL"
 bash "$SCRIPT_DIR/sign-wine.sh"
 
-LOGO_PNG="$OGOM/logo/cyderbits-transparent.png"
-[[ -f "$LOGO_PNG" ]] || LOGO_PNG="$OGOM/logo/cyderbits.png"
+LOGO_PNG="$OGOM/logo/cyder-logo.png"
 [[ -f "$LOGO_PNG" ]] || {
-  echo "Missing app logo at logo/cyderbits-transparent.png or logo/cyderbits.png" >&2
+  echo "Missing app logo at logo/cyder-logo.png" >&2
   exit 1
 }
 
@@ -142,7 +143,6 @@ cat > "$CONTENTS/Info.plist" <<'PLIST'
       <key>LSItemContentTypes</key>
       <array>
         <string>com.microsoft.windows-executable</string>
-        <string>public.executable</string>
       </array>
     </dict>
   </array>

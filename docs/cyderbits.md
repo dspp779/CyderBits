@@ -18,7 +18,7 @@ open dist/CyderBits.app
 `create-cyderbits-app.sh` 會：
 
 - 將 relocatable Wine 打包進 `CyderBits.app/Contents/Resources/engine-payload/`
-- 使用 `logo/cyderbits.png` 產生 app 圖示
+- 使用 `logo/cyderbits-logo.png` 產生 app 圖示
 - 內含 `cyder_create_game_app.py` 與 helper 腳本
 
 ## 建立遊戲 App

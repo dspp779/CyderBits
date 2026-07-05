@@ -11,6 +11,7 @@ SWIFT="$ROOT/scripts/cyder-exe-association.swift"
 }
 
 output="$(swift "$SWIFT" status local.cyder.app 2>&1 || true)"
+assert_contains "$output" "com.microsoft.windows-executable" "status should list exe UTI handlers"
 last="$(printf '%s\n' "$output" | tail -1)"
 if [[ "$last" == "associated" ]]; then
   echo "status: associated"
@@ -20,5 +21,8 @@ else
   echo "unexpected status output: $output" >&2
   exit 1
 fi
+
+handlers="$(swift "$SWIFT" handlers 2>&1)"
+assert_contains "$handlers" "default_for_exe_url" "handlers should include URL-based default"
 
 echo "PASS test-cyder-exe-association"
