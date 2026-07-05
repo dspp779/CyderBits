@@ -22,7 +22,11 @@ else:
 SUPPORT = Path.home() / "Library" / "Application Support" / "Cyder"
 ENGINES = SUPPORT / "Engines"
 BOTTLES = SUPPORT / "Bottles"
-SHARED_PREFIX = SUPPORT / "SharedPrefix"
+# CYDER_SHARED_PREFIX overrides SHARED_PREFIX for isolated bootstrap tests only.
+_shared_prefix_override = os.environ.get("CYDER_SHARED_PREFIX")
+SHARED_PREFIX = (
+    Path(_shared_prefix_override) if _shared_prefix_override else SUPPORT / "SharedPrefix"
+)
 ADDONS = SUPPORT / "Addons"
 ENGINE_NAME = "wine-x86_64"
 BOOTSTRAP_MARKER = SHARED_PREFIX / ".cyder-bootstrap-v1"

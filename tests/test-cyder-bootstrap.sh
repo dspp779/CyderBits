@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+# Bootstrap smoke test for Cyder shared prefix (mono + tar + hi-res).
+# Requires: install/wine-x86_64 built, tools/libarchive present.
+# Uses CYDER_SHARED_PREFIX so bootstrap does not touch ~/Library/Application Support.
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+[[ -x "$ROOT/install/wine-x86_64/bin/wine" ]] || { echo "SKIP: no wine"; exit 0; }
+
+source "$ROOT/tests/assert.sh"
+
+TMP="$(mktemp -d)"
+trap 'rm -rf "$TMP"' EXIT
+SHARED="$TMP/SharedPrefix"
+mkdir -p "$SHARED"
+
+output="$(
+  PYTHONPATH="$ROOT/scripts" CYDER_SHARED_PREFIX="$SHARED" \
+    python3 "$ROOT/scripts/cyder_launcher.py" --bootstrap-only \
+    --engine-src "$ROOT/install/wine-x86_64" 2>&1
+)"
+assert_contains "$output" "$SHARED" "bootstrap-only should use CYDER_SHARED_PREFIX"
+assert_contains "$output" ".cyder-bootstrap-v1" "bootstrap-only should print marker path"
+
+assert test -f "$SHARED/drive_c/windows/syswow64/tar.exe"
+assert test -d "$SHARED/drive_c/windows/mono"
+assert test -f "$SHARED/.cyder-bootstrap-v1"
+
+WINE="$ROOT/install/wine-x86_64/bin/wine"
+if WINEPREFIX="$SHARED" "$WINE" reg query "HKCU\\Software\\Wine\\Mac Driver" /v RetinaMode >/dev/null 2>&1; then
+  echo "RetinaMode registry OK"
+fi
+
+echo "PASS test-cyder-bootstrap"

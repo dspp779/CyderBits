@@ -7,6 +7,7 @@ import sys
 from pathlib import Path
 
 from cyder_common import (
+    BOOTSTRAP_MARKER,
     DEFAULT_ENGINE_SRC,
     ENGINE_NAME,
     ENGINES,
@@ -52,6 +53,8 @@ def main() -> None:
     if args.bootstrap_only:
         engine = ensure_shared_engine(args.engine_src)
         wine = engine / "bin" / "wine"
+        print(f"WINEPREFIX={SHARED_PREFIX}")
+        print(f"BOOTSTRAP_MARKER={BOOTSTRAP_MARKER}")
         bootstrap_shared_prefix(wine, engine_src=args.engine_src)
         return
 
