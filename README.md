@@ -1,70 +1,93 @@
-# ogom
+<p align="center">
+  <img src="logo/cyderbits-transparent.png" alt="CyderBits" width="160">
+</p>
 
-在 Apple Silicon Mac 上自建 CrossOver 系 Wine，執行 Windows 遊戲；並提供 **Cyder**（Old Game on Mac）把 `.exe` 包成可雙擊的 macOS `.app`。
+# CyderBits
 
-## 專案組成
+**Run legacy Windows games on Mac — DirectDraw & GDI first.**
 
-| 元件 | 說明 |
-|------|------|
-| **Wine 自建** | 從 `sources/wine`（CrossOver 26.2 原始碼）建 x86_64 版，經 Rosetta 執行 |
-| **BlueCG** | 驗證目標遊戲（魔力寶貝 BlueCrossgateNew）；`scripts/run-bluecg.sh` |
-| **Cyder** | 選 `.exe` → 產生遊戲 `.app`；共用 Wine 引擎與 per-game bottle |
+Built for 2D and classic Win32 graphics (DirectDraw, GDI). **DXVK, Vulkan, and modern 3D pipelines are not supported yet.**
 
-## 系統需求
+CyderBits builds CrossOver-based Wine on Apple Silicon and ships **Cyder** — a tool that wraps `.exe` files as double-clickable macOS `.app` bundles.
 
-- macOS 12+（建議 13+）
-- Apple Silicon + Rosetta 2（Wine 為 **x86_64** build）
-- 磁碟：Wine 原始碼、`.brew-x86`、build 產物約需數 GB（多數目錄在 `.gitignore`）
+**Languages:** [English](README.md) · [繁體中文](README.zh-TW.md)
 
-## 快速開始
+## Cyder (the app)
 
-### 1. 建 Wine（首次，耗時長）
-
-```bash
-bash scripts/build-wine.sh
-bash scripts/sign-wine.sh
-```
-
-### 2. 跑 BlueCG（開發驗證）
-
-```bash
-bash scripts/run-bluecg.sh
-# 高解析度（Retina + 200% DPI）
-bash scripts/enable-mac-retina-hires.sh
-```
-
-### 3. 使用 Cyder（包裝任意 EXE）
+| | |
+|---|---|
+| **What** | Pick a Windows `.exe` → get a macOS game `.app` |
+| **Engine** | Shared Wine under `~/Library/Application Support/Cyder/Engines/` |
+| **Docs** | [docs/cyder.md](docs/cyder.md) |
 
 ```bash
 bash scripts/create-cyder-app.sh
 open dist/Cyder.app
 ```
 
-或 CLI：
+## Validation game
+
+Development and smoke tests target **[BlueCG](https://www.bluecg.net/forum.php?mod=viewthread&tid=18)** (魔力寶貝), a DirectDraw PE32 title. Place the game files locally as `BlueCrossgateNew/` (not in git).
 
 ```bash
-python3 scripts/cyder_create_game_app.py --gui
+bash scripts/run-bluecg.sh
 ```
 
-詳見 [docs/cyder.md](docs/cyder.md)。
+## Wine sources
 
-## 目錄結構（精簡）
+Wine is built from the **CrossOver open-source release** — extract into `sources/` (see [CodeWeavers CrossOver Source](https://www.codeweavers.com/crossover/source)). The tree used at build time is `sources/wine/`.
+
+```bash
+bash scripts/build-wine.sh
+bash scripts/sign-wine.sh
+```
+
+## Requirements
+
+- macOS 12+ (13+ recommended)
+- Apple Silicon + Rosetta 2 (Wine is an **x86_64** build)
+- Several GB disk for Wine sources, `.brew-x86`, and build outputs (most paths are `.gitignore`d)
+
+## Quick start
+
+### 1. Build Wine (first time; slow)
+
+```bash
+bash scripts/build-wine.sh
+bash scripts/sign-wine.sh
+```
+
+### 2. Validate with BlueCG
+
+```bash
+bash scripts/run-bluecg.sh
+bash scripts/enable-mac-retina-hires.sh   # optional Retina + 200% DPI
+```
+
+### 3. Wrap any EXE with Cyder
+
+```bash
+bash scripts/create-cyder-app.sh
+open dist/Cyder.app
+# or: python3 scripts/cyder_create_game_app.py --gui
+```
+
+## Repository layout
 
 ```text
-ogom/
-├── config/entitlements.plist   # Wine JIT / dyld 簽章 entitlement
-├── logo/cyderbits.png          # Cyder.app 圖示
-├── patches/                    # 選用原始碼 patch（見 patches/README.md）
-├── scripts/                    # 建置、執行、打包腳本
-├── tests/                      # 腳本 smoke tests
-├── docs/                       # 說明文件（見 docs/README.md）
-├── sources/wine/               # Wine 原始碼（.gitignore，需自行準備）
-├── .brew-x86/                  # 專案內 x86_64 Homebrew（.gitignore）
-├── install/wine-x86_64/        # Wine 安裝前綴（.gitignore）
-└── BlueCrossgateNew/           # 遊戲與 prefix（.gitignore）
+├── logo/                       # cyderbits.png (app icon), cyderbits-transparent.png (README)
+├── config/entitlements.plist   # Wine JIT / dyld signing entitlements
+├── patches/                    # Optional source patches
+├── scripts/                    # Build, run, packaging
+├── tests/                      # Script smoke tests
+├── docs/                       # Guides (see docs/README.md)
+├── sources/wine/               # CrossOver Wine sources (.gitignore)
+├── .brew-x86/                  # Project-local x86_64 Homebrew (.gitignore)
+├── install/wine-x86_64/        # Wine install prefix (.gitignore)
+└── BlueCrossgateNew/           # BlueCG game + prefix (.gitignore)
 ```
 
-## 測試
+## Tests
 
 ```bash
 bash tests/test-env-x86_64.sh
@@ -74,14 +97,14 @@ bash tests/test-run-bluecg.sh
 bash tests/test-verify-bluecg.sh
 ```
 
-## 文件
+## Documentation
 
-- [docs/README.md](docs/README.md) — 文件索引
-- [docs/cyder.md](docs/cyder.md) — Cyder 使用與選項
-- [docs/bluecg.md](docs/bluecg.md) — BlueCG 建置與執行
-- [docs/scripts.md](docs/scripts.md) — 腳本參考
-- [docs/superpowers/](docs/superpowers/) — 設計規格與實作計畫（歷史決策）
+- [docs/README.md](docs/README.md) — index
+- [docs/cyder.md](docs/cyder.md) — Cyder usage
+- [docs/bluecg.md](docs/bluecg.md) — BlueCG workflow
+- [docs/scripts.md](docs/scripts.md) — script reference
+- [docs/superpowers/](docs/superpowers/) — design specs
 
-## 授權與原始碼
+## Sources and licensing
 
-Wine 原始碼來自 CrossOver / CodeWeavers 發行 tarball；遊戲檔案與大型二進位請自行放置，不納入 git。
+Wine sources come from the [CrossOver open-source release](https://www.codeweavers.com/crossover/source). Game files and large binaries are not in git; obtain them separately (e.g. [BlueCG](https://www.bluecg.net/forum.php?mod=viewthread&tid=18)).

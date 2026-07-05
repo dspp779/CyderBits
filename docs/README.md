@@ -1,5 +1,9 @@
 # 文件索引
 
+> 專案根目錄：[README.md](../README.md)（English · **CyderBits**）· [README.zh-TW.md](../README.zh-TW.md)（繁中）
+
+**CyderBits** — DirectDraw / GDI 舊遊戲 on Mac；**Cyder** — 包裝 `.exe` 的工具 app。
+
 ## 使用指南
 
 | 文件 | 對象 | 內容 |
