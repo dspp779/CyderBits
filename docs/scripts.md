@@ -10,6 +10,7 @@
 | `build-wine.sh` | configure + make + install Wine 至 `install/wine-x86_64` |
 | `sign-wine.sh` | ad-hoc codesign + entitlements（`config/entitlements.plist`） |
 | `bundle-wine-dylibs.sh` | 將 Homebrew dylib 複製進 Wine 樹並改 `@loader_path` |
+| `strip-wine-install.sh` | 剝除 engine 非 runtime（`include/`、dev `bin`、`*.a`、man）；打包前 staging |
 | `link-wine-runtime-libs.sh` | 包裝用 wrapper → `bundle-wine-dylibs.sh` |
 | `run-build-wine-bg.sh` | 背景建置 helper |
 | `wait-and-build-wine.sh` | 等待條件後建置 |
@@ -53,12 +54,12 @@ build-wine.sh
     → bundle-wine-dylibs.sh（打包 / Cyder / CyderBits 前）
 
 create-cyder-app.sh
-    → bundle-wine-dylibs.sh, sign-wine.sh
+    → bundle-wine-dylibs.sh, sign-wine.sh, strip-wine-install.sh
     → cyder_launcher.sh（執行時）
     → install-wine-mono.sh, install-libarchive-tar.sh, enable-mac-retina-hires.sh（bootstrap）
 
 create-cyderbits-app.sh
-    → bundle-wine-dylibs.sh, sign-wine.sh
+    → bundle-wine-dylibs.sh, sign-wine.sh, strip-wine-install.sh
     → cyder_create_game_app.py（執行時）
 
 cyder_launcher.sh
@@ -86,6 +87,15 @@ run-bluecg.sh
 | `tests/test-cyder-exe-association.sh` | `cyder-exe-association.swift status` |
 | `tests/test-install-libarchive-tar.sh` | `install-libarchive-tar.sh` |
 | `tests/test-cyder-bootstrap.sh` | `cyder_launcher.sh --bootstrap-only`（需 Wine） |
+| `tests/test-strip-wine-install.sh` | `strip-wine-install.sh`（零風險剝離） |
+
+## strip-wine-install.sh
+
+```bash
+bash scripts/strip-wine-install.sh install/wine-x86_64   # 就地（開發用）
+bash scripts/strip-wine-install.sh --dry-run "$ROOT"     # 預覽
+CYDER_SKIP_ENGINE_STRIP=1 bash scripts/create-cyder-app.sh  # 打包時跳過 strip
+```
 
 ## cyder_launcher.sh 旗標
 

@@ -66,7 +66,11 @@ cp "$SCRIPT_DIR/env-x86_64.sh" "$RES/ogom-scripts/"
 cp "$SCRIPT_DIR/bundle-wine-dylibs.sh" "$RES/ogom-scripts/"
 cp "$SCRIPT_DIR/sign-wine.sh" "$RES/ogom-scripts/"
 echo "==> Copying engine payload into CyderBits.app (first-run install source)"
-rsync -a --delete "$WINE_INSTALL/" "$RES/engine-payload/"
+ENGINE_STAGING="$(mktemp -d "${TMPDIR:-/tmp}/cyder-engine-stage.XXXXXX")"
+rsync -a --delete "$WINE_INSTALL/" "$ENGINE_STAGING/"
+bash "$SCRIPT_DIR/strip-wine-install.sh" "$ENGINE_STAGING"
+rsync -a --delete "$ENGINE_STAGING/" "$RES/engine-payload/"
+rm -rf "$ENGINE_STAGING"
 
 cat > "$MACOS/CyderBits" <<'LAUNCHER'
 #!/bin/bash

@@ -76,7 +76,11 @@ fi
 chmod +x "$RES/ogom-scripts/cyder_launcher.sh"
 
 echo "==> Copying engine payload into Cyder.app (first-run install source)"
-rsync -a --delete "$WINE_INSTALL/" "$RES/engine-payload/"
+ENGINE_STAGING="$(mktemp -d "${TMPDIR:-/tmp}/cyder-engine-stage.XXXXXX")"
+rsync -a --delete "$WINE_INSTALL/" "$ENGINE_STAGING/"
+bash "$SCRIPT_DIR/strip-wine-install.sh" "$ENGINE_STAGING"
+rsync -a --delete "$ENGINE_STAGING/" "$RES/engine-payload/"
+rm -rf "$ENGINE_STAGING"
 rsync -a "$OGOM/tools/libarchive/" "$RES/addons/libarchive/"
 
 cat > "$MACOS/Cyder" <<'LAUNCHER'
