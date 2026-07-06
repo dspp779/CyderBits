@@ -294,10 +294,7 @@ cyder_tarball_has_wine_root() {
 
 cyder_find_zstd() {
   local candidate
-  for candidate in \
-    "${CYDER_OGOM:-}/tools/zstd" \
-    "${CYDER_SCRIPTS:-}/../tools/zstd" \
-    "$(command -v zstd 2>/dev/null || true)"; do
+  for candidate in "$(command -v zstd 2>/dev/null || true)"; do
     if [[ -n "$candidate" && -x "$candidate" ]]; then
       printf '%s\n' "$candidate"
       return 0

@@ -65,27 +65,6 @@ source "$SCRIPT_DIR/cyder-copy-engine-artifact.sh"
 copy_engine_artifact_into_app "$SCRIPT_DIR" "$RES" "$OGOM"
 rsync -a "$OGOM/tools/libarchive/" "$RES/addons/libarchive/"
 
-if ZSTD_BIN="$(command -v zstd 2>/dev/null || true)" && [[ -n "$ZSTD_BIN" && -x "$ZSTD_BIN" ]]; then
-  echo "==> Bundling zstd for engine extract"
-  mkdir -p "$RES/tools"
-  cp "$ZSTD_BIN" "$RES/tools/zstd"
-  chmod +x "$RES/tools/zstd"
-  ZSTD_LIB_REF="$(otool -L "$ZSTD_BIN" | awk '/libzstd/ {print $1; exit}')"
-  if [[ -n "$ZSTD_LIB_REF" ]]; then
-    ZSTD_LIB_SRC="$ZSTD_LIB_REF"
-    if [[ "$ZSTD_LIB_REF" == @rpath/* ]]; then
-      ZSTD_LIB_SRC="$(cd "$(dirname "$ZSTD_BIN")/../lib" && pwd)/$(basename "$ZSTD_LIB_REF")"
-    fi
-    if [[ -f "$ZSTD_LIB_SRC" ]]; then
-      cp -f "$ZSTD_LIB_SRC" "$RES/tools/"
-      install_name_tool -change "$ZSTD_LIB_REF" "@loader_path/$(basename "$ZSTD_LIB_SRC")" "$RES/tools/zstd" 2>/dev/null || true
-    fi
-  fi
-  codesign --force --sign - "$RES/tools/zstd" 2>/dev/null || true
-else
-  echo "==> Warning: zstd not found; engine extract relies on system tar" >&2
-fi
-
 echo "==> Building MacOS/Cyder (Swift front-end for Finder open-document events)"
 if swiftc -O -o "$MACOS/Cyder" "$SCRIPT_DIR/cyder_app_main.swift" 2>/dev/null; then
   echo "==> Compiled cyder_app_main.swift"
