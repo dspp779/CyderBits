@@ -122,3 +122,4 @@ MyGame.app/
 - [scripts.md](scripts.md) — 腳本參考
 - [superpowers/specs/2026-07-04-cyder-mvp-design.md](superpowers/specs/2026-07-04-cyder-mvp-design.md) — MVP 決策紀錄
 - [superpowers/specs/2026-07-06-wine-engine-slim-design.md](superpowers/specs/2026-07-06-wine-engine-slim-design.md) — **未來：** Wine Engine 瘦身
+- [superpowers/specs/2026-07-06-cyderbits-bash-design.md](superpowers/specs/2026-07-06-cyderbits-bash-design.md) — **未來：** CyderBits 打包器 Bash 化

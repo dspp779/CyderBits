@@ -145,6 +145,17 @@ WINEMSYNC  = 1
 
 詳見 [2026-07-06-wine-engine-slim-design.md](2026-07-06-wine-engine-slim-design.md) 與 [Phase 1 實作計畫](../plans/2026-07-06-wine-engine-slim-phase1.md)。
 
+## CyderBits Bash 化（並行路線）
+
+`Cyder.app` 已改 `cyder_launcher.sh`；**CyderBits.app** 仍依賴 `cyder_create_game_app.py` + `cyder_common.py`，且產出的 game `.app` 內嵌 Python 啟動器。
+
+| Phase | 摘要 |
+|-------|------|
+| **1** | `cyder_create_game_app.sh`、`cyder_game_launcher.sh`、擴充 `cyder-common.sh`；icon 抽出 `extract-exe-icon.py` |
+| **2** | 可選：game meta 純 bash、`wrestool` icon、完全零 Python |
+
+詳見 [2026-07-06-cyderbits-bash-design.md](2026-07-06-cyderbits-bash-design.md) 與 [Phase 1 實作計畫](../plans/2026-07-06-cyderbits-bash-phase1.md)。
+
 ## Phase 1 明確不做（YAGNI）
 
 - CyderBits CoW / bottle-in-app

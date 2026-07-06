@@ -29,6 +29,8 @@
 | [superpowers/plans/2026-07-05-cyder-launcher-phase1.md](superpowers/plans/2026-07-05-cyder-launcher-phase1.md) | Cyder 執行器 Phase 1（已完成） |
 | [superpowers/specs/2026-07-06-wine-engine-slim-design.md](superpowers/specs/2026-07-06-wine-engine-slim-design.md) | **Wine Engine 瘦身** — Windows on Wine PE 設計 |
 | [superpowers/plans/2026-07-06-wine-engine-slim-phase1.md](superpowers/plans/2026-07-06-wine-engine-slim-phase1.md) | Engine 瘦身 Phase 1 實作計畫 |
+| [superpowers/specs/2026-07-06-cyderbits-bash-design.md](superpowers/specs/2026-07-06-cyderbits-bash-design.md) | **CyderBits Bash 化** — 打包器 / game app 去 Python |
+| [superpowers/plans/2026-07-06-cyderbits-bash-phase1.md](superpowers/plans/2026-07-06-cyderbits-bash-phase1.md) | CyderBits Bash 化 Phase 1 實作計畫 |
 
 ## 未來開發路線
 
@@ -39,8 +41,11 @@
 | **Wine Engine 瘦身** | 1 | 剝 `include/`、Plan B-1 allowlist、保守 Plan C；app ~820 MB | 待實作 | [design](superpowers/specs/2026-07-06-wine-engine-slim-design.md) · [plan](superpowers/plans/2026-07-06-wine-engine-slim-phase1.md) |
 | **Wine Engine 瘦身** | 2 | 精簡 CrossOver 級 build，PE ~295 MB | 待調查 | 同上 spec §6 |
 | **Wine Engine 瘦身** | 3 | App 不內嵌 engine，首次下載 tar.xz（~4 MB app） | 可選 | 同上 spec §6 |
+| **CyderBits Bash 化** | 1 | 打包器 + game launcher 改 shell；icon 保留 `extract-exe-icon.py` | 待實作 | [design](superpowers/specs/2026-07-06-cyderbits-bash-design.md) · [plan](superpowers/plans/2026-07-06-cyderbits-bash-phase1.md) |
 | **CyderBits 重構** | 2 | Bottle 進 game `.app`、APFS CoW template | 待實作 | [split design](superpowers/specs/2026-07-05-cyder-cyderbits-split-design.md) §Phase 2 |
 | **Cyder 生態** | 3 | 容器管理 UI、多引擎切換、加入最愛 | 構想 | 同上 §Phase 3 |
+
+**CyderBits 背景：** `Cyder.app` 已純 shell；`CyderBits.app` 仍 `python3 cyder_create_game_app.py`，產出的 game `.app` 亦內嵌 Python 讀 `meta.json`。Bash 化後對齊 Cyder 模式，僅 PE icon 抽取保留小型 `extract-exe-icon.py`（`winemenubuilder -t` / `sips` 直接讀 exe 不可行）。
 
 **Engine 瘦身背景：** 現況 `Cyder.app` ~1.1 GB，幾乎全是 `engine-payload/` 內 Windows PE 假 DLL（~997 MB）與 `include/`（~62 MB）。對照 Sikarugir `wswine.bundle` PE 僅 ~295 MB。Cyder 已用 prefix Mono + `mshtml=`，故可安全 prune 大量 IE/HTML 與非 runtime 檔；**須保留 `mscoree.dll`**（BlueLauncher .NET）。
 
