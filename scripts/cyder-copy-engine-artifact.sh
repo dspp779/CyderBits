@@ -11,17 +11,21 @@ copy_engine_artifact_into_app() {
   # shellcheck source=cyder-common.sh
   source "$script_dir/cyder-common.sh"
 
-  local artifacts version archive
+  local artifacts version archive format
+  format="${CYDER_ENGINE_FORMAT:-xz}"
+  if [[ "$format" == "zstd" ]]; then
+    format="zst"
+  fi
   artifacts="$(cyder_engine_artifacts_dir)"
   if [[ ! -f "$artifacts/engine-version.txt" ]] || [[ "${CYDER_PACK_ENGINE:-0}" == 1 ]]; then
-    bash "$script_dir/pack-engine-artifact.sh"
+    bash "$script_dir/pack-engine-artifact.sh" --format "$format"
   fi
   [[ -f "$artifacts/engine-version.txt" ]] || {
     echo "Missing $artifacts/engine-version.txt — run pack-engine-artifact.sh first." >&2
     exit 1
   }
   version="$(tr -d '[:space:]' < "$artifacts/engine-version.txt")"
-  archive="$(cyder_engine_archive_path "$version" "$artifacts")"
+  archive="$(cyder_engine_archive_path_for_format "$version" "$artifacts" "$format")"
   [[ -f "$archive" ]] || {
     echo "Missing engine archive: $archive" >&2
     exit 1
