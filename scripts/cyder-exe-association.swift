@@ -1,5 +1,6 @@
 #!/usr/bin/env swift
-// Query or set the default macOS handler for .exe files.
+// Dev helper: query or manually set/cleanup macOS handlers for .exe files.
+// Cyder.app does not call this at runtime; Finder "Open With" uses Info.plist only.
 import CoreServices
 import Foundation
 import UniformTypeIdentifiers

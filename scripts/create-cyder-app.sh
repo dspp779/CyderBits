@@ -58,12 +58,6 @@ cp "$SCRIPT_DIR/install-wine-mono.sh" "$RES/ogom-scripts/"
 cp "$SCRIPT_DIR/install-libarchive-tar.sh" "$RES/ogom-scripts/"
 cp "$SCRIPT_DIR/resolve-wine-locale.sh" "$RES/ogom-scripts/"
 cp "$SCRIPT_DIR/enable-mac-retina-hires.sh" "$RES/ogom-scripts/"
-cp "$SCRIPT_DIR/cyder-exe-association.swift" "$RES/ogom-scripts/"
-if swiftc -O -o "$RES/ogom-scripts/cyder-exe-association" "$SCRIPT_DIR/cyder-exe-association.swift" 2>/dev/null; then
-  echo "==> Compiled cyder-exe-association helper"
-else
-  echo "==> Warning: swiftc failed; app will use cyder-exe-association.swift (slower first launch)" >&2
-fi
 chmod +x "$RES/ogom-scripts/cyder_launcher.sh"
 
 # shellcheck source=cyder-copy-engine-artifact.sh

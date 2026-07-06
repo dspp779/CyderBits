@@ -19,7 +19,7 @@ open dist/Cyder.app
 - 首次啟動以系統 `tar -xf` 解壓至 `~/Library/Application Support/Cyder/Engines/wine-x86_64/`（archive 內含 `wine-x86_64/` 目錄）
 - 使用 `logo/cyder-logo.png` 產生 app 圖示
 - 內含 shell launcher（`cyder_launcher.sh`）與 bootstrap helper（mono、tar、locale、hi-res）
-- 在 `Info.plist` 註冊 `.exe` 檔案關聯（開啟、拖放）
+- 在 `Info.plist` 宣告可開啟 `.exe`（`LSHandlerRank: Alternate`；不強制設為預設）
 
 ## 開啟 .exe
 
@@ -27,31 +27,15 @@ open dist/Cyder.app
 
 | 方式 | 操作 |
 |------|------|
-| **雙擊 Cyder** | 無參數時：若尚未將 `.exe` 預設關聯到 Cyder，會先詢問是否設定；之後跳出檔案選擇器 |
+| **雙擊 Cyder** | 無參數時跳出檔案選擇器，選 `.exe` 後啟動 |
 | **拖放** | 將 `.exe` 拖到 Cyder.app 圖示上 |
-| **檔案關聯** | 在 Finder 對 `.exe` 按右鍵 → **打開方式** → 選 Cyder；可設為預設 |
+| **打開方式** | Finder 對 `.exe` 右鍵 → **打開方式** → Cyder；若要設為預設請按 **全部更改…** |
 
 首次執行某 `.exe` 時會自動 bootstrap 共用 prefix（見下節），之後再開其他 `.exe` 不會重複安裝。
 
-### `.exe` 檔案關聯
+Cyder **不會**自動將自己設為 `.exe` 預設程式；`Info.plist` 僅向系統宣告可開啟 Windows 執行檔（`LSHandlerRank: Alternate`），是否設為預設由使用者在 Finder 自行決定。從 Finder **雙擊 `.exe`**（已設為預設）或拖放到 Cyder 時會直接啟動該檔（`Cyder.app` 內建 Swift 啟動器接收 open-document 事件）。
 
-直接開啟 Cyder（未帶 `.exe` 參數）且尚未關聯時，會詢問是否將所有 `.exe` 預設以 Cyder 開啟：
-
-- **設為預設**：透過系統 Launch Services 設定（`cyder-exe-association` Swift 輔助工具）
-- **略過**：本次不設定，下次仍會詢問
-- **不再詢問**：寫入 `~/Library/Application Support/Cyder/.exe-assoc-declined`
-
-若已關聯、或曾選「不再詢問」，**直接雙擊 Cyder** 會進入檔案選擇器。從 Finder **雙擊 `.exe`** 或拖放到 Cyder 時應直接啟動該檔（`Cyder.app` 內建 Swift 啟動器接收 open-document 事件）；若仍跳出選檔器，請重新執行 `create-cyder-app.sh` 建置 app。
-
-設定失敗時會提示改用手動：**Finder → 右鍵 .exe → 打開方式 → Cyder → 全部更改**。
-
-若先前誤將 `public.executable` 設為 Cyder，可還原：
-
-```bash
-scripts/cyder-exe-association.swift cleanup local.cyder.app dist/Cyder.app
-# 或 app 內建編譯版
-dist/Cyder.app/Contents/Resources/ogom-scripts/cyder-exe-association cleanup local.cyder.app dist/Cyder.app
-```
+開發／除錯時可用 `scripts/cyder-exe-association.swift handlers` 查詢 Launch Services 狀態；若先前誤將 `public.executable` 設為 Cyder，可用 `cleanup` 還原（見 `docs/scripts.md`）。
 
 ### CLI（開發 / 除錯）
 
