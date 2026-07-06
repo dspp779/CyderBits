@@ -121,3 +121,4 @@ MyGame.app/
 - [bluecg.md](bluecg.md) — BlueCG 專用設定
 - [scripts.md](scripts.md) — 腳本參考
 - [superpowers/specs/2026-07-04-cyder-mvp-design.md](superpowers/specs/2026-07-04-cyder-mvp-design.md) — MVP 決策紀錄
+- [superpowers/specs/2026-07-06-wine-engine-slim-design.md](superpowers/specs/2026-07-06-wine-engine-slim-design.md) — **未來：** Wine Engine 瘦身

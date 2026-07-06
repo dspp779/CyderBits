@@ -133,6 +133,18 @@ WINEMSYNC  = 1
 - 容器管理 UI、orphan bottle prune、穩定 bottle_id 重用。
 - Cyder「加入最愛」、多引擎版本切換（若需要）。
 
+## Wine Engine 瘦身（並行路線，非 CyderBits Phase 編號）
+
+縮小 `Cyder.app` / `CyderBits.app` 內嵌 `engine-payload`（Windows on Wine PE + 非 runtime 檔）。與 CoW bottle、容器 UI 正交，可獨立排程。
+
+| Phase | 摘要 | 預估 app / engine |
+|-------|------|-------------------|
+| **1** | `strip-wine-install` + Plan B-1 allowlist + 保守 Plan C | ~820 MB |
+| **2** | 精簡 Wine build（對齊 Sikarugir PE ~295 MB） | ~300 MB engine |
+| **3** | App 不內嵌 engine，首次下載 tar.xz | ~4 MB app + 下載 |
+
+詳見 [2026-07-06-wine-engine-slim-design.md](2026-07-06-wine-engine-slim-design.md) 與 [Phase 1 實作計畫](../plans/2026-07-06-wine-engine-slim-phase1.md)。
+
 ## Phase 1 明確不做（YAGNI）
 
 - CyderBits CoW / bottle-in-app

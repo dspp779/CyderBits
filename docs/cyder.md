@@ -126,3 +126,4 @@ BlueCG（魔力寶貝）可透過 Cyder 直接開 `BlueLauncher.exe`；遊戲目
 - [bluecg.md](bluecg.md) — BlueCG 開發與驗證
 - [scripts.md](scripts.md) — 腳本參考
 - [superpowers/specs/2026-07-05-cyder-cyderbits-split-design.md](superpowers/specs/2026-07-05-cyder-cyderbits-split-design.md) — 產品分流設計
+- [superpowers/specs/2026-07-06-wine-engine-slim-design.md](superpowers/specs/2026-07-06-wine-engine-slim-design.md) — **未來：** Wine Engine 瘦身（縮小 app 體積）

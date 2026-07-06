@@ -25,6 +25,24 @@
 | [superpowers/specs/2026-07-04-mac-retina-hires-design.md](superpowers/specs/2026-07-04-mac-retina-hires-design.md) | Mac Retina 高解析度 registry |
 | [superpowers/specs/2026-07-04-portable-app-packaging-design.md](superpowers/specs/2026-07-04-portable-app-packaging-design.md) | 可攜 Wine / app 打包 |
 | [superpowers/specs/2026-07-04-cyder-mvp-design.md](superpowers/specs/2026-07-04-cyder-mvp-design.md) | Cyder MVP 決策摘要 |
+| [superpowers/specs/2026-07-05-cyder-cyderbits-split-design.md](superpowers/specs/2026-07-05-cyder-cyderbits-split-design.md) | Cyder / CyderBits 產品分流 |
+| [superpowers/plans/2026-07-05-cyder-launcher-phase1.md](superpowers/plans/2026-07-05-cyder-launcher-phase1.md) | Cyder 執行器 Phase 1（已完成） |
+| [superpowers/specs/2026-07-06-wine-engine-slim-design.md](superpowers/specs/2026-07-06-wine-engine-slim-design.md) | **Wine Engine 瘦身** — Windows on Wine PE 設計 |
+| [superpowers/plans/2026-07-06-wine-engine-slim-phase1.md](superpowers/plans/2026-07-06-wine-engine-slim-phase1.md) | Engine 瘦身 Phase 1 實作計畫 |
+
+## 未來開發路線
+
+以下為已文件化、尚未全部實作的優先方向；細節以各 spec / plan 為準。
+
+| 路線 | Phase | 目標 | 狀態 | 文件 |
+|------|-------|------|------|------|
+| **Wine Engine 瘦身** | 1 | 剝 `include/`、Plan B-1 allowlist、保守 Plan C；app ~820 MB | 待實作 | [design](superpowers/specs/2026-07-06-wine-engine-slim-design.md) · [plan](superpowers/plans/2026-07-06-wine-engine-slim-phase1.md) |
+| **Wine Engine 瘦身** | 2 | 精簡 CrossOver 級 build，PE ~295 MB | 待調查 | 同上 spec §6 |
+| **Wine Engine 瘦身** | 3 | App 不內嵌 engine，首次下載 tar.xz（~4 MB app） | 可選 | 同上 spec §6 |
+| **CyderBits 重構** | 2 | Bottle 進 game `.app`、APFS CoW template | 待實作 | [split design](superpowers/specs/2026-07-05-cyder-cyderbits-split-design.md) §Phase 2 |
+| **Cyder 生態** | 3 | 容器管理 UI、多引擎切換、加入最愛 | 構想 | 同上 §Phase 3 |
+
+**Engine 瘦身背景：** 現況 `Cyder.app` ~1.1 GB，幾乎全是 `engine-payload/` 內 Windows PE 假 DLL（~997 MB）與 `include/`（~62 MB）。對照 Sikarugir `wswine.bundle` PE 僅 ~295 MB。Cyder 已用 prefix Mono + `mshtml=`，故可安全 prune 大量 IE/HTML 與非 runtime 檔；**須保留 `mscoree.dll`**（BlueLauncher .NET）。
 
 ## 其他
 
