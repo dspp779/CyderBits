@@ -32,6 +32,7 @@ rm -rf "$APP"
 mkdir -p "$MACOS" "$RES"
 
 cp "$SCRIPT_DIR/cyder_create_game_app.py" "$RES/cyder_create_game_app.py"
+cp "$SCRIPT_DIR/cyder_common.py" "$RES/cyder_common.py"
 cp "$ENTITLEMENTS_PLIST" "$RES/entitlements.plist"
 
 echo "==> Building AppIcon.icns from ${LOGO_PNG#$OGOM/}"
