@@ -12,15 +12,6 @@ CONTENTS="$APP/Contents"
 MACOS="$CONTENTS/MacOS"
 RES="$CONTENTS/Resources"
 
-[[ -x "$WINE_INSTALL/bin/wine" ]] || {
-  echo "Missing Wine at $WINE_INSTALL — build it first." >&2
-  exit 1
-}
-
-echo "==> Preparing relocatable Wine engine"
-bash "$SCRIPT_DIR/bundle-wine-dylibs.sh" "$WINE_INSTALL"
-bash "$SCRIPT_DIR/sign-wine.sh"
-
 LOGO_PNG="$OGOM/logo/cyderbits-logo.png"
 [[ -f "$LOGO_PNG" ]] || {
   echo "Missing app logo at logo/cyderbits-logo.png" >&2
@@ -65,12 +56,9 @@ mkdir -p "$RES/ogom-scripts"
 cp "$SCRIPT_DIR/env-x86_64.sh" "$RES/ogom-scripts/"
 cp "$SCRIPT_DIR/bundle-wine-dylibs.sh" "$RES/ogom-scripts/"
 cp "$SCRIPT_DIR/sign-wine.sh" "$RES/ogom-scripts/"
-echo "==> Copying engine payload into CyderBits.app (first-run install source)"
-ENGINE_STAGING="$(mktemp -d "${TMPDIR:-/tmp}/cyder-engine-stage.XXXXXX")"
-rsync -a --delete "$WINE_INSTALL/" "$ENGINE_STAGING/"
-bash "$SCRIPT_DIR/strip-wine-install.sh" "$ENGINE_STAGING"
-rsync -a --delete "$ENGINE_STAGING/" "$RES/engine-payload/"
-rm -rf "$ENGINE_STAGING"
+# shellcheck source=cyder-copy-engine-artifact.sh
+source "$SCRIPT_DIR/cyder-copy-engine-artifact.sh"
+copy_engine_artifact_into_app "$SCRIPT_DIR" "$RES" "$OGOM"
 
 cat > "$MACOS/CyderBits" <<'LAUNCHER'
 #!/bin/bash
@@ -78,16 +66,25 @@ set -euo pipefail
 SELF="$(cd "$(dirname "$0")" && pwd)"
 RES="$(cd "$SELF/../Resources" && pwd)"
 
-export CYDER_ENGINE_SRC="$RES/engine-payload"
+ENGINE_VER="$(tr -d '[:space:]' < "$RES/engine-version.txt" 2>/dev/null || true)"
+if [[ -n "$ENGINE_VER" && -f "$RES/engine-${ENGINE_VER}.tar.zst" ]]; then
+  ENGINE_SRC="$RES/engine-${ENGINE_VER}.tar.zst"
+elif [[ -n "$ENGINE_VER" && -f "$RES/engine-wine-x86_64-${ENGINE_VER}.tar.xz" ]]; then
+  ENGINE_SRC="$RES/engine-wine-x86_64-${ENGINE_VER}.tar.xz"
+else
+  ENGINE_SRC="$RES/engine-payload"
+fi
+
+export CYDER_ENGINE_SRC="$ENGINE_SRC"
 export CYDER_SCRIPTS="$RES/ogom-scripts"
 
 export OGOM="$RES"
-export WINE_INSTALL="$RES/engine-payload"
+export WINE_INSTALL="$ENGINE_SRC"
 export HOMEBREW_PREFIX="/nonexistent"
 export ENTITLEMENTS_PLIST="$RES/entitlements.plist"
 
 export PYTHONUNBUFFERED=1
-python3 "$RES/cyder_create_game_app.py" --gui --engine-src "$RES/engine-payload"
+python3 "$RES/cyder_create_game_app.py" --gui --engine-src "$ENGINE_SRC"
 LAUNCHER
 chmod +x "$MACOS/CyderBits"
 

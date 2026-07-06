@@ -48,19 +48,48 @@ find "$TMP/lib" -name '*.a' | grep -q . && {
 output="$(CYDER_SKIP_ENGINE_STRIP=1 bash "$STRIP" "$TMP" 2>&1)"
 assert_contains "$output" "skipping strip" "CYDER_SKIP_ENGINE_STRIP should no-op"
 
-ENGINE="$ROOT/dist/Cyder.app/Contents/Resources/engine-payload"
-if [[ -x "$ENGINE/bin/wine" ]] && [[ -d "$ENGINE/include" ]]; then
+RES="$ROOT/dist/Cyder.app/Contents/Resources"
+ENGINE_TAR=""
+if [[ -f "$RES/engine-version.txt" ]]; then
+  ver="$(tr -d '[:space:]' < "$RES/engine-version.txt")"
+  ENGINE_TAR="$RES/engine-${ver}.tar.zst"
+  [[ -f "$ENGINE_TAR" ]] || ENGINE_TAR="$RES/engine-wine-x86_64-${ver}.tar.xz"
+fi
+if [[ -f "$ENGINE_TAR" ]]; then
   staging="$(mktemp -d)"
-  if cp -a "$ENGINE/." "$staging/" 2>/dev/null; then
+  if [[ "$ENGINE_TAR" == *.tar.zst ]]; then
+    tar -xf "$ENGINE_TAR" -C "$staging"
+    staging="$staging/wine-x86_64"
+  else
+    tar -xJf "$ENGINE_TAR" -C "$staging"
+  fi
+  if [[ -x "$staging/bin/wine" ]] && [[ -d "$staging/include" ]]; then
     bash "$STRIP" "$staging"
     [[ ! -d "$staging/include" ]] || exit 1
     [[ ! -f "$staging/bin/winegcc" ]] || exit 1
     [[ -x "$staging/bin/wine" ]] || exit 1
-    find "$staging/lib" -name '*.a' | grep -q . && exit 1
+    find "$staging/lib" -name '*.a' 2>/dev/null | grep -q . && exit 1 || true
     rm -rf "$staging"
-    echo "integration: engine-payload strip ok"
+    echo "integration: engine tar.xz strip ok"
   else
-    echo "SKIP integration (could not copy engine-payload)" >&2
+    rm -rf "$staging"
+    echo "SKIP integration (engine tar.xz missing expected layout)" >&2
+  fi
+elif [[ -x "$ROOT/dist/Cyder.app/Contents/Resources/engine-payload/bin/wine" ]]; then
+  ENGINE="$ROOT/dist/Cyder.app/Contents/Resources/engine-payload"
+  if [[ -d "$ENGINE/include" ]]; then
+    staging="$(mktemp -d)"
+    if cp -a "$ENGINE/." "$staging/" 2>/dev/null; then
+      bash "$STRIP" "$staging"
+      [[ ! -d "$staging/include" ]] || exit 1
+      [[ ! -f "$staging/bin/winegcc" ]] || exit 1
+      [[ -x "$staging/bin/wine" ]] || exit 1
+      find "$staging/lib" -name '*.a' | grep -q . && exit 1
+      rm -rf "$staging"
+      echo "integration: engine-payload strip ok"
+    else
+      echo "SKIP integration (could not copy engine-payload)" >&2
+    fi
   fi
 fi
 

@@ -31,8 +31,10 @@
 
 | 腳本 | 用途 |
 |------|------|
-| `create-cyder-app.sh` | `dist/Cyder.app`（`.exe` 啟動器 + engine payload + bootstrap） |
-| `cyder_launcher.sh` | 解析 `.exe`、bootstrap SharedPrefix、執行 Wine（Cyder.app 執行時入口） |
+| `pack-engine-artifact.sh` | strip + bundle + sign + `tar|zstd` → `dist/artifacts/engine-CX26-<winever>.tar.zst` |
+| `cyder-copy-engine-artifact.sh` | 複製預建 artifact 進 app `Resources/` |
+| `create-cyder-app.sh` | `dist/Cyder.app`（`.exe` 啟動器 + engine tar.zst + bootstrap） |
+| `cyder_launcher.sh` | 解析 `.exe`、bootstrap SharedPrefix、執行 Wine；`--ensure-engine-only` / `--bootstrap-only` / `--launch-exe` 供 GUI 分階段呼叫 |
 | `cyder_app_main.swift` | 編譯為 `Cyder.app/MacOS/Cyder`；接收 Finder open-document 再轉呼叫 launcher |
 | `cyder-common.sh` | 共用路徑、`ensure_shared_engine`、`bootstrap_shared_prefix`、`run_wine_exe` |
 | `cyder-exe-association.swift` | 查詢/設定 `.exe` 預設開啟程式（建 app 時編譯為二進位） |

@@ -15,6 +15,7 @@ cnc-ddraw/
 # Archives and binary drops
 *.tar.gz
 *.tar.xz
+*.tar.zst
 *.zip
 *.msi
 downloads/

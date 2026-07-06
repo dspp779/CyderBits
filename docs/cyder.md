@@ -15,12 +15,15 @@ open dist/Cyder.app
 
 `create-cyder-app.sh` 會：
 
-- 將 relocatable Wine 打包進 `Cyder.app/Contents/Resources/engine-payload/`
+- 從 `dist/artifacts/engine-<CX26-winever>.tar.zst` 複製進 app（由 `pack-engine-artifact.sh` 預先建立；`create-cyder-app.sh` 缺檔時會自動打包）
+- 首次啟動以系統 `tar -xf` 解壓至 `~/Library/Application Support/Cyder/Engines/wine-x86_64/`（archive 內含 `wine-x86_64/` 目錄）
 - 使用 `logo/cyder-logo.png` 產生 app 圖示
 - 內含 shell launcher（`cyder_launcher.sh`）與 bootstrap helper（mono、tar、locale、hi-res）
 - 在 `Info.plist` 註冊 `.exe` 檔案關聯（開啟、拖放）
 
 ## 開啟 .exe
+
+首次啟動時 `Cyder.app` 會依序顯示：**建立遊戲引擎中…**（解壓 engine）→ 選擇 `.exe`（若未指定）→ **準備 Windows 環境中…**（bootstrap）→ **正在啟動遊戲…**。之後已安裝 engine 與 prefix 時，雙擊 `.exe` 會直接啟動。
 
 | 方式 | 操作 |
 |------|------|
@@ -82,7 +85,7 @@ Cyder 使用**全機唯一**的 Wine prefix，所有 `.exe` 共用同一套 Wind
 
 首次啟動（或 marker 不存在）時，`cyder_launcher.sh` 會依序：
 
-1. 從 app 內 `engine-payload` 安裝引擎至 `Engines/`（若尚未安裝）
+1. 從 app 內 `engine-<version>.tar.zst` 解壓引擎至 `Engines/`（若尚未安裝或版本不同）
 2. 若 `SharedPrefix/system.reg` 不存在 → `wineboot -u` 建立 prefix
 3. 安裝 **wine-mono**、**syswow64/tar.exe**（含 libarchive DLL）
 4. 寫入 **Mac 高解析度** registry（RetinaMode + LogPixels=192）

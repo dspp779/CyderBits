@@ -12,7 +12,28 @@ PREFIX="${1:-${WINEPREFIX:-}}"
 if [[ "${1:-}" == "--prefix" ]]; then PREFIX="$2"; fi
 [[ -n "$PREFIX" ]] || { echo "Usage: $0 --prefix PATH" >&2; exit 1; }
 
-SRC="${CYDER_LIBARCHIVE_SRC:-$OGOM/tools/libarchive}"
+resolve_libarchive_src() {
+  if [[ -n "${CYDER_LIBARCHIVE_SRC:-}" && -d "$CYDER_LIBARCHIVE_SRC/bin" ]]; then
+    printf '%s\n' "$CYDER_LIBARCHIVE_SRC"
+    return 0
+  fi
+  if [[ -n "${OGOM:-}" ]]; then
+    if [[ -d "$OGOM/addons/libarchive/bin" ]]; then
+      printf '%s\n' "$OGOM/addons/libarchive"
+      return 0
+    fi
+    if [[ -d "$OGOM/tools/libarchive/bin" ]]; then
+      printf '%s\n' "$OGOM/tools/libarchive"
+      return 0
+    fi
+  fi
+  return 1
+}
+
+SRC="$(resolve_libarchive_src)" || {
+  echo "Missing libarchive source (expected OGOM/addons/libarchive or OGOM/tools/libarchive)" >&2
+  exit 1
+}
 BIN="$SRC/bin"
 DEP="$SRC/dep"
 TARGET="$PREFIX/drive_c/windows/syswow64"

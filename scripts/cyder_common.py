@@ -9,10 +9,41 @@ from pathlib import Path
 
 # When launched from Cyder.app, Resources/ is OGOM-like and scripts live in ogom-scripts/.
 _HERE = Path(__file__).resolve().parent
-if (_HERE / "engine-payload").is_dir():
+
+
+def _read_engine_version(resources: Path) -> str | None:
+    ver_file = resources / "engine-version.txt"
+    if not ver_file.is_file():
+        return None
+    ver = ver_file.read_text(encoding="utf-8").strip()
+    return ver or None
+
+
+def _engine_tarball_path(resources: Path) -> Path | None:
+    ver = _read_engine_version(resources)
+    if not ver:
+        return None
+    for name in (f"engine-{ver}.tar.zst", f"engine-wine-x86_64-{ver}.tar.xz"):
+        candidate = resources / name
+        if candidate.is_file():
+            return candidate
+    return None
+
+
+def _default_engine_src(here: Path) -> Path:
+    tarball = _engine_tarball_path(here)
+    if tarball is not None:
+        return tarball
+    if (here / "engine-payload").is_dir():
+        return here / "engine-payload"
+    return here.parent / "install" / "wine-x86_64"
+
+
+# When launched from Cyder.app, Resources/ is OGOM-like and scripts live in ogom-scripts/.
+if _engine_tarball_path(_HERE) is not None or (_HERE / "engine-payload").is_dir():
     OGOM = _HERE
     SCRIPTS = Path(os.environ.get("CYDER_SCRIPTS", _HERE / "ogom-scripts"))
-    DEFAULT_ENGINE_SRC = Path(os.environ.get("CYDER_ENGINE_SRC", _HERE / "engine-payload"))
+    DEFAULT_ENGINE_SRC = Path(os.environ.get("CYDER_ENGINE_SRC", _default_engine_src(_HERE)))
     ENTITLEMENTS = _HERE / "entitlements.plist"
 else:
     OGOM = _HERE.parent
@@ -122,25 +153,75 @@ def wine_locale_env(env: dict[str, str] | None = None) -> dict[str, str]:
     return out
 
 
+def _engine_version_from_archive(path: Path) -> str:
+    name = path.name
+    for suffix in (".tar.zst", ".tar.xz"):
+        if name.endswith(suffix):
+            name = name[: -len(suffix)]
+            break
+    if name.startswith("engine-"):
+        name = name[len("engine-") :]
+    if name.startswith("wine-x86_64-"):
+        name = name[len("wine-x86_64-") :]
+    return name
+
+
+def _tarball_has_wine_root(path: Path) -> bool:
+    out = subprocess.check_output(["tar", "-tf", str(path)], text=True, stderr=subprocess.DEVNULL)
+    first = out.splitlines()[0] if out else ""
+    return first.startswith("wine-x86_64/")
+
+
 def ensure_shared_engine(engine_src: Path) -> Path:
     dest = ENGINES / ENGINE_NAME
     marker = dest / "bin" / "wine"
+    version_marker = dest / ".cyder-engine-version"
+    engine_src = engine_src.resolve()
+    bundled_version = ""
+    if engine_src.name.endswith((".tar.zst", ".tar.xz")):
+        bundled_version = _engine_version_from_archive(engine_src)
+    installed_version = ""
+    if version_marker.is_file():
+        installed_version = version_marker.read_text(encoding="utf-8").strip()
+
     if marker.is_file():
-        print(f"Shared engine present: {dest}")
-        return dest
+        if not bundled_version or installed_version == bundled_version:
+            print(f"Shared engine present: {dest}")
+            return dest
+        print(f"Upgrading shared engine ({installed_version} -> {bundled_version}) -> {dest}")
 
     print(f"Installing shared engine -> {dest}")
     ENGINES.mkdir(parents=True, exist_ok=True)
-    engine_src = engine_src.resolve()
-    bundled = engine_src / "lib/wine/x86_64-unix/libfreetype.6.dylib"
-    # Bundle only when source still depends on project .brew-x86
-    if not bundled.is_file() or bundled.is_symlink():
-        bundle_sh = SCRIPTS / "bundle-wine-dylibs.sh"
-        if bundle_sh.is_file():
-            run(["bash", str(bundle_sh), str(engine_src)])
-    if dest.exists():
-        shutil.rmtree(dest)
-    run(["rsync", "-a", f"{engine_src}/", f"{dest}/"])
+
+    if engine_src.name.endswith(".tar.xz"):
+        if dest.exists():
+            shutil.rmtree(dest)
+        dest.mkdir(parents=True, exist_ok=True)
+        run(["tar", "-xJf", str(engine_src), "-C", str(dest)])
+    elif engine_src.name.endswith(".tar.zst"):
+        if dest.exists():
+            shutil.rmtree(dest)
+        if _tarball_has_wine_root(engine_src):
+            run(["tar", "-xf", str(engine_src), "-C", str(ENGINES)])
+        else:
+            dest.mkdir(parents=True, exist_ok=True)
+            run(["tar", "-xf", str(engine_src), "-C", str(dest)])
+    else:
+        bundled = engine_src / "lib/wine/x86_64-unix/libfreetype.6.dylib"
+        if not bundled.is_file() or bundled.is_symlink():
+            bundle_sh = SCRIPTS / "bundle-wine-dylibs.sh"
+            if bundle_sh.is_file():
+                run(["bash", str(bundle_sh), str(engine_src)])
+        if dest.exists():
+            shutil.rmtree(dest)
+        run(["rsync", "-a", f"{engine_src}/", f"{dest}/"])
+
+    if not marker.is_file():
+        raise RuntimeError(f"Engine extract failed: missing {marker}")
+
+    if bundled_version:
+        version_marker.write_text(f"{bundled_version}\n", encoding="utf-8")
+
     sign_sh = SCRIPTS / "sign-wine.sh"
     env_sh = SCRIPTS / "env-x86_64.sh"
     if sign_sh.is_file():

@@ -13,15 +13,6 @@ CONTENTS="$APP/Contents"
 MACOS="$CONTENTS/MacOS"
 RES="$CONTENTS/Resources"
 
-[[ -x "$WINE_INSTALL/bin/wine" ]] || {
-  echo "Missing Wine at $WINE_INSTALL — build it first." >&2
-  exit 1
-}
-
-echo "==> Preparing relocatable Wine engine"
-bash "$SCRIPT_DIR/bundle-wine-dylibs.sh" "$WINE_INSTALL"
-bash "$SCRIPT_DIR/sign-wine.sh"
-
 LOGO_PNG="$OGOM/logo/cyder-logo.png"
 [[ -f "$LOGO_PNG" ]] || {
   echo "Missing app logo at logo/cyder-logo.png" >&2
@@ -75,37 +66,64 @@ else
 fi
 chmod +x "$RES/ogom-scripts/cyder_launcher.sh"
 
-echo "==> Copying engine payload into Cyder.app (first-run install source)"
-ENGINE_STAGING="$(mktemp -d "${TMPDIR:-/tmp}/cyder-engine-stage.XXXXXX")"
-rsync -a --delete "$WINE_INSTALL/" "$ENGINE_STAGING/"
-bash "$SCRIPT_DIR/strip-wine-install.sh" "$ENGINE_STAGING"
-rsync -a --delete "$ENGINE_STAGING/" "$RES/engine-payload/"
-rm -rf "$ENGINE_STAGING"
+# shellcheck source=cyder-copy-engine-artifact.sh
+source "$SCRIPT_DIR/cyder-copy-engine-artifact.sh"
+copy_engine_artifact_into_app "$SCRIPT_DIR" "$RES" "$OGOM"
 rsync -a "$OGOM/tools/libarchive/" "$RES/addons/libarchive/"
+
+if ZSTD_BIN="$(command -v zstd 2>/dev/null || true)" && [[ -n "$ZSTD_BIN" && -x "$ZSTD_BIN" ]]; then
+  echo "==> Bundling zstd for engine extract"
+  mkdir -p "$RES/tools"
+  cp "$ZSTD_BIN" "$RES/tools/zstd"
+  chmod +x "$RES/tools/zstd"
+  ZSTD_LIB_REF="$(otool -L "$ZSTD_BIN" | awk '/libzstd/ {print $1; exit}')"
+  if [[ -n "$ZSTD_LIB_REF" ]]; then
+    ZSTD_LIB_SRC="$ZSTD_LIB_REF"
+    if [[ "$ZSTD_LIB_REF" == @rpath/* ]]; then
+      ZSTD_LIB_SRC="$(cd "$(dirname "$ZSTD_BIN")/../lib" && pwd)/$(basename "$ZSTD_LIB_REF")"
+    fi
+    if [[ -f "$ZSTD_LIB_SRC" ]]; then
+      cp -f "$ZSTD_LIB_SRC" "$RES/tools/"
+      install_name_tool -change "$ZSTD_LIB_REF" "@loader_path/$(basename "$ZSTD_LIB_SRC")" "$RES/tools/zstd" 2>/dev/null || true
+    fi
+  fi
+  codesign --force --sign - "$RES/tools/zstd" 2>/dev/null || true
+else
+  echo "==> Warning: zstd not found; engine extract relies on system tar" >&2
+fi
 
 echo "==> Building MacOS/Cyder (Swift front-end for Finder open-document events)"
 if swiftc -O -o "$MACOS/Cyder" "$SCRIPT_DIR/cyder_app_main.swift" 2>/dev/null; then
   echo "==> Compiled cyder_app_main.swift"
 else
   echo "==> Warning: swiftc failed; using bash launcher (double-click .exe may not pass path)" >&2
-  cat > "$MACOS/Cyder" <<'LAUNCHER'
+  cat > "$MACOS/Cyder" <<LAUNCHER
 #!/bin/bash
 set -euo pipefail
-SELF="$(cd "$(dirname "$0")" && pwd)"
-RES="$(cd "$SELF/../Resources" && pwd)"
+SELF="\$(cd "\$(dirname "\$0")" && pwd)"
+RES="\$(cd "\$SELF/../Resources" && pwd)"
 
-export CYDER_ENGINE_SRC="$RES/engine-payload"
-export CYDER_SCRIPTS="$RES/ogom-scripts"
-export CYDER_LIBARCHIVE_SRC="$RES/addons/libarchive"
+ENGINE_VER="\$(tr -d '[:space:]' < "\$RES/engine-version.txt" 2>/dev/null || true)"
+if [[ -n "\$ENGINE_VER" && -f "\$RES/engine-\${ENGINE_VER}.tar.zst" ]]; then
+  ENGINE_SRC="\$RES/engine-\${ENGINE_VER}.tar.zst"
+elif [[ -n "\$ENGINE_VER" && -f "\$RES/engine-wine-x86_64-\${ENGINE_VER}.tar.xz" ]]; then
+  ENGINE_SRC="\$RES/engine-wine-x86_64-\${ENGINE_VER}.tar.xz"
+else
+  ENGINE_SRC="\$RES/engine-payload"
+fi
 
-export OGOM="$RES"
-export WINE_INSTALL="$RES/engine-payload"
-export ENTITLEMENTS_PLIST="$RES/entitlements.plist"
-export CYDER_ENTITLEMENTS="$RES/entitlements.plist"
-export CYDER_APP="$(cd "$SELF/.." && pwd)"
+export CYDER_ENGINE_SRC="\$ENGINE_SRC"
+export CYDER_SCRIPTS="\$RES/ogom-scripts"
+export CYDER_LIBARCHIVE_SRC="\$RES/addons/libarchive"
+
+export OGOM="\$RES"
+export WINE_INSTALL="\$ENGINE_SRC"
+export ENTITLEMENTS_PLIST="\$RES/entitlements.plist"
+export CYDER_ENTITLEMENTS="\$RES/entitlements.plist"
+export CYDER_APP="\$(cd "\$SELF/.." && pwd)"
 export CYDER_BUNDLE_ID="local.cyder.app"
 
-exec "$RES/ogom-scripts/cyder_launcher.sh" --engine-src "$RES/engine-payload" "$@"
+exec "\$RES/ogom-scripts/cyder_launcher.sh" --engine-src "\$ENGINE_SRC" "\$@"
 LAUNCHER
   chmod +x "$MACOS/Cyder"
 fi

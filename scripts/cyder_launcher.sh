@@ -6,7 +6,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=cyder-common.sh
 source "$SCRIPT_DIR/cyder-common.sh"
 
-if [[ -d "$(dirname "$SCRIPT_DIR")/engine-payload" ]]; then
+if cyder_resources_has_bundled_engine "$(dirname "$SCRIPT_DIR")"; then
   cyder_init_paths "$(dirname "$SCRIPT_DIR")"
 else
   cyder_init_paths "$SCRIPT_DIR"
@@ -20,12 +20,16 @@ Options:
   --engine-src PATH   Wine engine source (default: install/wine-x86_64 or app payload)
   --dry-run           Print paths without installing engine or launching
   --bootstrap-only    Bootstrap shared prefix (mono, tar, hi-res) and exit
+  --ensure-engine-only  Install shared engine from payload/tarball and exit
+  --launch-exe PATH   Launch .exe (engine + bootstrap must already be ready)
   -h, --help          Show this help
 EOF
 }
 
 DRY_RUN=0
 BOOTSTRAP_ONLY=0
+ENSURE_ENGINE_ONLY=0
+LAUNCH_ONLY=0
 ENGINE_SRC="$CYDER_ENGINE_SRC"
 EXE_ARGS=()
 
@@ -38,6 +42,19 @@ while [[ $# -gt 0 ]]; do
     --bootstrap-only)
       BOOTSTRAP_ONLY=1
       shift
+      ;;
+    --ensure-engine-only)
+      ENSURE_ENGINE_ONLY=1
+      shift
+      ;;
+    --launch-exe)
+      [[ $# -ge 2 ]] || {
+        echo "--launch-exe requires PATH" >&2
+        exit 1
+      }
+      LAUNCH_ONLY=1
+      EXE_ARGS+=("$2")
+      shift 2
       ;;
     --engine-src)
       [[ $# -ge 2 ]] || {
@@ -72,6 +89,11 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+if [[ "$ENSURE_ENGINE_ONLY" -eq 1 ]]; then
+  cyder_ensure_shared_engine "$ENGINE_SRC" >/dev/null
+  exit 0
+fi
+
 if [[ "$BOOTSTRAP_ONLY" -eq 1 ]]; then
   engine="$(cyder_ensure_shared_engine "$ENGINE_SRC")"
   wine="$engine/bin/wine"
@@ -81,12 +103,23 @@ if [[ "$BOOTSTRAP_ONLY" -eq 1 ]]; then
   exit 0
 fi
 
+if [[ "$LAUNCH_ONLY" -eq 1 ]]; then
+  exe="$(cyder_resolve_exe_from_args "${EXE_ARGS[@]}")" || {
+    echo "Missing or invalid .exe for --launch-exe" >&2
+    exit 1
+  }
+  engine="$(cyder_ensure_shared_engine "$ENGINE_SRC")"
+  wine="$engine/bin/wine"
+  cyder_run_wine_exe "$wine" "$exe"
+  exit 0
+fi
+
 exe=""
 if [[ ${#EXE_ARGS[@]} -gt 0 ]]; then
   exe="$(cyder_resolve_exe_from_args "${EXE_ARGS[@]}")" || true
 fi
 
-if [[ -z "$exe" && "$DRY_RUN" -eq 0 ]]; then
+if [[ -z "$exe" && "$DRY_RUN" -eq 0 && "${CYDER_GUI:-0}" != 1 ]]; then
   cyder_maybe_prompt_exe_association
   exe="$(cyder_choose_exe)"
 fi
