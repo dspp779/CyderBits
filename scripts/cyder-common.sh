@@ -37,6 +37,7 @@ cyder_run() {
 
 cyder_abs_path() {
   local p="$1"
+  p="${p#file://}"
   p="${p/#\~/$HOME}"
   if [[ -d "$p" ]]; then
     (cd "$p" && pwd)

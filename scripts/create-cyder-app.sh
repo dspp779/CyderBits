@@ -83,7 +83,12 @@ rsync -a --delete "$ENGINE_STAGING/" "$RES/engine-payload/"
 rm -rf "$ENGINE_STAGING"
 rsync -a "$OGOM/tools/libarchive/" "$RES/addons/libarchive/"
 
-cat > "$MACOS/Cyder" <<'LAUNCHER'
+echo "==> Building MacOS/Cyder (Swift front-end for Finder open-document events)"
+if swiftc -O -o "$MACOS/Cyder" "$SCRIPT_DIR/cyder_app_main.swift" 2>/dev/null; then
+  echo "==> Compiled cyder_app_main.swift"
+else
+  echo "==> Warning: swiftc failed; using bash launcher (double-click .exe may not pass path)" >&2
+  cat > "$MACOS/Cyder" <<'LAUNCHER'
 #!/bin/bash
 set -euo pipefail
 SELF="$(cd "$(dirname "$0")" && pwd)"
@@ -102,7 +107,8 @@ export CYDER_BUNDLE_ID="local.cyder.app"
 
 exec "$RES/ogom-scripts/cyder_launcher.sh" --engine-src "$RES/engine-payload" "$@"
 LAUNCHER
-chmod +x "$MACOS/Cyder"
+  chmod +x "$MACOS/Cyder"
+fi
 
 cat > "$CONTENTS/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>

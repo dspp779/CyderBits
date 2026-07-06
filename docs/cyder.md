@@ -38,7 +38,7 @@ open dist/Cyder.app
 - **略過**：本次不設定，下次仍會詢問
 - **不再詢問**：寫入 `~/Library/Application Support/Cyder/.exe-assoc-declined`
 
-若已關聯、或曾選「不再詢問」，會直接進入檔案選擇器。從 Finder 雙擊 `.exe` 或拖放到 Cyder 時**不會**出現關聯提示。
+若已關聯、或曾選「不再詢問」，**直接雙擊 Cyder** 會進入檔案選擇器。從 Finder **雙擊 `.exe`** 或拖放到 Cyder 時應直接啟動該檔（`Cyder.app` 內建 Swift 啟動器接收 open-document 事件）；若仍跳出選檔器，請重新執行 `create-cyder-app.sh` 建置 app。
 
 設定失敗時會提示改用手動：**Finder → 右鍵 .exe → 打開方式 → Cyder → 全部更改**。
 
