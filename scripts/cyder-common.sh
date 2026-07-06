@@ -31,10 +31,35 @@ cyder_engine_archive_basename() {
   printf 'engine-%s.tar.zst\n' "$ver"
 }
 
+cyder_engine_archive_basename_xz() {
+  local ver="$1"
+  printf 'engine-wine-x86_64-%s.tar.xz\n' "$ver"
+}
+
 cyder_engine_archive_path() {
   local ver="$1"
   local dir="${2:-$(cyder_engine_artifacts_dir)}"
   printf '%s/%s' "$dir" "$(cyder_engine_archive_basename "$ver")"
+}
+
+cyder_engine_archive_path_xz() {
+  local ver="$1"
+  local dir="${2:-$(cyder_engine_artifacts_dir)}"
+  printf '%s/%s' "$dir" "$(cyder_engine_archive_basename_xz "$ver")"
+}
+
+cyder_engine_archive_path_for_format() {
+  local ver="$1"
+  local dir="${2:-$(cyder_engine_artifacts_dir)}"
+  local format="${3:-xz}"
+  case "$format" in
+    zst | zstd) cyder_engine_archive_path "$ver" "$dir" ;;
+    xz) cyder_engine_archive_path_xz "$ver" "$dir" ;;
+    *)
+      echo "Unknown engine archive format: $format" >&2
+      return 1
+      ;;
+  esac
 }
 
 cyder_read_engine_version() {
@@ -55,7 +80,7 @@ cyder_engine_tarball_path() {
     printf '%s\n' "$tar"
     return 0
   fi
-  legacy="$resources/engine-wine-x86_64-${ver}.tar.xz"
+  legacy="$resources/$(cyder_engine_archive_basename_xz "$ver")"
   if [[ -f "$legacy" ]]; then
     printf '%s\n' "$legacy"
     return 0
