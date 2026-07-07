@@ -19,7 +19,7 @@ arch -x86_64 "$WINE_INSTALL/bin/wineserver" -k 2>/dev/null || true
 
 if [[ "$OFF" -eq 1 ]]; then
   arch -x86_64 "$WINE" reg add "HKCU\\Software\\Wine\\Mac Driver" /v RetinaMode /t REG_SZ /d n /f
-  arch -x86_64 "$WINE" reg add "HKCU\\Control Panel\\Desktop" /v LogPixels /t REG_DWORD /d 0x60 /f
+  arch -x86_64 "$WINE" reg add "HKCU\\Control Panel\\Desktop" /v LogPixels /t REG_DWORD /d 0xd8 /f
   # Standard grayscale AA when not in Retina mode (ClearType often blurs at 1x)
   arch -x86_64 "$WINE" reg add "HKCU\\Control Panel\\Desktop" /v FontSmoothing /t REG_SZ /d 2 /f
   arch -x86_64 "$WINE" reg add "HKCU\\Control Panel\\Desktop" /v FontSmoothingType /t REG_DWORD /d 1 /f
