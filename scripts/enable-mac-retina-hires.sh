@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Enable CrossOver-like Mac high-resolution mode for the BlueCG prefix.
-# RetinaMode=y (sharp) + LogPixels=192 (compensate window size).
+# RetinaMode=y (sharp) + LogPixels=216 (compensate window size).
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -34,7 +34,7 @@ else
   arch -x86_64 "$WINE" reg add "HKCU\\Control Panel\\Desktop" /v FontSmoothingType /t REG_DWORD /d 2 /f
   arch -x86_64 "$WINE" reg add "HKCU\\Control Panel\\Desktop" /v FontSmoothingGamma /t REG_DWORD /d 0x578 /f
   arch -x86_64 "$WINE" reg add "HKCU\\Control Panel\\Desktop" /v FontSmoothingOrientation /t REG_DWORD /d 1 /f
-  echo "Mac high-res mode ON (RetinaMode=y, DPI=192, ClearType RGB)."
+  echo "Mac high-res mode ON (RetinaMode=y, DPI=216, ClearType RGB)."
 fi
 
 arch -x86_64 "$WINE_INSTALL/bin/wineserver" -k 2>/dev/null || true
