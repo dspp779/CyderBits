@@ -25,9 +25,18 @@ assert_contains "$output" ".cyder-bootstrap-v1" "bootstrap-only should print mar
 assert test -f "$SHARED/drive_c/windows/syswow64/tar.exe"
 assert test -d "$SHARED/drive_c/windows/mono"
 assert test -f "$SHARED/.cyder-bootstrap-v1"
+assert test -f "$SHARED/.cyder-font-songti-v1"
 
 WINE="$ROOT/install/wine-x86_64/bin/wine"
-if WINEPREFIX="$SHARED" "$WINE" reg query "HKCU\\Software\\Wine\\Mac Driver" /v RetinaMode >/dev/null 2>&1; then
+if WINEPREFIX="$SHARED" arch -x86_64 "$WINE" reg query \
+  "HKCU\\Software\\Wine\\Fonts\\Replacements" /v "PMingLiU" >/dev/null 2>&1; then
+  echo "Songti TC font replacements OK"
+else
+  echo "ASSERT failed: PMingLiU font replacement missing" >&2
+  exit 1
+fi
+
+if WINEPREFIX="$SHARED" arch -x86_64 "$WINE" reg query "HKCU\\Software\\Wine\\Mac Driver" /v RetinaMode >/dev/null 2>&1; then
   echo "RetinaMode registry OK"
 fi
 

@@ -59,7 +59,10 @@ cp "$SCRIPT_DIR/install-wine-mono.sh" "$RES/ogom-scripts/"
 cp "$SCRIPT_DIR/install-libarchive-tar.sh" "$RES/ogom-scripts/"
 cp "$SCRIPT_DIR/resolve-wine-locale.sh" "$RES/ogom-scripts/"
 cp "$SCRIPT_DIR/enable-mac-retina-hires.sh" "$RES/ogom-scripts/"
+cp "$SCRIPT_DIR/cyder-songti-replacements.reg" "$RES/ogom-scripts/"
+cp "$SCRIPT_DIR/install-cyder-font-replacements.sh" "$RES/ogom-scripts/"
 chmod +x "$RES/ogom-scripts/cyder_launcher.sh"
+chmod +x "$RES/ogom-scripts/install-cyder-font-replacements.sh"
 
 # shellcheck source=cyder-copy-engine-artifact.sh
 source "$SCRIPT_DIR/cyder-copy-engine-artifact.sh"

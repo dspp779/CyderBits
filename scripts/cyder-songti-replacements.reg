@@ -1,0 +1,13 @@
+REGEDIT4
+[HKEY_CURRENT_USER\Software\Wine\Fonts\Replacements]
+"MingLiU"="Songti TC"
+"PMingLiU"="Songti TC"
+"細明體"="Songti TC"
+"新細明體"="Songti TC"
+"SimSun"="Songti TC"
+"NSimSun"="Songti TC"
+"MS Shell Dlg"="Songti TC"
+"MS Shell Dlg 2"="Songti TC"
+"Microsoft Sans Serif"="Songti TC"
+"@PMingLiU"="@Songti TC"
+"@細明體"="@Songti TC"

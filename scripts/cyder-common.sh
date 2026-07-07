@@ -160,6 +160,7 @@ cyder_init_paths() {
   CYDER_ENGINE_NAME="wine-x86_64"
   CYDER_SHARED_PREFIX="${CYDER_SHARED_PREFIX:-$CYDER_SUPPORT/SharedPrefix}"
   CYDER_BOOTSTRAP_MARKER="$CYDER_SHARED_PREFIX/.cyder-bootstrap-v1"
+  CYDER_FONT_MARKER="$CYDER_SHARED_PREFIX/.cyder-font-songti-v1"
   CYDER_DOWNLOADS="$CYDER_SUPPORT/downloads"
   CYDER_BUNDLE_ID="${CYDER_BUNDLE_ID:-local.cyder.app}"
 }
@@ -521,10 +522,33 @@ cyder_ensure_shared_prefix() {
   cyder_init_bottle "$wine_bin" "$CYDER_SHARED_PREFIX"
 }
 
+cyder_ensure_font_replacements() {
+  local wine_bin="${1:-}"
+  local engine_root="${2:-}"
+  local font_sh="$CYDER_SCRIPTS/install-cyder-font-replacements.sh"
+
+  [[ -f "$CYDER_FONT_MARKER" ]] && return 0
+  [[ -f "$font_sh" ]] || return 0
+
+  if [[ -z "$wine_bin" ]]; then
+    wine_bin="$CYDER_ENGINES/$CYDER_ENGINE_NAME/bin/wine"
+  fi
+  [[ -x "$wine_bin" ]] || return 0
+
+  if [[ -z "$engine_root" ]]; then
+    engine_root="$(cd "$(dirname "$wine_bin")/.." && pwd)"
+  fi
+
+  echo "Applying Songti TC font replacements..." >&2
+  WINEPREFIX="$CYDER_SHARED_PREFIX" WINE_INSTALL="$engine_root" bash "$font_sh"
+  printf 'ok\n' >"$CYDER_FONT_MARKER"
+}
+
 cyder_bootstrap_shared_prefix() {
   local wine_bin="$1"
   local engine_root="$2"
   cyder_ensure_shared_prefix "$wine_bin"
+  cyder_ensure_font_replacements "$wine_bin" "$engine_root"
   if [[ -f "$CYDER_BOOTSTRAP_MARKER" ]]; then
     return 0
   fi
@@ -558,6 +582,9 @@ cyder_run_wine_exe() {
   local wine_bin="$1"
   local exe="$2"
   local wineserver="${wine_bin%/wine}/wineserver"
+  local engine_root
+  engine_root="$(cd "$(dirname "$wine_bin")/.." && pwd)"
+  cyder_ensure_font_replacements "$wine_bin" "$engine_root"
   cyder_wine_locale_exports
   local log_dir="$CYDER_SUPPORT/Logs"
   mkdir -p "$log_dir"
