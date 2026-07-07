@@ -21,6 +21,7 @@ Options:
   --dry-run           Print paths without installing engine or launching
   --bootstrap-only    Bootstrap shared prefix (mono, tar, hi-res) and exit
   --ensure-engine-only  Install shared engine from payload/tarball and exit
+  --ensure-rosetta-only Check Rosetta 2 on Apple Silicon and exit
   --launch-exe PATH   Launch .exe (engine + bootstrap must already be ready)
   -h, --help          Show this help
 EOF
@@ -29,6 +30,7 @@ EOF
 DRY_RUN=0
 BOOTSTRAP_ONLY=0
 ENSURE_ENGINE_ONLY=0
+ENSURE_ROSETTA_ONLY=0
 LAUNCH_ONLY=0
 ENGINE_SRC="$CYDER_ENGINE_SRC"
 EXE_ARGS=()
@@ -45,6 +47,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --ensure-engine-only)
       ENSURE_ENGINE_ONLY=1
+      shift
+      ;;
+    --ensure-rosetta-only)
+      ENSURE_ROSETTA_ONLY=1
       shift
       ;;
     --launch-exe)
@@ -88,6 +94,14 @@ while [[ $# -gt 0 ]]; do
       ;;
   esac
 done
+
+if [[ "$DRY_RUN" -eq 0 ]]; then
+  cyder_ensure_rosetta || exit 1
+fi
+
+if [[ "$ENSURE_ROSETTA_ONLY" -eq 1 ]]; then
+  exit 0
+fi
 
 if [[ "$ENSURE_ENGINE_ONLY" -eq 1 ]]; then
   cyder_ensure_shared_engine "$ENGINE_SRC" >/dev/null

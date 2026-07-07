@@ -4,6 +4,13 @@ set -euo pipefail
 
 CYDER_COMMON_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+_rosetta_sh="$CYDER_COMMON_DIR/cyder-ensure-rosetta.sh"
+if [[ -f "$_rosetta_sh" ]]; then
+  # shellcheck source=cyder-ensure-rosetta.sh
+  source "$_rosetta_sh"
+fi
+unset _rosetta_sh
+
 cyder_engine_artifacts_dir() {
   local root="${OGOM:-$(cd "$CYDER_COMMON_DIR/.." && pwd)}"
   printf '%s\n' "${CYDER_ENGINE_ARTIFACTS_DIR:-$root/dist/artifacts}"

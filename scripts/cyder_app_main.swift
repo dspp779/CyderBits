@@ -126,6 +126,15 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func runPhasedLaunch(context: CyderLaunchContext) -> Int32 {
+        showSetup("正在檢查系統需求…")
+        let rosettaCode = runLauncher(context: context, args: [
+            context.launcher, "--ensure-rosetta-only",
+        ])
+        if rosettaCode != 0 {
+            hideSetup()
+            return rosettaCode
+        }
+
         let support = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Library/Application Support/Cyder", isDirectory: true)
         let engineWine = support
