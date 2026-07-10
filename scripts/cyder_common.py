@@ -36,7 +36,7 @@ def _default_engine_src(here: Path) -> Path:
         return tarball
     if (here / "engine-payload").is_dir():
         return here / "engine-payload"
-    return here.parent / "install" / "wine-x86_64"
+    return here.parent / "install" / "wine-cx26-x86_64"
 
 
 # When launched from Cyder.app, Resources/ is OGOM-like and scripts live in ogom-scripts/.
@@ -48,7 +48,7 @@ if _engine_tarball_path(_HERE) is not None or (_HERE / "engine-payload").is_dir(
 else:
     OGOM = _HERE.parent
     SCRIPTS = Path(os.environ.get("CYDER_SCRIPTS", OGOM / "scripts"))
-    DEFAULT_ENGINE_SRC = Path(os.environ.get("CYDER_ENGINE_SRC", OGOM / "install" / "wine-x86_64"))
+    DEFAULT_ENGINE_SRC = Path(os.environ.get("CYDER_ENGINE_SRC", OGOM / "install" / "wine-cx26-x86_64"))
     ENTITLEMENTS = OGOM / "config" / "entitlements.plist"
 
 SUPPORT = Path.home() / "Library" / "Application Support" / "Cyder"

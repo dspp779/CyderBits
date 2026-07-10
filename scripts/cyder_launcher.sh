@@ -17,7 +17,7 @@ usage() {
 Usage: $(basename "$0") [options] [game.exe ...]
 
 Options:
-  --engine-src PATH   Wine engine source (default: install/wine-x86_64 or app payload)
+  --engine-src PATH   Wine engine source (default: install/wine-cx26-x86_64 or app payload)
   --dry-run           Print paths without installing engine or launching
   --bootstrap-only    Bootstrap shared prefix (mono, tar, hi-res) and exit
   --ensure-engine-only  Install shared engine from payload/tarball and exit

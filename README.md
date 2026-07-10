@@ -48,7 +48,13 @@ bash scripts/run-bluecg.sh
 
 ## Wine sources
 
-Wine is built from the **CrossOver open-source release** — extract into `sources/` (see [CodeWeavers CrossOver Source](https://www.codeweavers.com/crossover/source)). The tree used at build time is `sources/wine/`.
+Wine is built from the **CrossOver open-source release** — place archives in `tools/archives/` (see [CodeWeavers CrossOver Source](https://www.codeweavers.com/crossover/source)); builds extract into `build/cx25/` or `build/cx26/`.
+
+```bash
+bash scripts/build-wine.sh --cx 26
+bash scripts/build-wine.sh --cx 25
+bash scripts/sign-wine.sh
+```
 
 ```bash
 bash scripts/build-wine.sh
@@ -66,7 +72,8 @@ bash scripts/sign-wine.sh
 ### 1. Build Wine (first time; slow)
 
 ```bash
-bash scripts/build-wine.sh
+bash scripts/build-wine.sh --cx 26 --install-deps
+bash scripts/build-wine.sh --cx 26
 bash scripts/sign-wine.sh
 ```
 
@@ -99,9 +106,14 @@ open dist/CyderBits.app
 ├── scripts/                    # Build, run, packaging
 ├── tests/                      # Script smoke tests
 ├── docs/                       # Guides (see docs/README.md)
-├── sources/wine/               # CrossOver Wine sources (.gitignore)
+├── tools/
+│   ├── archives/               # CrossOver + llvm-mingw archives (.gitignore)
+│   └── libarchive/             # GnuWin bsdtar payload
+├── build/                      # Extracted sources + llvm-mingw (.gitignore)
 ├── .brew-x86/                  # Project-local x86_64 Homebrew (.gitignore)
-├── install/wine-x86_64/        # Wine install prefix (.gitignore)
+├── install/
+│   ├── wine-cx25-x86_64/       # CX25 engine (.gitignore)
+│   └── wine-cx26-x86_64/       # CX26 engine (.gitignore)
 └── BlueCrossgateNew/           # BlueCG game + prefix (.gitignore)
 ```
 
@@ -109,6 +121,7 @@ open dist/CyderBits.app
 
 ```bash
 bash tests/test-env-x86_64.sh
+bash tests/test-prepare-build-deps.sh
 bash tests/test-build-wine.sh
 bash tests/test-sign-wine.sh
 bash tests/test-run-bluecg.sh

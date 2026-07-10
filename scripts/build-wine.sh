@@ -2,12 +2,13 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "$SCRIPT_DIR/env-x86_64.sh"
 
 DRY_RUN=0
 BOOTSTRAP_BREW=0
 INSTALL_DEPS=0
 CONFIGURE_ONLY=0
+PREPARE_ONLY=0
+CX_VERSION="${CX_VERSION:-26}"
 JOBS="$(sysctl -n hw.ncpu)"
 
 run() {
@@ -28,9 +29,32 @@ while [[ $# -gt 0 ]]; do
     --bootstrap-brew) BOOTSTRAP_BREW=1 ;;
     --install-deps) INSTALL_DEPS=1 ;;
     --configure-only) CONFIGURE_ONLY=1 ;;
+    --prepare-only) PREPARE_ONLY=1 ;;
+    --cx)
+      CX_VERSION="$2"
+      shift
+      ;;
     --jobs)
       JOBS="$2"
       shift
+      ;;
+    -h | --help)
+      cat <<EOF
+Usage: $(basename "$0") [options]
+
+Build CrossOver Wine for macOS x86_64 (Rosetta).
+
+Options:
+  --cx 25|26         CrossOver release (default: 26)
+  --prepare-only     Extract archives from tools/archives/ and exit
+  --bootstrap-brew   Install project-local x86_64 Homebrew
+  --install-deps     Install build dependencies via .brew-x86
+  --configure-only   Run configure without make/install
+  --jobs N           Parallel make jobs (default: CPU count)
+  --dry-run          Print commands without executing
+  -h, --help         Show this help
+EOF
+      exit 0
       ;;
     *)
       echo "Unknown argument: $1" >&2
@@ -39,6 +63,25 @@ while [[ $# -gt 0 ]]; do
   esac
   shift
 done
+
+case "$CX_VERSION" in
+  25 | 26) ;;
+  *)
+    echo "Unknown --cx value: $CX_VERSION (expected 25 or 26)" >&2
+    exit 1
+    ;;
+esac
+
+export CX_VERSION
+source "$SCRIPT_DIR/env-x86_64.sh"
+
+PREPARE_ARGS=(--cx "$CX_VERSION")
+[[ "$DRY_RUN" -eq 1 ]] && PREPARE_ARGS+=(--dry-run)
+"$SCRIPT_DIR/prepare-build-deps.sh" "${PREPARE_ARGS[@]}"
+
+if [[ "$PREPARE_ONLY" -eq 1 ]]; then
+  exit 0
+fi
 
 bootstrap_brew() {
   if [[ -x "$HOMEBREW_PREFIX/bin/brew" ]]; then
