@@ -8,7 +8,13 @@ if [[ -z "${OGOM:-}" ]]; then
 fi
 
 export CX_VERSION="${CX_VERSION:-26}"
-export HOMEBREW_PREFIX="${HOMEBREW_PREFIX:-$OGOM/.brew-x86}"
+# Project-local x86_64 Homebrew. Ignore shell profile HOMEBREW_PREFIX=/opt/homebrew
+# (arm64); Rosetta brew cannot install into that prefix.
+if [[ -z "${HOMEBREW_PREFIX:-}" || "$HOMEBREW_PREFIX" == "/opt/homebrew" ]]; then
+  export HOMEBREW_PREFIX="$OGOM/.brew-x86"
+fi
+export HOMEBREW_REPOSITORY="${HOMEBREW_REPOSITORY:-$HOMEBREW_PREFIX}"
+export HOMEBREW_CELLAR="${HOMEBREW_CELLAR:-$HOMEBREW_PREFIX/Cellar}"
 export BUILD_DIR="${OGOM_BUILD_DIR:-$OGOM/build}"
 export LLVM_MINGW_NAME="llvm-mingw-20260616-ucrt-macos-universal"
 
@@ -73,3 +79,22 @@ if [[ -d "$HOMEBREW_PREFIX" ]]; then
   export DYLD_LIBRARY_PATH="${_brew_lib_path}${DYLD_LIBRARY_PATH:+:$DYLD_LIBRARY_PATH}"
   unset _d _brew_lib_path _candidate
 fi
+
+# Run Homebrew under Rosetta with an isolated prefix (never /opt/homebrew).
+brew_x86() {
+  arch -x86_64 env \
+    HOMEBREW_PREFIX="$HOMEBREW_PREFIX" \
+    HOMEBREW_REPOSITORY="$HOMEBREW_REPOSITORY" \
+    HOMEBREW_CELLAR="$HOMEBREW_CELLAR" \
+    HOMEBREW_CACHE="${HOMEBREW_CACHE:-$HOMEBREW_PREFIX/cache}" \
+    HOMEBREW_LOGS="${HOMEBREW_LOGS:-$HOMEBREW_PREFIX/logs}" \
+    HOMEBREW_TEMP="${HOMEBREW_TEMP:-$HOMEBREW_PREFIX/tmp}" \
+    HOMEBREW_NO_AUTO_UPDATE=1 \
+    HOMEBREW_NO_ANALYTICS=1 \
+    HOMEBREW_NO_ENV_HINTS=1 \
+    HOMEBREW_NO_ASK=1 \
+    NONINTERACTIVE=1 \
+    CI=1 \
+    PATH="$HOMEBREW_PREFIX/bin:/usr/bin:/bin:/usr/sbin:/sbin" \
+    "$HOMEBREW_PREFIX/bin/brew" "$@"
+}

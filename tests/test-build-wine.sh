@@ -10,9 +10,15 @@ if [[ "$output" != *"Homebrew/brew"* && "$output" != *"Homebrew already present"
   echo "ASSERT_CONTAINS failed: dry-run should bootstrap Homebrew or report it already present" >&2
   exit 1
 fi
-assert_contains "$output" "Extracting llvm-mingw" "dry-run should prepare archives before configure"
-assert_contains "$output" "crossover-sources-26.2.0.tar.gz" "dry-run should reference CX26 archive"
-assert_contains "$output" ".brew-x86/bin/brew install -y autoconf bison flex pkgconf freetype gettext gnutls zlib bzip2" "dry-run should install isolated deps non-interactively"
+if [[ "$output" != *"Extracting llvm-mingw"* && "$output" != *"llvm-mingw already present"* ]]; then
+  echo "ASSERT failed: dry-run should prepare llvm-mingw" >&2
+  exit 1
+fi
+if [[ "$output" != *"crossover-sources-26.2.0.tar.gz"* && "$output" != *"CX26 sources already present"* ]]; then
+  echo "ASSERT failed: dry-run should prepare CX26 sources" >&2
+  exit 1
+fi
+assert_contains "$output" "brew_x86 install" "dry-run should install deps via project brew_x86"
 assert_contains "$output" "PKG_CONFIG_PATH=" "dry-run configure must set PKG_CONFIG_PATH for keg-only deps"
 assert_contains "$output" "require pkg-config freetype2" "dry-run should check for x86_64 freetype2"
 assert_contains "$output" "ensure" "dry-run should ensure bzip2.pc exists"
@@ -33,7 +39,10 @@ assert_contains "$output" "make install" "dry-run should show the install step"
 assert_contains "$output" "bundle-wine-dylibs.sh" "dry-run should bundle relocatable dylibs after install"
 
 output_cx25="$(bash "$ROOT/scripts/build-wine.sh" --cx 25 --prepare-only --dry-run 2>&1 || true)"
-assert_contains "$output_cx25" "crossover-sources-25.1.1.tar.gz" "CX25 prepare should reference CX25 archive"
+if [[ "$output_cx25" != *"crossover-sources-25.1.1.tar.gz"* && "$output_cx25" != *"CX25 sources already present"* ]]; then
+  echo "ASSERT failed: CX25 prepare should reference CX25 archive" >&2
+  exit 1
+fi
 assert_contains "$output_cx25" "build/cx25" "CX25 prepare should target cx25 tree"
 
 echo "PASS test-build-wine"

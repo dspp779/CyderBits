@@ -97,6 +97,8 @@ bootstrap_brew() {
 
   curl -L https://github.com/Homebrew/brew/tarball/master \
     | tar xz --strip-components=1 -C "$HOMEBREW_PREFIX"
+  # Ensure brew metadata points at the project prefix, not /opt/homebrew.
+  brew_x86 update --force --quiet 2>/dev/null || true
 }
 
 if [[ "$BOOTSTRAP_BREW" -eq 1 ]]; then
@@ -108,7 +110,7 @@ if [[ "$INSTALL_DEPS" -eq 1 ]]; then
     echo "Missing $HOMEBREW_PREFIX/bin/brew; run with --bootstrap-brew first" >&2
     exit 1
   fi
-  run arch -x86_64 "$HOMEBREW_PREFIX/bin/brew" install -y autoconf bison flex pkgconf freetype gettext gnutls zlib bzip2
+  run brew_x86 install autoconf bison flex pkgconf freetype gettext gnutls zlib bzip2
 fi
 
 # Sanitize PATH so configure/make never pick /opt/homebrew (arm64) pkg-config/libs.

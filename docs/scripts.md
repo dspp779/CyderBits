@@ -6,7 +6,7 @@
 
 | 腳本 | 用途 |
 |------|------|
-| `env-x86_64.sh` | `OGOM`、`CX_VERSION`、`.brew-x86`、`WINE_SRC`、`WINE_INSTALL`、`ENTITLEMENTS_PLIST` 等 |
+| `env-x86_64.sh` | `OGOM`、`CX_VERSION`、`.brew-x86`、`WINE_SRC`、`WINE_INSTALL`、`ENTITLEMENTS_PLIST` 等；**忽略 shell 的 `HOMEBREW_PREFIX=/opt/homebrew`** |
 | `prepare-build-deps.sh` | 從 `tools/archives/` 解壓 llvm-mingw 與 CrossOver 原始碼至 `build/` |
 | `build-wine.sh` | `--cx 25\|26`：prepare + configure + make + install 至 `install/wine-cx25-x86_64` 或 `wine-cx26-x86_64` |
 | `sign-wine.sh` | ad-hoc codesign + entitlements（`config/entitlements.plist`） |

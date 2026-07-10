@@ -26,4 +26,10 @@ assert_eq "$WINE_INSTALL" "$ROOT/install/wine-cx25-x86_64" "CX25 should use sepa
 assert_eq "$WINE_SRC" "$ROOT/build/cx25/sources/wine" "CX25 source tree should be isolated"
 assert_eq "$CYDER_ENGINE_CX_PREFIX" "CX25" "CX25 build should set engine prefix label"
 
+export HOMEBREW_PREFIX=/opt/homebrew
+unset WINE_SRC WINE_INSTALL CYDER_ENGINE_CX_PREFIX
+# shellcheck disable=SC1091
+source "$ROOT/scripts/env-x86_64.sh"
+assert_eq "$HOMEBREW_PREFIX" "$ROOT/.brew-x86" "shell /opt/homebrew must not leak into build env"
+
 echo "PASS test-env-x86_64"
