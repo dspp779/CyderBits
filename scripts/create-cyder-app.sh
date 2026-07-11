@@ -70,7 +70,8 @@ copy_engine_artifact_into_app "$SCRIPT_DIR" "$RES" "$OGOM"
 rsync -a "$OGOM/tools/libarchive/" "$RES/addons/libarchive/"
 
 echo "==> Building MacOS/Cyder (Swift front-end for Finder open-document events)"
-if swiftc -O -o "$MACOS/Cyder" "$SCRIPT_DIR/cyder_app_main.swift" 2>/dev/null; then
+CYDER_SWIFT_TARGET="${CYDER_SWIFT_TARGET:-arm64-apple-macosx12.0}"
+if swiftc -O -target "$CYDER_SWIFT_TARGET" -o "$MACOS/Cyder" "$SCRIPT_DIR/cyder_app_main.swift" 2>/dev/null; then
   echo "==> Compiled cyder_app_main.swift"
 else
   echo "==> Warning: swiftc failed; using bash launcher (double-click .exe may not pass path)" >&2
