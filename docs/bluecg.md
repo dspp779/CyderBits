@@ -95,13 +95,18 @@ bash scripts/create-bluecg-app.sh --link-prefix
 
 或用 **Cyder** 建立（建議 `game_dir` + `no-gecko`），見 [cyder.md](cyder.md)。
 
+## 已知問題
+
+- **視窗手動縮放黑屏**（CrossOver／自建 Wine；Sikarugir 較佳）— 詳見 [bluecg-winemac-resize-black-screen.md](bluecg-winemac-resize-black-screen.md)
+
 ## 已知雜訊（通常可忽略）
 
 - `libMoltenVK.dylib` 找不到（ddraw 走 wined3d/GL，非 Vulkan）
 - `dmsynth` underrun、`GL_INVALID_FRAMEBUFFER_OPERATION`
-- 全螢幕 / 縮放黑畫面（CrossOver 亦有；Sikarugir 較佳）
+- 全螢幕 / 縮放黑畫面（見上方連結；產品迴避：啟動器解析度）
 
 ## 相關文件
 
+- [bluecg-winemac-resize-black-screen.md](bluecg-winemac-resize-black-screen.md) — 縮放黑屏追蹤（winemac.drv）
 - [superpowers/specs/2026-07-03-bluecg-wine-build-design.md](superpowers/specs/2026-07-03-bluecg-wine-build-design.md)
 - [superpowers/plans/2026-07-03-bluecg-wine-build.md](superpowers/plans/2026-07-03-bluecg-wine-build.md)

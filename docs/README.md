@@ -12,6 +12,7 @@
 | [cyderbits.md](cyderbits.md) | 一般使用者 | CyderBits 打包器：建立 game `.app`、選項與疑難排解 |
 | [bluecg.md](bluecg.md) | 開發 / 驗證 | BlueCG 自建 Wine、執行、高解析度與已知問題 |
 | [wine-configure-options.md](wine-configure-options.md) | 開發 / 建置 | Wine `configure` 旗標說明與老遊戲取捨 |
+| [bluecg-winemac-resize-black-screen.md](bluecg-winemac-resize-black-screen.md) | 開發 / 追蹤 | BlueCG 視窗縮放黑屏與 winemac.drv 實驗紀錄（**未解**） |
 | [scripts.md](scripts.md) | 開發者 | `scripts/` 腳本一覽與依賴關係 |
 
 ## 設計與計畫（superpowers）
