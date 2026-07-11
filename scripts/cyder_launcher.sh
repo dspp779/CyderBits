@@ -113,7 +113,24 @@ if [[ "$BOOTSTRAP_ONLY" -eq 1 ]]; then
   wine="$engine/bin/wine"
   echo "WINEPREFIX=$CYDER_SHARED_PREFIX"
   echo "BOOTSTRAP_MARKER=$CYDER_BOOTSTRAP_MARKER"
-  cyder_bootstrap_shared_prefix "$wine" "$engine"
+  log_dir="$CYDER_SUPPORT/Logs"
+  mkdir -p "$log_dir"
+  tmp_log="$(mktemp "${TMPDIR:-/tmp}/cyder-bootstrap.XXXXXX")"
+  set +e
+  {
+    echo "engine=$engine"
+    echo "wine=$wine"
+    echo "WINEPREFIX=$CYDER_SHARED_PREFIX"
+    echo
+    cyder_bootstrap_shared_prefix "$wine" "$engine"
+  } >"$tmp_log" 2>&1
+  status=$?
+  set -e
+  if [[ "$status" -ne 0 ]]; then
+    mv -f "$tmp_log" "$log_dir/bootstrap-error.log"
+    exit "$status"
+  fi
+  rm -f "$tmp_log"
   exit 0
 fi
 

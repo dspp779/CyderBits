@@ -12,6 +12,7 @@ export WINE_INSTALL="${WINE_INSTALL:-$OGOM/install/wine-x86_64}"
 export WINE_SRC="${WINE_SRC:-$OGOM/sources/wine}"
 export BLUECG_PREFIX="${BLUECG_PREFIX:-$OGOM/BlueCrossgateNew}"
 export ENTITLEMENTS_PLIST="${ENTITLEMENTS_PLIST:-$OGOM/config/entitlements.plist}"
+export CYDER_CROSSOVER_VERSION="${CYDER_CROSSOVER_VERSION:-26.2.0}"
 export ARCH_CMD="arch -x86_64"
 
 export PATH="$LLVM_MINGW/bin:$HOMEBREW_PREFIX/bin:$PATH"

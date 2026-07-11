@@ -84,10 +84,12 @@ else
   }
 fi
 
-ENGINE_VERSION="$(cyder_detect_engine_version "$WINE_INSTALL/bin/wine")" || {
+ENGINE_VERSION_LABEL="$(cyder_detect_engine_version_label "$WINE_INSTALL/bin/wine")" || {
   echo "Could not detect engine version from wine --version" >&2
   exit 1
 }
+ENGINE_VERSION_SLUG="$(cyder_engine_version_slug_from_label "$ENGINE_VERSION_LABEL")"
+ENGINE_VERSION="$ENGINE_VERSION_SLUG"
 ARTIFACTS_DIR="$(cyder_engine_artifacts_dir)"
 ARCHIVE="$(cyder_engine_archive_path_for_format "$ENGINE_VERSION" "$ARTIFACTS_DIR" "$FORMAT")"
 VERSION_FILE="$ARTIFACTS_DIR/engine-version.txt"
@@ -106,9 +108,10 @@ cleanup() {
 trap cleanup EXIT
 ENGINE_TREE="$STAGING/wine-x86_64"
 
-echo "==> Staging engine tree ($ENGINE_VERSION)"
+echo "==> Staging engine tree ($ENGINE_VERSION_LABEL)"
 rsync -a --delete "$WINE_INSTALL/" "$ENGINE_TREE/"
 find "$ENGINE_TREE" -name '.DS_Store' -delete 2>/dev/null || true
+cyder_write_engine_version_file "$ENGINE_TREE" "$ENGINE_VERSION_LABEL"
 bash "$SCRIPT_DIR/strip-wine-install.sh" "$ENGINE_TREE"
 bash "$SCRIPT_DIR/bundle-wine-dylibs.sh" "$ENGINE_TREE"
 bash "$SCRIPT_DIR/sign-wine.sh" --root "$ENGINE_TREE" --entitlements "$ENTITLEMENTS_PLIST"
@@ -136,9 +139,10 @@ case "$FORMAT" in
     ;;
 esac
 
-printf '%s\n' "$ENGINE_VERSION" >"$VERSION_FILE"
+printf '%s\n' "$ENGINE_VERSION_LABEL" >"$VERSION_FILE"
 {
-  echo "version=$ENGINE_VERSION"
+  echo "version=$ENGINE_VERSION_LABEL"
+  echo "slug=$ENGINE_VERSION_SLUG"
   echo "format=$FORMAT"
   echo "archive=$(basename "$ARCHIVE")"
   echo "wine=$(arch -x86_64 "$WINE_INSTALL/bin/wine" --version 2>/dev/null || true)"

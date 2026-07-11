@@ -16,21 +16,162 @@ cyder_engine_artifacts_dir() {
   printf '%s\n' "${CYDER_ENGINE_ARTIFACTS_DIR:-$root/dist/artifacts}"
 }
 
-cyder_detect_engine_version() {
+cyder_crossover_version() {
+  printf '%s\n' "${CYDER_CROSSOVER_VERSION:-26.2.0}"
+}
+
+cyder_engine_version_label_trim() {
+  local ver="$1"
+  ver="${ver//$'\r'/}"
+  ver="${ver#"${ver%%[![:space:]]*}"}"
+  ver="${ver%"${ver##*[![:space:]]}"}"
+  printf '%s\n' "$ver"
+}
+
+cyder_format_engine_version_from_wine() {
   local wine_bin="${1:-}"
-  local cx wine_ver
-  if [[ -n "${CYDER_ENGINE_VERSION:-}" ]]; then
-    printf '%s\n' "$CYDER_ENGINE_VERSION"
+  local wine_raw wine_ver cx_ver
+  if [[ -n "${CYDER_ENGINE_VERSION_LABEL:-}" ]]; then
+    cyder_engine_version_label_trim "$CYDER_ENGINE_VERSION_LABEL"
     return 0
   fi
   if [[ -z "$wine_bin" && -n "${WINE_INSTALL:-}" ]]; then
     wine_bin="$WINE_INSTALL/bin/wine"
   fi
   [[ -x "$wine_bin" ]] || return 1
-  cx="${CYDER_ENGINE_CX_PREFIX:-CX26}"
-  wine_ver="$(arch -x86_64 "$wine_bin" --version 2>/dev/null | sed 's/^wine-//')"
-  [[ -n "$wine_ver" ]] || return 1
-  printf '%s-%s\n' "$cx" "$wine_ver"
+  wine_raw="$(arch -x86_64 "$wine_bin" --version 2>/dev/null || true)"
+  wine_ver="${wine_raw#wine-}"
+  if [[ "$wine_ver" == *[Ss]ikarugir* ]]; then
+    wine_ver="${wine_ver%% (Sikarugir)*}"
+    wine_ver="${wine_ver%% (sikarugir)*}"
+    printf 'wine sikarugir %s\n' "$wine_ver"
+    return 0
+  fi
+  cx_ver="$(cyder_crossover_version)"
+  printf 'wine crossover %s (wine %s)\n' "$cx_ver" "$wine_ver"
+}
+
+cyder_engine_version_slug_from_label() {
+  local label="$1"
+  local slug cx wine_ver tail
+  label="$(cyder_engine_version_label_trim "$label")"
+  if [[ "$label" == wine\ crossover\ * ]]; then
+    cx="${label#wine crossover }"
+    cx="${cx%% (wine *)}"
+    wine_ver="${label#* (wine }"
+    wine_ver="${wine_ver%)}"
+    slug="crossover-${cx}-wine-${wine_ver}"
+    slug="${slug// /-}"
+    printf '%s\n' "$slug"
+    return 0
+  fi
+  if [[ "$label" == wine\ sikarugir\ * || "$label" == wine\ Sikarugir\ * ]]; then
+    tail="${label#wine sikarugir }"
+    if [[ "$tail" == "$label" ]]; then
+      tail="${label#wine Sikarugir }"
+    fi
+    slug="sikarugir-${tail}"
+    slug="$(printf '%s' "$slug" | tr ' .()/' '-' | tr -s '-')"
+    slug="${slug#-}"
+    slug="${slug%-}"
+    printf '%s\n' "$slug"
+    return 0
+  fi
+  slug="$(printf '%s' "$label" | tr ' .()/' '-' | tr -s '-')"
+  slug="${slug#-}"
+  slug="${slug%-}"
+  printf '%s\n' "$slug"
+}
+
+cyder_read_engine_version_file() {
+  local engine_root="$1"
+  local f="$engine_root/version"
+  local ver=""
+  [[ -f "$f" ]] || return 1
+  ver="$(cyder_engine_version_label_trim "$(cat "$f")")"
+  [[ -n "$ver" ]] || return 1
+  printf '%s\n' "$ver"
+}
+
+cyder_write_engine_version_file() {
+  local engine_root="$1"
+  local ver="$2"
+  ver="$(cyder_engine_version_label_trim "$ver")"
+  [[ -n "$ver" ]] || return 1
+  printf '%s\n' "$ver" >"$engine_root/version"
+}
+
+cyder_read_installed_engine_version() {
+  local engine_root="$1"
+  local ver=""
+  if ver="$(cyder_read_engine_version_file "$engine_root" 2>/dev/null)"; then
+    printf '%s\n' "$ver"
+    return 0
+  fi
+  if [[ -f "$engine_root/.cyder-engine-version" ]]; then
+    ver="$(cyder_engine_version_label_trim "$(cat "$engine_root/.cyder-engine-version")")"
+    [[ -n "$ver" ]] || return 1
+    printf '%s\n' "$ver"
+    return 0
+  fi
+  return 1
+}
+
+cyder_engine_version_from_tarball() {
+  local tarball="$1"
+  local ver=""
+  ver="$(tar -xOf "$tarball" wine-x86_64/version 2>/dev/null | head -1 || true)"
+  ver="$(cyder_engine_version_label_trim "$ver")"
+  [[ -n "$ver" ]] || return 1
+  printf '%s\n' "$ver"
+  return 0
+}
+
+cyder_bundled_engine_version_from_src() {
+  local engine_src="$1"
+  engine_src="$(cyder_abs_path "$engine_src")"
+  if cyder_engine_is_tarball "$engine_src"; then
+    if cyder_engine_version_from_tarball "$engine_src"; then
+      return 0
+    fi
+    cyder_engine_version_from_archive "$engine_src"
+    return 0
+  fi
+  if [[ -d "$engine_src" ]]; then
+    if cyder_read_engine_version_file "$engine_src"; then
+      return 0
+    fi
+    if [[ -x "$engine_src/bin/wine" ]]; then
+      cyder_format_engine_version_from_wine "$engine_src/bin/wine"
+      return 0
+    fi
+  fi
+  if [[ -n "${CYDER_OGOM:-}" ]]; then
+    cyder_bundled_engine_version "$CYDER_OGOM"
+    return 0
+  fi
+  return 1
+}
+
+cyder_detect_engine_version() {
+  local wine_bin="${1:-}"
+  local label
+  if [[ -n "${CYDER_ENGINE_VERSION:-}" ]]; then
+    printf '%s\n' "$CYDER_ENGINE_VERSION"
+    return 0
+  fi
+  label="$(cyder_format_engine_version_from_wine "$wine_bin")" || return 1
+  cyder_engine_version_slug_from_label "$label"
+}
+
+cyder_detect_engine_version_label() {
+  cyder_format_engine_version_from_wine "${1:-}"
+}
+
+cyder_reset_shared_prefix() {
+  [[ -e "$CYDER_SHARED_PREFIX" ]] || return 0
+  echo "Resetting SharedPrefix (engine version changed): $CYDER_SHARED_PREFIX" >&2
+  cyder_remove_path "$CYDER_SHARED_PREFIX"
 }
 
 cyder_engine_archive_basename() {
@@ -80,8 +221,26 @@ cyder_read_engine_version() {
 
 cyder_engine_tarball_path() {
   local resources="$1"
-  local ver tar legacy
+  local ver tar legacy archive_name
+  if [[ -f "$resources/engine-archive.txt" ]]; then
+    archive_name="$(tr -d '[:space:]' < "$resources/engine-archive.txt")"
+    if [[ -n "$archive_name" && -f "$resources/$archive_name" ]]; then
+      printf '%s\n' "$resources/$archive_name"
+      return 0
+    fi
+  fi
   ver="$(cyder_read_engine_version "$resources")" || return 1
+  tar="$resources/$(cyder_engine_archive_basename "$(cyder_engine_version_slug_from_label "$ver")")"
+  if [[ -f "$tar" ]]; then
+    printf '%s\n' "$tar"
+    return 0
+  fi
+  legacy="$resources/$(cyder_engine_archive_basename_xz "$(cyder_engine_version_slug_from_label "$ver")")"
+  if [[ -f "$legacy" ]]; then
+    printf '%s\n' "$legacy"
+    return 0
+  fi
+  # Legacy layouts keyed by old slug-style engine-version.txt
   tar="$resources/$(cyder_engine_archive_basename "$ver")"
   if [[ -f "$tar" ]]; then
     printf '%s\n' "$tar"
@@ -177,17 +336,12 @@ cyder_engine_needs_install() {
   local engine_src="$1"
   local dest="$CYDER_ENGINES/$CYDER_ENGINE_NAME"
   local marker="$dest/bin/wine"
-  local version_marker="$dest/.cyder-engine-version"
   local bundled_version="" installed_version=""
 
   engine_src="$(cyder_abs_path "$engine_src")"
-  if cyder_engine_is_tarball "$engine_src"; then
-    bundled_version="$(cyder_engine_version_from_archive "$engine_src")"
-  elif [[ -n "${CYDER_OGOM:-}" ]]; then
-    bundled_version="$(cyder_bundled_engine_version "$CYDER_OGOM")"
-  fi
-  if [[ -f "$version_marker" ]]; then
-    installed_version="$(tr -d '[:space:]' < "$version_marker")"
+  bundled_version="$(cyder_bundled_engine_version_from_src "$engine_src" 2>/dev/null || true)"
+  if [[ -f "$marker" ]]; then
+    installed_version="$(cyder_read_installed_engine_version "$dest" 2>/dev/null || true)"
   fi
   if [[ ! -f "$marker" ]]; then
     return 0
@@ -432,6 +586,14 @@ cyder_install_engine_from_dir() {
   rm -rf "$dest"
   mkdir -p "$dest"
   cyder_run rsync -a "$engine_src/" "$dest/"
+  if ! cyder_read_engine_version_file "$dest" >/dev/null 2>&1; then
+    if [[ -x "$dest/bin/wine" ]]; then
+      local ver
+      ver="$(cyder_format_engine_version_from_wine "$dest/bin/wine" 2>/dev/null || true)"
+      [[ -n "$ver" ]] && cyder_write_engine_version_file "$dest" "$ver"
+    fi
+  fi
+  rm -f "$dest/.cyder-engine-version"
 }
 
 cyder_sign_installed_engine() {
@@ -450,28 +612,24 @@ cyder_ensure_shared_engine() {
   local engine_src="$1"
   local dest="$CYDER_ENGINES/$CYDER_ENGINE_NAME"
   local marker="$dest/bin/wine"
-  local version_marker="$dest/.cyder-engine-version"
   local bundled_version="" installed_version=""
   engine_src="$(cyder_abs_path "$engine_src")"
 
-  if cyder_engine_is_tarball "$engine_src"; then
-    bundled_version="$(cyder_engine_version_from_archive "$engine_src")"
-  elif [[ -n "${CYDER_OGOM:-}" ]]; then
-    bundled_version="$(cyder_bundled_engine_version "$CYDER_OGOM")"
-  fi
-  if [[ -f "$version_marker" ]]; then
-    installed_version="$(tr -d '[:space:]' < "$version_marker")"
-  fi
-
+  bundled_version="$(cyder_bundled_engine_version_from_src "$engine_src" 2>/dev/null || true)"
   if [[ -f "$marker" ]]; then
+    installed_version="$(cyder_read_installed_engine_version "$dest" 2>/dev/null || true)"
     if [[ -z "$bundled_version" || "$installed_version" == "$bundled_version" ]]; then
       echo "Shared engine present: $dest" >&2
       echo "$dest"
       return 0
     fi
     echo "Upgrading shared engine ($installed_version -> $bundled_version) -> $dest" >&2
+    cyder_reset_shared_prefix
   else
     echo "Installing shared engine -> $dest" >&2
+    if [[ -n "$bundled_version" && -e "$CYDER_SHARED_PREFIX" ]]; then
+      cyder_reset_shared_prefix
+    fi
   fi
 
   mkdir -p "$CYDER_ENGINES"
@@ -483,8 +641,12 @@ cyder_ensure_shared_engine() {
     echo "Missing engine source: $engine_src" >&2
     exit 1
   fi
+  if [[ -z "$bundled_version" && -x "$dest/bin/wine" ]]; then
+    bundled_version="$(cyder_format_engine_version_from_wine "$dest/bin/wine" 2>/dev/null || true)"
+  fi
   if [[ -n "$bundled_version" ]]; then
-    printf '%s\n' "$bundled_version" >"$version_marker"
+    cyder_write_engine_version_file "$dest" "$bundled_version"
+    rm -f "$dest/.cyder-engine-version"
   fi
   cyder_sign_installed_engine "$dest"
   echo "$dest"

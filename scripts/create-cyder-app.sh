@@ -7,7 +7,37 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 unset HOMEBREW_PREFIX OGOM WINE_INSTALL ENTITLEMENTS_PLIST
 source "$SCRIPT_DIR/env-x86_64.sh"
 
-OUT_DIR="${1:-$OGOM/dist}"
+OUT_DIR="${OGOM}/dist"
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --engine-archive)
+      [[ $# -ge 2 ]] || {
+        echo "--engine-archive requires PATH" >&2
+        exit 1
+      }
+      export CYDER_BUNDLED_ENGINE_ARCHIVE="$2"
+      shift 2
+      ;;
+    -h | --help)
+      cat <<EOF
+Usage: $(basename "$0") [options] [OUT_DIR]
+
+Options:
+  --engine-archive PATH   Bundle this engine tarball into Cyder.app Resources
+  -h, --help              Show this help
+
+Default OUT_DIR: dist/
+Without --engine-archive, uses dist/artifacts/engine-version.txt + archive from pack-engine-artifact.sh.
+EOF
+      exit 0
+      ;;
+    *)
+      OUT_DIR="$1"
+      shift
+      ;;
+  esac
+done
+
 APP="$OUT_DIR/Cyder.app"
 CONTENTS="$APP/Contents"
 MACOS="$CONTENTS/MacOS"
@@ -66,6 +96,7 @@ chmod +x "$RES/ogom-scripts/install-cyder-font-replacements.sh"
 
 # shellcheck source=cyder-copy-engine-artifact.sh
 source "$SCRIPT_DIR/cyder-copy-engine-artifact.sh"
+
 copy_engine_artifact_into_app "$SCRIPT_DIR" "$RES" "$OGOM"
 rsync -a "$OGOM/tools/libarchive/" "$RES/addons/libarchive/"
 
@@ -81,13 +112,18 @@ set -euo pipefail
 SELF="\$(cd "\$(dirname "\$0")" && pwd)"
 RES="\$(cd "\$SELF/../Resources" && pwd)"
 
-ENGINE_VER="\$(tr -d '[:space:]' < "\$RES/engine-version.txt" 2>/dev/null || true)"
-if [[ -n "\$ENGINE_VER" && -f "\$RES/engine-\${ENGINE_VER}.tar.zst" ]]; then
-  ENGINE_SRC="\$RES/engine-\${ENGINE_VER}.tar.zst"
-elif [[ -n "\$ENGINE_VER" && -f "\$RES/engine-wine-x86_64-\${ENGINE_VER}.tar.xz" ]]; then
-  ENGINE_SRC="\$RES/engine-wine-x86_64-\${ENGINE_VER}.tar.xz"
+ENGINE_ARCHIVE="\$(tr -d '[:space:]' < "\$RES/engine-archive.txt" 2>/dev/null || true)"
+if [[ -n "\$ENGINE_ARCHIVE" && -f "\$RES/\$ENGINE_ARCHIVE" ]]; then
+  ENGINE_SRC="\$RES/\$ENGINE_ARCHIVE"
 else
-  ENGINE_SRC="\$RES/engine-payload"
+  ENGINE_VER="\$(tr -d '[:space:]' < "\$RES/engine-version.txt" 2>/dev/null || true)"
+  if [[ -n "\$ENGINE_VER" && -f "\$RES/engine-\${ENGINE_VER}.tar.zst" ]]; then
+    ENGINE_SRC="\$RES/engine-\${ENGINE_VER}.tar.zst"
+  elif [[ -n "\$ENGINE_VER" && -f "\$RES/engine-wine-x86_64-\${ENGINE_VER}.tar.xz" ]]; then
+    ENGINE_SRC="\$RES/engine-wine-x86_64-\${ENGINE_VER}.tar.xz"
+  else
+    ENGINE_SRC="\$RES/engine-payload"
+  fi
 fi
 
 export CYDER_ENGINE_SRC="\$ENGINE_SRC"

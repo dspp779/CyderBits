@@ -137,11 +137,8 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             || engineNeedsInstall(context: context, engineWine: engineWine)
         let needsBootstrap = !FileManager.default.fileExists(atPath: bootstrapMarker.path)
 
-        if needsEngine || needsBootstrap {
-            showSetup("建立遊戲引擎中…")
-        }
-
         if needsEngine {
+            showSetup("建立遊戲引擎中…")
             let code = runLauncher(context: context, args: [
                 context.launcher, "--engine-src", context.engineSrc, "--ensure-engine-only",
             ])
@@ -152,15 +149,6 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
                 )
                 return code
             }
-        }
-
-        var exePaths = normalizeExePaths(pendingFiles)
-        if exePaths.isEmpty {
-            hideSetup()
-            guard let chosen = chooseExeOnMainThread() else {
-                return 1
-            }
-            exePaths = [chosen]
         }
 
         if needsBootstrap {
@@ -177,10 +165,19 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             }
         }
 
+        var exePaths = normalizeExePaths(pendingFiles)
+        if exePaths.isEmpty {
+            hideSetup()
+            guard let chosen = chooseExeOnMainThread() else {
+                return 1
+            }
+            exePaths = [chosen]
+        }
+
         if needsEngine || needsBootstrap {
             showSetup("正在啟動遊戲…")
         }
-        var args = [context.launcher, "--engine-src", context.engineSrc, "--launch-exe", exePaths[0]]
+        let args = [context.launcher, "--engine-src", context.engineSrc, "--launch-exe", exePaths[0]]
         return runLauncher(context: context, args: args)
     }
 
@@ -197,7 +194,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         let installedFile = engineWine
             .deletingLastPathComponent()
             .deletingLastPathComponent()
-            .appendingPathComponent(".cyder-engine-version")
+            .appendingPathComponent("version")
         guard let installed = try? String(contentsOfFile: installedFile.path, encoding: .utf8)
             .trimmingCharacters(in: .whitespacesAndNewlines),
             !installed.isEmpty
@@ -316,6 +313,16 @@ private struct CyderLaunchContext {
 }
 
 private func resolveEngineSrc(resourcePath: String) -> String {
+    let archiveListFile = resourcePath + "/engine-archive.txt"
+    if let archiveName = try? String(contentsOfFile: archiveListFile, encoding: .utf8) {
+        let trimmedArchive = archiveName.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmedArchive.isEmpty {
+            let archivePath = resourcePath + "/" + trimmedArchive
+            if FileManager.default.fileExists(atPath: archivePath) {
+                return archivePath
+            }
+        }
+    }
     let versionFile = resourcePath + "/engine-version.txt"
     if let ver = try? String(contentsOfFile: versionFile, encoding: .utf8) {
         let trimmed = ver.trimmingCharacters(in: .whitespacesAndNewlines)
