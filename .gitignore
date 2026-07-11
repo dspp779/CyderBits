@@ -1,18 +1,23 @@
 # Build toolchain and outputs
 .brew-x86/
+build/
 install/
-sources/wine/build64/
 tests/tmp/
 logs/
 dist/
 
-# Large local trees (stay on disk; not versioned)
-BlueCrossgateNew/
+# Legacy extracted trees at repo root (prefer build/)
 sources/
 llvm-mingw-20260616-ucrt-macos-universal/
 cnc-ddraw/
 
-# Archives and binary drops
+# Large local trees (stay on disk; not versioned)
+BlueCrossgateNew/
+
+# Archives under tools/ (tracked libarchive/ is the small exception)
+tools/archives/
+
+# Archives and binary drops at repo root
 *.tar.gz
 *.tar.xz
 *.tar.zst

@@ -41,7 +41,7 @@ while [[ $# -gt 0 ]]; do
       cat <<EOF
 Usage: $(basename "$0") [--force] [--dry-run] [--zstd] [--format zstd|xz]
 
-Build a compressed engine artifact from install/wine-x86_64.
+Build a compressed engine artifact from install/wine-cx26-x86_64 (or WINE_INSTALL).
   xz:   dist/artifacts/engine-wine-x86_64-<CX26-winever>.tar.xz (default, xz -9e)
   zstd: dist/artifacts/engine-<CX26-winever>.tar.zst (--zstd)
 Set CYDER_ENGINE_VERSION to override the detected version label.

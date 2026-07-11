@@ -12,7 +12,7 @@ touch "$TMP/BlueCrossgateNew/BlueLauncher.exe"
 touch "$TMP/BlueCrossgateNew/bluecg.exe"
 printf 'official-ddraw' > "$TMP/BlueCrossgateNew/BlueLauncher_temp/BlueCG_updatelogin/DDRAW.dll"
 
-output="$(bash "$ROOT/scripts/run-bluecg.sh" --prefix "$TMP/BlueCrossgateNew" --wine-install "$ROOT/install/wine-x86_64" --dry-run 2>&1 || true)"
+output="$(bash "$ROOT/scripts/run-bluecg.sh" --prefix "$TMP/BlueCrossgateNew" --wine-install "$ROOT/install/wine-cx26-x86_64" --dry-run 2>&1 || true)"
 
 assert_contains "$output" "cp" "dry-run should copy the official DDRAW.dll into the game root"
 assert_contains "$output" "ddraw.dll" "copy target should be lowercase ddraw.dll"
@@ -24,7 +24,7 @@ if [[ "$output" == *"WINEDLLOVERRIDES"* ]]; then
   exit 1
 fi
 
-output_no_gecko="$(bash "$ROOT/scripts/run-bluecg.sh" --prefix "$TMP/BlueCrossgateNew" --wine-install "$ROOT/install/wine-x86_64" --no-gecko-prompt --dry-run 2>&1 || true)"
+output_no_gecko="$(bash "$ROOT/scripts/run-bluecg.sh" --prefix "$TMP/BlueCrossgateNew" --wine-install "$ROOT/install/wine-cx26-x86_64" --no-gecko-prompt --dry-run 2>&1 || true)"
 assert_contains "$output_no_gecko" "WINEDLLOVERRIDES=mshtml=" "dry-run --no-gecko-prompt should disable mshtml for the session"
 
 echo "PASS test-run-bluecg"

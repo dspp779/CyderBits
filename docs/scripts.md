@@ -6,8 +6,9 @@
 
 | 腳本 | 用途 |
 |------|------|
-| `env-x86_64.sh` | `OGOM`、`.brew-x86`、`WINE_INSTALL`、`ENTITLEMENTS_PLIST`、`arch -x86_64` 等 |
-| `build-wine.sh` | configure + make + install Wine 至 `install/wine-x86_64` |
+| `env-x86_64.sh` | `OGOM`、`CX_VERSION`、`.brew-x86`、`WINE_SRC`、`WINE_INSTALL`、`ENTITLEMENTS_PLIST` 等；**忽略 shell 的 `HOMEBREW_PREFIX=/opt/homebrew`** |
+| `prepare-build-deps.sh` | 從 `tools/archives/` 解壓 llvm-mingw 與 CrossOver 原始碼至 `build/` |
+| `build-wine.sh` | `--cx 25\|26`：prepare + configure + make + install 至 `install/wine-cx25-x86_64` 或 `wine-cx26-x86_64` |
 | `sign-wine.sh` | ad-hoc codesign + entitlements（`config/entitlements.plist`） |
 | `bundle-wine-dylibs.sh` | 將 Homebrew dylib 複製進 Wine 樹並改 `@loader_path` |
 | `strip-wine-install.sh` | 剝除 engine 非 runtime（`include/`、dev `bin`、`*.a`、man）；打包前 staging |
@@ -95,7 +96,7 @@ run-bluecg.sh
 ## strip-wine-install.sh
 
 ```bash
-bash scripts/strip-wine-install.sh install/wine-x86_64   # 就地（開發用）
+bash scripts/strip-wine-install.sh install/wine-cx26-x86_64   # 就地（開發用）
 bash scripts/strip-wine-install.sh --dry-run "$ROOT"     # 預覽
 CYDER_SKIP_ENGINE_STRIP=1 bash scripts/create-cyder-app.sh  # 打包時跳過 strip
 ```
@@ -104,7 +105,7 @@ CYDER_SKIP_ENGINE_STRIP=1 bash scripts/create-cyder-app.sh  # 打包時跳過 st
 
 ```
 exe [exe ...]          .exe 路徑（可省略 → 檔案選擇器）
---engine-src DIR       Wine 安裝來源（預設 install/wine-x86_64）
+--engine-src DIR       Wine 安裝來源（預設 install/wine-cx26-x86_64）
 --dry-run              印出路徑，不裝引擎、不啟動
 --bootstrap-only       只 bootstrap SharedPrefix（mono、tar、hi-res）
 ```
@@ -121,7 +122,7 @@ exe [exe ...]          .exe 路徑（可省略 → 檔案選擇器）
 --no-gecko-prompt
 --no-mac-hires
 --no-msync
---engine-src DIR       Wine 安裝來源（預設 install/wine-x86_64）
+--engine-src DIR       Wine 安裝來源（預設 install/wine-cx26-x86_64）
 ```
 
 ## 環境變數（Cyder / Wine）

@@ -48,10 +48,11 @@ bash scripts/run-bluecg.sh
 
 ## Wine 原始碼
 
-Wine 來自 **CrossOver 開源釋出** — 解壓至 `sources/`（見 [CodeWeavers CrossOver Source](https://www.codeweavers.com/crossover/source)），建置使用 `sources/wine/`。
+Wine 來自 **CrossOver 開源釋出** — 將 archive 放在 `tools/archives/`（見 [CodeWeavers CrossOver Source](https://www.codeweavers.com/crossover/source)），建置時解壓至 `build/cx25/` 或 `build/cx26/`。
 
 ```bash
-bash scripts/build-wine.sh
+bash scripts/build-wine.sh --cx 26          # 預設 CX26
+bash scripts/build-wine.sh --cx 25          # A/B 對照 CX25
 bash scripts/sign-wine.sh
 ```
 
@@ -66,7 +67,8 @@ bash scripts/sign-wine.sh
 ### 1. 建 Wine（首次，耗時長）
 
 ```bash
-bash scripts/build-wine.sh
+bash scripts/build-wine.sh --cx 26 --install-deps   # 首次（含 bootstrap brew）
+bash scripts/build-wine.sh --cx 26
 bash scripts/sign-wine.sh
 ```
 
@@ -99,9 +101,14 @@ open dist/CyderBits.app
 ├── scripts/
 ├── tests/
 ├── docs/
-├── sources/wine/               # CrossOver Wine（.gitignore）
+├── tools/
+│   ├── archives/               # crossover + llvm-mingw 壓縮檔（.gitignore）
+│   └── libarchive/             # GnuWin bsdtar payload
+├── build/                      # 解壓後原始碼與 llvm-mingw（.gitignore）
 ├── .brew-x86/                  # .gitignore
-├── install/wine-x86_64/        # .gitignore
+├── install/
+│   ├── wine-cx25-x86_64/       # CX25 engine（.gitignore）
+│   └── wine-cx26-x86_64/       # CX26 engine（.gitignore）
 └── BlueCrossgateNew/           # BlueCG（.gitignore）
 ```
 
@@ -109,6 +116,7 @@ open dist/CyderBits.app
 
 ```bash
 bash tests/test-env-x86_64.sh
+bash tests/test-prepare-build-deps.sh
 bash tests/test-build-wine.sh
 bash tests/test-sign-wine.sh
 bash tests/test-run-bluecg.sh

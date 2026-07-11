@@ -8,10 +8,10 @@ Applied only when a clean build fails. Prefer proper dependency fixes first.
 
 **Cause:** configure found neither `libvulkan` nor `libMoltenVK`, so `config.h` never defines `SONAME_LIBVULKAN`, but CrossOver still compiles `vulkan.c`.
 
-**Apply** (from repo root):
+**Apply** (from repo root, CX26 example):
 
 ```bash
-patch -p1 -d sources/wine < patches/w1-win32u-vulkan-soname.patch
+patch -p1 -d build/cx26/sources/wine < patches/w1-win32u-vulkan-soname.patch
 ```
 
 The patch adds:
@@ -27,9 +27,9 @@ after `#include "config.h"` (not a bare `sed` replace of every identifier).
 **Restore:**
 
 ```bash
-tar -xOf crossover-sources-26.2.0.tar.gz sources/wine/dlls/win32u/vulkan.c \
-  > sources/wine/dlls/win32u/vulkan.c
-# or: patch -R -p1 -d sources/wine < patches/w1-win32u-vulkan-soname.patch
+tar -xOf tools/archives/crossover-sources-26.2.0.tar.gz sources/wine/dlls/win32u/vulkan.c \
+  > build/cx26/sources/wine/dlls/win32u/vulkan.c
+# or: patch -R -p1 -d build/cx26/sources/wine < patches/w1-win32u-vulkan-soname.patch
 ```
 
 Then rebuild the affected object / full `make` as needed.

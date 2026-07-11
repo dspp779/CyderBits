@@ -197,4 +197,4 @@ codesign --force --deep --sign - "$APP" 2>/dev/null || true
 echo ""
 echo "Created $APP"
 echo "Open: open \"$APP\""
-echo "CLI:  bash scripts/cyder_launcher.sh --engine-src install/wine-x86_64 /path/to/game.exe"
+echo "CLI:  bash scripts/cyder_launcher.sh --engine-src install/wine-cx26-x86_64 /path/to/game.exe"
