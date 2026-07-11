@@ -37,7 +37,8 @@ else
 fi
 
 if WINEPREFIX="$SHARED" arch -x86_64 "$WINE" reg query "HKCU\\Software\\Wine\\Mac Driver" /v RetinaMode >/dev/null 2>&1; then
-  echo "RetinaMode registry OK"
+  retina="$(WINEPREFIX="$SHARED" arch -x86_64 "$WINE" reg query "HKCU\\Software\\Wine\\Mac Driver" /v RetinaMode 2>/dev/null | rg -i 'RetinaMode' | rg -io 'n|y' | head -1 || true)"
+  assert_eq "${retina,,}" "n" "bootstrap should default Mac high-res to OFF (RetinaMode=n)"
 fi
 
 echo "PASS test-cyder-bootstrap"
