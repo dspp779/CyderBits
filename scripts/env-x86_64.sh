@@ -48,6 +48,10 @@ if [[ -z "${LLVM_MINGW:-}" ]]; then
 fi
 export LLVM_MINGW
 
+export GRAPHICS_INSTALL="${GRAPHICS_INSTALL:-$OGOM/install/graphics-cx${CX_VERSION}-x86_64}"
+export MOLTENVK_SRC="${MOLTENVK_SRC:-$BUILD_DIR/cx${CX_VERSION}/sources/moltenvk}"
+export VKD3D_SRC="${VKD3D_SRC:-$BUILD_DIR/cx${CX_VERSION}/sources/vkd3d}"
+
 export BLUECG_PREFIX="${BLUECG_PREFIX:-$OGOM/BlueCrossgateNew}"
 export ENTITLEMENTS_PLIST="${ENTITLEMENTS_PLIST:-$OGOM/config/entitlements.plist}"
 export CYDER_CROSSOVER_VERSION="${CYDER_CROSSOVER_VERSION:-26.2.0}"

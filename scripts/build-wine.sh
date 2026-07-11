@@ -10,6 +10,8 @@ CONFIGURE_ONLY=0
 PREPARE_ONLY=0
 CX_VERSION="${CX_VERSION:-26}"
 JOBS="$(sysctl -n hw.ncpu)"
+VULKAN_MODE=without
+VULKAN_SOURCE=homebrew
 
 run() {
   if [[ "$DRY_RUN" -eq 1 ]]; then
@@ -38,6 +40,16 @@ while [[ $# -gt 0 ]]; do
       JOBS="$2"
       shift
       ;;
+    --with-vulkan)
+      VULKAN_MODE=with
+      ;;
+    --without-vulkan)
+      VULKAN_MODE=without
+      ;;
+    --vulkan-source)
+      VULKAN_SOURCE="$2"
+      shift
+      ;;
     -h | --help)
       cat <<EOF
 Usage: $(basename "$0") [options]
@@ -49,10 +61,22 @@ Options:
   --prepare-only     Extract archives from tools/archives/ and exit
   --bootstrap-brew   Install project-local x86_64 Homebrew
   --install-deps     Install build dependencies via .brew-x86
+  --with-vulkan      Enable Vulkan (Wine configure autodetects MoltenVK)
+  --without-vulkan   Disable Vulkan (Wine ./configure --without-vulkan)
+  --vulkan-source SRC
+                     With --with-vulkan: homebrew (default) or crossover
+                     crossover: use install from build-graphics-stack.sh
   --configure-only   Run configure without make/install
   --jobs N           Parallel make jobs (default: CPU count)
   --dry-run          Print commands without executing
   -h, --help         Show this help
+
+Vulkan examples:
+  bash scripts/build-wine.sh --install-deps --without-vulkan
+  bash scripts/build-wine.sh --install-deps --with-vulkan --vulkan-source homebrew
+  bash scripts/build-graphics-stack.sh --cx 26 --install-deps && \\
+    bash scripts/build-graphics-stack.sh --cx 26
+  bash scripts/build-wine.sh --with-vulkan --vulkan-source crossover
 EOF
       exit 0
       ;;
@@ -71,6 +95,19 @@ case "$CX_VERSION" in
     exit 1
     ;;
 esac
+
+case "$VULKAN_SOURCE" in
+  homebrew | crossover) ;;
+  *)
+    echo "Unknown --vulkan-source: $VULKAN_SOURCE (expected homebrew or crossover)" >&2
+    exit 1
+    ;;
+esac
+
+if [[ "$VULKAN_MODE" == "without" && "$VULKAN_SOURCE" != "homebrew" ]]; then
+  echo "--vulkan-source is only valid with --with-vulkan" >&2
+  exit 1
+fi
 
 export CX_VERSION
 source "$SCRIPT_DIR/env-x86_64.sh"
@@ -110,13 +147,62 @@ if [[ "$INSTALL_DEPS" -eq 1 ]]; then
     echo "Missing $HOMEBREW_PREFIX/bin/brew; run with --bootstrap-brew first" >&2
     exit 1
   fi
-  run brew_x86 install autoconf bison flex pkgconf freetype gettext gnutls zlib bzip2
+  DEPS=(autoconf bison flex pkgconf freetype gettext gnutls zlib bzip2)
+  if [[ "$VULKAN_MODE" == "with" ]]; then
+    case "$VULKAN_SOURCE" in
+      homebrew)
+        DEPS+=(molten-vk vulkan-headers)
+        ;;
+      crossover)
+        DEPS+=(cmake python3)
+        ;;
+    esac
+  fi
+  run brew_x86 install "${DEPS[@]}"
+  if [[ "$VULKAN_MODE" == "with" && "$VULKAN_SOURCE" == "crossover" ]]; then
+    echo "CrossOver Vulkan: run build-graphics-stack.sh after deps (cmake/python3 installed)."
+    echo "  bash scripts/build-graphics-stack.sh --cx $CX_VERSION"
+  fi
 fi
 
 # Sanitize PATH so configure/make never pick /opt/homebrew (arm64) pkg-config/libs.
 BUILD_PATH="$LLVM_MINGW/bin:$HOMEBREW_PREFIX/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 # keg-only formulae ship .pc under opt/*/lib/pkgconfig
 PKG_PC_PATH="$HOMEBREW_PREFIX/lib/pkgconfig:${HOMEBREW_PREFIX}/opt/zlib/lib/pkgconfig:${HOMEBREW_PREFIX}/opt/bzip2/lib/pkgconfig"
+
+require_moltenvk_homebrew() {
+  local lib
+  for lib in \
+    "$HOMEBREW_PREFIX/opt/molten-vk/lib/libMoltenVK.dylib" \
+    "$HOMEBREW_PREFIX/lib/libMoltenVK.dylib"; do
+    if [[ -f "$lib" ]]; then
+      return 0
+    fi
+  done
+  if [[ "$DRY_RUN" -eq 1 ]]; then
+    echo "+ require libMoltenVK.dylib in $HOMEBREW_PREFIX"
+    return 0
+  fi
+  echo "Missing x86_64 libMoltenVK.dylib in $HOMEBREW_PREFIX." >&2
+  echo "Re-run: bash scripts/build-wine.sh --install-deps --with-vulkan --vulkan-source homebrew" >&2
+  exit 1
+}
+
+require_moltenvk_crossover() {
+  local lib="$GRAPHICS_INSTALL/lib/libMoltenVK.dylib"
+  if [[ -f "$lib" ]]; then
+    return 0
+  fi
+  if [[ "$DRY_RUN" -eq 1 ]]; then
+    echo "+ require $lib from build-graphics-stack.sh"
+    return 0
+  fi
+  echo "Missing $lib" >&2
+  echo "Build CrossOver MoltenVK first:" >&2
+  echo "  bash scripts/build-graphics-stack.sh --cx $CX_VERSION --install-deps" >&2
+  echo "  bash scripts/build-graphics-stack.sh --cx $CX_VERSION" >&2
+  exit 1
+}
 
 # Homebrew bzip2 is keg-only and may not install a .pc file; freetype2.pc needs it.
 ensure_bzip2_pc() {
@@ -172,6 +258,36 @@ require_x86_dep() {
 ensure_bzip2_pc
 require_x86_dep freetype2
 
+CONFIGURE_VULKAN=()
+VULKAN_LIB_PATHS=()
+VULKAN_PKG_PC_PATH="$PKG_PC_PATH"
+
+if [[ "$VULKAN_MODE" == "without" ]]; then
+  CONFIGURE_VULKAN=(--without-vulkan)
+else
+  case "$VULKAN_SOURCE" in
+    homebrew)
+      require_moltenvk_homebrew
+      VULKAN_LIB_PATHS+=("$HOMEBREW_PREFIX/opt/molten-vk/lib" "$HOMEBREW_PREFIX/lib")
+      if [[ -d "$HOMEBREW_PREFIX/opt/molten-vk/lib/pkgconfig" ]]; then
+        VULKAN_PKG_PC_PATH="$HOMEBREW_PREFIX/opt/molten-vk/lib/pkgconfig:$VULKAN_PKG_PC_PATH"
+      fi
+      ;;
+    crossover)
+      require_moltenvk_crossover
+      VULKAN_LIB_PATHS+=("$GRAPHICS_INSTALL/lib")
+      ;;
+  esac
+fi
+
+if [[ ${#VULKAN_LIB_PATHS[@]} -gt 0 ]]; then
+  for _vulkan_lib in "${VULKAN_LIB_PATHS[@]}"; do
+    PKG_PC_PATH="$_vulkan_lib/pkgconfig:$PKG_PC_PATH"
+    export LIBRARY_PATH="${_vulkan_lib}${LIBRARY_PATH:+:$LIBRARY_PATH}"
+  done
+  unset _vulkan_lib
+fi
+
 run mkdir -p "$OGOM/install" "$WINE_SRC/build64"
 # Dry-run only prints mkdir; still create dirs so subsequent cd works.
 mkdir -p "$OGOM/install" "$WINE_SRC/build64"
@@ -193,19 +309,22 @@ run arch -x86_64 env \
   PATH="$BUILD_PATH" \
   BISON="$HOMEBREW_PREFIX/opt/bison/bin/bison" \
   PKG_CONFIG="$HOMEBREW_PREFIX/bin/pkg-config" \
-  PKG_CONFIG_PATH="$PKG_PC_PATH" \
+  PKG_CONFIG_PATH="$VULKAN_PKG_PC_PATH" \
+  LIBRARY_PATH="${LIBRARY_PATH:-}" \
   ../configure -C \
     --enable-win64 \
     --enable-archs=i386,x86_64 \
     --with-mingw=llvm-mingw \
-    --prefix="$WINE_INSTALL"
+    --prefix="$WINE_INSTALL" \
+    "${CONFIGURE_VULKAN[@]}"
 
 if [[ "$CONFIGURE_ONLY" -eq 0 ]]; then
-  run arch -x86_64 env PATH="$BUILD_PATH" PKG_CONFIG_PATH="$PKG_PC_PATH" make -j"$JOBS"
-  run arch -x86_64 env PATH="$BUILD_PATH" PKG_CONFIG_PATH="$PKG_PC_PATH" make install
+  run arch -x86_64 env PATH="$BUILD_PATH" PKG_CONFIG_PATH="$VULKAN_PKG_PC_PATH" LIBRARY_PATH="${LIBRARY_PATH:-}" make -j"$JOBS"
+  run arch -x86_64 env PATH="$BUILD_PATH" PKG_CONFIG_PATH="$VULKAN_PKG_PC_PATH" LIBRARY_PATH="${LIBRARY_PATH:-}" make install
   if [[ "$DRY_RUN" -eq 1 ]]; then
-    echo "+ $SCRIPT_DIR/bundle-wine-dylibs.sh"
+    echo "+ GRAPHICS_INSTALL=${GRAPHICS_INSTALL:-} VULKAN_MODE=$VULKAN_MODE $SCRIPT_DIR/bundle-wine-dylibs.sh"
   else
-    "$SCRIPT_DIR/bundle-wine-dylibs.sh" "$WINE_INSTALL"
+    GRAPHICS_INSTALL="$GRAPHICS_INSTALL" VULKAN_MODE="$VULKAN_MODE" \
+      "$SCRIPT_DIR/bundle-wine-dylibs.sh" "$WINE_INSTALL"
   fi
 fi

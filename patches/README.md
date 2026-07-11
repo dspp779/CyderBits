@@ -34,4 +34,17 @@ tar -xOf tools/archives/crossover-sources-26.2.0.tar.gz sources/wine/dlls/win32u
 
 Then rebuild the affected object / full `make` as needed.
 
-**Better fix (no patch):** install x86_64 MoltenVK into `.brew-x86` and re-run configure so `SONAME_LIBVULKAN` is defined properly.
+**Better fix (no patch):** enable Vulkan when building Wine:
+
+```bash
+# Homebrew MoltenVK (fast path)
+bash scripts/build-wine.sh --install-deps --with-vulkan --vulkan-source homebrew
+bash scripts/build-wine.sh --with-vulkan --vulkan-source homebrew
+
+# CrossOver FOSS MoltenVK (version-locked to CX tarball)
+bash scripts/build-graphics-stack.sh --cx 26 --install-deps
+bash scripts/build-graphics-stack.sh --cx 26
+bash scripts/build-wine.sh --with-vulkan --vulkan-source crossover
+```
+
+To skip Vulkan entirely (BlueCG default): `--without-vulkan`.

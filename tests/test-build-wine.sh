@@ -37,6 +37,17 @@ assert_contains "$output" "install/wine-cx26-x86_64" "dry-run should install to 
 assert_contains "$output" "make -j" "dry-run should show the compile step"
 assert_contains "$output" "make install" "dry-run should show the install step"
 assert_contains "$output" "bundle-wine-dylibs.sh" "dry-run should bundle relocatable dylibs after install"
+assert_contains "$output" "--without-vulkan" "default dry-run should disable Vulkan"
+
+output_vk_homebrew="$(bash "$ROOT/scripts/build-wine.sh" --cx 26 --dry-run --install-deps --with-vulkan --vulkan-source homebrew 2>&1 || true)"
+assert_contains "$output_vk_homebrew" "molten-vk" "homebrew vulkan deps should include molten-vk"
+assert_contains "$output_vk_homebrew" "require libMoltenVK.dylib" "with-vulkan homebrew should check MoltenVK"
+
+output_vk_crossover="$(bash "$ROOT/scripts/build-wine.sh" --cx 26 --dry-run --install-deps --with-vulkan --vulkan-source crossover 2>&1 || true)"
+assert_contains "$output_vk_crossover" "cmake" "crossover vulkan deps should include cmake"
+assert_contains "$output_vk_crossover" "build-graphics-stack.sh" "crossover path should reference graphics stack build"
+assert_contains "$output_vk_crossover" "require" "crossover path should check graphics install"
+assert_contains "$output_vk_crossover" "graphics-cx26-x86_64" "crossover path should use graphics prefix"
 
 output_cx25="$(bash "$ROOT/scripts/build-wine.sh" --cx 25 --prepare-only --dry-run 2>&1 || true)"
 if [[ "$output_cx25" != *"crossover-sources-25.1.1.tar.gz"* && "$output_cx25" != *"CX25 sources already present"* ]]; then

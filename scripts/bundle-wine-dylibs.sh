@@ -9,19 +9,43 @@ source "$SCRIPT_DIR/env-x86_64.sh"
 WINE_ROOT="${1:-$WINE_INSTALL}"
 UNIX_LIB="$WINE_ROOT/lib/wine/x86_64-unix"
 BREW="$HOMEBREW_PREFIX"
+GRAPHICS_LIB="${GRAPHICS_INSTALL:-}/lib"
+VULKAN_MODE="${VULKAN_MODE:-without}"
 
 [[ -d "$UNIX_LIB" ]] || { echo "Missing $UNIX_LIB" >&2; exit 1; }
 [[ -d "$BREW" ]] || { echo "Missing $BREW (needed as source of dylibs)" >&2; exit 1; }
 
+export GRAPHICS_LIB VULKAN_MODE
+
 python3 - "$WINE_ROOT" "$BREW" "$UNIX_LIB" <<'PY'
+import os
 import subprocess, re, shutil, sys
 from pathlib import Path
 
 wine_root = Path(sys.argv[1])
 brew = Path(sys.argv[2]).resolve()
 unix_lib = Path(sys.argv[3])
+graphics_lib = Path(os.environ.get("GRAPHICS_LIB", "")) if os.environ.get("GRAPHICS_LIB") else None
+vulkan_mode = os.environ.get("VULKAN_MODE", "without")
 
 abs_re = re.compile(r"^\t(.+?) \(compatibility")
+
+
+def allowed_root(p: Path) -> bool:
+    p = p.resolve()
+    for root in (brew, wine_root):
+        try:
+            p.relative_to(root)
+            return True
+        except ValueError:
+            pass
+    if graphics_lib and graphics_lib.is_dir():
+        try:
+            p.relative_to(graphics_lib.resolve())
+            return True
+        except ValueError:
+            pass
+    return False
 
 
 def otool_deps(path: Path):
@@ -59,6 +83,17 @@ for name in (
             seeds.append(candidate.resolve())
             break
 
+if vulkan_mode == "with":
+    for candidate in (
+        brew / "opt" / "molten-vk" / "lib" / "libMoltenVK.dylib",
+        brew / "lib" / "libMoltenVK.dylib",
+        (graphics_lib / "libMoltenVK.dylib") if graphics_lib else None,
+        unix_lib / "libMoltenVK.dylib",
+    ):
+        if candidate and candidate.exists():
+            seeds.append(candidate.resolve())
+            break
+
 # follow any existing symlinks already in unix lib
 for p in unix_lib.iterdir():
     if p.suffix == ".dylib":
@@ -78,14 +113,8 @@ while queue:
     p = p.resolve()
     if p in seen_files:
         continue
-    try:
-        p.relative_to(brew)
-    except ValueError:
-        # allow already-bundled copies under wine_root
-        try:
-            p.relative_to(wine_root)
-        except ValueError:
-            continue
+    if not allowed_root(p):
+        continue
     seen_files.add(p)
     iid = install_id(p)
     base = Path(iid).name
@@ -100,9 +129,7 @@ while queue:
         if not dp.exists():
             continue
         dp = dp.resolve()
-        try:
-            dp.relative_to(brew)
-        except ValueError:
+        if not allowed_root(dp):
             continue
         queue.append(dp)
 
