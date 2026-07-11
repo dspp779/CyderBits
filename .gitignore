@@ -38,3 +38,5 @@ libarchive-2.4.12-1-*.zip
 # Python
 __pycache__/
 *.py[cod]
+
+.wine/

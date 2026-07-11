@@ -258,13 +258,15 @@ require_x86_dep() {
 ensure_bzip2_pc
 require_x86_dep freetype2
 
-CONFIGURE_VULKAN=()
+CONFIGURE_VULKAN_FLAG=()
+if [[ "$VULKAN_MODE" == "without" ]]; then
+  CONFIGURE_VULKAN_FLAG=(--without-vulkan)
+fi
+
 VULKAN_LIB_PATHS=()
 VULKAN_PKG_PC_PATH="$PKG_PC_PATH"
 
-if [[ "$VULKAN_MODE" == "without" ]]; then
-  CONFIGURE_VULKAN=(--without-vulkan)
-else
+if [[ "$VULKAN_MODE" == "with" ]]; then
   case "$VULKAN_SOURCE" in
     homebrew)
       require_moltenvk_homebrew
@@ -305,18 +307,33 @@ else
 fi
 
 cd "$WINE_SRC/build64"
-run arch -x86_64 env \
-  PATH="$BUILD_PATH" \
-  BISON="$HOMEBREW_PREFIX/opt/bison/bin/bison" \
-  PKG_CONFIG="$HOMEBREW_PREFIX/bin/pkg-config" \
-  PKG_CONFIG_PATH="$VULKAN_PKG_PC_PATH" \
-  LIBRARY_PATH="${LIBRARY_PATH:-}" \
-  ../configure -C \
-    --enable-win64 \
-    --enable-archs=i386,x86_64 \
-    --with-mingw=llvm-mingw \
-    --prefix="$WINE_INSTALL" \
-    "${CONFIGURE_VULKAN[@]}"
+
+CONFIGURE_CMD=(
+  arch -x86_64 env
+  PATH="$BUILD_PATH"
+  BISON="$HOMEBREW_PREFIX/opt/bison/bin/bison"
+  PKG_CONFIG="$HOMEBREW_PREFIX/bin/pkg-config"
+  PKG_CONFIG_PATH="$VULKAN_PKG_PC_PATH"
+  LIBRARY_PATH="${LIBRARY_PATH:-}"
+  ../configure
+  -C
+  --enable-win64
+  --enable-archs=i386,x86_64
+  --with-mingw=llvm-mingw
+  --prefix="$WINE_INSTALL"
+)
+if [[ ${#CONFIGURE_VULKAN_FLAG[@]} -gt 0 ]]; then
+  CONFIGURE_CMD+=("${CONFIGURE_VULKAN_FLAG[@]}")
+fi
+
+echo "configure command:"
+printf '  '
+for arg in "${CONFIGURE_CMD[@]}"; do
+  printf '%q ' "$arg"
+done
+printf '\n'
+
+run "${CONFIGURE_CMD[@]}"
 
 if [[ "$CONFIGURE_ONLY" -eq 0 ]]; then
   run arch -x86_64 env PATH="$BUILD_PATH" PKG_CONFIG_PATH="$VULKAN_PKG_PC_PATH" LIBRARY_PATH="${LIBRARY_PATH:-}" make -j"$JOBS"

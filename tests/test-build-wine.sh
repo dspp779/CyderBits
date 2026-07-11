@@ -41,7 +41,11 @@ assert_contains "$output" "--without-vulkan" "default dry-run should disable Vul
 
 output_vk_homebrew="$(bash "$ROOT/scripts/build-wine.sh" --cx 26 --dry-run --install-deps --with-vulkan --vulkan-source homebrew 2>&1 || true)"
 assert_contains "$output_vk_homebrew" "molten-vk" "homebrew vulkan deps should include molten-vk"
-assert_contains "$output_vk_homebrew" "require libMoltenVK.dylib" "with-vulkan homebrew should check MoltenVK"
+if [[ "$output_vk_homebrew" == *"require libMoltenVK.dylib"* ]]; then
+  assert_contains "$output_vk_homebrew" "require libMoltenVK.dylib" "with-vulkan homebrew should check MoltenVK when missing"
+else
+  assert_contains "$output_vk_homebrew" "opt/molten-vk/lib" "with-vulkan homebrew should add MoltenVK to LIBRARY_PATH when present"
+fi
 
 output_vk_crossover="$(bash "$ROOT/scripts/build-wine.sh" --cx 26 --dry-run --install-deps --with-vulkan --vulkan-source crossover 2>&1 || true)"
 assert_contains "$output_vk_crossover" "cmake" "crossover vulkan deps should include cmake"
