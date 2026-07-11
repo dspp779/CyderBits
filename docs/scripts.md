@@ -8,7 +8,8 @@
 |------|------|
 | `env-x86_64.sh` | `OGOM`、`CX_VERSION`、`.brew-x86`、`WINE_SRC`、`WINE_INSTALL`、`ENTITLEMENTS_PLIST` 等；**忽略 shell 的 `HOMEBREW_PREFIX=/opt/homebrew`** |
 | `prepare-build-deps.sh` | 從 `tools/archives/` 解壓 llvm-mingw 與 CrossOver 原始碼至 `build/` |
-| `build-wine.sh` | `--cx 25\|26`：prepare + configure + make + install 至 `install/wine-cx25-x86_64` 或 `wine-cx26-x86_64` |
+| `build-wine.sh` | `--cx 25\|26`：prepare + configure + make + install 至 `install/wine-cx25-x86_64` 或 `wine-cx26-x86_64`；`--with-vulkan` / `--without-vulkan`；見 [wine-configure-options.md](wine-configure-options.md) |
+| `build-graphics-stack.sh` | 從 CrossOver FOSS 建 MoltenVK（`--vulkan-source crossover` 時）；`--with-vkd3d` 預留 phase 2 |
 | `sign-wine.sh` | ad-hoc codesign + entitlements（`config/entitlements.plist`） |
 | `bundle-wine-dylibs.sh` | 將 Homebrew dylib 複製進 Wine 樹並改 `@loader_path` |
 | `strip-wine-install.sh` | 剝除 engine 非 runtime（`include/`、dev `bin`、`*.a`、man）；打包前 staging |
