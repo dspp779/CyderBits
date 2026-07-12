@@ -327,6 +327,34 @@ main thread 稍後才套用 view frame / 清 backing cache
 
 所以「有呼叫 `wine_updateBackingSize`」不足以排除錯誤；必須同時比對 context、view pointer、frame、cache 與 CGL backing size 的時間序。
 
+### 階段 9：A1–A4 實驗結果（2026-07-12）
+
+使用獨立 prefix `/Users/jjc/ogom/.wine`、同一 BlueCG 遊戲目錄、`RetinaMode` 固定測試：
+
+| 實驗 | 主要差異 | RetinaMode | 拖曳結果 |
+|------|----------|------------|----------|
+| A1 | resize 時只保留非 Retina cache guard | `n` | 黑屏 |
+| A2 | backing-size update/reset 僅 Retina 才執行 | `n` | **成功** |
+| A3 | 只略過 `wine_setBackingSize({0,0})` | `n` | 黑屏 |
+| A2 | 同一 guard，但 Retina 路徑重新啟用 | `y` | 黑屏 |
+| A4 | 無條件停用 backing-size update/reset，且不清 cache | `y` | **成功**（direct 與 launcher） |
+| A5 | 僅 live resize transaction 期間停用 backing update/reset | `y` | live resize 成功；Alt+Enter／最小化還原失敗，高 DPI 無黑邊 |
+
+這組結果把根因進一步收斂到 **explicit GL backing-size update/reset path**：
+
+- A1 vs A2：只改 backing-size update/reset 是否執行，結果由黑變正常。
+- A1 vs A3：只略過 cache invalidation 不足以修復。
+- A2 `n` vs `y`：同一組 guard 在 Retina 開啟後重新走失效路徑，黑屏復現。
+- A4 `y` 成功：完全停用該路徑可避開黑屏，顯示 Retina 本身不是唯一障礙。
+
+A4 已通過 BlueCG 的 direct 與 launcher resize、Alt+Enter、最小化／還原；目前可作為避免黑屏的 workaround。但高 DPI 時外層視窗會放大、遊戲 render target 維持原尺寸，畫面固定在左下角且右上出現黑邊。A5 證明只在 live resize transaction 暫停 backing update/reset 可同時保留高 DPI backing、避免 live resize 黑屏；但全域 flag 未涵蓋 Alt+Enter／最小化／還原，造成黑屏與尺寸失控。A6 應改用 per-window/event-scoped state，並在 fullscreen、minimize、restore、resize end 等所有終止路徑清除狀態。
+
+### 使用者畫質觀察與產品 workaround
+
+最新實測指出：一般非 Retina 拉大視窗主要是平滑放大，清晰度不如增加 DPI；高 DPI 會增加遊戲實際渲染畫素，但也放大邏輯視窗佔用面積；RetinaMode 則讓相同 Mac 視窗大小下的 backing 畫面更清晰。
+
+因此目前畫質優先的最佳組合是：**A2 + RetinaMode=`y` + DPI 約 196（或適合的 96 倍數）**，並在進入遊戲世界前按 Alt+Enter 放到最大；進入世界後不要再調整視窗。這不是 live resize 修復，而是目前最穩定的高畫質 workaround。A6 的目標是讓這組 Retina+DPI 畫質在進入世界後也能安全 resize。
+
 ---
 
 ## 關鍵 log 片段（篩選用）

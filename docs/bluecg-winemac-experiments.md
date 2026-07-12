@@ -14,6 +14,8 @@ runtime 位置：`install/wine-experiments/`
 | `a1` | `macdrv_set_view_frame()` 只有 RetinaMode 才清 backing-size cache | 第一優先實驗：測試非 Retina 回歸 |
 | `a2` | A1 + `resetSurfaceIfBackingSizeChanged()` 與 `wine_updateBackingSize()` 只在 RetinaMode 執行 | guard-only backing-size 實驗 |
 | `a3` | resize 完全略過 `wine_setBackingSize({0,0})` | 測試 cache invalidation / drawable rebuild 是否為觸發點 |
+| `a4` | 無條件停用 backing-size update/reset，且不清 resize cache | RetinaMode 路徑的診斷實驗；可能犧牲高解析度 |
+| `a5` | 只在 `QUERY_RESIZE_START` 到 `WINDOW_RESIZE_ENDED` 期間停用 backing update/reset | 目標修復：保留平時 DPI backing，同時避免 live resize 黑屏 |
 
 A2 是依目前 CX26 source tree 建立的 guard-only 版本。上游 !7979 的 window-DPI rect 改動未在 A2 回退，因為目前 source tree 的 `macdrv_context` 結構已與上游 patch diff 不同；不要把 A2 解讀為完整 MR !7979 revert。
 
@@ -25,8 +27,12 @@ A2 是依目前 CX26 source tree 建立的 guard-only 版本。上游 !7979 的 
 | A2 | `n` | **成功，仍有遊戲畫面** |
 | A3 | `n` | 黑屏 |
 | A2 | `y` | 黑屏 |
+| A4 | `y` | **功能成功；拖曳、Alt+Enter、最小化／還原正常，但高 DPI 有黑邊** |
+| A5 | `y` | **live resize 不黑且無高 DPI 黑邊；Alt+Enter／最小化還原失敗** |
 
-A2 已證實 guard-only backing-size 變更足以避開目前的非 Retina resize 黑屏；A3 黑屏則表示只略過 `wine_setBackingSize({0,0})` 不足以修復，關鍵較可能在 `wine_updateBackingSize()` / `resetSurfaceIfBackingSizeChanged()` 路徑。A2 + RetinaMode=`y` 再次黑屏，表示目前修復只適用非 Retina 路徑。
+A2 已證實 guard-only backing-size 變更足以避開目前的非 Retina resize 黑屏；A3 黑屏則表示只略過 `wine_setBackingSize({0,0})` 不足以修復，關鍵較可能在 `wine_updateBackingSize()` / `resetSurfaceIfBackingSizeChanged()` 路徑。A2 + RetinaMode=`y` 再次黑屏，表示目前修復只適用非 Retina 路徑。A5 顯示 transaction-scoped suppression 能保留高 DPI backing 並避免 live resize 黑屏，但狀態未在 Alt+Enter／最小化／還原路徑清理。
+
+A4 的早期 launcher 啟動曾出現 `GL_INVALID_FRAMEBUFFER_OPERATION` 訊息；重新啟動後 launcher 路徑可正常執行。A4 已同時通過 direct 與 launcher resize、Alt+Enter、最小化／還原；但高 DPI 會使外層視窗放大、遊戲 render target 維持原尺寸，導致畫面固定在左下角且右上有黑邊。因此 A4 是有效的黑屏 workaround，但不是最終高 DPI 畫質方案。
 
 每個 runtime 都是獨立的 Wine install，大小約 1.1 GB。建議遊戲目錄與 Wine prefix 分離；本次使用 `BlueCrossgateNew/` 作遊戲目錄、`.wine/` 作 prefix。請勿同時啟動兩個實驗。
 
@@ -134,6 +140,34 @@ bash scripts/run-bluecg.sh \
   --ddraw-source official \
   --no-gecko-prompt \
   > "$EXPERIMENT_LOG/a3.log" 2>&1
+```
+
+### A4
+
+```bash
+RUNTIME="$OGOM/install/wine-experiments/a4"
+WINEPREFIX="$PREFIX" arch -x86_64 "$RUNTIME/bin/wineserver" -k || true
+bash scripts/run-bluecg.sh \
+  --prefix "$PREFIX" \
+  --game-dir "$GAME_DIR" \
+  --wine-install "$RUNTIME" \
+  --ddraw-source official \
+  --no-gecko-prompt \
+  > "$EXPERIMENT_LOG/a4.log" 2>&1
+```
+
+### A5
+
+```bash
+RUNTIME="$OGOM/install/wine-experiments/a5"
+WINEPREFIX="$PREFIX" arch -x86_64 "$RUNTIME/bin/wineserver" -k || true
+bash scripts/run-bluecg.sh \
+  --prefix "$PREFIX" \
+  --game-dir "$GAME_DIR" \
+  --wine-install "$RUNTIME" \
+  --ddraw-source official \
+  --no-gecko-prompt \
+  > "$EXPERIMENT_LOG/a5.log" 2>&1
 ```
 
 `run-bluecg.sh` 預設啟動 `BlueLauncher.exe`，所以每組都應在 launcher 畫面點選第一個模式；不要使用 `--direct`，否則會跳過要測的 launcher 路徑。
