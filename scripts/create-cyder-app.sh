@@ -43,6 +43,14 @@ CONTENTS="$APP/Contents"
 MACOS="$CONTENTS/MacOS"
 RES="$CONTENTS/Resources"
 
+PRESERVED_ICON=""
+if [[ -f "$APP/Contents/Resources/AppIcon.icns" ]]; then
+  PRESERVED_ICON="$(mktemp "${TMPDIR:-/tmp}/cyder-preserved-icon.XXXXXX.icns")"
+  cp "$APP/Contents/Resources/AppIcon.icns" "$PRESERVED_ICON"
+elif [[ -f "$OUT_DIR/Cyder_001.app/Contents/Resources/AppIcon.icns" ]]; then
+  PRESERVED_ICON="$OUT_DIR/Cyder_001.app/Contents/Resources/AppIcon.icns"
+fi
+
 LOGO_PNG="$OGOM/logo/cyder-logo.png"
 [[ -f "$LOGO_PNG" ]] || {
   echo "Missing app logo at logo/cyder-logo.png" >&2
@@ -73,8 +81,19 @@ done <<'SIZES'
 512 icon_512x512.png
 1024 icon_512x512@2x.png
 SIZES
-iconutil -c icns "$ICONSET" -o "$RES/AppIcon.icns"
+if ! iconutil -c icns "$ICONSET" -o "$RES/AppIcon.icns"; then
+  if [[ -n "$PRESERVED_ICON" && -f "$PRESERVED_ICON" ]]; then
+    echo "==> Warning: iconutil failed; reusing the previous Cyder icon" >&2
+    cp "$PRESERVED_ICON" "$RES/AppIcon.icns"
+  else
+    echo "Failed to build AppIcon.icns and no previous Cyder icon is available" >&2
+    exit 1
+  fi
+fi
 rm -rf "$ICON_WORK"
+if [[ "$PRESERVED_ICON" == "${TMPDIR:-/tmp}"/cyder-preserved-icon.*.icns ]]; then
+  rm -f "$PRESERVED_ICON"
+fi
 [[ -f "$RES/AppIcon.icns" ]] || {
   echo "Failed to build AppIcon.icns" >&2
   exit 1
@@ -91,8 +110,10 @@ cp "$SCRIPT_DIR/resolve-wine-locale.sh" "$RES/ogom-scripts/"
 cp "$SCRIPT_DIR/enable-mac-retina-hires.sh" "$RES/ogom-scripts/"
 cp "$SCRIPT_DIR/cyder-songti-replacements.reg" "$RES/ogom-scripts/"
 cp "$SCRIPT_DIR/install-cyder-font-replacements.sh" "$RES/ogom-scripts/"
+cp "$SCRIPT_DIR/cyder-apply-settings.sh" "$RES/ogom-scripts/"
 chmod +x "$RES/ogom-scripts/cyder_launcher.sh"
 chmod +x "$RES/ogom-scripts/install-cyder-font-replacements.sh"
+chmod +x "$RES/ogom-scripts/cyder-apply-settings.sh"
 
 # shellcheck source=cyder-copy-engine-artifact.sh
 source "$SCRIPT_DIR/cyder-copy-engine-artifact.sh"
@@ -100,12 +121,26 @@ source "$SCRIPT_DIR/cyder-copy-engine-artifact.sh"
 copy_engine_artifact_into_app "$SCRIPT_DIR" "$RES" "$OGOM"
 rsync -a "$OGOM/tools/libarchive/" "$RES/addons/libarchive/"
 
-echo "==> Building MacOS/Cyder (Swift front-end for Finder open-document events)"
-CYDER_SWIFT_TARGET="${CYDER_SWIFT_TARGET:-arm64-apple-macosx12.0}"
-if swiftc -O -target "$CYDER_SWIFT_TARGET" -o "$MACOS/Cyder" "$SCRIPT_DIR/cyder_app_main.swift" 2>/dev/null; then
-  echo "==> Compiled cyder_app_main.swift"
+echo "==> Building universal MacOS/Cyder (arm64 + x86_64)"
+SWIFT_BUILD_DIR="$(mktemp -d "${TMPDIR:-/tmp}/cyder-swift.XXXXXX")"
+if [[ -n "${CYDER_MACOS_SDK:-}" ]]; then
+  SWIFT_SDK="$CYDER_MACOS_SDK"
+elif [[ -d /Library/Developer/CommandLineTools/SDKs/MacOSX15.4.sdk ]]; then
+  # Some CLT updates leave a newer swiftc beside an older default SDK module.
+  # The retained 15.4 SDK is sufficient for our macOS 12 deployment target.
+  SWIFT_SDK=/Library/Developer/CommandLineTools/SDKs/MacOSX15.4.sdk
 else
-  echo "==> Warning: swiftc failed; using bash launcher (double-click .exe may not pass path)" >&2
+  SWIFT_SDK="$(xcrun --sdk macosx --show-sdk-path)"
+fi
+echo "==> Swift SDK: $SWIFT_SDK"
+if CLANG_MODULE_CACHE_PATH="$SWIFT_BUILD_DIR/module-cache" swiftc -O -sdk "$SWIFT_SDK" -target arm64-apple-macosx12.0 -o "$SWIFT_BUILD_DIR/Cyder-arm64" "$SCRIPT_DIR/cyder_app_main.swift" \
+  && CLANG_MODULE_CACHE_PATH="$SWIFT_BUILD_DIR/module-cache" swiftc -O -sdk "$SWIFT_SDK" -target x86_64-apple-macosx12.0 -o "$SWIFT_BUILD_DIR/Cyder-x86_64" "$SCRIPT_DIR/cyder_app_main.swift" \
+  && lipo -create "$SWIFT_BUILD_DIR/Cyder-arm64" "$SWIFT_BUILD_DIR/Cyder-x86_64" -output "$MACOS/Cyder"; then
+  rm -rf "$SWIFT_BUILD_DIR"
+  echo "==> Compiled universal cyder_app_main.swift"
+else
+  rm -rf "$SWIFT_BUILD_DIR"
+  echo "==> Warning: universal Swift build failed; using bash launcher (double-click .exe may not pass path)" >&2
   cat > "$MACOS/Cyder" <<LAUNCHER
 #!/bin/bash
 set -euo pipefail

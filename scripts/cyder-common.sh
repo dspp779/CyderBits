@@ -664,7 +664,7 @@ cyder_init_bottle() {
   mkdir -p "$bottle"
   (
     cyder_wine_locale_exports
-    export WINEPREFIX="$bottle" WINEDLLOVERRIDES="mshtml=" WINESERVER="$wineserver"
+    export WINEPREFIX="$bottle" WINESERVER="$wineserver"
     cyder_run arch -x86_64 "$wine_bin" wineboot -u
   )
   local dos="$bottle/dosdevices"
@@ -706,6 +706,36 @@ cyder_ensure_font_replacements() {
   printf 'ok\n' >"$CYDER_FONT_MARKER"
 }
 
+cyder_apply_user_settings() {
+  local wine_bin="$1"
+  local engine_root="$2"
+  local settings_sh="$CYDER_SCRIPTS/cyder-apply-settings.sh"
+  [[ -f "$settings_sh" ]] || return 0
+  WINEPREFIX="$CYDER_SHARED_PREFIX" WINE_INSTALL="$engine_root" bash "$settings_sh"
+}
+
+cyder_stop_all_exes() {
+  local wineserver="$CYDER_ENGINES/$CYDER_ENGINE_NAME/bin/wineserver"
+  if [[ ! -x "$wineserver" ]]; then
+    echo "Cyder engine is not installed; no EXEs to stop." >&2
+    return 0
+  fi
+  echo "Stopping all EXEs in $CYDER_SHARED_PREFIX" >&2
+  WINEPREFIX="$CYDER_SHARED_PREFIX" arch -x86_64 "$wineserver" -k
+}
+
+cyder_has_running_exes() {
+  [[ -d "$CYDER_SHARED_PREFIX" ]] || return 1
+  local device inode socket_dir
+  device="$(stat -f '%d' "$CYDER_SHARED_PREFIX" 2>/dev/null)" || return 1
+  inode="$(stat -f '%i' "$CYDER_SHARED_PREFIX" 2>/dev/null)" || return 1
+  printf -v device '%x' "$device"
+  printf -v inode '%x' "$inode"
+  socket_dir="/tmp/.wine-$(id -u)/server-$device-$inode"
+  # Wine removes the socket when the prefix wineserver exits; the lock file may remain.
+  [[ -S "$socket_dir/socket" ]]
+}
+
 cyder_bootstrap_shared_prefix() {
   local wine_bin="$1"
   local engine_root="$2"
@@ -737,6 +767,7 @@ cyder_bootstrap_shared_prefix() {
   if [[ -f "$hires_sh" ]]; then
     WINEPREFIX="$CYDER_SHARED_PREFIX" WINE_INSTALL="$engine_root" bash "$hires_sh"
   fi
+  cyder_apply_user_settings "$wine_bin" "$engine_root"
   printf 'ok\n' >"$CYDER_BOOTSTRAP_MARKER"
 }
 
@@ -747,6 +778,7 @@ cyder_run_wine_exe() {
   local engine_root
   engine_root="$(cd "$(dirname "$wine_bin")/.." && pwd)"
   cyder_ensure_font_replacements "$wine_bin" "$engine_root"
+  cyder_apply_user_settings "$wine_bin" "$engine_root"
   cyder_wine_locale_exports
   local log_dir="$CYDER_SUPPORT/Logs"
   mkdir -p "$log_dir"
@@ -759,7 +791,18 @@ cyder_run_wine_exe() {
   } >"$log_file"
   (
     export WINEPREFIX="$CYDER_SHARED_PREFIX" WINESERVER="$wineserver"
-    export WINEMSYNC=1 WINEDLLOVERRIDES="mshtml="
+    if [[ "${CYDER_MSYNC:-0}" == 1 ]]; then
+      export WINEMSYNC=1
+    else
+      unset WINEMSYNC
+    fi
+    if [[ "${CYDER_DISABLE_MSHTML:-0}" == 1 ]]; then
+      if [[ -n "${WINEDLLOVERRIDES:-}" ]]; then
+        export WINEDLLOVERRIDES="mshtml=;${WINEDLLOVERRIDES}"
+      else
+        export WINEDLLOVERRIDES="mshtml="
+      fi
+    fi
     export PATH="${wine_bin%/wine}:$PATH"
     cd "$(dirname "$exe")"
     nohup arch -x86_64 "$wine_bin" "$exe" >>"$log_file" 2>&1 &

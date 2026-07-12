@@ -73,7 +73,7 @@ Cyder 使用**全機唯一**的 Wine prefix，所有 `.exe` 共用同一套 Wind
 2. 若 `SharedPrefix/system.reg` 不存在 → `wineboot -u` 建立 prefix
 3. 安裝 **wine-mono**、**syswow64/tar.exe**（含 libarchive DLL）
 4. 寫入 **Mac 高解析度** registry（RetinaMode + LogPixels=192）
-5. 設定 `WINEDLLOVERRIDES=mshtml=`（略過 Gecko 提示）
+5. 套用進階設定；僅在「停用 MSHTML」開啟時設定 `WINEDLLOVERRIDES=mshtml=`
 6. 寫入 `.cyder-bootstrap-v1`；之後啟動跳過上述步驟
 
 執行時環境：
@@ -84,6 +84,32 @@ Cyder 使用**全機唯一**的 Wine prefix，所有 `.exe` 共用同一套 Wind
 - `WINEMSYNC=1`
 
 遊戲檔**不會**被複製或移動，仍留在原路徑。
+
+## 進階設定（Phase 1）
+
+Cyder 的 `設定…`（`⌘,`）、Dock 右鍵或執行檔選擇器的「進階設定…」可調整：
+
+- MSync（預設關閉）
+- 停用 MSHTML（預設關閉；開啟時以 `WINEDLLOVERRIDES=mshtml=` 略過 MSHTML／Gecko）
+- Retina Mode（預設關閉）
+- DPI（預設 96 / 100%）
+- 字體平滑（預設 ClearType RGB，可選關閉、灰階或 ClearType BGR；與 Retina Mode 獨立）
+- Windows 字體方案：宋體 Songti TC（預設）或細明體 MingLiU
+
+選擇細明體前，必須先在 macOS「字體簿」或 Wine prefix 中安裝合法取得的 MingLiU 字型。Cyder 只設定字體替代規則，不會散布或自動安裝該字型。
+
+設定儲存在 `~/Library/Application Support/Cyder/settings.json`，套用到共用 prefix，並於下次啟動遊戲時生效。
+
+單獨開啟 `Cyder.app` 時會直接顯示進階設定。控制項變更先保留為草稿，按「確認」後可選擇：
+
+- 若偵測到共用 prefix 有執行中的 EXE：可選擇 **儲存並關閉所有 EXE**、**僅儲存**或**取消**。
+- 若沒有執行中的 EXE：只顯示 **儲存**與**取消**。
+- 儲存完成後，Cyder 才檢查 bundled engine 版本與 SharedPrefix bootstrap marker；必要時建立或升級遊戲引擎並準備 Windows 環境。
+- **取消**：返回設定視窗，不儲存也不關閉 EXE。
+
+強制關閉可能造成尚未儲存的遊戲進度遺失，因此執行前會顯示警告。
+
+直接由 Finder 打開 `.exe` 時，Cyder **不會**安裝、升級或重建環境。若 engine 不存在、版本不同或 SharedPrefix 尚未完成 bootstrap，只顯示提示，要求使用者先單獨開啟 `Cyder.app` 完成設定與環境建置。
 
 ## BlueCG 注意事項
 

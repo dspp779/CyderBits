@@ -22,6 +22,8 @@ Options:
   --bootstrap-only    Bootstrap shared prefix (mono, tar, hi-res) and exit
   --ensure-engine-only  Install shared engine from payload/tarball and exit
   --ensure-rosetta-only Check Rosetta 2 on Apple Silicon and exit
+  --stop-all          Stop all EXEs in the Cyder shared prefix and exit
+  --has-running-exes  Exit 0 if the shared prefix has running EXEs, otherwise 1
   --launch-exe PATH   Launch .exe (engine + bootstrap must already be ready)
   -h, --help          Show this help
 EOF
@@ -31,6 +33,8 @@ DRY_RUN=0
 BOOTSTRAP_ONLY=0
 ENSURE_ENGINE_ONLY=0
 ENSURE_ROSETTA_ONLY=0
+STOP_ALL=0
+HAS_RUNNING_EXES=0
 LAUNCH_ONLY=0
 ENGINE_SRC="$CYDER_ENGINE_SRC"
 EXE_ARGS=()
@@ -51,6 +55,14 @@ while [[ $# -gt 0 ]]; do
       ;;
     --ensure-rosetta-only)
       ENSURE_ROSETTA_ONLY=1
+      shift
+      ;;
+    --stop-all)
+      STOP_ALL=1
+      shift
+      ;;
+    --has-running-exes)
+      HAS_RUNNING_EXES=1
       shift
       ;;
     --launch-exe)
@@ -95,11 +107,21 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+if [[ "$HAS_RUNNING_EXES" -eq 1 ]]; then
+  cyder_has_running_exes
+  exit $?
+fi
+
 if [[ "$DRY_RUN" -eq 0 ]]; then
   cyder_ensure_rosetta || exit 1
 fi
 
 if [[ "$ENSURE_ROSETTA_ONLY" -eq 1 ]]; then
+  exit 0
+fi
+
+if [[ "$STOP_ALL" -eq 1 ]]; then
+  cyder_stop_all_exes
   exit 0
 fi
 
@@ -139,7 +161,12 @@ if [[ "$LAUNCH_ONLY" -eq 1 ]]; then
     echo "Missing or invalid .exe for --launch-exe" >&2
     exit 1
   }
-  engine="$(cyder_ensure_shared_engine "$ENGINE_SRC")"
+  engine="$CYDER_ENGINES/$CYDER_ENGINE_NAME"
+  if [[ ! -x "$engine/bin/wine" || ! -f "$CYDER_BOOTSTRAP_MARKER" ]] \
+    || cyder_engine_needs_install "$ENGINE_SRC"; then
+    echo "Cyder environment is not ready; open Cyder.app to finish setup." >&2
+    exit 2
+  fi
   wine="$engine/bin/wine"
   cyder_run_wine_exe "$wine" "$exe"
   exit 0
