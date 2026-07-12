@@ -97,13 +97,16 @@ bash scripts/create-bluecg-app.sh --link-prefix
 
 ## 已知問題
 
-- **視窗手動縮放黑屏**（CrossOver／自建 Wine；Sikarugir 較佳）— 詳見 [bluecg-winemac-resize-black-screen.md](bluecg-winemac-resize-black-screen.md)
+- **視窗縮放黑屏**（自建／官方 CX26 GL 路徑；開 RetinaMode 時 Sikarugir 亦黑）— 詳見 [bluecg-winemac-resize-black-screen.md](bluecg-winemac-resize-black-screen.md)
+- Sikarugir Wine 10 / CX24 在**無 RetinaMode** 下可平滑縮放；CX24 + 高 DPI 可滿版無黑邊
+- **迴避（GL 路徑）**：**進入遊戲世界前**調窗或 `Alt+Enter` 等比放到最大；進入後勿再改視窗大小（含 Alt+Enter）
+- **暫用（GDI registry）**：進入遊戲後仍可縮放不黑，但無線性過濾、縮放模糊；Retina + 高 DPI 僅改善靜態畫質，進遊戲前調準尺寸
 
 ## 已知雜訊（通常可忽略）
 
 - `libMoltenVK.dylib` 找不到（ddraw 走 wined3d/GL，非 Vulkan）
 - `dmsynth` underrun、`GL_INVALID_FRAMEBUFFER_OPERATION`
-- 全螢幕 / 縮放黑畫面（見上方連結；產品迴避：啟動器解析度）
+- 全螢幕 / 縮放黑畫面（見上方連結；GL 路徑：進遊戲前調窗／Alt+Enter；GDI 路徑見追蹤文件）
 
 ## 相關文件
 

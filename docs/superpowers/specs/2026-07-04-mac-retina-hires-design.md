@@ -115,7 +115,7 @@ bash scripts/run-bluecg.sh
 | wine-mono | BlueLauncher .NET |
 | `link-wine-runtime-libs.sh` | FreeType／gnutls 執行期 |
 | FontSmoothing / fakechinese | 字型策略；Retina 開啟後字體通常已足夠清楚 |
-| 手動拉視窗／全螢幕黑屏 | ddraw/wined3d 限制（CrossOver 亦然）；請用啟動器解析度模式 |
+| 手動拉視窗／全螢幕黑屏 | 與 RetinaMode **分開追蹤**：Retina 負責畫質，但開啟後拖邊框縮放會黑屏（Sikarugir 亦然）；見 [bluecg-winemac-resize-black-screen.md](../../bluecg-winemac-resize-black-screen.md) |
 
 ## 驗證紀錄
 
