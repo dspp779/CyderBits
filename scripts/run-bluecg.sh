@@ -5,6 +5,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/env-x86_64.sh"
 
 PREFIX="$BLUECG_PREFIX"
+GAME_DIR=""
 DDRAW_SOURCE="official"
 MODE="launcher"
 DRY_RUN=0
@@ -29,6 +30,10 @@ while [[ $# -gt 0 ]]; do
       PREFIX="$2"
       shift
       ;;
+    --game-dir)
+      GAME_DIR="$2"
+      shift
+      ;;
     --wine-install)
       WINE_INSTALL="$2"
       shift
@@ -51,11 +56,16 @@ while [[ $# -gt 0 ]]; do
   shift
 done
 
-WINE_BIN="$WINE_INSTALL/bin/wine"
-OFFICIAL_DDRAW="$PREFIX/BlueLauncher_temp/BlueCG_updatelogin/DDRAW.dll"
-LOCAL_DDRAW="$PREFIX/ddraw.dll"
+if [[ -z "$GAME_DIR" ]]; then
+  GAME_DIR="$PREFIX"
+fi
 
-[[ -d "$PREFIX" ]] || { echo "Missing BlueCG prefix: $PREFIX" >&2; exit 1; }
+WINE_BIN="$WINE_INSTALL/bin/wine"
+OFFICIAL_DDRAW="$GAME_DIR/BlueLauncher_temp/BlueCG_updatelogin/DDRAW.dll"
+LOCAL_DDRAW="$GAME_DIR/ddraw.dll"
+
+[[ -d "$PREFIX" ]] || { echo "Missing Wine prefix: $PREFIX" >&2; exit 1; }
+[[ -d "$GAME_DIR" ]] || { echo "Missing BlueCG game directory: $GAME_DIR" >&2; exit 1; }
 [[ -x "$WINE_BIN" || "$DRY_RUN" -eq 1 ]] || { echo "Missing wine binary: $WINE_BIN" >&2; exit 1; }
 
 case "$DDRAW_SOURCE" in
@@ -94,7 +104,7 @@ if [[ "$NO_GECKO_PROMPT" -eq 1 ]]; then
   fi
 fi
 
-cd "$PREFIX"
+cd "$GAME_DIR"
 
 if [[ "$MODE" == "launcher" ]]; then
   run arch -x86_64 "$WINE_BIN" BlueLauncher.exe

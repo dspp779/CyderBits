@@ -27,4 +27,13 @@ fi
 output_no_gecko="$(bash "$ROOT/scripts/run-bluecg.sh" --prefix "$TMP/BlueCrossgateNew" --wine-install "$ROOT/install/wine-cx26-x86_64" --no-gecko-prompt --dry-run 2>&1 || true)"
 assert_contains "$output_no_gecko" "WINEDLLOVERRIDES=mshtml=" "dry-run --no-gecko-prompt should disable mshtml for the session"
 
+mkdir -p "$TMP/.wine"
+output_separate="$(bash "$ROOT/scripts/run-bluecg.sh" \
+  --prefix "$TMP/.wine" \
+  --game-dir "$TMP/BlueCrossgateNew" \
+  --wine-install "$ROOT/install/wine-cx26-x86_64" \
+  --dry-run 2>&1 || true)"
+assert_contains "$output_separate" "$TMP/BlueCrossgateNew/BlueLauncher_temp" "separate game directory should supply DDRAW"
+assert_contains "$output_separate" "BlueLauncher.exe" "separate game directory should launch BlueLauncher"
+
 echo "PASS test-run-bluecg"
