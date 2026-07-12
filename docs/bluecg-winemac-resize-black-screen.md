@@ -205,7 +205,7 @@ macdrv_window_resize_ended hwnd 0x20058
           但使用者畫面已黑
 ```
 
-**收斂假設：** resize 時 `client_surface_update` 會改 Cocoa view / backing，但 **OpenGL drawable 與可見層脫節**；wined3d 仍 blit 到「已不可見或 backing 為 0」的 drawable。
+**收斂假設：** resize 時 `client_surface_update` 會改 Cocoa view / backing metadata，但 **OpenGL drawable 與可見層脫節**；wined3d 仍 blit 到已不可見、尺寸錯誤或掛在舊 view 的 drawable。
 
 ### 階段 4：原始碼對應（winemac.drv）
 
@@ -217,12 +217,12 @@ NtUserSetRawWindowPos
     → macdrv_client_surface_update()
       → macdrv_set_view_frame()          # cocoa_window.m
            → [view setFrameSize:...]
-           → [view wine_setBackingSize:{0,0}]   ← 清空 GL backing
+           → [view wine_setBackingSize:{0,0}]   ← 使 view backing-size cache 失效
            → [window updateForGLSubviews]
 ```
 
-設計上期望之後由 `GL_FLUSH_UPDATED` → `macdrv_surface_flush` → `make_context_current` → `wine_updateBackingSize` 恢復 backing。  
-BlueCG 的 **frontbuffer onscreen** 路徑常 **不觸發** 該 flush → backing 維持 0 或 drawable 失效 → 黑屏。
+設計上期望之後由 `GL_FLUSH_UPDATED` → `macdrv_surface_flush` → `make_context_current` → `wine_updateBackingSize` 重新同步 backing size，必要時 `clearDrawable` / `setView` 重建 surface。
+BlueCG 的 **frontbuffer onscreen** 路徑可能未觸發該 flush，或在 make-current、surface 重建與 main-thread view resize 之間發生競態 → drawable 尺寸錯誤或與可見 view 脫節 → 黑屏。此處仍需精準 trace 驗證。
 
 **僅在 `resize_ended` 再呼叫 `present` 可能不夠：** view 已是 `client_view` 時 present 可能是 no-op。
 
@@ -252,16 +252,80 @@ BlueCG 的 **frontbuffer onscreen** 路徑常 **不觸發** 該 flush → backin
 #### 根因三層模型（收斂）
 
 ```text
-Layer 1  winemac resize 清空 GL backing
+Layer 1  winemac resize 使 view backing-size cache 失效
          macdrv_set_view_frame → wine_setBackingSize({0,0})
 
-Layer 2  恢復機制未觸發（BlueCG frontbuffer onscreen 特有）
-         期望 GL_FLUSH_UPDATED → wine_updateBackingSize
-         此路徑常不觸發 → backing 維持 0
+Layer 2  drawable 恢復／重新掛載可能失敗（BlueCG frontbuffer onscreen 特有）
+         期望 make-current → wine_updateBackingSize → clearDrawable/setView
+         呼叫缺失、尺寸錯誤或非同步競態 → 可見 surface 與 GL context 脫節
 
 Layer 3  RetinaMode 加劇（Sikarugir 亦中招）
          contentsScale=2 → 實體／邏輯像素換算使恢復更難
 ```
+
+### 階段 8：上游 Wine 交叉分析（2026-07-12）
+
+#### 第一嫌疑：Wine MR !7979 的 GL backing-size / DPI 改動
+
+2025-05 的 Wine MR [!7979 — Set the OpenGL backbuffer size to the size in window DPI](https://list.winehq.org/archives/list/wine-gitlab%40list.winehq.org/message/X4ZYHLKNAEAM4YEHUCOSVMJ42FVKZUBE/) 為了修正 DPI scaling、DPI-unaware app 與 display-mode emulation 下的 GL 尺寸，做了三項與本問題直接相關的變更：
+
+1. `macdrv_set_view_frame()` 從「只有 RetinaMode 才把 view backing-size cache 清為 0」改為**所有模式都清為 0**。
+2. `WineOpenGLContext::wine_updateBackingSize()` 與 drawable 重建不再只限 RetinaMode。
+3. GL context backing rect 改用 window DPI 下的 client rect。
+
+這與實測的版本分界高度吻合：
+
+| 引擎世代 | 非 Retina resize | Retina resize |
+|----------|-----------------|---------------|
+| Sikarugir Wine 10 / CX24 | 正常 | 黑屏 |
+| CX26 | 黑屏 | 黑屏 |
+
+**待驗證推論：** 舊 engine 只有 RetinaMode 會進入容易失效的 explicit GL backing-size 重建；!7979 將該機制擴大到非 Retina 模式，因此 CX26 預設 GL 路徑也開始黑屏。這是目前最適合直接做 patch bisect 的候選回歸，但尚不能視為已證實根因。
+
+本機 CX26 原始碼已具有該類行為：
+
+- `cocoa_window.m::macdrv_set_view_frame()` 無條件執行 `wine_setBackingSize({0,0})`
+- `cocoa_opengl.m::wine_updateBackingSize()` 非 Retina 亦會啟用 `kCGLCESurfaceBackingSize`
+- `opengl.c::make_context_current()` 使用 `NtUserGetClientRect(..., NtUserGetDpiForWindow(...))` 取得 backing rect
+
+#### 修正既有描述：清零的是 cache，不是直接把 CGL surface 設為 0×0
+
+`wine_setBackingSize({0,0})` 只會清除 `WineContentView` 保存的 backing-size cache；它不直接呼叫 CGL 把 drawable 設成零尺寸。預期的後續流程是：
+
+```text
+resize / setFrame
+  → view backing-size cache = 0,0（標記失效）
+  → make context current
+  → wine_updateBackingSize(new DPI client size)
+  → resetSurfaceIfBackingSizeChanged
+  → clearDrawable + setView
+  → 新 backing surface 生效
+```
+
+因此更精確的假設是：**resize 將 cache 標為失效後，BlueCG onscreen/frontbuffer 路徑在 drawable 重建、重新掛載或非同步 view 更新時留下不可見／脫節的 GL surface**。原先「backing 維持 0」只能作為 trace 待驗證項目，不應當成已確認事實。
+
+#### 其它相關上游修補
+
+| 上游項目 | 內容 | 與 BlueCG 的關係 |
+|----------|------|------------------|
+| [Wine MR !9049](https://gitlab.winehq.org/wine/wine/-/merge_requests/9049/pipelines/) | `NtUserGetClientRect` 在最小化時回傳空 rect，導致 CGL/Metal assertion；新增零尺寸防護 | 證明 !7979 後的 backing-size 路徑曾引入 surface lifecycle 回歸；本機已有 zero-size return，較不像直接解法 |
+| [Wine MR !5929](https://list.winehq.org/hyperkitty/list/wine-gitlab%40list.winehq.org/thread/VG3R3ESZQRNJHXP2LSO7IFFC5QA3PLO3/) | 移除主動把 GL view 清黑的 hack，曾修正 Active Trader Pro / Assetto Corsa 黑畫面 | 本機 CX26 已無 `clearToBlackIfNeeded`，可排除為直接根因；但證實不可見 GL surface 疊層是已知問題類型 |
+| [Wine MR !9301](https://list.winehq.org/archives/list/wine-gitlab%40list.winehq.org/thread/YSN3XKNVC4KR25TWGBAL23UZM4QGBAGR/) | 明確追蹤 letter/pillarbox shape layer，避免誤刪 Cocoa 內部可見 backing layer | 優先度低於 !7979；若回退 !7979 無效，再測 layer hierarchy 修補 |
+
+Wine Bugzilla 另有 macOS DirectDraw window-position / display-mode 測試問題（如 55558、55559），但目前網站有反爬驗證，尚未取得足以支持具體解法的完整討論。
+
+#### 非同步競態也是高優先假設
+
+`macdrv_set_view_frame()` 透過 `OnMainThreadAsync` 修改 Cocoa view；GL make-current / frontbuffer blit 可在其它執行緒繼續。即使新的 DPI rect 正確，也可能發生：
+
+```text
+GL thread 先依新 rect 重建 drawable
+  ↕
+main thread 稍後才套用 view frame / 清 backing cache
+  → cache、view、context 的世代不同步
+```
+
+所以「有呼叫 `wine_updateBackingSize`」不足以排除錯誤；必須同時比對 context、view pointer、frame、cache 與 CGL backing size 的時間序。
 
 ---
 
@@ -433,6 +497,104 @@ ls -la "$WINE_INSTALL/lib/wine/x86_64-unix/winemac.so"
 
 ---
 
+## 後續追蹤與測試計畫（2026-07-12）
+
+### P0：拆分／回退 MR !7979（最高優先）
+
+以同一台 Mac、同一 prefix、同一 BlueCG 操作流程建立三個最小 patch build。每版只改一個變因：
+
+| Build | 實驗變更 | 要回答的問題 |
+|-------|----------|----------------|
+| **A1：恢復 Retina guard** | `macdrv_set_view_frame()` 只在 `retina_enabled` 時清 backing-size cache；保留 `updateForGLSubviews` | 非 Retina 回歸是否來自 unconditional cache invalidation？ |
+| **A2：完整回退 !7979 行為** | 恢復 `cocoa_opengl.m` 的 Retina guards，並回退 window-DPI backing rect 改動 | 是整組 DPI/backing 改動造成，還是單一清 cache 行為？ |
+| **A3：保留新 DPI rect，但不清 cache** | 暫時略過 resize 中的 `wine_setBackingSize({0,0})` | 黑屏是否由 drawable teardown / reattach 被觸發？ |
+
+判讀：
+
+- A1 非 Retina 成功、Retina 仍黑：高度支持 !7979 將舊 Retina 問題擴張到預設模式。
+- A1 失敗、A2 成功：問題較可能是 window-DPI rect 或非 Retina explicit backing-size 機制。
+- A1、A3 都成功：問題集中在 resize cache invalidation 所觸發的 drawable rebuild。
+- 三者皆失敗：轉查 async race、layer hierarchy，以及 CX24/CX26 的其它 winemac/wined3d 差異。
+
+### 固定驗證矩陣
+
+每個 build 都應完成下列組合，避免只修到單一模式：
+
+| 設定 | 拖邊框 | 進世界後 Alt+Enter | 最小化／還原 | 第二款 DirectDraw 遊戲 |
+|------|--------|--------------------|---------------|-----------------------|
+| Retina off、DPI 96 | 必測 | 必測 | 必測 | 必測 |
+| Retina off、DPI 192 或 240 | 必測 | 必測 | 必測 | 建議 |
+| Retina on、DPI 96 | 必測 | 必測 | 必測 | 建議 |
+| Retina on、DPI 192 或 240 | 必測 | 必測 | 必測 | 建議 |
+
+每次記錄：engine/build ID、macOS 版本、CPU、螢幕 scale、起始／結束 client size、是否進入 onscreen 路徑、黑屏後程式是否存活。
+
+### P1：加入可關聯的 backing/context trace
+
+在下列函式加入相同格式的時間戳與識別資料：
+
+- `macdrv_set_view_frame`
+- `wine_setBackingSize`
+- `wine_updateBackingSize`
+- `resetSurfaceIfBackingSizeChanged`
+- `clearDrawable` / `setView`
+- `macdrv_make_context_current`
+- `macdrv_surface_flush`
+
+至少輸出：
+
+```text
+timestamp / thread id
+HWND / NSWindow* / NSView* / NSOpenGLContext*
+Win32 logical client rect
+window-DPI client rect
+NSView frame / bounds / visibleRect
+convertRectToBacking result
+cached backing_size before/after
+kCGLCESurfaceBackingSize enabled and configured size
+GL_DRAW_FRAMEBUFFER_STATUS
+```
+
+判斷重點：
+
+1. 黑屏後 context 是否仍掛在可見的原 `NSView`。
+2. CGL backing size 是否等於實際 backing pixels，而非只等於 logical rect。
+3. `clearDrawable → setView` 是否成對完成。
+4. main-thread frame 更新是否晚於 GL-thread context rebuild。
+
+### P2：驗證 main-thread / GL-thread 競態
+
+建立純診斷 build，將 resize view 更新暫改為同步 main-thread，或在 `resize_ended` 後確認 main-thread frame 已套用才允許 context update。若只有同步版不黑，根因應定位為 view frame、cache invalidation 與 GL surface rebuild 的時序競爭。
+
+### P3：最後才補強 context update / present
+
+若前述測試無法解決，再依序實驗：
+
+1. resize ended 時把掛在該 view 的 GL contexts 標為 `needsUpdate`。
+2. 主動執行一次 context update / make-current。
+3. 最後才嘗試 `client_surface_present`。
+
+`present` 對已是 `client_view` 的 surface 可能是 no-op，因此不應作為第一個 patch。
+
+### 上游回報所需材料
+
+若要提交 WineHQ / CodeWeavers，應準備：
+
+- 可合法散布的最小 DirectDraw reproducer；避免要求維護者取得 BlueCG。
+- CX24 good / CX26 bad 的同機錄影與固定設定矩陣。
+- A1/A2/A3 三個 patch 的結果與 diff。
+- 黑屏前後 2–3 秒的精準 context/view/backing trace。
+- macOS、硬體、螢幕 scale、logical/client/backing 尺寸。
+- 明確指出：GL frontbuffer blit 仍持續，只有 Cocoa surface 不再可見。
+
+建議 issue 標題：
+
+```text
+winemac.drv regression after MR !7979: DirectDraw GL frontbuffer becomes black after window resize
+```
+
+---
+
 ## 開放問題
 
 1. `wine_setBackingSize({0,0})` 在 resize 當下是否**一定**被呼叫？（建議 lldb breakpoint 或暫加 TRACE）
@@ -444,6 +606,10 @@ ls -la "$WINE_INSTALL/lib/wine/x86_64-unix/winemac.so"
 7. GDI registry 在 Sikarugir 上是否同樣變模糊但不黑？（自建 CX26 已確認；Sikarugir 待測）
 8. **onscreen 繪製建立後** resize 才黑 → 能否在 ddraw attach／首次 frontbuffer 後補強 backing 恢復？（進入遊戲後 Alt+Enter 亦黑，已確認非 live-drag 特有）
 9. patch `surface_cpu_blt` 線性過濾後，GDI 路徑縮放品質是否可接受為暫用方案？
+10. A1（只恢復 Retina guard）能否讓 CX26 非 Retina resize 恢復正常？
+11. A2 與 A3 的結果能否區分 DPI rect 錯誤與 drawable rebuild 錯誤？
+12. `OnMainThreadAsync` 的 frame/cache 更新是否晚於 GL thread 的 `make_context_current`？
+13. 上游 MR !9301 是否已包含在目前 CX26 tree；若否，套用後是否改變純黑畫面？
 
 ---
 
@@ -470,3 +636,4 @@ ls -la "$WINE_INSTALL/lib/wine/x86_64-unix/winemac.so"
 | 2026-07-11 | 引擎×設定矩陣實測；GDI 繞道；RetinaMode 改為觸發因子；區分黑邊與黑屏 |
 | 2026-07-11 | 畫面出現前可調窗、Alt+Enter 迴避；GDI 路徑 DPI/Retina 細節與 log |
 | 2026-07-11 | 進入遊戲後 Alt+Enter 亦黑；GDI 無 TEXF_LINEAR；renderer 取捨表；根因三層模型 |
+| 2026-07-12 | 上游 issue / MR 交叉分析；鎖定 !7979 為第一候選回歸；修正 backing cache 描述；新增 A1–A3 測試計畫與上游回報清單 |
