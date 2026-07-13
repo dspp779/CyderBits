@@ -8,6 +8,7 @@ unset HOMEBREW_PREFIX OGOM WINE_INSTALL ENTITLEMENTS_PLIST
 source "$SCRIPT_DIR/env-x86_64.sh"
 
 OUT_DIR="${OGOM}/dist"
+CYDER_APP_VERSION="${CYDER_APP_VERSION:-0.2.0}"
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --engine-archive)
@@ -125,23 +126,25 @@ echo "==> Building universal MacOS/Cyder (arm64 + x86_64)"
 SWIFT_BUILD_DIR="$(mktemp -d "${TMPDIR:-/tmp}/cyder-swift.XXXXXX")"
 if [[ -n "${CYDER_MACOS_SDK:-}" ]]; then
   SWIFT_SDK="$CYDER_MACOS_SDK"
-elif [[ -d /Library/Developer/CommandLineTools/SDKs/MacOSX15.4.sdk ]]; then
-  # Some CLT updates leave a newer swiftc beside an older default SDK module.
-  # The retained 15.4 SDK is sufficient for our macOS 12 deployment target.
-  SWIFT_SDK=/Library/Developer/CommandLineTools/SDKs/MacOSX15.4.sdk
 else
+  # Use the SDK selected by the active Command Line Tools.  Pinning an older
+  # SDK can make SwiftShims incompatible when swiftc was updated separately.
   SWIFT_SDK="$(xcrun --sdk macosx --show-sdk-path)"
 fi
 echo "==> Swift SDK: $SWIFT_SDK"
-if CLANG_MODULE_CACHE_PATH="$SWIFT_BUILD_DIR/module-cache" swiftc -O -sdk "$SWIFT_SDK" -target arm64-apple-macosx12.0 -o "$SWIFT_BUILD_DIR/Cyder-arm64" "$SCRIPT_DIR/cyder_app_main.swift" \
-  && CLANG_MODULE_CACHE_PATH="$SWIFT_BUILD_DIR/module-cache" swiftc -O -sdk "$SWIFT_SDK" -target x86_64-apple-macosx12.0 -o "$SWIFT_BUILD_DIR/Cyder-x86_64" "$SCRIPT_DIR/cyder_app_main.swift" \
-  && lipo -create "$SWIFT_BUILD_DIR/Cyder-arm64" "$SWIFT_BUILD_DIR/Cyder-x86_64" -output "$MACOS/Cyder"; then
+NATIVE_CYDER=0
+if swiftc -O -sdk "$SWIFT_SDK" -module-cache-path "$SWIFT_BUILD_DIR/module-cache" -target arm64-apple-macosx12.0 -o "$SWIFT_BUILD_DIR/Cyder-arm64" "$SCRIPT_DIR/cyder_app_main.swift" \
+  && swiftc -O -sdk "$SWIFT_SDK" -module-cache-path "$SWIFT_BUILD_DIR/module-cache" -target x86_64-apple-macosx12.0 -o "$SWIFT_BUILD_DIR/Cyder-x86_64" "$SCRIPT_DIR/cyder_app_main.swift" \
+  && lipo -create "$SWIFT_BUILD_DIR/Cyder-arm64" "$SWIFT_BUILD_DIR/Cyder-x86_64" -output "$MACOS/CyderSwift"; then
+  cp "$MACOS/CyderSwift" "$MACOS/Cyder"
+  chmod +x "$MACOS/Cyder" "$MACOS/CyderSwift"
+  NATIVE_CYDER=1
   rm -rf "$SWIFT_BUILD_DIR"
-  echo "==> Compiled universal cyder_app_main.swift"
+  echo "==> Compiled universal native Cyder launcher"
 else
   rm -rf "$SWIFT_BUILD_DIR"
   echo "==> Warning: universal Swift build failed; using bash launcher (double-click .exe may not pass path)" >&2
-  cat > "$MACOS/Cyder" <<LAUNCHER
+  cat > "$MACOS/CyderSwift" <<LAUNCHER
 #!/bin/bash
 set -euo pipefail
 SELF="\$(cd "\$(dirname "\$0")" && pwd)"
@@ -174,10 +177,57 @@ export CYDER_BUNDLE_ID="local.cyder.app"
 
 exec "\$RES/ogom-scripts/cyder_launcher.sh" --engine-src "\$ENGINE_SRC" "\$@"
 LAUNCHER
-  chmod +x "$MACOS/Cyder"
+  chmod +x "$MACOS/CyderSwift"
 fi
 
-cat > "$CONTENTS/Info.plist" <<'PLIST'
+if [[ "$NATIVE_CYDER" -eq 0 ]]; then
+cat > "$MACOS/Cyder" <<'LAUNCHER'
+#!/usr/bin/env bash
+set -euo pipefail
+
+SELF="$(cd "$(dirname "$0")" && pwd)"
+RES="$(cd "$SELF/../Resources" && pwd)"
+
+ENGINE_ARCHIVE="$(tr -d '[:space:]' < "$RES/engine-archive.txt" 2>/dev/null || true)"
+if [[ -n "$ENGINE_ARCHIVE" && -f "$RES/$ENGINE_ARCHIVE" ]]; then
+  ENGINE_SRC="$RES/$ENGINE_ARCHIVE"
+else
+  ENGINE_VER="$(tr -d '[:space:]' < "$RES/engine-version.txt" 2>/dev/null || true)"
+  if [[ -n "$ENGINE_VER" && -f "$RES/engine-$ENGINE_VER.tar.zst" ]]; then
+    ENGINE_SRC="$RES/engine-$ENGINE_VER.tar.zst"
+  elif [[ -n "$ENGINE_VER" && -f "$RES/engine-wine-x86_64-$ENGINE_VER.tar.xz" ]]; then
+    ENGINE_SRC="$RES/engine-wine-x86_64-$ENGINE_VER.tar.xz"
+  else
+    ENGINE_SRC="$RES/engine-payload"
+  fi
+fi
+
+export CYDER_ENGINE_SRC="$ENGINE_SRC"
+export CYDER_SCRIPTS="$RES/ogom-scripts"
+export CYDER_LIBARCHIVE_SRC="$RES/addons/libarchive"
+export OGOM="$RES"
+export WINE_INSTALL="$ENGINE_SRC"
+export ENTITLEMENTS_PLIST="$RES/entitlements.plist"
+export CYDER_ENTITLEMENTS="$RES/entitlements.plist"
+export CYDER_APP="$(cd "$SELF/.." && pwd)"
+export CYDER_BUNDLE_ID="local.cyder.app"
+
+for raw in "$@"; do
+  [[ "$raw" == "--args" || "$raw" == -psn_* ]] && continue
+  path="${raw#file://}"
+  lower="$(printf '%s' "$path" | tr '[:upper:]' '[:lower:]')"
+  if [[ "$lower" == *.exe ]]; then
+    exec "$RES/ogom-scripts/cyder_launcher.sh" --engine-src "$ENGINE_SRC" --launch-exe "$path"
+  fi
+done
+
+# No document was opened: launch the AppKit settings UI only when needed.
+exec "$SELF/CyderSwift"
+LAUNCHER
+chmod +x "$MACOS/Cyder"
+fi
+
+cat > "$CONTENTS/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -197,9 +247,9 @@ cat > "$CONTENTS/Info.plist" <<'PLIST'
   <key>CFBundlePackageType</key>
   <string>APPL</string>
   <key>CFBundleShortVersionString</key>
-  <string>0.1.0</string>
+  <string>$CYDER_APP_VERSION</string>
   <key>CFBundleVersion</key>
-  <string>1</string>
+  <string>$CYDER_APP_VERSION</string>
   <key>LSMinimumSystemVersion</key>
   <string>12.0</string>
   <key>NSHighResolutionCapable</key>

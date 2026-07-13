@@ -1,16 +1,33 @@
-// Cyder.app entry — phased setup UI, then launch Windows EXE via cyder_launcher.sh.
+// Cyder.app entry — phased setup UI, then launch Windows EXE directly with Wine.
 import Cocoa
 import Foundation
 import UniformTypeIdentifiers
 
+private enum CyderPaths {
+    static let home = FileManager.default.homeDirectoryForCurrentUser
+    static let support = home
+        .appendingPathComponent("Library/Application Support/Cyder", isDirectory: true)
+    static let runtimeRoot: URL = {
+        if let override = ProcessInfo.processInfo.environment["CYDER_RUNTIME_ROOT"], !override.isEmpty {
+            return URL(fileURLWithPath: override, isDirectory: true)
+        }
+        return home.appendingPathComponent(".cyder/runtime", isDirectory: true)
+    }()
+    static let engine = runtimeRoot
+        .appendingPathComponent("Engines/wine-x86_64", isDirectory: true)
+    static let sharedBottle = support
+        .appendingPathComponent("bottles/shared", isDirectory: true)
+    static let bootstrapMarker = sharedBottle.appendingPathComponent(".cyder-bootstrap-v1")
+}
+
 private struct CyderSettings: Codable {
     var schemaVersion = 1
     var msync = false
-    var disableMshtml: Bool? = false
-    var retinaMode = false
-    var dpi = 96
+    var esync: Bool? = false
+    var retinaMode = true
+    var dpi = 192
     var fontPreset = "songti"
-    var fontSmoothing = "cleartype-rgb"
+    var fontSmoothing = "grayscale"
 
     static let defaults = CyderSettings()
 }
@@ -21,9 +38,7 @@ private final class CyderSettingsStore {
     private let url: URL
 
     private init() {
-        let support = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Library/Application Support/Cyder", isDirectory: true)
-        url = support.appendingPathComponent("settings.json")
+        url = CyderPaths.support.appendingPathComponent("settings.json")
         if let data = try? Data(contentsOf: url),
            let decoded = try? JSONDecoder().decode(CyderSettings.self, from: data),
            decoded.schemaVersion == 1 {
@@ -51,7 +66,7 @@ private final class CyderSettingsStore {
     var environment: [String: String] {
         [
             "CYDER_MSYNC": value.msync ? "1" : "0",
-            "CYDER_DISABLE_MSHTML": (value.disableMshtml ?? false) ? "1" : "0",
+            "CYDER_ESYNC": (value.esync ?? false) ? "1" : "0",
             "CYDER_RETINA_MODE": value.retinaMode ? "1" : "0",
             "CYDER_DPI": String(value.dpi),
             "CYDER_FONT_PRESET": value.fontPreset,
@@ -70,11 +85,13 @@ private extension JSONEncoder {
 
 private final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate {
     var onCommit: ((Bool) -> Void)?
+    var onSaveStarted: (() -> Void)?
+    var onSaveFailed: (() -> Void)?
     var onClose: (() -> Void)?
     var hasRunningExes: (() -> Bool)?
     private let store = CyderSettingsStore.shared
     private let msync = NSSwitch()
-    private let disableMshtml = NSSwitch()
+    private let esync = NSSwitch()
     private let retina = NSSwitch()
     private let dpi = NSPopUpButton()
     private let font = NSPopUpButton()
@@ -155,16 +172,16 @@ private final class CyderSettingsWindowController: NSWindowController, NSWindowD
 
     private func makeGeneralTab() -> NSTabViewItem {
         msync.target = self
-        msync.action = #selector(markDirty)
-        disableMshtml.target = self
-        disableMshtml.action = #selector(markDirty)
-        let description = note("通常可改善效能與執行緒同步；若遊戲凍結或無法啟動，可嘗試關閉。")
-        let mshtmlDescription = note("停用後可避免 Wine Gecko／HTML 元件提示，但需要內嵌網頁的啟動器可能無法顯示內容。")
+        msync.action = #selector(msyncChanged)
+        esync.target = self
+        esync.action = #selector(esyncChanged)
+        let msyncDescription = note("使用 macOS 原生同步機制改善部分遊戲效能；若遊戲凍結或無法啟動，可保持關閉。")
+        let esyncDescription = note("使用事件同步機制降低等待開銷。MSync 與 ESync 不能同時開啟。")
         return tab("一般", rows: [
             row("MSync", msync),
-            description,
-            row("停用 MSHTML", disableMshtml),
-            mshtmlDescription,
+            msyncDescription,
+            row("ESync", esync),
+            esyncDescription,
         ])
     }
 
@@ -177,7 +194,7 @@ private final class CyderSettingsWindowController: NSWindowController, NSWindowD
         return tab("顯示", rows: [
             row("高解析度（Retina Mode）", retina),
             row("縮放比例 / DPI", dpi),
-            note("建議使用 Retina Mode + 200%。只調高 DPI 可能使部分舊遊戲出現黑邊。"),
+            note("建議使用高解析度模式與 200%。\n125%、150%、175%、250% 等非整數倍率，可能讓部分老遊戲的像素邊緣出現鋸齒或模糊。"),
         ])
     }
 
@@ -191,7 +208,7 @@ private final class CyderSettingsWindowController: NSWindowController, NSWindowD
         return tab("字體", rows: [
             row("Windows 預設字體", font),
             note("Cyder 只設定 Wine 的字體替代規則，不會自動安裝受授權保護的字型。"),
-            row("字體反鋸齒平滑", smoothing),
+            row("字體平滑", smoothing),
         ])
     }
 
@@ -202,8 +219,16 @@ private final class CyderSettingsWindowController: NSWindowController, NSWindowD
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = 16
-        stack.edgeInsets = NSEdgeInsets(top: 24, left: 22, bottom: 20, right: 22)
-        item.view = stack
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        let container = NSView()
+        container.addSubview(stack)
+        NSLayoutConstraint.activate([
+            stack.topAnchor.constraint(equalTo: container.topAnchor, constant: 24),
+            stack.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 22),
+            stack.trailingAnchor.constraint(lessThanOrEqualTo: container.trailingAnchor, constant: -22),
+            stack.bottomAnchor.constraint(lessThanOrEqualTo: container.bottomAnchor, constant: -20),
+        ])
+        item.view = container
         return item
     }
 
@@ -230,13 +255,13 @@ private final class CyderSettingsWindowController: NSWindowController, NSWindowD
     private func reload() {
         let value = store.value
         msync.state = value.msync ? .on : .off
-        disableMshtml.state = (value.disableMshtml ?? false) ? .on : .off
+        esync.state = (value.esync ?? false) && !value.msync ? .on : .off
         retina.state = value.retinaMode ? .on : .off
         let dpiValues = [96, 120, 144, 168, 192, 240]
         dpi.selectItem(at: dpiValues.firstIndex(of: value.dpi) ?? 4)
         font.selectItem(at: value.fontPreset == "mingliu" ? 1 : 0)
         let smoothingValues = ["off", "grayscale", "cleartype-rgb", "cleartype-bgr"]
-        smoothing.selectItem(at: smoothingValues.firstIndex(of: value.fontSmoothing) ?? 2)
+        smoothing.selectItem(at: smoothingValues.firstIndex(of: value.fontSmoothing) ?? 1)
         isDirty = false
         status.stringValue = "設定將於確認後儲存"
         status.textColor = .secondaryLabelColor
@@ -252,13 +277,23 @@ private final class CyderSettingsWindowController: NSWindowController, NSWindowD
         status.textColor = .systemOrange
     }
 
+    @objc private func msyncChanged() {
+        if msync.state == .on { esync.state = .off }
+        markDirty()
+    }
+
+    @objc private func esyncChanged() {
+        if esync.state == .on { msync.state = .off }
+        markDirty()
+    }
+
     private func saveControls() -> Bool {
         let dpiValues = [96, 120, 144, 168, 192, 240]
         let smoothingValues = ["off", "grayscale", "cleartype-rgb", "cleartype-bgr"]
         do {
             try store.update {
                 $0.msync = msync.state == .on
-                $0.disableMshtml = disableMshtml.state == .on
+                $0.esync = esync.state == .on
                 $0.retinaMode = retina.state == .on
                 $0.dpi = dpiValues[max(0, dpi.indexOfSelectedItem)]
                 $0.fontPreset = font.indexOfSelectedItem == 1 ? "mingliu" : "songti"
@@ -293,56 +328,55 @@ private final class CyderSettingsWindowController: NSWindowController, NSWindowD
     @objc private func resetAll() {
         let alert = NSAlert()
         alert.messageText = "恢復所有進階設定？"
-        alert.informativeText = "這不會刪除 Wine 引擎、遊戲或個人檔案。"
+        alert.informativeText = "這不會刪除遊戲所需元件、遊戲或個人檔案。"
         alert.alertStyle = .warning
         alert.addButton(withTitle: "恢復預設值")
         alert.addButton(withTitle: "取消")
         guard alert.runModal() == .alertFirstButtonReturn else { return }
         let value = CyderSettings.defaults
         msync.state = value.msync ? .on : .off
-        disableMshtml.state = (value.disableMshtml ?? false) ? .on : .off
+        esync.state = (value.esync ?? false) ? .on : .off
         retina.state = value.retinaMode ? .on : .off
-        dpi.selectItem(at: 0)
+        dpi.selectItem(at: 4)
         font.selectItem(at: 0)
-        smoothing.selectItem(at: 2)
+        smoothing.selectItem(at: 1)
         markDirty()
     }
 
     @objc private func confirmChanges() {
         let running = hasRunningExes?() ?? false
-        let alert = NSAlert()
-        alert.messageText = "EXE 重新開啟後設定才會生效"
+        var shouldStopAll = false
         if running {
-            alert.informativeText = "偵測到由 Cyder 執行的 EXE。是否儲存設定並關閉所有 EXE？未儲存的遊戲進度可能會遺失。"
+            let alert = NSAlert()
+            alert.messageText = "重新開啟遊戲後會套用新設定"
+            alert.informativeText = "目前有遊戲正在執行。要立即關閉所有遊戲並套用設定，還是只儲存設定、稍後自行重新開啟？未儲存的遊戲進度可能會遺失。"
             alert.alertStyle = .warning
-            alert.addButton(withTitle: "儲存並關閉所有 EXE")
-            alert.addButton(withTitle: "僅儲存")
+            alert.addButton(withTitle: "儲存並關閉所有遊戲")
+            alert.addButton(withTitle: "只儲存")
             alert.addButton(withTitle: "取消")
-        } else {
-            alert.informativeText = "目前沒有偵測到執行中的 Cyder EXE。確定儲存設定嗎？"
-            alert.addButton(withTitle: "儲存")
-            alert.addButton(withTitle: "取消")
-        }
-        let response = alert.runModal()
-        if running {
+            let response = alert.runModal()
             guard response != .alertThirdButtonReturn else { return }
-        } else {
-            guard response == .alertFirstButtonReturn else { return }
+            shouldStopAll = response == .alertFirstButtonReturn
         }
-        guard saveControls() else { return }
-        onCommit?(running && response == .alertFirstButtonReturn)
+        onSaveStarted?()
+        guard saveControls() else {
+            onSaveFailed?()
+            return
+        }
+        onCommit?(shouldStopAll)
         close()
     }
 }
 
 final class CyderSetupPanel {
     private let window: NSWindow
-    private let spinner: NSProgressIndicator
+    private let progress: NSProgressIndicator
     private let label: NSTextField
+    private let detail: NSTextField
 
     init() {
-        let width: CGFloat = 360
-        let height: CGFloat = 120
+        let width: CGFloat = 420
+        let height: CGFloat = 150
         let frame = NSRect(x: 0, y: 0, width: width, height: height)
         window = NSWindow(
             contentRect: frame,
@@ -356,41 +390,64 @@ final class CyderSetupPanel {
         window.level = .floating
         window.center()
 
-        spinner = NSProgressIndicator()
-        spinner.style = .spinning
-        spinner.controlSize = .regular
-        spinner.translatesAutoresizingMaskIntoConstraints = false
-        spinner.startAnimation(nil)
+        progress = NSProgressIndicator()
+        progress.style = .bar
+        progress.isIndeterminate = true
+        progress.controlSize = .regular
+        progress.translatesAutoresizingMaskIntoConstraints = false
+        progress.startAnimation(nil)
 
         label = NSTextField(labelWithString: "正在準備…")
         label.font = .systemFont(ofSize: 14)
         label.alignment = .center
         label.translatesAutoresizingMaskIntoConstraints = false
 
+        detail = NSTextField(labelWithString: "請稍候，完成後會自動關閉。")
+        detail.font = .systemFont(ofSize: 11)
+        detail.textColor = .secondaryLabelColor
+        detail.alignment = .center
+        detail.translatesAutoresizingMaskIntoConstraints = false
+
         let content = window.contentView!
-        content.addSubview(spinner)
         content.addSubview(label)
+        content.addSubview(progress)
+        content.addSubview(detail)
         NSLayoutConstraint.activate([
-            spinner.centerXAnchor.constraint(equalTo: content.centerXAnchor),
-            spinner.topAnchor.constraint(equalTo: content.topAnchor, constant: 24),
             label.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 16),
             label.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -16),
-            label.topAnchor.constraint(equalTo: spinner.bottomAnchor, constant: 16),
+            label.topAnchor.constraint(equalTo: content.topAnchor, constant: 28),
+            progress.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 36),
+            progress.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -36),
+            progress.topAnchor.constraint(equalTo: label.bottomAnchor, constant: 18),
+            detail.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 16),
+            detail.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -16),
+            detail.topAnchor.constraint(equalTo: progress.bottomAnchor, constant: 14),
         ])
     }
 
     func setMessage(_ text: String) {
         label.stringValue = text
+        window.displayIfNeeded()
     }
 
     func show() {
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
+        window.displayIfNeeded()
     }
 
     func close() {
-        spinner.stopAnimation(nil)
+        progress.stopAnimation(nil)
         window.orderOut(nil)
+    }
+}
+
+private final class WineActivationWaiter {
+    let prefix: String
+    let semaphore = DispatchSemaphore(value: 0)
+
+    init(prefix: String) {
+        self.prefix = (prefix as NSString).standardizingPath
     }
 }
 
@@ -401,10 +458,19 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
     private var setupPanel: CyderSetupPanel?
     private var terminateWhenSettingsClose = false
     private var environmentPreparationInProgress = false
+    private var wineActivationWaiter: WineActivationWaiter?
     private lazy var settingsController: CyderSettingsWindowController = {
         let controller = CyderSettingsWindowController()
         controller.onCommit = { [weak self] shouldStopAll in
             self?.prepareEnvironmentAfterSettings(stopAll: shouldStopAll)
+        }
+        controller.onSaveStarted = { [weak self] in
+            self?.environmentPreparationInProgress = true
+            self?.showSetup("正在儲存設定…")
+        }
+        controller.onSaveFailed = { [weak self] in
+            self?.hideSetup()
+            self?.environmentPreparationInProgress = false
         }
         controller.hasRunningExes = { [weak self] in self?.hasRunningExes() ?? false }
         controller.onClose = { [weak self] in
@@ -415,8 +481,17 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         return controller
     }()
 
+    func applicationWillFinishLaunching(_ notification: Notification) {
+        // Opening an EXE should not leave a Cyder Dock item behind.  The Wine
+        // process owns the game windows and will become the regular frontmost
+        // application after the native launcher activates it.  Settings mode
+        // remains a normal AppKit application with a Dock item.
+        NSApp.setActivationPolicy(hasDocumentArgument ? .prohibited : .regular)
+    }
+
     func application(_ application: NSApplication, openFiles filenames: [String]) {
         terminateWhenSettingsClose = false
+        NSApp.setActivationPolicy(.prohibited)
         if settingsController.window?.isVisible == true {
             settingsController.close()
         }
@@ -425,6 +500,13 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        DistributedNotificationCenter.default().addObserver(
+            self,
+            selector: #selector(wineAppWillActivate(_:)),
+            name: Notification.Name("WineAppWillActivateNotification"),
+            object: nil,
+            suspensionBehavior: .deliverImmediately
+        )
         installMainMenu()
         didFinishLaunch = true
         for arg in CommandLine.arguments.dropFirst() {
@@ -441,6 +523,17 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             showSettings()
         } else {
             scheduleRun()
+        }
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        DistributedNotificationCenter.default().removeObserver(self)
+    }
+
+    private var hasDocumentArgument: Bool {
+        CommandLine.arguments.dropFirst().contains { raw in
+            let path = raw.replacingOccurrences(of: "file://", with: "")
+            return path.lowercased().hasSuffix(".exe")
         }
     }
 
@@ -496,7 +589,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         let context = CyderLaunchContext(resourcePath: resourcePath)
         let status = runLauncher(context: context, args: [context.launcher, "--stop-all"])
         if status != 0 {
-            showAlert("無法關閉所有 EXE", "請手動關閉遊戲後再重新開啟。")
+            showAlert("有些遊戲未能關閉", "請先手動關閉遊戲，再重新套用設定。")
         }
     }
 
@@ -509,17 +602,32 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
     private func prepareEnvironmentAfterSettings(stopAll: Bool) {
         guard terminateWhenSettingsClose,
               let resourcePath = Bundle.main.resourcePath else { return }
-        environmentPreparationInProgress = true
         let context = CyderLaunchContext(resourcePath: resourcePath)
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             guard let self else { return }
-            if stopAll { self.stopAllExes() }
+            if stopAll {
+                self.showSetup("正在關閉遊戲…")
+                self.stopAllExes()
+            }
             let status = self.ensureEnvironment(context: context)
+            var settingsStatus = status
+            if status == 0 {
+                self.showSetup("正在套用新設定…")
+                settingsStatus = self.runLauncher(context: context, args: [
+                    context.launcher, "--apply-settings-only",
+                ])
+            }
             DispatchQueue.main.async {
                 self.hideSetup()
                 self.environmentPreparationInProgress = false
-                if status == 0 {
-                    self.showAlert("Cyder 已準備完成", "設定已儲存，遊戲引擎與 Windows 環境均可使用。")
+                if settingsStatus == 0 {
+                    self.showAlert(
+                        "設定完成",
+                        "新設定已儲存，下次開啟遊戲時會自動使用。",
+                        style: .informational
+                    )
+                } else if status == 0 {
+                    self.showAlert("設定未完成", "套用設定時發生問題。請重新開啟 Cyder 再試一次。")
                 }
                 NSApp.terminate(nil)
             }
@@ -537,6 +645,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             return
         }
         didRunLauncher = true
+        NSApp.setActivationPolicy(.prohibited)
 
         guard let resourcePath = Bundle.main.resourcePath else {
             fputs("Cyder: missing Resources path\n", stderr)
@@ -545,11 +654,6 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         }
 
         let context = CyderLaunchContext(resourcePath: resourcePath)
-        guard FileManager.default.isExecutableFile(atPath: context.launcher) else {
-            fputs("Cyder: missing launcher at \(context.launcher)\n", stderr)
-            NSApp.terminate(nil)
-            return
-        }
 
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             guard let self else {
@@ -558,6 +662,12 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             let status = self.runPhasedLaunch(context: context)
             DispatchQueue.main.async {
                 self.hideSetup()
+                if status == 2 {
+                    self.showAlert(
+                        "遊戲尚未準備完成",
+                        "請先單獨開啟 Cyder.app，按「確認」完成首次準備，再重新開啟遊戲。"
+                    )
+                }
                 NSApp.terminate(nil)
                 exit(status)
             }
@@ -565,16 +675,13 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func environmentState(context: CyderLaunchContext) -> (needsEngine: Bool, needsBootstrap: Bool) {
-        let support = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Library/Application Support/Cyder", isDirectory: true)
-        let engineWine = support
-            .appendingPathComponent("Engines/wine-x86_64/bin/wine")
-        let bootstrapMarker = support
-            .appendingPathComponent("SharedPrefix/.cyder-bootstrap-v1")
+        let engineWine = CyderPaths.engine.appendingPathComponent("bin/wine")
 
-        let needsEngine = !FileManager.default.isExecutableFile(atPath: engineWine.path)
+        let unsafeEnginePath = CyderPaths.engine.path.rangeOfCharacter(from: .whitespacesAndNewlines) != nil
+        let needsEngine = unsafeEnginePath
+            || !FileManager.default.isExecutableFile(atPath: engineWine.path)
             || engineNeedsInstall(context: context, engineWine: engineWine)
-        let needsBootstrap = !FileManager.default.fileExists(atPath: bootstrapMarker.path)
+        let needsBootstrap = !FileManager.default.fileExists(atPath: CyderPaths.bootstrapMarker.path)
         return (needsEngine, needsBootstrap)
     }
 
@@ -582,28 +689,34 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         let state = environmentState(context: context)
 
         if state.needsEngine {
-            showSetup("建立遊戲引擎中…")
+            showSetup("正在準備遊戲執行元件…")
             let code = runLauncher(context: context, args: [
                 context.launcher, "--engine-src", context.engineSrc, "--ensure-engine-only",
             ])
             if code != 0 {
                 showAlert(
-                    "Cyder 無法安裝遊戲引擎",
-                    "請查看 ~/Library/Application Support/Cyder/Logs/engine-install.log"
+                    "無法完成遊戲準備",
+                    "準備遊戲所需元件時發生問題。請重新開啟 Cyder 再試一次。"
                 )
                 return code
             }
         }
 
-        if state.needsBootstrap {
-            showSetup("準備 Windows 環境中…")
+        // Engine installation can create/replace the engine tree. Recompute
+        // the marker decision after that operation so first-run setup cannot
+        // be deferred to the next Cyder launch.
+        let bootstrapNeeded = state.needsEngine
+            || state.needsBootstrap
+            || environmentState(context: context).needsBootstrap
+        if bootstrapNeeded {
+            showSetup("正在準備遊戲環境…")
             let code = runLauncher(context: context, args: [
                 context.launcher, "--engine-src", context.engineSrc, "--bootstrap-only",
             ])
             if code != 0 {
                 showAlert(
-                    "Cyder 初始化失敗",
-                    "請查看 ~/Library/Application Support/Cyder/Logs/bootstrap-error.log"
+                    "無法完成遊戲準備",
+                    "準備遊戲環境時發生問題。請重新開啟 Cyder 再試一次。"
                 )
                 return code
             }
@@ -612,15 +725,6 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func runPhasedLaunch(context: CyderLaunchContext) -> Int32 {
-        let state = environmentState(context: context)
-        if state.needsEngine || state.needsBootstrap {
-            showAlert(
-                "Cyder 環境尚未完成",
-                "請先單獨開啟 Cyder.app、儲存設定並完成遊戲引擎與 Windows 環境建置，再重新開啟此 EXE。"
-            )
-            return 2
-        }
-
         var exePaths = normalizeExePaths(pendingFiles)
         if exePaths.isEmpty {
             hideSetup()
@@ -630,8 +734,135 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             exePaths = [chosen]
         }
 
-        let args = [context.launcher, "--engine-src", context.engineSrc, "--launch-exe", exePaths[0]]
-        return runLauncher(context: context, args: args)
+        // Direct EXE launches intentionally do not install or bootstrap the
+        // environment.  That work is completed by the settings flow first.
+        let state = environmentState(context: context)
+        guard !state.needsEngine, !state.needsBootstrap else {
+            return 2
+        }
+
+        let wine = CyderPaths.engine.appendingPathComponent("bin/wine")
+        guard FileManager.default.isExecutableFile(atPath: wine.path) else {
+            return 2
+        }
+        return runDirectWine(wine: wine, exe: exePaths[0])
+    }
+
+    /// Launch Wine directly through Apple's architecture selector, then wait
+    /// for CrossOver Wine to publish the actual foreground application PID in
+    /// WineAppWillActivateNotification.  The wrapper Process PID is not used
+    /// for activation. Wine continues independently after Cyder exits.
+    private func runDirectWine(wine: URL, exe: String) -> Int32 {
+        let support = CyderPaths.support
+        let logDirectory = support.appendingPathComponent("Logs", isDirectory: true)
+        let prefix = CyderPaths.sharedBottle.path
+        let activationWaiter = WineActivationWaiter(prefix: prefix)
+        onMainThread {
+            wineActivationWaiter = activationWaiter
+        }
+        defer {
+            onMainThread {
+                if wineActivationWaiter === activationWaiter {
+                    wineActivationWaiter = nil
+                }
+            }
+        }
+
+        do {
+            try FileManager.default.createDirectory(at: logDirectory, withIntermediateDirectories: true)
+        } catch {
+            fputs("Cyder: unable to create log directory: \(error)\n", stderr)
+            return 1
+        }
+
+        let launchLog = logDirectory.appendingPathComponent("last-launch.log")
+
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/arch")
+        process.arguments = ["-x86_64", wine.path, exe]
+        process.currentDirectoryURL = URL(fileURLWithPath: exe).deletingLastPathComponent()
+        process.environment = wineEnvironment(wine: wine, support: support)
+
+        let command = "arch -x86_64 \(wine.path) \(exe)\n"
+        FileManager.default.createFile(atPath: launchLog.path, contents: command.data(using: .utf8))
+        if let handle = FileHandle(forWritingAtPath: launchLog.path) {
+            process.standardOutput = handle
+            process.standardError = handle
+        }
+
+        do {
+            try process.run()
+        } catch {
+            fputs("Cyder: failed to run Wine: \(error)\n", stderr)
+            return 1
+        }
+
+        // The distributed notification is normally posted as soon as Wine's
+        // first activatable Cocoa window is ready. Keep this hidden launcher
+        // alive only long enough to receive that exact foreground PID.
+        _ = activationWaiter.semaphore.wait(timeout: .now() + 30)
+        return 0
+    }
+
+    private func wineEnvironment(wine: URL, support: URL) -> [String: String] {
+        var environment = ProcessInfo.processInfo.environment
+        for (key, value) in CyderSettingsStore.shared.environment {
+            environment[key] = value
+        }
+
+        let engineRoot = wine.deletingLastPathComponent().deletingLastPathComponent()
+        let prefix = CyderPaths.sharedBottle.path
+        environment["WINEPREFIX"] = prefix
+        environment["WINESERVER"] = engineRoot.appendingPathComponent("bin/wineserver").path
+        environment["PATH"] = engineRoot.appendingPathComponent("bin").path
+            + ":" + (environment["PATH"] ?? "/usr/bin:/bin")
+
+        if environment["CYDER_MSYNC"] == "1" {
+            environment["WINEMSYNC"] = "1"
+            environment.removeValue(forKey: "WINEESYNC")
+        } else if environment["CYDER_ESYNC"] == "1" {
+            environment["WINEESYNC"] = "1"
+            environment.removeValue(forKey: "WINEMSYNC")
+        } else {
+            environment.removeValue(forKey: "WINEMSYNC")
+            environment.removeValue(forKey: "WINEESYNC")
+        }
+
+        let locale = resolvedWineLocale(environment: environment)
+        environment["LANG"] = locale
+        environment["LC_ALL"] = locale
+        return environment
+    }
+
+    @objc private func wineAppWillActivate(_ notification: Notification) {
+        let userInfo = notification.userInfo ?? [:]
+        let pid = (userInfo["ActivatingAppPID"] as? NSNumber)?.int32Value ?? 0
+        let prefix = userInfo["ActivatingAppPrefix"] as? String ?? ""
+
+        let handle = { [weak self] in
+            guard let self,
+                  let waiter = self.wineActivationWaiter,
+                  pid > 0,
+                  !prefix.isEmpty,
+                  (prefix as NSString).standardizingPath == waiter.prefix,
+                  let application = NSRunningApplication(processIdentifier: pid),
+                  application.activationPolicy == .regular
+            else {
+                return
+            }
+
+            // The notification comes from the Wine Cocoa process that is
+            // ready to become foreground. No PID search or activation polling
+            // is needed after this point.
+            self.wineActivationWaiter = nil
+            _ = application.activate(options: [.activateAllWindows, .activateIgnoringOtherApps])
+            waiter.semaphore.signal()
+        }
+        if Thread.isMainThread {
+            handle()
+        } else {
+            DispatchQueue.main.async(execute: handle)
+        }
     }
 
     private func engineNeedsInstall(context: CyderLaunchContext, engineWine: URL) -> Bool {
@@ -682,12 +913,16 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    private func showAlert(_ title: String, _ message: String) {
+    private func showAlert(
+        _ title: String,
+        _ message: String,
+        style: NSAlert.Style = .warning
+    ) {
         onMainThread {
             let alert = NSAlert()
             alert.messageText = title
             alert.informativeText = message
-            alert.alertStyle = .warning
+            alert.alertStyle = style
             alert.runModal()
         }
     }
@@ -815,6 +1050,37 @@ private func normalizeExePaths(_ paths: [String]) -> [String] {
         }
     }
     return out
+}
+
+private func resolvedWineLocale(environment: [String: String]) -> String {
+    for key in ["LC_ALL", "LANG"] {
+        if let value = environment[key],
+           !value.isEmpty,
+           value != "C",
+           value != "POSIX",
+           value != "C.UTF-8" {
+            return value
+        }
+    }
+
+    let identifier = Locale.current.identifier.replacingOccurrences(of: "-", with: "_")
+    let lower = identifier.lowercased()
+    if lower.hasPrefix("zh_hant_tw") || lower == "zh_tw" {
+        return "zh_TW.UTF-8"
+    }
+    if lower.hasPrefix("zh_hant_hk") || lower == "zh_hk" {
+        return "zh_HK.UTF-8"
+    }
+    if lower.hasPrefix("zh_hans") || lower == "zh_cn" {
+        return "zh_CN.UTF-8"
+    }
+    if lower.hasPrefix("ja") {
+        return "ja_JP.UTF-8"
+    }
+    if lower.hasPrefix("ko") {
+        return "ko_KR.UTF-8"
+    }
+    return identifier.contains(".") ? identifier : "\(identifier).UTF-8"
 }
 
 let app = NSApplication.shared

@@ -11,6 +11,7 @@ if cyder_resources_has_bundled_engine "$(dirname "$SCRIPT_DIR")"; then
 else
   cyder_init_paths "$SCRIPT_DIR"
 fi
+cyder_load_saved_settings
 
 usage() {
   cat <<EOF
@@ -24,6 +25,7 @@ Options:
   --ensure-rosetta-only Check Rosetta 2 on Apple Silicon and exit
   --stop-all          Stop all EXEs in the Cyder shared prefix and exit
   --has-running-exes  Exit 0 if the shared prefix has running EXEs, otherwise 1
+  --apply-settings-only Apply saved settings without installing the environment
   --launch-exe PATH   Launch .exe (engine + bootstrap must already be ready)
   -h, --help          Show this help
 EOF
@@ -35,6 +37,7 @@ ENSURE_ENGINE_ONLY=0
 ENSURE_ROSETTA_ONLY=0
 STOP_ALL=0
 HAS_RUNNING_EXES=0
+APPLY_SETTINGS_ONLY=0
 LAUNCH_ONLY=0
 ENGINE_SRC="$CYDER_ENGINE_SRC"
 EXE_ARGS=()
@@ -63,6 +66,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --has-running-exes)
       HAS_RUNNING_EXES=1
+      shift
+      ;;
+    --apply-settings-only)
+      APPLY_SETTINGS_ONLY=1
       shift
       ;;
     --launch-exe)
@@ -112,7 +119,7 @@ if [[ "$HAS_RUNNING_EXES" -eq 1 ]]; then
   exit $?
 fi
 
-if [[ "$DRY_RUN" -eq 0 ]]; then
+if [[ "$DRY_RUN" -eq 0 && "$LAUNCH_ONLY" -eq 0 ]]; then
   cyder_ensure_rosetta || exit 1
 fi
 
@@ -122,6 +129,16 @@ fi
 
 if [[ "$STOP_ALL" -eq 1 ]]; then
   cyder_stop_all_exes
+  exit 0
+fi
+
+if [[ "$APPLY_SETTINGS_ONLY" -eq 1 ]]; then
+  engine="$CYDER_ENGINES/$CYDER_ENGINE_NAME"
+  if [[ ! -x "$engine/bin/wine" || ! -f "$CYDER_BOOTSTRAP_MARKER" ]]; then
+    echo "Cyder environment is not ready; open Cyder.app to finish setup." >&2
+    exit 2
+  fi
+  cyder_apply_user_settings "$engine/bin/wine" "$engine"
   exit 0
 fi
 
@@ -161,13 +178,11 @@ if [[ "$LAUNCH_ONLY" -eq 1 ]]; then
     echo "Missing or invalid .exe for --launch-exe" >&2
     exit 1
   }
-  engine="$CYDER_ENGINES/$CYDER_ENGINE_NAME"
-  if [[ ! -x "$engine/bin/wine" || ! -f "$CYDER_BOOTSTRAP_MARKER" ]] \
-    || cyder_engine_needs_install "$ENGINE_SRC"; then
+  if ! cyder_engine_is_ready_for_launch; then
     echo "Cyder environment is not ready; open Cyder.app to finish setup." >&2
     exit 2
   fi
-  wine="$engine/bin/wine"
+  wine="$CYDER_ENGINES/$CYDER_ENGINE_NAME/bin/wine"
   cyder_run_wine_exe "$wine" "$exe"
   exit 0
 fi
