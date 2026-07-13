@@ -1,0 +1,78 @@
+--- a/dlls/winemac.drv/cocoa_opengl.m
++++ b/dlls/winemac.drv/cocoa_opengl.m
+@@ -34,7 +34,7 @@
+ @property (nullable, weak) NSView *view;    /* redeclare this to avoid NSOpenGLContext's deprecation warnings */
+ 
+     + (NSView*) dummyView;
+-    - (void) wine_updateBackingSize:(const CGSize*)size;
++    - (void) wine_updateBackingSize:(const CGSize*)size inPlace:(BOOL)allow_in_place;
+ 
+ @end
+ 
+@@ -108,10 +108,10 @@
+     }
+ 
+     /* This is a no-op if either dimension of the size is zero. */
+-    - (void) wine_updateBackingSize:(const CGSize*)size
++    - (void) wine_updateBackingSize:(const CGSize*)size inPlace:(BOOL)allow_in_place
+     {
+         GLint enabled;
+-        BOOL final_sync;
++        BOOL in_place_commit;
+ 
+         if (size)
+         {
+@@ -124,7 +124,7 @@
+             if (size->width == 0 || size->height == 0)
+                 return;
+ 
+-            final_sync = self.backingSyncPending;
++            in_place_commit = allow_in_place || self.backingSyncPending;
+ 
+             if (CGLIsEnabled(self.CGLContextObj, kCGLCESurfaceBackingSize, &enabled) != kCGLNoError)
+                 enabled = 0;
+@@ -139,7 +139,7 @@
+             if (!enabled)
+                 CGLEnable(self.CGLContextObj, kCGLCESurfaceBackingSize);
+ 
+-            if (final_sync)
++            if (in_place_commit)
+             {
+                 macdrv_set_view_backing_size((macdrv_view)self.view, backing_size);
+                 if ([NSThread isMainThread])
+@@ -184,7 +184,7 @@
+         });
+         [oldView release];
+ 
+-        [self wine_updateBackingSize:NULL];
++        [self wine_updateBackingSize:NULL inPlace:FALSE];
+     }
+ 
+     /* On at least some versions of Mac OS X, -[NSOpenGLContext clearDrawable] has the
+@@ -271,7 +271,7 @@
+     {
+         if (view == [context view] || view == [context latentView])
+         {
+-            [context wine_updateBackingSize:&r.size];
++            [context wine_updateBackingSize:&r.size inPlace:(view == [context view])];
+             macdrv_update_opengl_context(c);
+         }
+         else
+@@ -285,7 +285,7 @@
+                 context.needsReattach = FALSE;
+                 if (context.view)
+                     [context setView:[[context class] dummyView]];
+-                [context wine_updateBackingSize:&r.size];
++                [context wine_updateBackingSize:&r.size inPlace:FALSE];
+                 [context setView:view];
+                 [context setLatentView:nil];
+                 [context resetSurfaceIfBackingSizeChanged];
+@@ -294,7 +294,7 @@
+             {
+                 if ([context view])
+                     [context clearDrawableLeavingSurfaceOnScreen];
+-                [context wine_updateBackingSize:&r.size];
++                [context wine_updateBackingSize:&r.size inPlace:FALSE];
+                 [context setLatentView:view];
+             }
+         }

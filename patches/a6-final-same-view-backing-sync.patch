@@ -1,0 +1,330 @@
+--- a/dlls/winemac.drv/cocoa_opengl.h
++++ b/dlls/winemac.drv/cocoa_opengl.h
+@@ -26,11 +26,13 @@
+     NSView* latentView;
+     BOOL needsUpdate;
+     BOOL needsReattach;
++    BOOL backingSyncPending;
+ 
+     GLint backing_size[2];
+ }
+ 
+ @property BOOL needsUpdate;
+ @property BOOL needsReattach;
++@property BOOL backingSyncPending;
+ 
+ @end
+--- a/dlls/winemac.drv/macdrv_cocoa.h
++++ b/dlls/winemac.drv/macdrv_cocoa.h
+@@ -561,6 +561,8 @@
+ extern void macdrv_view_release_metal_view(macdrv_metal_view v);
+ extern bool macdrv_get_view_backing_size(macdrv_view v, int backing_size[2]);
+ extern void macdrv_set_view_backing_size(macdrv_view v, const int backing_size[2]);
++extern bool macdrv_view_backing_sync_deferred(macdrv_view v);
++extern void macdrv_finalize_window_backing_sync(macdrv_window w);
+ extern uint32_t macdrv_window_background_color(void);
+ extern bool macdrv_ime_process_key(int keyc, unsigned int flags, int repeat, void *data);
+ extern bool macdrv_is_any_wine_window_visible(void);
+@@ -592,6 +594,7 @@
+ extern void macdrv_make_context_current(macdrv_opengl_context c, macdrv_view v, CGRect r);
+ extern void macdrv_update_opengl_context(macdrv_opengl_context c);
+ extern void macdrv_flush_opengl_context(macdrv_opengl_context c);
++extern bool macdrv_opengl_context_backing_sync_pending(macdrv_opengl_context c);
+ 
+ 
+ /* systray / status item */
+--- a/dlls/winemac.drv/cocoa_opengl.m
++++ b/dlls/winemac.drv/cocoa_opengl.m
+@@ -34,14 +34,14 @@
+ @property (nullable, weak) NSView *view;    /* redeclare this to avoid NSOpenGLContext's deprecation warnings */
+ 
+     + (NSView*) dummyView;
+-    - (void) wine_updateBackingSize:(const CGSize*)size;
++    - (void) wine_updateBackingSize:(const CGSize*)size inPlace:(BOOL)allow_in_place;
+ 
+ @end
+ 
+ 
+ @implementation WineOpenGLContext
+ @dynamic view;
+-@synthesize latentView, needsUpdate, needsReattach;
++@synthesize latentView, needsUpdate, needsReattach, backingSyncPending;
+ 
+     - (void) dealloc
+     {
+@@ -73,9 +73,16 @@
+     // destroy that view's GL surface (see -clearDrawableLeavingSurfaceOnScreen).
+     // However, if we're using a surface backing size and that size changes, we
+     // need to destroy and recreate the surface or we get weird behavior.
+-    - (void) resetSurfaceIfBackingSizeChanged
++    - (BOOL) resetSurfaceIfBackingSizeChanged
+     {
+         int view_backing[2];
++
++        if (macdrv_view_backing_sync_deferred((macdrv_view)self.view))
++        {
++            self.backingSyncPending = TRUE;
++            return FALSE;
++        }
++
+         if (macdrv_get_view_backing_size((macdrv_view)self.view, view_backing) &&
+             (view_backing[0] != backing_size[0] || view_backing[1] != backing_size[1]))
+         {
+@@ -97,18 +104,28 @@
+             });
+ #pragma clang diagnostic pop
+         }
++        return TRUE;
+     }
+ 
+     /* This is a no-op if either dimension of the size is zero. */
+-    - (void) wine_updateBackingSize:(const CGSize*)size
++    - (void) wine_updateBackingSize:(const CGSize*)size inPlace:(BOOL)allow_in_place
+     {
+         GLint enabled;
++        BOOL in_place_commit;
+ 
+         if (size)
+         {
++            if (macdrv_view_backing_sync_deferred((macdrv_view)self.view))
++            {
++                self.backingSyncPending = TRUE;
++                return;
++            }
++
+             if (size->width == 0 || size->height == 0)
+                 return;
+ 
++            in_place_commit = allow_in_place || self.backingSyncPending;
++
+             if (CGLIsEnabled(self.CGLContextObj, kCGLCESurfaceBackingSize, &enabled) != kCGLNoError)
+                 enabled = 0;
+ 
+@@ -122,7 +139,18 @@
+             if (!enabled)
+                 CGLEnable(self.CGLContextObj, kCGLCESurfaceBackingSize);
+ 
+-            [self resetSurfaceIfBackingSizeChanged];
++            if (in_place_commit)
++            {
++                macdrv_set_view_backing_size((macdrv_view)self.view, backing_size);
++                if ([NSThread isMainThread])
++                    [self update];
++                else OnMainThread(^{
++                    [self update];
++                });
++                self.backingSyncPending = FALSE;
++            }
++            else if ([self resetSurfaceIfBackingSizeChanged])
++                self.backingSyncPending = FALSE;
+         }
+         else
+         {
+@@ -156,7 +184,7 @@
+         });
+         [oldView release];
+ 
+-        [self wine_updateBackingSize:NULL];
++        [self wine_updateBackingSize:NULL inPlace:FALSE];
+     }
+ 
+     /* On at least some versions of Mac OS X, -[NSOpenGLContext clearDrawable] has the
+@@ -243,7 +271,7 @@
+     {
+         if (view == [context view] || view == [context latentView])
+         {
+-            [context wine_updateBackingSize:&r.size];
++            [context wine_updateBackingSize:&r.size inPlace:(view == [context view])];
+             macdrv_update_opengl_context(c);
+         }
+         else
+@@ -257,7 +285,7 @@
+                 context.needsReattach = FALSE;
+                 if (context.view)
+                     [context setView:[[context class] dummyView]];
+-                [context wine_updateBackingSize:&r.size];
++                [context wine_updateBackingSize:&r.size inPlace:FALSE];
+                 [context setView:view];
+                 [context setLatentView:nil];
+                 [context resetSurfaceIfBackingSizeChanged];
+@@ -266,7 +294,7 @@
+             {
+                 if ([context view])
+                     [context clearDrawableLeavingSurfaceOnScreen];
+-                [context wine_updateBackingSize:&r.size];
++                [context wine_updateBackingSize:&r.size inPlace:FALSE];
+                 [context setLatentView:view];
+             }
+         }
+@@ -343,4 +371,11 @@
+     macdrv_update_opengl_context(c);
+     [context flushBuffer];
+ }
++}
++
++bool macdrv_opengl_context_backing_sync_pending(macdrv_opengl_context c)
++{
++    WineOpenGLContext *context = (WineOpenGLContext*)c;
++
++    return context && context.backingSyncPending;
+ }
+--- a/dlls/winemac.drv/cocoa_window.m
++++ b/dlls/winemac.drv/cocoa_window.m
+@@ -368,6 +368,7 @@
+     BOOL _everHadGLContext;
+     BOOL _cachedHasGLDescendant;
+     BOOL _cachedHasGLDescendantValid;
++    BOOL backingSyncDeferred;
+ 
+     NSMutableAttributedString* markedText;
+     NSRange markedTextSelection;
+@@ -387,6 +388,8 @@
+ 
+     - (void) wine_getBackingSize:(int*)outBackingSize;
+     - (void) wine_setBackingSize:(const int*)newBackingSize;
++    - (BOOL) wine_isBackingSyncDeferred;
++    - (void) wine_setBackingSyncDeferred:(BOOL)deferred finalize:(BOOL)finalize;
+ 
+     - (WineMetalView*) newMetalViewWithDevice:(id<MTLDevice>)device;
+ 
+@@ -687,6 +690,30 @@
+         }
+     }
+ 
++    - (BOOL) wine_isBackingSyncDeferred
++    {
++        @synchronized(self) {
++            return backingSyncDeferred;
++        }
++    }
++
++    - (void) wine_setBackingSyncDeferred:(BOOL)deferred finalize:(BOOL)finalize
++    {
++        @synchronized(self) {
++            backingSyncDeferred = deferred;
++            if (finalize)
++                memset(backingSize, 0, sizeof(backingSize));
++        }
++
++        if (finalize)
++        {
++            for (WineOpenGLContext *context in glContexts)
++                context.backingSyncPending = TRUE;
++            for (WineOpenGLContext *context in pendingGlContexts)
++                context.backingSyncPending = TRUE;
++        }
++    }
++
+     - (WineMetalView*) newMetalViewWithDevice:(id<MTLDevice>)device
+     {
+         if (_metalView) return _metalView;
+@@ -954,6 +981,16 @@
+ @end
+ 
+ 
++static void set_view_backing_sync_deferred(NSView *root, BOOL deferred, BOOL finalize)
++{
++    if ([root isKindOfClass:[WineContentView class]])
++        [(WineContentView*)root wine_setBackingSyncDeferred:deferred finalize:finalize];
++
++    for (NSView *subview in [root subviews])
++        set_view_backing_sync_deferred(subview, deferred, finalize);
++}
++
++
+ @implementation WineMetalView
+ 
+     - (id) initWithFrame:(NSRect)frame device:(id<MTLDevice>)device
+@@ -3293,6 +3330,7 @@
+     - (void) windowWillStartLiveResize:(NSNotification *)notification
+     {
+         [self endWindowDragging];
++        set_view_backing_sync_deferred([self contentView], TRUE, FALSE);
+ 
+         if (maximized)
+         {
+@@ -3907,7 +3945,8 @@
+             else
+                 [view setFrame:newFrame];
+             [view setNeedsDisplay:YES];
+-            [view wine_setBackingSize:(int[2]){ 0 }];
++            if (![view wine_isBackingSyncDeferred])
++                [view wine_setBackingSize:(int[2]){ 0 }];
+             [(WineWindow*)[view window] updateForGLSubviews];
+         }
+     });
+@@ -4084,6 +4123,27 @@
+ 
+     if ([view isKindOfClass:[WineContentView class]])
+         [view wine_setBackingSize:backing_size];
++}
++
++bool macdrv_view_backing_sync_deferred(macdrv_view v)
++{
++    WineContentView* view = (WineContentView*)v;
++
++    if (![view isKindOfClass:[WineContentView class]])
++        return false;
++
++    return [view wine_isBackingSyncDeferred];
++}
++
++void macdrv_finalize_window_backing_sync(macdrv_window w)
++{
++    WineWindow* window = (WineWindow*)w;
++
++    if (!window) return;
++
++    OnMainThread(^{
++        set_view_backing_sync_deferred([window contentView], FALSE, TRUE);
++    });
+ }
+ 
+ /* CW HACK 22435 */
+--- a/dlls/winemac.drv/window.c
++++ b/dlls/winemac.drv/window.c
+@@ -1521,8 +1521,7 @@
+     if (!thread_data->current_event || thread_data->current_event->window != data->cocoa_window)
+         goto done;
+ 
+-    if (thread_data->current_event->type != WINDOW_FRAME_CHANGED &&
+-        thread_data->current_event->type != WINDOW_DID_UNMINIMIZE)
++    if (thread_data->current_event->type != WINDOW_FRAME_CHANGED)
+         goto done;
+ 
+     macdrv_get_cocoa_window_frame(data->cocoa_window, &frame);
+@@ -1996,8 +1995,13 @@
+  */
+ void macdrv_window_resize_ended(HWND hwnd)
+ {
++    macdrv_window window;
++
+     TRACE("hwnd %p\n", hwnd);
+     send_message(hwnd, WM_EXITSIZEMOVE, 0, 0);
++
++    if ((window = macdrv_get_cocoa_window(hwnd, FALSE)))
++        macdrv_finalize_window_backing_sync(window);
+ }
+ 
+ 
+--- a/dlls/winemac.drv/opengl.c
++++ b/dlls/winemac.drv/opengl.c
+@@ -2021,7 +2021,8 @@
+ 
+     if (!context) return;
+     if (flags & GL_FLUSH_INTERVAL) set_swap_interval(context, base->interval);
+-    if (flags & GL_FLUSH_UPDATED) make_context_current(context, context->read_view == client->cocoa_view);
++    if ((flags & GL_FLUSH_UPDATED) || macdrv_opengl_context_backing_sync_pending(context->context))
++        make_context_current(context, context->read_view == client->cocoa_view);
+ }
+ 
+ 
+@@ -2870,6 +2871,8 @@
+     TRACE("%s context %p/%p/%p\n", debugstr_opengl_drawable(base), context, (context ? context->context : NULL),
+           (context ? context->cglcontext : NULL));
+ 
++    if (macdrv_opengl_context_backing_sync_pending(context->context))
++        make_context_current(context, FALSE);
+     macdrv_flush_opengl_context(context->context);
+     return TRUE;
+ }

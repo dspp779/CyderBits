@@ -1,0 +1,37 @@
+--- a/dlls/winemac.drv/cocoa_opengl.m
++++ b/dlls/winemac.drv/cocoa_opengl.m
+@@ -108,6 +108,7 @@
+     - (void) wine_updateBackingSize:(const CGSize*)size
+     {
+         GLint enabled;
++        BOOL final_sync;
+ 
+         if (size)
+         {
+@@ -121,6 +122,8 @@
+             if (size->width == 0 || size->height == 0)
+                 return;
+ 
++            final_sync = self.backingSyncPending;
++
+             if (CGLIsEnabled(self.CGLContextObj, kCGLCESurfaceBackingSize, &enabled) != kCGLNoError)
+                 enabled = 0;
+ 
+@@ -138,6 +141,16 @@
+                 CGLEnable(self.CGLContextObj, kCGLCESurfaceBackingSize);
+ 
+-            if ([self resetSurfaceIfBackingSizeChanged])
++            if (final_sync)
++            {
++                macdrv_set_view_backing_size((macdrv_view)self.view, backing_size);
++                if ([NSThread isMainThread])
++                    [self update];
++                else OnMainThread(^{
++                    [self update];
++                });
++                self.backingSyncPending = FALSE;
++            }
++            else if ([self resetSurfaceIfBackingSizeChanged])
+                 self.backingSyncPending = FALSE;
+         }
+         else

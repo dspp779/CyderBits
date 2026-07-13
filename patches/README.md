@@ -48,3 +48,12 @@ bash scripts/build-wine.sh --with-vulkan --vulkan-source crossover
 ```
 
 To skip Vulkan entirely (BlueCG default): `--without-vulkan`.
+
+## BlueCG A6 — same-view backing sync
+
+`a6-final-same-view-backing-sync.patch` is the consolidated CrossOver 26.2.0
+patch for the BlueCG Retina+DPI resize fix. It combines the tested R1, R2, R3
+and R5 changes; the R4 deminiaturize guard remains history-only and should not
+be applied to the final engine. See
+[`docs/bluecg-winemac-a6-engine.md`](../docs/bluecg-winemac-a6-engine.md) for
+the tested runtime and artifact checksum.

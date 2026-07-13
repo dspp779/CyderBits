@@ -1,0 +1,42 @@
+--- a/dlls/winemac.drv/cocoa_window.h
++++ b/dlls/winemac.drv/cocoa_window.h
+@@ -82,6 +82,8 @@
+     BOOL ignore_windowDeminiaturize;
+     BOOL ignore_windowResize;
+     BOOL fakingClose;
++    BOOL frameBeforeMiniaturizeValid;
++    NSRect frameBeforeMiniaturize;
+ 
+     CAShapeLayer* contentViewMaskLayer;
+ }
+--- a/dlls/winemac.drv/cocoa_window.m
++++ b/dlls/winemac.drv/cocoa_window.m
+@@ -3088,6 +3088,8 @@
+     - (void)windowDidDeminiaturize:(NSNotification *)notification
+     {
+         WineApplicationController* controller = [WineApplicationController sharedController];
++        BOOL frameChanged = !frameBeforeMiniaturizeValid ||
++                            !NSEqualRects(self.wine_fractionalFrame, frameBeforeMiniaturize);
+ 
+         if (!ignore_windowDeminiaturize)
+             [self postDidUnminimizeEvent];
+@@ -3110,7 +3112,9 @@
+             [controller windowGotFocus:self];
+         }
+ 
+-        [self windowDidResize:notification];
++        if (frameChanged)
++            [self windowDidResize:notification];
++        frameBeforeMiniaturizeValid = FALSE;
+         [self checkWineDisplayLink];
+     }
+ 
+@@ -3284,6 +3288,8 @@
+ 
+     - (void)windowWillMiniaturize:(NSNotification *)notification
+     {
++        frameBeforeMiniaturize = self.wine_fractionalFrame;
++        frameBeforeMiniaturizeValid = TRUE;
+         [self becameIneligibleParentOrChild];
+         [self grabDockIconSnapshotFromWindow:nil force:NO];
+     }

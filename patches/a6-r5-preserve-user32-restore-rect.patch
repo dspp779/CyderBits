@@ -1,0 +1,12 @@
+--- a/dlls/winemac.drv/window.c
++++ b/dlls/winemac.drv/window.c
+@@ -1521,8 +1521,7 @@
+     if (!thread_data->current_event || thread_data->current_event->window != data->cocoa_window)
+         goto done;
+ 
+-    if (thread_data->current_event->type != WINDOW_FRAME_CHANGED &&
+-        thread_data->current_event->type != WINDOW_DID_UNMINIMIZE)
++    if (thread_data->current_event->type != WINDOW_FRAME_CHANGED)
+         goto done;
+ 
+     macdrv_get_cocoa_window_frame(data->cocoa_window, &frame);

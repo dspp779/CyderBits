@@ -177,15 +177,29 @@ A4：確認完整停用 backing path 的上限效果
 
 不要把 A4 的 `winemac.so` 直接覆蓋所有 Cyder／CyderBits 共用 engine；應維持 BlueCG 專用 runtime，或加入 per-app 選項。
 
-## 下一步 A6
+## A6-R1：resize-end commit
 
-A5 已證明「只在 live resize transaction 暫停 backing」可以保留高 DPI backing，但狀態沒有涵蓋 Alt+Enter／最小化／還原。A6 應：
+A5 已證明「只在 live resize transaction 暫停 backing」可以保留高 DPI backing，但全域狀態沒有涵蓋 Alt+Enter／最小化／還原。A6-R1 已改成 per-view deferral，先收斂 live resize：
 
-1. 將全域狀態改成 per-window 或至少以 HWND 關聯。
-2. 只在真正 `in_resize` 的 frame change 抑制 update/reset。
-3. 在 `WINDOW_RESIZE_ENDED`、fullscreen enter/exit、minimize、unminimize、restore、close 等路徑清除狀態。
-4. resize 結束後強制一次安全的 final backing sync。
-5. 以 A4 為功能基準，逐項比較黑屏、DPI 黑邊、Alt+Enter 與最小化還原。
+1. `windowWillStartLiveResize` 對該 window 的 `WineContentView` 設定 defer。
+2. 拖曳期間保留舊 backing/drawable，不反覆 teardown。
+3. `WINDOW_RESIZE_ENDED` 先完成 `WM_EXITSIZEMOVE`，再用同步 main-thread barrier 等最後 view frame 落地。
+4. 清除 view backing cache、標記 context pending。
+5. 下一次 flush/swap 強制 make-current，以最終 DPI client rect 更新並重掛一次。
+
+R1 暫不處理 Alt+Enter、最小化／還原；先確認拖曳放開後能同時得到可見畫面、正確 DPI backing 與無黑邊，再將相同 terminal-commit 模型擴展到其它生命週期。
+
+實測結果：R1 拖曳期間仍顯示舊 drawable，但放大時內容超出視窗、縮小時內容小於視窗且露出區域有殘影；放開滑鼠執行 final commit 後黑屏。因此問題已從「resize 中反覆重建」進一步收斂到 resize-end 的 `clearDrawable` / `setView` 本身。下一版 R2 應在 pending final sync 時只更新 `kCGLCPSurfaceBackingSize`、view backing cache 與 context geometry，不拆除 drawable。
+
+R2 實測：拖曳放大、縮小及連續多次操作皆能在放開後正確滿版顯示，證明 in-place final commit 可同時保留 DPI backing sync 與可見 drawable。Alt+Enter 仍黑，表示 programmatic resize 尚未被標記為 pending，仍落回原版 teardown。R3 應只擴大 in-place commit 的觸發範圍，不改動已成功的 live-resize transaction。
+
+R3 實測：same-view backing resize 全部改用 in-place commit 後，live resize、連續縮放、Alt+Enter 進出及最小化／還原的畫面均正常滿版。這是目前第一個同時保留 Retina+DPI 畫質與主要視窗生命週期可見性的版本。唯一新收斂項目是每次最小化還原後視窗尺寸都會增加；它應獨立列為 Cocoa/Win32 restore geometry 問題，不應再修改已成功的 GL backing 策略。
+
+R4 的 deminiaturize callback guard 未修正尺寸成長；每次還原約放大 2 倍，進一步指向 `macdrv_ShowWindow()` 在 `WINDOW_DID_UNMINIMIZE` 中以 Retina-converted Cocoa frame 覆蓋 user32 saved restore rect。R5 應讓 `WINDOW_DID_UNMINIMIZE` 保留 `window_min_maximize()` 產生的 `newPos`，只有 `WINDOW_FRAME_CHANGED` 才從 Cocoa 取回外部 geometry。
+
+R5 實測完整通過：live resize、連續縮放、Alt+Enter 進出、最小化／還原均正常滿版，重複還原不再改變視窗尺寸。因此 R5 的行為已成為正式 A6 runtime 的基礎；正式包採用 R1、R2、R3、R5 並移除 R4 guard。A/B runtime 驗證移除 R4 後結果不變，故正式版本同時保留原版 DPI backing sync、R2/R3 的 same-view drawable 可見性，以及穩定的 user32 restore geometry。
+
+正式版本與封裝資訊請見 [`bluecg-winemac-a6-engine.md`](bluecg-winemac-a6-engine.md)。
 
 A6 的驗收條件應增加畫質矩陣：
 
