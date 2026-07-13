@@ -1,6 +1,6 @@
 # Cyder 使用指南
 
-**Cyder** 是 Windows `.exe` 一鍵啟動器：裝一次，直接執行任何 `.exe`，共用全機唯一的 Wine prefix（`SharedPrefix`）。若要包成獨立的 macOS 遊戲 `.app`，請改用 [CyderBits 打包器](cyderbits.md)。
+**Cyder** 是 Windows `.exe` 一鍵啟動器：裝一次，直接執行任何 `.exe`。目前所有遊戲共用預設 bottle `bottles/shared`；路徑結構已預留未來加入多個 bottle。若要包成獨立的 macOS 遊戲 `.app`，請改用 [CyderBits 打包器](cyderbits.md)。
 
 ## 安裝 Cyder.app
 
@@ -16,14 +16,14 @@ open dist/Cyder.app
 `create-cyder-app.sh` 會：
 
 - 從 `dist/artifacts/engine-<CX26-winever>.tar.zst` 複製進 app（由 `pack-engine-artifact.sh` 預先建立；`create-cyder-app.sh` 缺檔時會自動打包）
-- 首次啟動以系統 `tar -xf` 解壓至 `~/Library/Application Support/Cyder/Engines/wine-x86_64/`（archive 內含 `wine-x86_64/` 目錄）
+- 首次啟動將 engine 實體解壓至無空白路徑 `~/.cyder/runtime/Engines/wine-x86_64/`（archive 內含 `wine-x86_64/` 目錄）
 - 使用 `logo/cyder-logo.png` 產生 app 圖示
-- 內含 shell launcher（`cyder_launcher.sh`）與 bootstrap helper（mono、tar、locale、hi-res）
+- 內含 Universal Swift launcher（arm64 + x86_64）、shell worker（`cyder_launcher.sh`）與 bootstrap helper（mono、tar、locale、hi-res）
 - 在 `Info.plist` 宣告可開啟 `.exe`（`LSHandlerRank: Alternate`；不強制設為預設）
 
 ## 開啟 .exe
 
-首次啟動時 `Cyder.app` 會依序顯示：**建立遊戲引擎中…**（解壓 engine）→ 選擇 `.exe`（若未指定）→ **準備 Windows 環境中…**（bootstrap）→ **正在啟動遊戲…**。之後已安裝 engine 與 prefix 時，雙擊 `.exe` 會直接啟動。
+單獨開啟 `Cyder.app`、確認設定後，會以進度列依序顯示：**正在儲存設定…** → **正在準備遊戲執行元件…** → **正在準備遊戲環境…** → **正在套用新設定…**。之後從 Finder 開啟 `.exe` 會直接啟動，不顯示設定或準備視窗。
 
 | 方式 | 操作 |
 |------|------|
@@ -51,14 +51,16 @@ bash scripts/cyder_launcher.sh --bootstrap-only --engine-src install/wine-x86_64
 
 （`python3 scripts/cyder_launcher.py` 仍可用，會轉呼叫上述 shell 腳本。）
 
-## SharedPrefix 與 bootstrap
+## Shared bottle 與 bootstrap
 
-Cyder 使用**全機唯一**的 Wine prefix，所有 `.exe` 共用同一套 Windows 環境：
+Cyder 目前使用一個預設 Wine bottle，所有 `.exe` 共用同一套 Windows 環境：
 
 ```text
+~/.cyder/runtime/
+  Engines/wine-x86_64/       # 無空白實體路徑的共用 Wine runtime
+
 ~/Library/Application Support/Cyder/
-  Engines/wine-x86_64/       # 共用 Wine（Cyder / CyderBits 預設）
-  SharedPrefix/              # Cyder WINEPREFIX
+  bottles/shared/            # 預設 WINEPREFIX
     drive_c/windows/mono/    # wine-mono（.NET）
     drive_c/windows/syswow64/tar.exe   # GnuWin bsdtar（大 zip 解壓）
     system.reg / user.reg
@@ -70,18 +72,19 @@ Cyder 使用**全機唯一**的 Wine prefix，所有 `.exe` 共用同一套 Wind
 首次啟動（或 marker 不存在）時，`cyder_launcher.sh` 會依序：
 
 1. 從 app 內 `engine-<version>.tar.zst` 解壓引擎至 `Engines/`（若尚未安裝或版本不同）
-2. 若 `SharedPrefix/system.reg` 不存在 → `wineboot -u` 建立 prefix
+2. 若 `bottles/shared/system.reg` 不存在 → `wineboot -u` 建立 bottle
 3. 安裝 **wine-mono**、**syswow64/tar.exe**（含 libarchive DLL）
 4. 寫入 **Mac 高解析度** registry（RetinaMode + LogPixels=192）
-5. 套用進階設定；僅在「停用 MSHTML」開啟時設定 `WINEDLLOVERRIDES=mshtml=`
+5. 套用進階設定，並為 `BlueLauncher.exe` 寫入專屬的 `ddraw=n,b` DLL override
 6. 寫入 `.cyder-bootstrap-v1`；之後啟動跳過上述步驟
 
 執行時環境：
 
-- `WINEPREFIX` = `SharedPrefix`
+- `WINEPREFIX` = `~/Library/Application Support/Cyder/bottles/shared`
 - `cwd` = `.exe` 所在目錄
 - `LANG` / `LC_ALL` = macOS `AppleLocale` → fallback `zh_TW.UTF-8`
-- `WINEMSYNC=1`
+- `WINEMSYNC=1`（僅在 MSync 開啟時）
+- `WINEESYNC=1`（僅在 ESync 開啟時；與 MSync 互斥）
 
 遊戲檔**不會**被複製或移動，仍留在原路徑。
 
@@ -90,10 +93,10 @@ Cyder 使用**全機唯一**的 Wine prefix，所有 `.exe` 共用同一套 Wind
 Cyder 的 `設定…`（`⌘,`）、Dock 右鍵或執行檔選擇器的「進階設定…」可調整：
 
 - MSync（預設關閉）
-- 停用 MSHTML（預設關閉；開啟時以 `WINEDLLOVERRIDES=mshtml=` 略過 MSHTML／Gecko）
-- Retina Mode（預設關閉）
-- DPI（預設 96 / 100%）
-- 字體平滑（預設 ClearType RGB，可選關閉、灰階或 ClearType BGR；與 Retina Mode 獨立）
+- ESync（預設關閉；開啟時會自動關閉 MSync）
+- Retina Mode（預設開啟）
+- DPI（預設 192 / 200%；非整數縮放可能讓部分老遊戲出現鋸齒或模糊）
+- 字體平滑（預設灰階，可選關閉、ClearType RGB 或 ClearType BGR；與 Retina Mode 獨立）
 - Windows 字體方案：宋體 Songti TC（預設）或細明體 MingLiU
 
 選擇細明體前，必須先在 macOS「字體簿」或 Wine prefix 中安裝合法取得的 MingLiU 字型。Cyder 只設定字體替代規則，不會散布或自動安裝該字型。
@@ -103,17 +106,32 @@ Cyder 的 `設定…`（`⌘,`）、Dock 右鍵或執行檔選擇器的「進階
 單獨開啟 `Cyder.app` 時會直接顯示進階設定。控制項變更先保留為草稿，按「確認」後可選擇：
 
 - 若偵測到共用 prefix 有執行中的 EXE：可選擇 **儲存並關閉所有 EXE**、**僅儲存**或**取消**。
-- 若沒有執行中的 EXE：只顯示 **儲存**與**取消**。
-- 儲存完成後，Cyder 才檢查 bundled engine 版本與 SharedPrefix bootstrap marker；必要時建立或升級遊戲引擎並準備 Windows 環境。
+- 若沒有執行中的遊戲：按「確認」後直接儲存，不再出現第二次確認。
+- 儲存及首次準備期間會顯示進度列與目前階段，不會停留在無提示的畫面。
+- 儲存完成後，Cyder 才檢查 bundled engine 版本與 `bottles/shared` bootstrap marker；必要時建立或升級遊戲引擎並準備 Windows 環境。
 - **取消**：返回設定視窗，不儲存也不關閉 EXE。
 
 強制關閉可能造成尚未儲存的遊戲進度遺失，因此執行前會顯示警告。
 
-直接由 Finder 打開 `.exe` 時，Cyder **不會**安裝、升級或重建環境。若 engine 不存在、版本不同或 SharedPrefix 尚未完成 bootstrap，只顯示提示，要求使用者先單獨開啟 `Cyder.app` 完成設定與環境建置。
+直接由 Finder 打開 `.exe` 時，Cyder **不會**安裝、升級或重建環境。若 engine 不存在、版本不同或預設 bottle 尚未完成 bootstrap，只顯示提示，要求使用者先單獨開啟 `Cyder.app` 完成設定與環境建置。
+
+直接啟動 EXE 時不再顯示 loading 或執行額外的初始化流程；Universal Cyder 只在 Swift 內檢查 engine、版本與 bootstrap marker，然後直接以 `/usr/bin/arch -x86_64 wine` 啟動。Rosetta 也不在此路徑預先檢查，由 `arch -x86_64` 交給 macOS 處理。
+
+正式啟動路徑不設定 `WINEDLLOVERRIDES`。DLL 相容性設定存放在 prefix Registry；目前僅為 `BlueLauncher.exe` 設定 `HKCU\Software\Wine\AppDefaults\BlueLauncher.exe\DllOverrides` 的 `ddraw=native,builtin`，不影響其他 EXE。
+
+Finder 啟動時，Cyder 會在呼叫 `/usr/bin/arch` 前監聽 CrossOver Wine 的 `WineAppWillActivateNotification`。收到與 `bottles/shared` 相同、且 `ActivatingAppPID` 已登記為 `regular/Foreground` 的通知後，Cyder 對該 PID 呼叫一次 `NSRunningApplication.activate(.activateAllWindows)`，隨即退出；wrapper PID 不參與 activation，也不搜尋 process tree 或視窗 owner。若 Wine 未發出通知，隱藏 launcher 最多等待 30 秒後自行退出。Wine 與遊戲會獨立繼續執行，stdout／stderr 重導向到 `Logs/last-launch.log`，不會開啟 Terminal。
+
+命令列直接呼叫 `cyder_launcher.sh` 時仍以前景模式執行，方便腳本等待遊戲結束；只有 Universal Cyder 的 Finder EXE 入口會使用 Swift 直接啟動的分離模式。
+
+EXE 模式會將 Cyder activation policy 設為 `prohibited`，所以 Dock 不會留下 Cyder 圖示。CX26 的 Wine Mac driver 會嘗試從 EXE 資源讀取應用程式圖示；若遊戲沒有可用的 Windows 圖示，Dock 可能顯示 Wine 的預設圖示。
+
+若要比較 Wine 的 ShellExecute 啟動路徑，可暫時設定
+`CYDER_WINE_START_MODE=start`；此時會執行 `wine start /wait /unix <exe>`。預設仍是直接執行
+`wine <exe>`，因為 `start.exe` 的 Windows 顯示狀態不保證 macOS application 會切到 frontmost。
 
 ## BlueCG 注意事項
 
-BlueCG（魔力寶貝）可透過 Cyder 直接開 `BlueLauncher.exe`；遊戲目錄（如 `BlueCrossgateNew/`）維持原位，Wine 環境來自 `SharedPrefix`。
+BlueCG（魔力寶貝）可透過 Cyder 直接開 `BlueLauncher.exe`；遊戲目錄（如 `BlueCrossgateNew/`）維持原位，Wine 環境來自 `bottles/shared`。
 
 - 大客戶端 zip（`BlueCG_client.zip`）需要 prefix 內的 `syswow64/tar.exe`；bootstrap 會自動安裝。
 - **共用 prefix 風險**：不同遊戲的 registry、已安裝元件可能互相影響。若某遊戲在 Cyder 下異常，可改用 [CyderBits](cyderbits.md) 建立**獨立 bottle** 的 game `.app`。
@@ -126,10 +144,10 @@ BlueCG（魔力寶貝）可透過 Cyder 直接開 `BlueLauncher.exe`；遊戲目
 | 現象 | 建議 |
 |------|------|
 | 中文輸入變 `??` | 確認系統語言為繁中；Cyder 會讀 `AppleLocale` |
-| 畫面糊 / 視窗太小 | bootstrap 已啟用高解析度；可對 SharedPrefix 執行 `bash scripts/enable-mac-retina-hires.sh` |
-| 大 zip 解壓失敗 / 找不到 tar | 確認 `SharedPrefix/drive_c/windows/syswow64/tar.exe` 存在；刪除 `.cyder-bootstrap-v1` 後重開 Cyder 觸發 reinstall，或執行 `--bootstrap-only` |
+| 畫面糊 / 視窗太小 | bootstrap 已啟用高解析度；可對 `bottles/shared` 執行 `bash scripts/enable-mac-retina-hires.sh` |
+| 大 zip 解壓失敗 / 找不到 tar | 確認 `bottles/shared/drive_c/windows/syswow64/tar.exe` 存在；刪除 `.cyder-bootstrap-v1` 後重開 Cyder 觸發 reinstall，或執行 `--bootstrap-only` |
 | 找不到 Wine | 重新開啟 Cyder.app 以安裝共用引擎到 `Engines/` |
-| Gecko 安裝提示 | Cyder 預設已停用 mshtml；若仍出現，對 SharedPrefix 執行 `bash scripts/configure-mshtml.sh --disable` |
+| Gecko 安裝提示 | Cyder 不修改 MSHTML；若遊戲確實不需要內嵌網頁，可對 `bottles/shared` 執行 `bash scripts/configure-mshtml.sh --disable` |
 | 多遊戲衝突 / registry 混亂 | 改用 [CyderBits](cyderbits.md) 為該遊戲建立獨立 bottle 的 game `.app` |
 | Dock 圖示 | Cyder 啟動 Wine 程序後即結束；Dock 上顯示的是 Wine / 遊戲視窗 |
 

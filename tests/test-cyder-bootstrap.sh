@@ -16,6 +16,7 @@ mkdir -p "$SHARED"
 
 output="$(
   CYDER_SHARED_PREFIX="$SHARED" \
+  CYDER_RUNTIME_ROOT="$TMP/runtime" \
     bash "$ROOT/scripts/cyder_launcher.sh" --bootstrap-only \
     --engine-src "$ROOT/install/wine-cx26-x86_64" 2>&1
 )"
@@ -38,7 +39,7 @@ fi
 
 if WINEPREFIX="$SHARED" arch -x86_64 "$WINE" reg query "HKCU\\Software\\Wine\\Mac Driver" /v RetinaMode >/dev/null 2>&1; then
   retina="$(WINEPREFIX="$SHARED" arch -x86_64 "$WINE" reg query "HKCU\\Software\\Wine\\Mac Driver" /v RetinaMode 2>/dev/null | rg -i 'RetinaMode' | rg -io 'n|y' | head -1 || true)"
-  assert_eq "${retina,,}" "n" "bootstrap should default to RetinaMode=n"
+  assert_eq "${retina,,}" "y" "bootstrap should default to RetinaMode=y"
 fi
 
 echo "PASS test-cyder-bootstrap"

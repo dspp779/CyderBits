@@ -36,8 +36,10 @@
 | `pack-engine-artifact.sh` | strip + bundle + sign + 預設 xz 最高壓縮比 → `engine-wine-x86_64-CX26-<winever>.tar.xz`；`--zstd` / `CYDER_ENGINE_FORMAT=zstd` 產出 `engine-CX26-<winever>.tar.zst` |
 | `cyder-copy-engine-artifact.sh` | 複製預建 artifact 進 app `Resources/` |
 | `create-cyder-app.sh` | `dist/Cyder.app`（`.exe` 啟動器 + engine artifact + bootstrap） |
-| `cyder_launcher.sh` | 解析 `.exe`、bootstrap SharedPrefix、執行 Wine；`--ensure-engine-only` / `--bootstrap-only` / `--launch-exe` 供 GUI 分階段呼叫 |
-| `cyder_app_main.swift` | 編譯為 `Cyder.app/MacOS/Cyder`；接收 Finder open-document 再轉呼叫 launcher |
+| `cyder_launcher.sh` | 解析 `.exe`、bootstrap `bottles/shared`、執行 Wine；`--ensure-engine-only` / `--bootstrap-only` / `--launch-exe` 供 GUI 分階段呼叫 |
+| `cyder_app_main.swift` | 編譯為 `Cyder.app/Contents/MacOS/Cyder`（Universal）；無 `.exe` 時顯示設定頁，有 `.exe` 時直接啟動 Wine，收到 same-prefix 的 `ActivatingAppPID` Foreground 通知後 activate 並退出 |
+| `create-cyder-pid-test-app.sh` | 建立 `dist/CyderPIDTest.app` Universal 測試工具 |
+| `cyder_pid_test_launcher.swift` | 可選 EXE、比較 wrapper PID 與 Wine `ActivatingAppPID`，測試普通及 cooperative activation |
 | `cyder-common.sh` | 共用路徑、`ensure_shared_engine`、`bootstrap_shared_prefix`、`run_wine_exe` |
 | `cyder-exe-association.swift` | 開發用：查詢 Launch Services `.exe` handler、手動 set/cleanup（**不**打包進 app、執行時不呼叫） |
 | `cyder_launcher.py` | 開發用 CLI，轉呼叫 `cyder_launcher.sh` |
@@ -108,7 +110,7 @@ CYDER_SKIP_ENGINE_STRIP=1 bash scripts/create-cyder-app.sh  # 打包時跳過 st
 exe [exe ...]          .exe 路徑（可省略 → 檔案選擇器）
 --engine-src DIR       Wine 安裝來源（預設 install/wine-cx26-x86_64）
 --dry-run              印出路徑，不裝引擎、不啟動
---bootstrap-only       只 bootstrap SharedPrefix（mono、tar、hi-res）
+--bootstrap-only       只 bootstrap bottles/shared（mono、tar、hi-res）
 ```
 
 ## cyder_create_game_app.py 旗標
@@ -130,9 +132,9 @@ exe [exe ...]          .exe 路徑（可省略 → 檔案選擇器）
 
 | 變數 | 說明 |
 |------|------|
-| `WINEPREFIX` | Wine bottle 路徑（Cyder 啟動器固定為 SharedPrefix） |
+| `WINEPREFIX` | Wine bottle 路徑（目前固定為 `~/Library/Application Support/Cyder/bottles/shared`） |
 | `WINEMSYNC` | `1` 啟用 macOS msync（Cyder / CyderBits 預設） |
-| `WINEDLLOVERRIDES` | 如 `mshtml=` 跳過 Gecko |
+| `WINEDLLOVERRIDES` | 正式 Cyder 啟動不設定；只保留給單次測試或其他工具使用 |
 | `CYDER_ENGINE_SRC` | app 內引擎 payload 路徑 |
 | `CYDER_SCRIPTS` | app 內 helper 腳本路徑 |
 | `CYDER_LIBARCHIVE_SRC` | app 內 libarchive payload（Cyder.app） |

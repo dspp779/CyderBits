@@ -170,7 +170,7 @@ cyder_detect_engine_version_label() {
 
 cyder_reset_shared_prefix() {
   [[ -e "$CYDER_SHARED_PREFIX" ]] || return 0
-  echo "Resetting SharedPrefix (engine version changed): $CYDER_SHARED_PREFIX" >&2
+  echo "Resetting shared bottle (engine version changed): $CYDER_SHARED_PREFIX" >&2
   cyder_remove_path "$CYDER_SHARED_PREFIX"
 }
 
@@ -315,13 +315,75 @@ cyder_init_paths() {
     CYDER_ENTITLEMENTS="${CYDER_ENTITLEMENTS:-$CYDER_OGOM/config/entitlements.plist}"
   fi
   CYDER_SUPPORT="${CYDER_SUPPORT:-$HOME/Library/Application Support/Cyder}"
-  CYDER_ENGINES="$CYDER_SUPPORT/Engines"
+  CYDER_RUNTIME_ROOT="${CYDER_RUNTIME_ROOT:-$HOME/.cyder/runtime}"
+  CYDER_ENGINES="${CYDER_ENGINES:-$CYDER_RUNTIME_ROOT/Engines}"
   CYDER_ENGINE_NAME="wine-x86_64"
-  CYDER_SHARED_PREFIX="${CYDER_SHARED_PREFIX:-$CYDER_SUPPORT/SharedPrefix}"
+  CYDER_SHARED_PREFIX="${CYDER_SHARED_PREFIX:-$CYDER_SUPPORT/bottles/shared}"
+  CYDER_LEGACY_ENGINES="${CYDER_LEGACY_ENGINES:-$CYDER_SUPPORT/Engines}"
+  CYDER_LEGACY_SHARED_PREFIX="${CYDER_LEGACY_SHARED_PREFIX:-$CYDER_SUPPORT/SharedPrefix}"
   CYDER_BOOTSTRAP_MARKER="$CYDER_SHARED_PREFIX/.cyder-bootstrap-v1"
   CYDER_FONT_MARKER="$CYDER_SHARED_PREFIX/.cyder-font-songti-v1"
   CYDER_DOWNLOADS="$CYDER_SUPPORT/downloads"
   CYDER_BUNDLE_ID="${CYDER_BUNDLE_ID:-local.cyder.app}"
+}
+
+cyder_validate_runtime_path() {
+  if [[ "$CYDER_ENGINES" == *[[:space:]]* ]]; then
+    echo "Cyder runtime path must not contain whitespace: $CYDER_ENGINES" >&2
+    return 1
+  fi
+}
+
+cyder_migrate_legacy_layout() {
+  CYDER_MIGRATED_ENGINE_VERSION=""
+  cyder_validate_runtime_path || return 1
+
+  local legacy_engine="$CYDER_LEGACY_ENGINES/$CYDER_ENGINE_NAME"
+  local active_engine="$CYDER_ENGINES/$CYDER_ENGINE_NAME"
+  if [[ "$legacy_engine" != "$active_engine" && ( -e "$legacy_engine" || -L "$legacy_engine" ) ]]; then
+    if cyder_has_running_prefix "$CYDER_LEGACY_SHARED_PREFIX" || cyder_has_running_prefix "$CYDER_SHARED_PREFIX"; then
+      echo "Close all Cyder games before migrating the Wine runtime." >&2
+      return 1
+    fi
+    CYDER_MIGRATED_ENGINE_VERSION="$(cyder_read_installed_engine_version "$legacy_engine" 2>/dev/null || true)"
+    echo "Removing legacy engine with unsafe path: $legacy_engine" >&2
+    cyder_remove_path "$legacy_engine"
+    rmdir "$CYDER_LEGACY_ENGINES" 2>/dev/null || true
+  fi
+
+  if [[ "$CYDER_LEGACY_SHARED_PREFIX" != "$CYDER_SHARED_PREFIX" && -e "$CYDER_LEGACY_SHARED_PREFIX" ]]; then
+    if cyder_has_running_prefix "$CYDER_LEGACY_SHARED_PREFIX"; then
+      echo "Close all Cyder games before migrating the shared bottle." >&2
+      return 1
+    fi
+    if [[ ! -e "$CYDER_SHARED_PREFIX" ]]; then
+      mkdir -p "$(dirname "$CYDER_SHARED_PREFIX")"
+      echo "Migrating shared bottle -> $CYDER_SHARED_PREFIX" >&2
+      mv "$CYDER_LEGACY_SHARED_PREFIX" "$CYDER_SHARED_PREFIX"
+    else
+      echo "Legacy SharedPrefix retained because bottles/shared already exists." >&2
+    fi
+  fi
+}
+
+cyder_load_saved_settings() {
+  local settings="$CYDER_SUPPORT/settings.json"
+  [[ -f "$settings" ]] || return 0
+  command -v plutil >/dev/null 2>&1 || return 0
+
+  local value
+  value="$(plutil -extract msync raw -o - "$settings" 2>/dev/null || true)"
+  case "$value" in true) export CYDER_MSYNC=1 ;; false) export CYDER_MSYNC=0 ;; esac
+  value="$(plutil -extract esync raw -o - "$settings" 2>/dev/null || true)"
+  case "$value" in true) export CYDER_ESYNC=1 ;; false) export CYDER_ESYNC=0 ;; esac
+  value="$(plutil -extract retinaMode raw -o - "$settings" 2>/dev/null || true)"
+  case "$value" in true) export CYDER_RETINA_MODE=1 ;; false) export CYDER_RETINA_MODE=0 ;; esac
+  value="$(plutil -extract dpi raw -o - "$settings" 2>/dev/null || true)"
+  [[ "$value" =~ ^[0-9]+$ ]] && export CYDER_DPI="$value"
+  value="$(plutil -extract fontPreset raw -o - "$settings" 2>/dev/null || true)"
+  [[ "$value" == songti || "$value" == mingliu ]] && export CYDER_FONT_PRESET="$value"
+  value="$(plutil -extract fontSmoothing raw -o - "$settings" 2>/dev/null || true)"
+  case "$value" in off|grayscale|cleartype-rgb|cleartype-bgr) export CYDER_FONT_SMOOTHING="$value" ;; esac
 }
 
 cyder_engine_is_installed() {
@@ -350,6 +412,19 @@ cyder_engine_needs_install() {
     return 0
   fi
   return 1
+}
+
+# Fast readiness check for direct EXE launches. Do not inspect/decompress the
+# bundled archive here; installation and upgrade paths are the only callers
+# that need cyder_bundled_engine_version_from_src().
+cyder_engine_is_ready_for_launch() {
+  local engine="$CYDER_ENGINES/$CYDER_ENGINE_NAME"
+  local expected installed
+  cyder_validate_runtime_path || return 1
+  [[ -x "$engine/bin/wine" && -f "$CYDER_BOOTSTRAP_MARKER" ]] || return 1
+  expected="$(cyder_bundled_engine_version "$CYDER_OGOM" 2>/dev/null || true)"
+  installed="$(cyder_read_installed_engine_version "$engine" 2>/dev/null || true)"
+  [[ -z "$expected" || "$installed" == "$expected" ]]
 }
 
 cyder_run() {
@@ -497,7 +572,8 @@ cyder_install_engine_from_tarball() {
   local tarball="$1"
   local dest="$2"
   local staging extracted_root archive_path read_path
-  staging="$(mktemp -d "${TMPDIR:-/tmp}/cyder-engine-staging.XXXXXX")"
+  mkdir -p "$(dirname "$dest")"
+  staging="$(mktemp -d "$(dirname "$dest")/.cyder-engine-staging.XXXXXX")"
   cyder_log_engine "extract start tarball=$tarball dest=$dest staging=$staging"
 
   read_path="$tarball"
@@ -576,6 +652,7 @@ cyder_install_engine_from_tarball() {
 cyder_install_engine_from_dir() {
   local engine_src="$1"
   local dest="$2"
+  local staging
   local bundled="$engine_src/lib/wine/x86_64-unix/libfreetype.6.dylib"
   if [[ ! -f "$bundled" || -L "$bundled" ]]; then
     local bundle_sh="$CYDER_SCRIPTS/bundle-wine-dylibs.sh"
@@ -583,17 +660,19 @@ cyder_install_engine_from_dir() {
       cyder_run bash "$bundle_sh" "$engine_src"
     fi
   fi
-  rm -rf "$dest"
-  mkdir -p "$dest"
-  cyder_run rsync -a "$engine_src/" "$dest/"
-  if ! cyder_read_engine_version_file "$dest" >/dev/null 2>&1; then
-    if [[ -x "$dest/bin/wine" ]]; then
+  mkdir -p "$(dirname "$dest")"
+  staging="$(mktemp -d "$(dirname "$dest")/.cyder-engine-staging.XXXXXX")"
+  cyder_run rsync -a "$engine_src/" "$staging/"
+  if ! cyder_read_engine_version_file "$staging" >/dev/null 2>&1; then
+    if [[ -x "$staging/bin/wine" ]]; then
       local ver
-      ver="$(cyder_format_engine_version_from_wine "$dest/bin/wine" 2>/dev/null || true)"
-      [[ -n "$ver" ]] && cyder_write_engine_version_file "$dest" "$ver"
+      ver="$(cyder_format_engine_version_from_wine "$staging/bin/wine" 2>/dev/null || true)"
+      [[ -n "$ver" ]] && cyder_write_engine_version_file "$staging" "$ver"
     fi
   fi
-  rm -f "$dest/.cyder-engine-version"
+  rm -f "$staging/.cyder-engine-version"
+  cyder_remove_path "$dest"
+  mv "$staging" "$dest"
 }
 
 cyder_sign_installed_engine() {
@@ -614,6 +693,7 @@ cyder_ensure_shared_engine() {
   local marker="$dest/bin/wine"
   local bundled_version="" installed_version=""
   engine_src="$(cyder_abs_path "$engine_src")"
+  cyder_migrate_legacy_layout || exit 1
 
   bundled_version="$(cyder_bundled_engine_version_from_src "$engine_src" 2>/dev/null || true)"
   if [[ -f "$marker" ]]; then
@@ -627,7 +707,9 @@ cyder_ensure_shared_engine() {
     cyder_reset_shared_prefix
   else
     echo "Installing shared engine -> $dest" >&2
-    if [[ -n "$bundled_version" && -e "$CYDER_SHARED_PREFIX" ]]; then
+    if [[ -n "$bundled_version" && -e "$CYDER_SHARED_PREFIX" &&
+          ( -z "$CYDER_MIGRATED_ENGINE_VERSION" ||
+            "$CYDER_MIGRATED_ENGINE_VERSION" != "$bundled_version" ) ]]; then
       cyder_reset_shared_prefix
     fi
   fi
@@ -716,24 +798,41 @@ cyder_apply_user_settings() {
 
 cyder_stop_all_exes() {
   local wineserver="$CYDER_ENGINES/$CYDER_ENGINE_NAME/bin/wineserver"
+  local legacy_wineserver="$CYDER_LEGACY_ENGINES/$CYDER_ENGINE_NAME/bin/wineserver"
+  if [[ ! -x "$wineserver" && -x "$legacy_wineserver" ]]; then
+    wineserver="$legacy_wineserver"
+  fi
   if [[ ! -x "$wineserver" ]]; then
     echo "Cyder engine is not installed; no EXEs to stop." >&2
     return 0
   fi
-  echo "Stopping all EXEs in $CYDER_SHARED_PREFIX" >&2
-  WINEPREFIX="$CYDER_SHARED_PREFIX" arch -x86_64 "$wineserver" -k
+  local prefix
+  for prefix in "$CYDER_SHARED_PREFIX" "$CYDER_LEGACY_SHARED_PREFIX"; do
+    [[ -d "$prefix" ]] || continue
+    echo "Stopping all EXEs in $prefix" >&2
+    WINEPREFIX="$prefix" arch -x86_64 "$wineserver" -k || true
+  done
 }
 
-cyder_has_running_exes() {
-  [[ -d "$CYDER_SHARED_PREFIX" ]] || return 1
+cyder_has_running_prefix() {
+  local prefix="$1"
+  [[ -d "$prefix" ]] || return 1
   local device inode socket_dir
-  device="$(stat -f '%d' "$CYDER_SHARED_PREFIX" 2>/dev/null)" || return 1
-  inode="$(stat -f '%i' "$CYDER_SHARED_PREFIX" 2>/dev/null)" || return 1
+  device="$(stat -f '%d' "$prefix" 2>/dev/null)" || return 1
+  inode="$(stat -f '%i' "$prefix" 2>/dev/null)" || return 1
   printf -v device '%x' "$device"
   printf -v inode '%x' "$inode"
   socket_dir="/tmp/.wine-$(id -u)/server-$device-$inode"
   # Wine removes the socket when the prefix wineserver exits; the lock file may remain.
   [[ -S "$socket_dir/socket" ]]
+}
+
+cyder_has_running_exes() {
+  cyder_has_running_prefix "$CYDER_SHARED_PREFIX" && return 0
+  if [[ "$CYDER_LEGACY_SHARED_PREFIX" != "$CYDER_SHARED_PREFIX" ]]; then
+    cyder_has_running_prefix "$CYDER_LEGACY_SHARED_PREFIX" && return 0
+  fi
+  return 1
 }
 
 cyder_bootstrap_shared_prefix() {
@@ -775,16 +874,26 @@ cyder_run_wine_exe() {
   local wine_bin="$1"
   local exe="$2"
   local wineserver="${wine_bin%/wine}/wineserver"
-  local engine_root
-  engine_root="$(cd "$(dirname "$wine_bin")/.." && pwd)"
-  cyder_ensure_font_replacements "$wine_bin" "$engine_root"
-  cyder_apply_user_settings "$wine_bin" "$engine_root"
+  # Keep the legacy direct path as the default.  Wine's ShellExecute-compatible
+  # start.exe path is available for A/B testing with CYDER_WINE_START_MODE=start
+  # but does not guarantee macOS frontmost activation.
+  local start_mode="${CYDER_WINE_START_MODE:-direct}"
+  local detach="${CYDER_WINE_DETACH:-0}"
+  local pid_file="${CYDER_WINE_PID_FILE:-}"
   cyder_wine_locale_exports
   local log_dir="$CYDER_SUPPORT/Logs"
   mkdir -p "$log_dir"
   local log_file="$log_dir/last-launch.log"
+  if [[ "$detach" == 1 && -n "$pid_file" ]]; then
+    mkdir -p "$(dirname "$pid_file")"
+    rm -f "$pid_file" "${pid_file}.tmp"
+  fi
   {
-    echo "cmd=arch -x86_64 $wine_bin $exe"
+    if [[ "$start_mode" == "start" ]]; then
+      echo "cmd=arch -x86_64 $wine_bin start /wait /unix $exe"
+    else
+      echo "cmd=arch -x86_64 $wine_bin $exe"
+    fi
     echo "WINEPREFIX=$CYDER_SHARED_PREFIX"
     echo "cwd=$(dirname "$exe")"
     echo
@@ -793,19 +902,38 @@ cyder_run_wine_exe() {
     export WINEPREFIX="$CYDER_SHARED_PREFIX" WINESERVER="$wineserver"
     if [[ "${CYDER_MSYNC:-0}" == 1 ]]; then
       export WINEMSYNC=1
+      unset WINEESYNC
+    elif [[ "${CYDER_ESYNC:-0}" == 1 ]]; then
+      export WINEESYNC=1
+      unset WINEMSYNC
     else
       unset WINEMSYNC
-    fi
-    if [[ "${CYDER_DISABLE_MSHTML:-0}" == 1 ]]; then
-      if [[ -n "${WINEDLLOVERRIDES:-}" ]]; then
-        export WINEDLLOVERRIDES="mshtml=;${WINEDLLOVERRIDES}"
-      else
-        export WINEDLLOVERRIDES="mshtml="
-      fi
+      unset WINEESYNC
     fi
     export PATH="${wine_bin%/wine}:$PATH"
     cd "$(dirname "$exe")"
-    nohup arch -x86_64 "$wine_bin" "$exe" >>"$log_file" 2>&1 &
+    if [[ "$detach" == 1 && -n "$pid_file" ]]; then
+      # Native Cyder only needs the Wine PID long enough to activate the Wine
+      # application.  The Wine process is intentionally asynchronous here;
+      # Finder-launched apps have no controlling Terminal, so no nohup is
+      # required.  stdout/stderr remain redirected to the persistent log.
+      if [[ "$start_mode" == "start" ]]; then
+        arch -x86_64 "$wine_bin" start /wait /unix "$exe" >>"$log_file" 2>&1 &
+      else
+        arch -x86_64 "$wine_bin" "$exe" >>"$log_file" 2>&1 &
+      fi
+      wine_pid=$!
+      printf '%s\n' "$wine_pid" >"${pid_file}.tmp"
+      mv -f "${pid_file}.tmp" "$pid_file"
+    else
+      # CLI launches keep Wine in the foreground so the caller owns the game
+      # lifetime. Finder's native entry point opts into the detached branch.
+      if [[ "$start_mode" == "start" ]]; then
+        arch -x86_64 "$wine_bin" start /wait /unix "$exe" >>"$log_file" 2>&1
+      else
+        arch -x86_64 "$wine_bin" "$exe" >>"$log_file" 2>&1
+      fi
+    fi
   )
 }
 
