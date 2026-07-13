@@ -39,6 +39,25 @@ EOF
   esac
 done
 
+if [[ -z "${CYDER_BUNDLED_ENGINE_ARCHIVE:-}" ]]; then
+  DEFAULT_ENGINE_ARCHIVE_FILE="$OGOM/config/cyder-engine-archive.txt"
+  DEFAULT_ENGINE_VERSION_FILE="$OGOM/config/cyder-engine-version.txt"
+  if [[ -f "$DEFAULT_ENGINE_ARCHIVE_FILE" ]]; then
+    DEFAULT_ENGINE_ARCHIVE="$(tr -d '[:space:]' <"$DEFAULT_ENGINE_ARCHIVE_FILE")"
+    [[ "$DEFAULT_ENGINE_ARCHIVE" = /* ]] || DEFAULT_ENGINE_ARCHIVE="$OGOM/$DEFAULT_ENGINE_ARCHIVE"
+    [[ -f "$DEFAULT_ENGINE_ARCHIVE" ]] || {
+      echo "Missing pinned Cyder engine: $DEFAULT_ENGINE_ARCHIVE" >&2
+      echo "Provide it at the configured path or pass --engine-archive PATH." >&2
+      exit 1
+    }
+    export CYDER_BUNDLED_ENGINE_ARCHIVE="$DEFAULT_ENGINE_ARCHIVE"
+    if [[ -f "$DEFAULT_ENGINE_VERSION_FILE" ]]; then
+      export CYDER_BUNDLED_ENGINE_VERSION
+      CYDER_BUNDLED_ENGINE_VERSION="$(tr -d '[:space:]' <"$DEFAULT_ENGINE_VERSION_FILE")"
+    fi
+  fi
+fi
+
 APP="$OUT_DIR/Cyder.app"
 CONTENTS="$APP/Contents"
 MACOS="$CONTENTS/MacOS"
