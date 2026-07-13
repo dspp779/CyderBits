@@ -14,15 +14,15 @@ WINEPREFIX="${WINEPREFIX:-}"
 }
 
 WINE=(arch -x86_64 "$WINE_INSTALL/bin/wine")
-retina="${CYDER_RETINA_MODE:-0}"
-dpi="${CYDER_DPI:-96}"
+retina="${CYDER_RETINA_MODE:-1}"
+dpi="${CYDER_DPI:-192}"
 font="${CYDER_FONT_PRESET:-songti}"
-smoothing="${CYDER_FONT_SMOOTHING:-cleartype-rgb}"
+smoothing="${CYDER_FONT_SMOOTHING:-grayscale}"
 
-[[ "$retina" == 0 || "$retina" == 1 ]] || retina=0
-[[ "$dpi" =~ ^[0-9]+$ ]] && (( dpi >= 72 && dpi <= 480 )) || dpi=96
+[[ "$retina" == 0 || "$retina" == 1 ]] || retina=1
+[[ "$dpi" =~ ^[0-9]+$ ]] && (( dpi >= 72 && dpi <= 480 )) || dpi=192
 case "$font" in songti|mingliu) ;; *) font=songti ;; esac
-case "$smoothing" in off|grayscale|cleartype-rgb|cleartype-bgr) ;; *) smoothing=cleartype-rgb ;; esac
+case "$smoothing" in off|grayscale|cleartype-rgb|cleartype-bgr) ;; *) smoothing=grayscale ;; esac
 
 if [[ "$retina" == 1 ]]; then retina_value=y; else retina_value=n; fi
 "${WINE[@]}" reg add 'HKCU\Software\Wine\Mac Driver' /v RetinaMode /t REG_SZ /d "$retina_value" /f

@@ -117,7 +117,7 @@ Dock 右鍵：
 | 欄位 | 控制項 | 預設 | 行為 |
 |---|---|---:|---|
 | MSync | Switch | 關 | 啟動時設定或移除 `WINEMSYNC=1` |
-| 停用 MSHTML | Switch | 關 | 開啟時設定 `WINEDLLOVERRIDES=mshtml=`；關閉時允許 MSHTML／Gecko |
+| ESync | Switch | 關 | 啟動時設定或移除 `WINEESYNC=1`；與 MSync 互斥 |
 | 設定套用範圍 | 說明文字 | 所有 Cyder 遊戲 | 第一版不可切換 |
 | 恢復所有預設值 | 危險按鈕 | — | 二次確認後清除設定並重建預設 registry |
 
@@ -129,8 +129,8 @@ MSync 說明：
 
 | 欄位 | 控制項 | 預設 | 實際值 |
 |---|---|---:|---|
-| 高解析度（Retina Mode） | Switch | 關 | `HKCU\Software\Wine\Mac Driver\RetinaMode=y/n` |
-| 縮放比例 / DPI | Popup | 100% | 100%=96、125%=120、150%=144、175%=168、200%=192、250%=240 |
+| 高解析度（Retina Mode） | Switch | 開 | `HKCU\Software\Wine\Mac Driver\RetinaMode=y/n` |
+| 縮放比例 / DPI | Popup | 200% | 100%=96、125%=120、150%=144、175%=168、200%=192、250%=240 |
 | 自訂 DPI | Number field | 關 | 允許 72–480，超出拒絕儲存 |
 
 互動規則：
@@ -147,7 +147,7 @@ MSync 說明：
 | 欄位 | 控制項 | 預設 | 說明 |
 |---|---|---:|---|
 | Windows 預設字體方案 | Popup | Cyder 繁中建議 | 寫入 Wine Fonts Replacements |
-| 字體平滑 | Popup | ClearType RGB | 寫入 Desktop FontSmoothing 系列值；與 Retina Mode 獨立 |
+| 字體平滑 | Popup | 灰階 | 寫入 Desktop FontSmoothing 系列值；與 Retina Mode 獨立 |
 
 字體方案：
 
@@ -158,8 +158,8 @@ MSync 說明：
 字體平滑方案：
 
 - 關閉
-- 灰階
-- ClearType RGB（預設）
+- 灰階（預設）
+- ClearType RGB
 - ClearType BGR
 
 進階展開區可提供 Gamma（1000–2200），預設 1400。一般頁面不直接暴露 registry 名稱。
@@ -212,11 +212,13 @@ MSync 說明：
 ### 流程 A：首次安裝、直接遊玩
 
 1. 使用者開啟 Cyder。
-2. 直接顯示進階設定，套用安全預設：MSync 關、Retina 關、DPI 96、ClearType RGB、圖形自動。
+2. 直接顯示進階設定，套用安全預設：MSync 關、ESync 關、Retina 開、DPI 192、灰階字體平滑。
 3. 使用者確認儲存。
-4. Cyder 檢查 bundled engine 版本與 SharedPrefix marker，必要時顯示「建立遊戲引擎中…」及「準備 Windows 環境中…」。
+4. Cyder 先顯示儲存進度，再檢查遊戲執行元件與遊戲環境，必要時顯示對應的準備階段。
 5. 完成後提示環境已可使用並結束 Cyder。
 6. 使用者再由 Finder 開啟 `.exe`；此路徑只啟動現有環境，不執行安裝或重建。
+
+直接啟動 EXE 時由 bash 進行必要檢查後直接呼叫 `arch -x86_64 wine`；不顯示 loading、不做額外 Swift warm-up，Rosetta 交由 `arch -x86_64` 與 macOS 處理。
 
 ### 流程 B：啟動前調整設定
 
@@ -239,7 +241,7 @@ MSync 說明：
 ### 流程 D：恢復預設
 
 1. 點「全部恢復預設值」。
-2. 對話框列出影響：顯示、字體、鍵盤、圖形、MSync；不刪除引擎、遊戲或最近項目。
+2. 對話框列出影響：顯示、字體、鍵盤、圖形、MSync、ESync；不刪除引擎、遊戲或最近項目。
 3. 使用者確認。
 4. 重建預設 JSON 並同步 registry。
 5. 顯示「已恢復；下次啟動遊戲時生效」。
@@ -265,8 +267,8 @@ MSync 說明：
     "msync": false
   },
   "display": {
-    "retinaMode": false,
-    "dpi": 96
+    "retinaMode": true,
+    "dpi": 192
   },
   "fonts": {
     "replacementPreset": "cyder-zh-tw",
@@ -318,7 +320,7 @@ MSync 說明：
 
 - 主視窗、齒輪入口、`⌘,`、Dock 右鍵。
 - SettingsStore 與 JSON migration。
-- MSync、Retina、DPI、字體平滑。
+- MSync、ESync、Retina、DPI、字體平滑。
 - 重置、錯誤狀態、settings log。
 - 現有 launcher 測試全部維持通過。
 
@@ -341,8 +343,8 @@ MSync 說明：
 - 三個入口都能開啟同一個非重複的設定視窗。
 - 設定視窗可在未選 `.exe` 時使用。
 - 關閉／重開 Cyder 後設定仍存在。
-- MSync 開關能正確決定是否輸出 `WINEMSYNC=1`。
-- Retina、DPI 與字體平滑可獨立設定；預設為 Retina 關、96 DPI、ClearType RGB。
+- MSync／ESync 開關互斥，並能正確決定是否輸出 `WINEMSYNC=1` 或 `WINEESYNC=1`。
+- Retina、DPI 與字體平滑可獨立設定；預設為 Retina 開、192 DPI、灰階。
 - 字體平滑四種 preset 能得到可預測 registry 值。
 - Direct3D 自動會移除 override；GL/GDI 寫入正確值。
 - 設定損壞、registry 寫入失敗、引擎未安裝時均不 crash。
