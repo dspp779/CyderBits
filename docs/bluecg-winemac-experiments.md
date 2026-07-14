@@ -2,7 +2,7 @@
 
 > 建立日期：2026-07-12
 >
-> 目的：在不覆蓋主要 CX26 runtime 或遊戲檔案的前提下，並存保存 baseline、A1、A2、A3，供之後透過遠端桌面或本機逐組測試。
+> 目的：在不覆蓋主要 CX26 runtime 或遊戲檔案的前提下，保存 baseline、A1–A5 與 A6-R1～R5 的歷史實驗結果。**目前正式 BlueCG runtime 是 A6 final；本文件不是目前 engine 狀態的唯一入口。**
 
 ## Runtime 對照
 

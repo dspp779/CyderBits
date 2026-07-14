@@ -2,11 +2,11 @@
 
 > 觀察日期：2026-07-13
 >
-> 狀態：已採用實體無空白 runtime 路徑作為正式 workaround
+> 狀態：已採用實體無空白 runtime 路徑作為正式 workaround；Wine 根因未修復
 
 ## 結論摘要
 
-目前 CrossOver Wine engine 在路徑包含空白時，皮卡丘排球會在進入 demo 模式後於 `00402FA3` 發生 page fault；同一份 engine 複製到沒有空白的路徑後，使用全新 prefix 可以正常執行。
+目前 CrossOver Wine engine 在路徑包含空白時，皮卡丘排球會在進入 demo 模式後於 `00402FA3` 發生 page fault；同一份 engine 複製到沒有空白的路徑後，使用全新 prefix 可以正常執行。另有獨立觀察：皮卡丘排球在 MSync 或 ESync 開啟時無法正常運作，故目前建議以「無空白實體 runtime + MSync/ESync 都關閉」作為基線；同步模式矩陣見 [皮卡丘排球問題入口](games/pikachu-volleyball/runtime-path-and-sync.md)。
 
 因此目前優先懷疑的是 Wine／CrossOver runtime 對 engine root、`WINESERVER` 或相關 dylib/resource 路徑的空白字元處理，而不是 Wine prefix 內的 Mono、字型、Retina 或 DPI 設定。
 
@@ -143,7 +143,7 @@ arch -x86_64 "$ENGINE/bin/wine" \
 ~/.cyder/runtime/Engines/wine-x86_64
 ```
 
-設定與 bottle 仍保留在 `~/Library/Application Support/Cyder/`；預設 bottle 改為 `bottles/shared`，為未來多 bottle 預留結構。正式 runtime 不使用 symlink；舊 `Application Support/Cyder/Engines` 會在安全遷移時移除，再由 app 內正式 artifact 重建。
+設定與 bottle 仍保留在 `~/Library/Application Support/Cyder/`；預設 bottle 改為 `bottles/shared`，為未來多 bottle 預留結構。正式 runtime 不使用 symlink；舊 `Application Support/Cyder/Engines` 會在安全遷移時移除，再由 app 內正式 artifact 重建。皮卡丘排球另須關閉 MSync 與 ESync；這不是路徑 workaround 的替代品，而是另一個已知相容性條件。
 
 ### `WINESERVER` 與 `PATH`
 

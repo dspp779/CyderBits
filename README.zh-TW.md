@@ -6,7 +6,7 @@
 
 **在 Mac 上跑經典 Windows 遊戲 — 先支援 DirectDraw 與 GDI。**
 
-鎖定 2D 與傳統 Win32 圖形（DirectDraw、GDI）；**尚未**支援 DXVK、Vulkan 與現代 3D 管線。
+驗證路徑是傳統 2D Win32 圖形：**DirectDraw → Wine wined3d/OpenGL** 與 GDI。目前封裝的 `CX26.2.0-W11-Cyder003` engine 也包含 x86_64 **MoltenVK**，供 Wine Vulkan 使用；但 BlueCG 不走 Vulkan、DXVK、dxmt 或 D3DMetal。
 
 CyderBits 在 Apple Silicon 上自建 CrossOver 系 Wine，並提供兩個工具：**Cyder** — 一鍵啟動 `.exe` — 與 **CyderBits** — 把 `.exe` 包成可雙擊的 macOS `.app`。
 
@@ -17,7 +17,7 @@ CyderBits 在 Apple Silicon 上自建 CrossOver 系 Wine，並提供兩個工具
 | | |
 |---|---|
 | **用途** | 直接開啟 Windows `.exe`（共用 SharedPrefix） |
-| **引擎** | 共用 Wine（`~/Library/Application Support/Cyder/Engines/`） |
+| **引擎** | 共用 Wine（`~/.cyder/runtime/Engines/`，刻意避免空白） |
 | **文件** | [docs/cyder.md](docs/cyder.md) |
 
 ```bash
@@ -45,6 +45,19 @@ open dist/CyderBits.app
 ```bash
 bash scripts/run-bluecg.sh
 ```
+
+## 圖形 backend 狀態
+
+| Backend | 專案狀態 | 說明 |
+|---|---|---|
+| DirectDraw / GDI | **支援且已驗證** | BlueCG 使用 DirectDraw；預設路徑是 wined3d/OpenGL，GDI 是相容性 fallback。 |
+| wined3d / OpenGL | **目前預設** | BlueCG A6 engine 含已測試的 `winemac.drv` same-view backing 修復，可支援 Retina/DPI resize。 |
+| Vulkan / MoltenVK | **目前封裝 engine 已包含** | x86_64 Wine 內含 `libMoltenVK.dylib`；這不是 BlueCG 的繪圖路徑。重新建置仍可用 `--without-vulkan`。 |
+| DXVK | **尚未整合** | 本 repo 沒有打包 DXVK runtime，也沒有遊戲驗證結果。 |
+| dxmt | **尚未整合** | 尚無 dxmt 建置、封裝或相容性結果。 |
+| D3DMetal | **不是產品 backend** | 只在歷史 source 實驗中被提及，尚未接入或驗證為 Cyder runtime 路徑。 |
+
+詳見 [Wine configure 與圖形選項](docs/wine-configure-options.md)。
 
 ## Wine 原始碼
 
@@ -78,6 +91,13 @@ bash scripts/sign-wine.sh
 bash scripts/run-bluecg.sh
 bash scripts/enable-mac-retina-hires.sh   # 可選：Retina + 200% DPI
 ```
+
+## 已實作 workaround
+
+- [繁中字體預設](docs/workarounds/font-default.md) — 預設把常見 Windows CJK 字體替代為 Songti TC。
+- [RetinaMode 遊戲視窗設定](docs/workarounds/retina-mode.md) — RetinaMode、DPI 腳本與 resize 注意事項。
+- [BlueCG A6 視窗修復](docs/workarounds/bluecg-a6-resize.md) — 已驗證 resize、Alt+Enter、最小化／還原的 same-view backing sync。
+- [皮卡丘排球相容性](docs/games/pikachu-volleyball/README.md) — 使用無空白 runtime 路徑，並關閉 MSync 與 ESync。
 
 ### 3. 執行或包裝 EXE
 

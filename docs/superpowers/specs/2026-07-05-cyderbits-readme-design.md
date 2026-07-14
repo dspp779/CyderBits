@@ -44,5 +44,5 @@
 
 ## 文件
 
-- [README.md](../../README.md) — 英文主 README
-- [README.zh-TW.md](../../README.zh-TW.md) — 繁中
+- [README.md](../../../README.md) — 英文主 README
+- [README.zh-TW.md](../../../README.zh-TW.md) — 繁中

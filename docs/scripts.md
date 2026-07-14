@@ -133,7 +133,8 @@ exe [exe ...]          .exe 路徑（可省略 → 檔案選擇器）
 | 變數 | 說明 |
 |------|------|
 | `WINEPREFIX` | Wine bottle 路徑（目前固定為 `~/Library/Application Support/Cyder/bottles/shared`） |
-| `WINEMSYNC` | `1` 啟用 macOS msync（Cyder / CyderBits 預設） |
+| `WINEMSYNC` | `1` 啟用 macOS MSync；Cyder 依進階設定（目前預設關閉），CyderBits 預設開啟但可用 `--no-msync` 關閉 |
+| `WINEESYNC` | `1` 啟用 ESync；與 MSync 互斥，依啟動器／遊戲設定決定 |
 | `WINEDLLOVERRIDES` | 正式 Cyder 啟動不設定；只保留給單次測試或其他工具使用 |
 | `CYDER_ENGINE_SRC` | app 內引擎 payload 路徑 |
 | `CYDER_SCRIPTS` | app 內 helper 腳本路徑 |

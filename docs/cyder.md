@@ -103,6 +103,8 @@ Cyder 的 `設定…`（`⌘,`）、Dock 右鍵或執行檔選擇器的「進階
 
 設定儲存在 `~/Library/Application Support/Cyder/settings.json`，套用到共用 prefix，並於下次啟動遊戲時生效。
 
+個別遊戲可能需要不同的同步設定；例如皮卡丘打排球目前應關閉 MSync／ESync，並使用無空白的 Wine runtime。請參考 [依遊戲問題文件](games/pikachu-volleyball/README.md)。
+
 單獨開啟 `Cyder.app` 時會直接顯示進階設定。控制項變更先保留為草稿，按「確認」後可選擇：
 
 - 若偵測到共用 prefix 有執行中的 EXE：可選擇 **儲存並關閉所有 EXE**、**僅儲存**或**取消**。

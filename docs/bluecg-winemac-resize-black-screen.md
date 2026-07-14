@@ -1,8 +1,14 @@
 # BlueCG 視窗縮放黑屏與 winemac.drv 實驗紀錄
 
-> **狀態：未解決（2026-07）**  
-> 供後續追蹤 `winemac.drv` / `ddraw` / `wined3d` 修復與引擎對照。  
+> **狀態：已解決（A6 final，2026-07-13）**
+> `patches/a6-final-same-view-backing-sync.patch` 已在 `CX26.2.0-W11-Cyder003` 通過 BlueCG Retina+DPI 的拖曳縮放、Alt+Enter、最小化／還原驗收。以下仍保留原始調查、A1–A5 失敗邊界與可用 fallback。
 > 驗證遊戲：**水藍魔力（BlueCG）** — DirectDraw、PE32、視窗模式。
+
+## 目前狀態
+
+原本的「CX26 GL 路徑 resize 後黑屏」已不再是 BlueCG 正式 engine 的待解決問題。正式方案是 A6 的 same-view backing sync：同一個 view 的 backing 尺寸變更採 in-place CGL 更新，避免 `clearDrawable`／`setView` teardown 讓可見 drawable 脫節；restore geometry 則保留 user32 的 saved normal rect。
+
+正式 artifact、版本與 checksum 見 [bluecg-winemac-a6-engine.md](bluecg-winemac-a6-engine.md)。A2、A4、GDI 與「進入世界前調窗」仍是診斷或相容性 fallback，不應再寫成主要解法。
 
 ## 問題摘要
 
@@ -34,8 +40,9 @@
 |------|------|---------|-------------|------|
 | **Sikarugir Wine 10** | 平滑縮放、不黑 | 不黑，上／右有黑邊（DPI 越高越大） | **黑屏** | 基準線 |
 | **Sikarugir CrossOver 24** | 平滑縮放、不黑 | 不黑，畫面滿版無黑邊 | **黑屏** | DPI 佈局優於 Wine 10 |
-| **自建 CrossOver 26.2.0 Wine（ogom）** | 黑屏 | 黑屏 | 黑屏 | 目前主要修復對象 |
+| **自建 CrossOver 26.2.0 Wine（ogom）** | 黑屏 | 黑屏 | 黑屏 | A6 前的 baseline；A6 已另建正式 engine |
 | **官方 CrossOver 26** | 黑屏 | 黑屏 | 黑屏 | 與自建 CX 類似 |
+| **A6 final（CX26.2.0-W11-Cyder003）** | **正常** | **正常** | **正常** | 正式 BlueCG engine；same-view in-place backing sync |
 | **Cyder（bundled engine）** | 自建 engine 黑；換 Sikarugir engine 較佳 | — | — | 與底層 Wine 一致 |
 
 > 先前記載「商業 CrossOver 24 縮放亦會黑」可能指非 Sikarugir 打包的 CX24；**Sikarugir 版 CX24 在無 RetinaMode 下可正常縮放**。
@@ -52,6 +59,21 @@
 1. **必須**：GL 路徑下拖邊框平滑縮放、不黑（對照 Sikarugir Wine 10 / CX24）
 2. **加分**：高 DPI 滿版無黑邊（Sikarugir CX24 已做到）
 3. **長期**：RetinaMode + 平滑縮放同時成立（目前所有引擎在 Retina 下皆黑）
+
+> 上述「長期」目標已由 A6 final 在 BlueCG 上達成；它仍是針對 CX26.2.0 與 BlueCG 的驗收結論，不代表所有遊戲或更新後的 CrossOver source 都已驗證。
+
+## 解法與 fallback 矩陣（2026-07-13）
+
+| 解法／runtime | 黑屏狀態 | 線性縮放／畫質 | Retina + DPI | Alt+Enter／最小化 | 優點 | 代價、風險與其它問題 | 建議用途 |
+|---|---|---|---|---|---|---|---|
+| **A6 final patch** | **已解決** | GPU backing 跟隨，滿版 | **已通過** | **已通過** | 同時保留畫質與主要視窗生命週期；正式 artifact 可重現 | 目前只驗證 BlueCG；patch 綁定 CX26.2.0，需重新做其它遊戲回歸 | **正式 BlueCG engine** |
+| A4：停用 explicit backing update/reset | 不黑 | 高 DPI render target 不跟隨，左下內容＋右／上黑邊；一般 resize 可模糊 | 可運作 | BlueCG 已通過 | 改動概念簡單、可快速避開 drawable teardown | 可能讓依賴 DPI backing pixels 的其它 OpenGL／D3D 遊戲裁切、模糊或黑邊 | BlueCG fallback／診斷 |
+| A2：非 Retina guard | 非 Retina 不黑；Retina 黑 | 非 Retina 可能保留舊 render target | **不支援** | Retina 路徑仍有風險 | 改動面較小，可定位 CX26 回歸 | 不能作高 DPI 方案；其它 DPI-aware 遊戲可能尺寸不符 | 非 Retina A/B 對照 |
+| GDI renderer | 不黑 | CPU blit，`WINED3D_TEXF_LINEAR` 未實作，縮放模糊 | 不受 GL backing 黑屏影響 | BlueCG 可運作 | 不需改 source，能驗證根因在 GL 路徑 | 效能／畫質較差，不是 GPU 修復 | 暫用與診斷 |
+| 進入世界前調窗／Alt+Enter | 避開已知觸發時機 | 依原 runtime | 依原 runtime | 進入世界後不可再改尺寸 | 不需修改 engine | 不支援 live resize；操作限制明顯 | 無 A6 時的保守迴避 |
+| 原版 CX26／官方 CX26 | **未解決** | 理論上完整 | 觸發黑屏 | 有同源風險 | 保留原始 Wine 行為，適合 baseline | BlueCG 實際不可接受 | 回歸基準 |
+
+矩陣中的「已通過」只代表目前記錄的 BlueCG 手動驗收；其它遊戲、其它 macOS／顯示器 scale 與更新後 source tree 仍需獨立測試。
 
 ---
 
@@ -156,7 +178,7 @@ Wine `HKCU\Software\Wine\Direct3D\renderer` 有效值：`gl`、`gdi`（同 `no3d
 | **`gl`（預設 OpenGL）** | ✅ GPU | ❌；Sikarugir ✅ | **正解方向**——修 winemac backing |
 | **`gdi`** | ❌ 軟體 blit | ✅ | 診斷／暫用繞道 |
 | **`vulkan`** | ✅（GPU） | ❓ 未驗證，預期不佳 | **不建議**——主要服務 D3D10/11；ddraw 仍走舊鏈；winemac Vulkan 亦用 Metal surface，可能有類似 backing 問題 |
-| **DXVK / MoltenVK** | — | — | ddraw 遊戲不走此路 |
+| **DXVK / MoltenVK** | — | — | ddraw 遊戲不走此路；A6 engine 雖內含 x86_64 MoltenVK，不能因此把 BlueCG 視為 DXVK／Vulkan 路徑 |
 | **原生 DDRAW 替換** | 視包裝而定 | 視包裝而定 | cnc-ddraw 破圖、DDrawCompat 崩潰、官方 stub 仍見 wined3d（見下方矩陣） |
 
 **結論：** 目前唯一同時滿足「平滑線性縮放 + resize 不黑」的已知組合是 **Sikarugir 的 GL 路徑（無 RetinaMode）**。不存在只改 registry 的第三條路；正確投資是修 winemac GL backing 恢復（方案 A），而非換 renderer。
@@ -416,7 +438,7 @@ update_frontbuffer ... Rendering onscreen ... GL_FRONT
 
 ---
 
-## 文件化 workaround（W2 / W3）
+## 文件化 workaround（W2 / W3 與 A6）
 
 定義於 [bluecg-wine-build plan](superpowers/plans/2026-07-03-bluecg-wine-build.md) § macOS build workarounds。**未納入建置腳本**；僅在 clean build 失敗或實驗時手動套用。
 
@@ -424,6 +446,7 @@ update_frontbuffer ... Rendering onscreen ... GL_FRONT
 |----|------|------|-------------------|
 | **W2** | `cocoa_window.m` | `WineMetalLayer` → `CAMetalLayer` | 編譯／D3DMetal 路徑；**未證實修復 BlueCG resize** |
 | **W3** | `event.c` | 刪除 `macdrv_client_surface_presented` 處理 | 可能避開 present 同步卡死；**可能加劇 drawable 脫節，需謹慎** |
+| **A6** | `winemac.drv` 多檔 | same-view in-place backing sync、resize-end commit、restore rect 修正 | **已由 BlueCG 驗收；正式 patch 為 `patches/a6-final-same-view-backing-sync.patch`** |
 
 還原單檔：
 
@@ -437,11 +460,11 @@ tar -xOf "$TAR" sources/wine/dlls/winemac.drv/cocoa_window.m \
 
 ---
 
-## 建議修復方向（實驗優先順序）
+## 歷史修復方向與後續研究
 
-以下為診斷後的**待驗證**方案，非已合併 patch。
+以下是 A6 完成前的診斷方案；A6 已完成 BlueCG 的主要修復，這些方向保留作回歸、其它遊戲相容性或上游化研究。
 
-### 方案 A：resize 後強制恢復 backing（最小侵入）
+### 方案 A：resize 後強制恢復 backing（歷史方向；A6 已採更完整模型）
 
 在 `macdrv_set_view_frame` 或 `macdrv_window_resize_ended` 末尾：
 
@@ -473,6 +496,8 @@ tar -xOf "$TAR" sources/wine/dlls/winemac.drv/cocoa_window.m \
 | **進入遊戲前調窗** | 載入／啟動畫面階段可自由調整，不會黑屏 |
 | **進入遊戲前 Alt+Enter** | 等比展開到最大，可得大畫面且不黑；**進入遊戲世界後勿再 Alt+Enter 或拖邊框** |
 | **GDI registry** | 自建 CX26 進入遊戲後仍可拖邊框不黑，但縮放模糊；RetinaMode + 高 DPI 改善靜態字體 → 進遊戲前調到接近螢幕大小、進入後盡量別縮放 |
+
+| **A6 final engine** | BlueCG 正式方案；Retina+DPI 下拖曳、Alt+Enter、最小化／還原均已驗收 |
 
 ### 方案 F：patch `surface_cpu_blt` 線性過濾（GDI 妥協，低優先）
 

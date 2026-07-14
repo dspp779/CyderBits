@@ -100,6 +100,16 @@ tar -tf "$ART" | rg \
   `814358c0b459b3e4b2735b604ba038dd166f72561e9425676b57f323d7aafbab`。
 - `codesign --verify --deep --strict` 通過。
 
+## 圖形 runtime 內容
+
+目前正式 artifact 已包含：
+
+```text
+wine-x86_64/lib/wine/x86_64-unix/libMoltenVK.dylib
+```
+
+它是 x86_64 Wine 的 Vulkan／MoltenVK runtime；不代表 BlueCG 會改走 Vulkan。BlueCG 的已驗證路徑仍是 DirectDraw → wined3d/OpenGL，A6 修復的是 `winemac.drv` 的 GL backing 生命週期。DXVK、dxmt、D3DMetal 目前沒有接入此 artifact。
+
 ## BlueCG 驗收矩陣
 
 在 RetinaMode=`y`、DPI 為 96 倍數（目前測試使用 196）下，已由使用者實機確認：

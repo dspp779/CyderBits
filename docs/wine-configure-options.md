@@ -4,7 +4,9 @@
 > 情境：**macOS + CrossOver Wine（`winemac.drv`）+ 經典 Windows 遊戲**（Win95～XP 世代、32-bit PE、DirectDraw / GDI 為主）。  
 > 實際建置腳本：`scripts/build-wine.sh`（執行 configure 前會印出完整指令）。
 
-## ogom 目前預設
+## ogom 建置與目前發布 engine
+
+原始碼重新建置若未指定選項，`scripts/build-wine.sh` 仍以 `--without-vulkan` 作為 BlueCG 的最小建置路徑；但目前封裝給 Cyder 的 `CX26.2.0-W11-Cyder003` 已使用 Vulkan build，並在 artifact 內含 x86_64 `libMoltenVK.dylib`。兩者是不同層級：configure 預設不等於目前發布 artifact 的內容。
 
 `scripts/build-wine.sh` 傳給 Wine `configure` 的旗標：
 
@@ -15,7 +17,7 @@
 | `--enable-archs=i386,x86_64` | 同時建 32/64-bit PE（`syswow64` 等） |
 | `--with-mingw=llvm-mingw` | 使用專案內 llvm-mingw 交叉編譯 PE DLL |
 | `--prefix=...` | 安裝至 `install/wine-cx25-x86_64` 或 `wine-cx26-x86_64` |
-| `--without-vulkan` | **預設**（`--without-vulkan`）；DirectDraw 老遊戲不需 Vulkan |
+| `--without-vulkan` | clean source build 的預設；DirectDraw 老遊戲不需 Vulkan |
 | `--with-vulkan` | 可選；搭配 `--vulkan-source homebrew\|crossover`，見 `scripts/build-graphics-stack.sh` |
 
 建置前後相關腳本：
@@ -99,7 +101,7 @@ macOS 上使用 **`winemac.drv`（Cocoa）**，不走 X11。下列選項在 Mac 
 | 選項 | 用途 | 老遊戲 |
 |------|------|--------|
 | `--without-opengl` | 關閉 OpenGL | **不要關**。macOS 上 wined3d、許多 DirectDraw / GDI 路徑依賴 OpenGL |
-| `--without-vulkan` | 關閉 Vulkan（winevulkan、D3D10+ 現代路徑） | **DirectDraw / 2D 可關**（ogom 預設）；D3D9+ 需開並搭配 MoltenVK |
+| `--without-vulkan` | 關閉 Vulkan（winevulkan、D3D10+ 現代路徑） | **DirectDraw / 2D 可關**；D3D9+ 需開並搭配 MoltenVK |
 | `--without-osmesa` | 關閉離屏 OpenGL（OSMesa） | 一般老遊戲可不管 |
 | `--without-opencl` | 關閉 OpenCL | **不需要**（2D 老遊戲） |
 
@@ -107,7 +109,7 @@ macOS 上使用 **`winemac.drv`（Cocoa）**，不走 X11。下列選項在 Mac 
 
 | 目標 | configure | 額外步驟 |
 |------|-----------|----------|
-| BlueCG / DirectDraw | `--without-vulkan` | 無；若缺 `SONAME_LIBVULKAN` 見 `patches/w1-win32u-vulkan-soname.patch` |
+| BlueCG / DirectDraw | `--without-vulkan` 可用；目前 A6 packaged engine 另含 MoltenVK | BlueCG 仍走 ddraw → wined3d/OpenGL；若 configure 缺 `SONAME_LIBVULKAN` 見 `patches/w1-win32u-vulkan-soname.patch` |
 | 實驗性 3D / DXVK 路線 | `--with-vulkan` | `build-wine.sh --vulkan-source homebrew` 或 `crossover` + `build-graphics-stack.sh` |
 
 ---

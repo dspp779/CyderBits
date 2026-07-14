@@ -18,9 +18,25 @@
 | [cyderbits.md](cyderbits.md) | 一般使用者 | CyderBits 打包器：建立 game `.app`、選項與疑難排解 |
 | [bluecg.md](bluecg.md) | 開發 / 驗證 | BlueCG 自建 Wine、執行、高解析度與已知問題 |
 | [wine-configure-options.md](wine-configure-options.md) | 開發 / 建置 | Wine `configure` 旗標說明與老遊戲取捨 |
-| [bluecg-winemac-resize-black-screen.md](bluecg-winemac-resize-black-screen.md) | 開發 / 追蹤 | BlueCG 視窗縮放黑屏的背景、issue 與原始調查 |
+| [bluecg-winemac-resize-black-screen.md](bluecg-winemac-resize-black-screen.md) | 開發 / 追蹤 | BlueCG 視窗縮放黑屏的背景、A6 正式解法矩陣與歷史調查 |
+| [bluecg-winemac-runtime-comparison.md](bluecg-winemac-runtime-comparison.md) | 開發 / 比較 | baseline、A2、A4、A6 的功能／畫質／風險矩陣 |
+| [bluecg-winemac-experiments.md](bluecg-winemac-experiments.md) | 開發 / 歷史 | A1–A6-R5 的逐步實驗與失敗邊界 |
 | [bluecg-winemac-a6-engine.md](bluecg-winemac-a6-engine.md) | 開發 / 發布 | A6 最終 patch、Cyder003 engine artifact 與驗收資訊 |
+| [bluecg-winemac-a2-engine.md](bluecg-winemac-a2-engine.md) | 開發 / 歷史 | A2 guard-only artifact；非 Retina 對照 |
 | [scripts.md](scripts.md) | 開發者 | `scripts/` 腳本一覽與依賴關係 |
+
+## 依遊戲整理的問題文件
+
+| 遊戲／主題 | 內容 |
+|------|------|
+| [games/](games/README.md) | 依遊戲與問題類型的總入口 |
+| [games/bluecg/](games/bluecg/README.md) | BlueCG 顯示、runtime、MIDI 問題索引；A6 resize 已解決 |
+| [games/bluecg/audio/midi-underrun.md](games/bluecg/audio/midi-underrun.md) | `dmsynth underrun` 的觀察、判定與診斷計畫 |
+| [games/pikachu-volleyball/](games/pikachu-volleyball/README.md) | 皮卡丘排球的 MSync／ESync 與 runtime 路徑空白問題 |
+
+## 已實作 workaround
+
+- [workarounds/](workarounds/README.md) — 字體預設、RetinaMode、BlueCG A6 與遊戲相容性 workaround 的索引
 
 ## 設計與計畫（superpowers）
 

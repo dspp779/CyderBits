@@ -74,11 +74,15 @@ python3 scripts/cyder_create_game_app.py \
 - **Dock**：包裝 app 設 `LSUIElement`（不佔 Dock）；Wine 顯示 EXE 圖示
 - **圖示**：從 EXE 資源擷取最大 icon 轉為 `AppIcon.icns`
 
+皮卡丘打排球是例外相容性案例：MSync 與 ESync 都可能使遊戲無法運作，且 Wine runtime 的實際路徑不能含空白。請在建立／啟動該遊戲時關閉同步選項，並使用無空白的正式 runtime；詳見 [皮卡丘排球文件](games/pikachu-volleyball/README.md)。
+
 ## 檔案佈局
 
 ```text
+~/.cyder/runtime/
+  Engines/wine-x86_64/       # 無空白的共用 Wine runtime
+
 ~/Library/Application Support/Cyder/
-  Engines/wine-x86_64/       # 首次建立遊戲時從 engine-payload 安裝
   Bottles/<id>/              # bottle 模式的 prefix（Phase 1 預設）
 
 MyGame.app/
@@ -111,7 +115,7 @@ MyGame.app/
 | 畫面糊 / 視窗太小 | 建立時啟用高解析度，或對 prefix 執行 `bash scripts/enable-mac-retina-hires.sh` |
 | BlueCG 無法啟動 | 使用 `--prefix-mode game_dir`，並 `--no-gecko-prompt` |
 | Dock 兩個圖示 / 跳動 | 重建 app（新版啟動器已 detach Wine） |
-| 找不到 Wine | 重新開啟 CyderBits.app 以安裝共用引擎到 Application Support |
+| 找不到 Wine | 重新開啟 CyderBits.app 以安裝共用引擎到 `~/.cyder/runtime/Engines/` |
 | Gecko 安裝提示 | 建立時選停用 mshtml，或 `bash scripts/configure-mshtml.sh --disable` |
 | Bottle 佔用過多空間 | 刪除 app 不會刪 bottle；可手動清理 `~/Library/Application Support/Cyder/Bottles/` |
 

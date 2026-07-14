@@ -6,7 +6,7 @@
 
 **Run legacy Windows games on Mac — DirectDraw & GDI first.**
 
-Built for 2D and classic Win32 graphics (DirectDraw, GDI). **DXVK, Vulkan, and modern 3D pipelines are not supported yet.**
+The validated path is classic 2D Win32 graphics: **DirectDraw → Wine wined3d/OpenGL** and GDI. The current packaged `CX26.2.0-W11-Cyder003` engine also contains an x86_64 **MoltenVK** runtime for Wine Vulkan, but BlueCG does not use Vulkan, DXVK, dxmt, or D3DMetal.
 
 CyderBits builds CrossOver-based Wine on Apple Silicon and ships two tools: **Cyder** — a one-click `.exe` launcher — and **CyderBits** — a packager that wraps `.exe` files as double-clickable macOS `.app` bundles.
 
@@ -17,7 +17,7 @@ CyderBits builds CrossOver-based Wine on Apple Silicon and ships two tools: **Cy
 | | |
 |---|---|
 | **What** | Open any Windows `.exe` with one shared Wine prefix |
-| **Engine** | Shared Wine under `~/Library/Application Support/Cyder/Engines/` |
+| **Engine** | Shared Wine under `~/.cyder/runtime/Engines/` (kept free of spaces) |
 | **Docs** | [docs/cyder.md](docs/cyder.md) |
 
 ```bash
@@ -45,6 +45,19 @@ Development and smoke tests target **[BlueCG](https://www.bluecg.net/forum.php?m
 ```bash
 bash scripts/run-bluecg.sh
 ```
+
+## Graphics backend status
+
+| Backend | Project status | Notes |
+|---|---|---|
+| DirectDraw / GDI | **Supported and validated** | BlueCG uses DirectDraw; the default path is wined3d/OpenGL. GDI is a compatibility fallback. |
+| wined3d / OpenGL | **Active default** | BlueCG's A6 engine includes the tested `winemac.drv` same-view backing fix for Retina/DPI resize. |
+| Vulkan / MoltenVK | **Included in the current packaged engine** | `libMoltenVK.dylib` is bundled for x86_64 Wine Vulkan support; it is not the BlueCG rendering path. Fresh builds may use `--without-vulkan`. |
+| DXVK | **Not integrated** | No DXVK runtime or game validation is shipped by this repository. |
+| dxmt | **Not integrated** | No dxmt build, packaging, or compatibility result is maintained here. |
+| D3DMetal | **Not a product backend** | Only referenced by historical source experiments; it is not wired or validated as a Cyder runtime path. |
+
+See [Wine configure and graphics options](docs/wine-configure-options.md) for build choices and limitations.
 
 ## Wine sources
 
@@ -83,6 +96,13 @@ bash scripts/sign-wine.sh
 bash scripts/run-bluecg.sh
 bash scripts/enable-mac-retina-hires.sh   # optional Retina + 200% DPI
 ```
+
+## Implemented workarounds
+
+- [Chinese font default](docs/workarounds/font-default.md) — maps common Windows CJK fonts to Songti TC by default.
+- [RetinaMode window setup](docs/workarounds/retina-mode.md) — RetinaMode + DPI script and its resize caveats.
+- [BlueCG A6 resize fix](docs/workarounds/bluecg-a6-resize.md) — tested same-view backing sync for resize, Alt+Enter, and minimize/restore.
+- [Pikachu Volleyball compatibility](docs/games/pikachu-volleyball/README.md) — use a no-space runtime path with MSync and ESync disabled.
 
 ### 3. Run or wrap any EXE
 

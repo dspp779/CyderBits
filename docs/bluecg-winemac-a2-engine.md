@@ -1,6 +1,8 @@
 # BlueCG A2 engine artifact
 
 > 建立日期：2026-07-12
+>
+> **狀態：歷史對照 artifact，不是目前正式 BlueCG engine。** A2 只修正非 Retina guard；需要 Retina+DPI resize 請使用 [A6 final](bluecg-winemac-a6-engine.md)。
 
 ## 發行識別
 
@@ -80,4 +82,3 @@ tar -tJf "$ART" | rg \
 bash scripts/create-cyder-app.sh \
   --engine-archive "$PWD/dist/artifacts/a2/engine-wine-x86_64-CX26-2-0-W11-A2-Cyder0-0-2.tar.xz"
 ```
-
