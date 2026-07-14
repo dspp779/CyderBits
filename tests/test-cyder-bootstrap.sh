@@ -12,9 +12,12 @@ source "$ROOT/tests/assert.sh"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 SHARED="$TMP/SharedPrefix"
-mkdir -p "$SHARED"
+SUPPORT="$TMP/support"
+mkdir -p "$SHARED" "$SUPPORT/downloads"
+cp "$ROOT/downloads/wine-mono-10.4.1-x86.msi" "$SUPPORT/downloads/"
 
 output="$(
+  CYDER_SUPPORT="$SUPPORT" \
   CYDER_SHARED_PREFIX="$SHARED" \
   CYDER_RUNTIME_ROOT="$TMP/runtime" \
     bash "$ROOT/scripts/cyder_launcher.sh" --bootstrap-only \
@@ -23,7 +26,8 @@ output="$(
 assert_contains "$output" "$SHARED" "bootstrap-only should use CYDER_SHARED_PREFIX"
 assert_contains "$output" ".cyder-bootstrap-v1" "bootstrap-only should print marker path"
 
-assert test -f "$SHARED/drive_c/windows/syswow64/tar.exe"
+assert test -f "$SHARED/drive_c/windows/syswow64/tar.exe" -o \
+  -f "$SHARED/drive_c/windows/system32/tar.exe"
 assert test -d "$SHARED/drive_c/windows/mono"
 assert test -f "$SHARED/.cyder-bootstrap-v1"
 assert test -f "$SHARED/.cyder-font-songti-v1"
@@ -38,8 +42,9 @@ else
 fi
 
 if WINEPREFIX="$SHARED" arch -x86_64 "$WINE" reg query "HKCU\\Software\\Wine\\Mac Driver" /v RetinaMode >/dev/null 2>&1; then
-  retina="$(WINEPREFIX="$SHARED" arch -x86_64 "$WINE" reg query "HKCU\\Software\\Wine\\Mac Driver" /v RetinaMode 2>/dev/null | rg -i 'RetinaMode' | rg -io 'n|y' | head -1 || true)"
-  assert_eq "${retina,,}" "y" "bootstrap should default to RetinaMode=y"
+  retina="$(WINEPREFIX="$SHARED" arch -x86_64 "$WINE" reg query "HKCU\\Software\\Wine\\Mac Driver" /v RetinaMode 2>/dev/null | awk 'tolower($1) == "retinamode" { print $NF; exit }' || true)"
+  retina="$(printf '%s' "$retina" | tr -d '\r' | tr '[:upper:]' '[:lower:]')"
+  assert_eq "$retina" "y" "bootstrap should default to RetinaMode=y"
 fi
 
 echo "PASS test-cyder-bootstrap"

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Cyder launcher — open Windows EXE with shared prefix (no Python).
-set -euo pipefail
+set -Eeuo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=cyder-common.sh
@@ -12,6 +12,41 @@ else
   cyder_init_paths "$SCRIPT_DIR"
 fi
 cyder_load_saved_settings
+
+CYDER_DIAGNOSTIC_STAGE="${CYDER_DIAGNOSTIC_STAGE:-launcher-start}"
+CYDER_DIAGNOSTIC_LAST_ERROR=""
+CYDER_DIAGNOSTIC_EXPECTED_EXIT="0"
+
+cyder_set_stage() {
+  CYDER_DIAGNOSTIC_STAGE="$1"
+  export CYDER_DIAGNOSTIC_STAGE
+  if [[ -n "${CYDER_DIAGNOSTIC_SESSION_ID:-}" || "${CYDER_DIAGNOSTIC_VERBOSE:-0}" == 1 ]]; then
+    printf 'diagnostic event=stage session=%s stage=%s\n' \
+      "${CYDER_DIAGNOSTIC_SESSION_ID:-cli}" "$CYDER_DIAGNOSTIC_STAGE" >&2
+  fi
+}
+
+cyder_on_error() {
+  local status="$1" line="$2" command="$3"
+  CYDER_DIAGNOSTIC_LAST_ERROR="status=$status line=$line command=$command"
+  printf 'diagnostic event=error session=%s stage=%s status=%s line=%s command=%q\n' \
+    "${CYDER_DIAGNOSTIC_SESSION_ID:-cli}" "$CYDER_DIAGNOSTIC_STAGE" \
+    "$status" "$line" "$command" >&2
+  return "$status"
+}
+
+cyder_on_exit() {
+  local status="$?"
+  if [[ "$status" -ne 0 && "$status" -ne "${CYDER_DIAGNOSTIC_EXPECTED_EXIT:-0}" ]]; then
+    printf 'diagnostic event=exit session=%s stage=%s status=%s detail=%q\n' \
+      "${CYDER_DIAGNOSTIC_SESSION_ID:-cli}" "$CYDER_DIAGNOSTIC_STAGE" \
+      "$status" "${CYDER_DIAGNOSTIC_LAST_ERROR:-explicit-exit}" >&2
+  fi
+}
+
+trap 'cyder_on_error "$?" "$LINENO" "$BASH_COMMAND"' ERR
+trap cyder_on_exit EXIT
+cyder_set_stage launcher-start
 
 usage() {
   cat <<EOF
@@ -115,11 +150,16 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [[ "$HAS_RUNNING_EXES" -eq 1 ]]; then
-  cyder_has_running_exes
-  exit $?
+  cyder_set_stage has-running-exes
+  if cyder_has_running_exes; then
+    exit 0
+  fi
+  CYDER_DIAGNOSTIC_EXPECTED_EXIT=1
+  exit 1
 fi
 
 if [[ "$DRY_RUN" -eq 0 && "$LAUNCH_ONLY" -eq 0 ]]; then
+  cyder_set_stage rosetta-check
   cyder_ensure_rosetta || exit 1
 fi
 
@@ -128,11 +168,13 @@ if [[ "$ENSURE_ROSETTA_ONLY" -eq 1 ]]; then
 fi
 
 if [[ "$STOP_ALL" -eq 1 ]]; then
+  cyder_set_stage stop-all
   cyder_stop_all_exes
   exit 0
 fi
 
 if [[ "$APPLY_SETTINGS_ONLY" -eq 1 ]]; then
+  cyder_set_stage settings-apply
   engine="$CYDER_ENGINES/$CYDER_ENGINE_NAME"
   if [[ ! -x "$engine/bin/wine" || ! -f "$CYDER_BOOTSTRAP_MARKER" ]]; then
     echo "Cyder environment is not ready; open Cyder.app to finish setup." >&2
@@ -143,11 +185,13 @@ if [[ "$APPLY_SETTINGS_ONLY" -eq 1 ]]; then
 fi
 
 if [[ "$ENSURE_ENGINE_ONLY" -eq 1 ]]; then
+  cyder_set_stage engine-extraction
   cyder_ensure_shared_engine "$ENGINE_SRC" >/dev/null
   exit 0
 fi
 
 if [[ "$BOOTSTRAP_ONLY" -eq 1 ]]; then
+  cyder_set_stage engine-validation
   engine="$(cyder_ensure_shared_engine "$ENGINE_SRC")"
   wine="$engine/bin/wine"
   echo "WINEPREFIX=$CYDER_SHARED_PREFIX"
@@ -156,6 +200,7 @@ if [[ "$BOOTSTRAP_ONLY" -eq 1 ]]; then
   mkdir -p "$log_dir"
   tmp_log="$(mktemp "${TMPDIR:-/tmp}/cyder-bootstrap.XXXXXX")"
   set +e
+  cyder_set_stage bootstrap
   {
     echo "engine=$engine"
     echo "wine=$wine"
@@ -174,6 +219,7 @@ if [[ "$BOOTSTRAP_ONLY" -eq 1 ]]; then
 fi
 
 if [[ "$LAUNCH_ONLY" -eq 1 ]]; then
+  cyder_set_stage exe-validation
   exe="$(cyder_resolve_exe_from_args "${EXE_ARGS[@]}")" || {
     echo "Missing or invalid .exe for --launch-exe" >&2
     exit 1
@@ -183,6 +229,7 @@ if [[ "$LAUNCH_ONLY" -eq 1 ]]; then
     exit 2
   fi
   wine="$CYDER_ENGINES/$CYDER_ENGINE_NAME/bin/wine"
+  cyder_set_stage wine-launch
   cyder_run_wine_exe "$wine" "$exe"
   exit 0
 fi
@@ -202,6 +249,7 @@ if [[ -z "$exe" ]]; then
 fi
 
 if [[ "$DRY_RUN" -eq 1 ]]; then
+  cyder_set_stage dry-run
   wine="$(cyder_wine_bin_for_dry_run "$ENGINE_SRC")"
   echo "WINEPREFIX=$CYDER_SHARED_PREFIX"
   echo "wine=$wine"
@@ -212,6 +260,7 @@ fi
 
 engine="$(cyder_ensure_shared_engine "$ENGINE_SRC")"
 wine="$engine/bin/wine"
+cyder_set_stage bootstrap
 set +e
 cyder_bootstrap_shared_prefix "$wine" "$engine"
 bootstrap_status=$?
@@ -220,4 +269,5 @@ if [[ "$bootstrap_status" -ne 0 ]]; then
   cyder_bootstrap_error_dialog "bootstrap failed (exit $bootstrap_status)"
   exit 1
 fi
+cyder_set_stage wine-launch
 cyder_run_wine_exe "$wine" "$exe"

@@ -119,7 +119,7 @@ Cyder 的 `設定…`（`⌘,`）、Dock 右鍵或執行檔選擇器的「進階
 
 正式啟動路徑不設定 `WINEDLLOVERRIDES`。DLL 相容性設定存放在 prefix Registry；目前僅為 `bluecg.exe` 設定 `HKCU\Software\Wine\AppDefaults\bluecg.exe\DllOverrides` 的 `ddraw=native,builtin`，不影響 BlueLauncher 或其他 EXE。
 
-Finder 啟動時，Cyder 會在呼叫 `/usr/bin/arch` 前監聽 CrossOver Wine 的 `WineAppWillActivateNotification`。收到與 `bottles/shared` 相同、且 `ActivatingAppPID` 已登記為 `regular/Foreground` 的通知後，macOS 14 以上會由 Cyder 先讓出焦點，再透過 cooperative activation 將所有 Wine 視窗帶到前方；macOS 12、13 則使用舊版 activation API 作為相容 fallback。送出一次 activation 後 Cyder 隨即退出；wrapper PID 不參與 activation，也不搜尋 process tree 或視窗 owner。若 Wine 未發出通知，隱藏 launcher 最多等待 30 秒後自行退出。Wine 與遊戲會獨立繼續執行，stdout／stderr 重導向到 `Logs/last-launch.log`，不會開啟 Terminal。
+Finder 啟動時，Cyder 會在呼叫 `/usr/bin/arch` 前監聽 CrossOver Wine 的 `WineAppWillActivateNotification`。收到與 `bottles/shared` 相同、且 `ActivatingAppPID` 已登記為 `regular/Foreground` 的通知後，macOS 14 以上會由 Cyder 先讓出焦點，再透過 cooperative activation 將所有 Wine 視窗帶到前方；macOS 12、13 則使用舊版 activation API 作為相容 fallback。送出一次 activation 後 Cyder 隨即退出；wrapper PID 不參與 activation，也不搜尋 process tree 或視窗 owner。若 Wine 未發出通知，隱藏 launcher最多等待 30 秒；Wine 仍在執行時只記錄 warning，不誤判為失敗。若 Wine 在顯示視窗前退出或被 signal 終止，Cyder 會顯示錯誤代碼、結束狀態與記錄內容。Wine stdout／stderr 會保存到每次 session 的獨立記錄，`Logs/last-launch.log` 指向最近一次啟動記錄。
 
 命令列直接呼叫 `cyder_launcher.sh` 時仍以前景模式執行，方便腳本等待遊戲結束；只有 Universal Cyder 的 Finder EXE 入口會使用 Swift 直接啟動的分離模式。
 
@@ -150,6 +150,22 @@ BlueCG（魔力寶貝）可透過 Cyder 直接開 `BlueLauncher.exe`；遊戲目
 | Gecko 安裝提示 | Cyder 不修改 MSHTML；若遊戲確實不需要內嵌網頁，可對 `bottles/shared` 執行 `bash scripts/configure-mshtml.sh --disable` |
 | 多遊戲衝突 / registry 混亂 | 改用 [CyderBits](cyderbits.md) 為該遊戲建立獨立 bottle 的 game `.app` |
 | Dock 圖示 | Cyder 啟動 Wine 程序後即結束；Dock 上顯示的是 Wine / 遊戲視窗 |
+
+## 錯誤記錄與診斷
+
+Cyder 每次啟動都會建立獨立 session，記錄目前階段、shell worker 輸出、Wine stdout／stderr 與結束原因：
+
+```text
+~/Library/Application Support/Cyder/Logs/
+  sessions/                 # 每次啟動及各子程序的獨立記錄
+  session-state.json        # 目前／上次 session 是否正常完成
+  last-error.json           # 最近一次結構化錯誤
+  last-launch.log           # 最近一次 Wine 啟動記錄的連結
+  bootstrap-error.log       # bootstrap 詳細錯誤（若有）
+  engine-install.log        # engine 解壓與安裝記錄
+```
+
+除使用者主動取消外，非預期失敗會顯示 `CYD-*` 錯誤代碼、失敗階段、exit status 或 signal，並提供「複製診斷資訊」及「開啟記錄資料夾」。若 native process 來不及顯示對話框便 crash，Cyder 會在下次啟動時偵測未完成的 session 並提示查看上次記錄。
 
 ## 相關文件
 

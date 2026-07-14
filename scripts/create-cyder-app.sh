@@ -8,7 +8,7 @@ unset HOMEBREW_PREFIX OGOM WINE_INSTALL ENTITLEMENTS_PLIST
 source "$SCRIPT_DIR/env-x86_64.sh"
 
 OUT_DIR="${OGOM}/dist"
-CYDER_APP_VERSION="${CYDER_APP_VERSION:-0.2.1}"
+CYDER_APP_VERSION="${CYDER_APP_VERSION:-0.3.0}"
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --engine-archive)
@@ -102,8 +102,11 @@ done <<'SIZES'
 1024 icon_512x512@2x.png
 SIZES
 if ! iconutil -c icns "$ICONSET" -o "$RES/AppIcon.icns"; then
-  if [[ -n "$PRESERVED_ICON" && -f "$PRESERVED_ICON" ]]; then
-    echo "==> Warning: iconutil failed; reusing the previous Cyder icon" >&2
+  echo "==> iconutil failed; building the ICNS container directly" >&2
+  if perl "$SCRIPT_DIR/create-icns.pl" "$ICONSET" "$RES/AppIcon.icns"; then
+    echo "==> Built AppIcon.icns with the portable fallback"
+  elif [[ -n "$PRESERVED_ICON" && -f "$PRESERVED_ICON" ]]; then
+    echo "==> Warning: ICNS fallback failed; reusing the previous Cyder icon" >&2
     cp "$PRESERVED_ICON" "$RES/AppIcon.icns"
   else
     echo "Failed to build AppIcon.icns and no previous Cyder icon is available" >&2
@@ -143,6 +146,12 @@ rsync -a "$OGOM/tools/libarchive/" "$RES/addons/libarchive/"
 
 echo "==> Building universal MacOS/Cyder (arm64 + x86_64)"
 SWIFT_BUILD_DIR="$(mktemp -d "${TMPDIR:-/tmp}/cyder-swift.XXXXXX")"
+SWIFT_SOURCES=(
+  "$SCRIPT_DIR/cyder_diagnostics.swift"
+  "$SCRIPT_DIR/cyder_app_main.swift"
+)
+SWIFT_OPTIMIZATION="${CYDER_SWIFT_OPTIMIZATION:--O}"
+SWIFT_MODULE_CACHE="${CYDER_SWIFT_MODULE_CACHE:-$SWIFT_BUILD_DIR/module-cache}"
 if [[ -n "${CYDER_MACOS_SDK:-}" ]]; then
   SWIFT_SDK="$CYDER_MACOS_SDK"
 else
@@ -150,10 +159,13 @@ else
   # SDK can make SwiftShims incompatible when swiftc was updated separately.
   SWIFT_SDK="$(xcrun --sdk macosx --show-sdk-path)"
 fi
+# Resolve the SDK symlink. Some Command Line Tools updates can briefly leave
+# MacOSX.sdk module metadata out of sync while the versioned SDK is usable.
+SWIFT_SDK="$(cd "$SWIFT_SDK" && pwd -P)"
 echo "==> Swift SDK: $SWIFT_SDK"
 NATIVE_CYDER=0
-if swiftc -O -sdk "$SWIFT_SDK" -module-cache-path "$SWIFT_BUILD_DIR/module-cache" -target arm64-apple-macosx12.0 -o "$SWIFT_BUILD_DIR/Cyder-arm64" "$SCRIPT_DIR/cyder_app_main.swift" \
-  && swiftc -O -sdk "$SWIFT_SDK" -module-cache-path "$SWIFT_BUILD_DIR/module-cache" -target x86_64-apple-macosx12.0 -o "$SWIFT_BUILD_DIR/Cyder-x86_64" "$SCRIPT_DIR/cyder_app_main.swift" \
+if swiftc "$SWIFT_OPTIMIZATION" -sdk "$SWIFT_SDK" -module-cache-path "$SWIFT_MODULE_CACHE" -target arm64-apple-macosx12.0 -o "$SWIFT_BUILD_DIR/Cyder-arm64" "${SWIFT_SOURCES[@]}" \
+  && swiftc "$SWIFT_OPTIMIZATION" -sdk "$SWIFT_SDK" -module-cache-path "$SWIFT_MODULE_CACHE" -target x86_64-apple-macosx12.0 -o "$SWIFT_BUILD_DIR/Cyder-x86_64" "${SWIFT_SOURCES[@]}" \
   && lipo -create "$SWIFT_BUILD_DIR/Cyder-arm64" "$SWIFT_BUILD_DIR/Cyder-x86_64" -output "$MACOS/CyderSwift"; then
   cp "$MACOS/CyderSwift" "$MACOS/Cyder"
   chmod +x "$MACOS/Cyder" "$MACOS/CyderSwift"

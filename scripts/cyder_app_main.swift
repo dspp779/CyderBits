@@ -39,16 +39,28 @@ private final class CyderSettingsStore {
 
     private init() {
         url = CyderPaths.support.appendingPathComponent("settings.json")
-        if let data = try? Data(contentsOf: url),
-           let decoded = try? JSONDecoder().decode(CyderSettings.self, from: data),
-           decoded.schemaVersion == 1 {
+        guard FileManager.default.fileExists(atPath: url.path) else {
+            value = .defaults
+            return
+        }
+        CyderDiagnostics.shared.enter(.settingsLoad)
+        do {
+            let data = try Data(contentsOf: url)
+            let decoded = try JSONDecoder().decode(CyderSettings.self, from: data)
+            guard decoded.schemaVersion == 1 else {
+                CyderDiagnostics.shared.warning("unsupported settings schema=\(decoded.schemaVersion); using defaults")
+                value = .defaults
+                return
+            }
             value = decoded
-        } else {
+        } catch {
+            CyderDiagnostics.shared.warning("unable to read settings; using defaults error=\(error)")
             value = .defaults
         }
     }
 
     func update(_ work: (inout CyderSettings) -> Void) throws {
+        CyderDiagnostics.shared.enter(.settingsSave)
         var next = value
         work(&next)
         next.dpi = min(480, max(72, next.dpi))
@@ -304,6 +316,7 @@ private final class CyderSettingsWindowController: NSWindowController, NSWindowD
             isDirty = false
             return true
         } catch {
+            CyderDiagnostics.shared.warning("unable to save settings error=\(error)")
             status.stringValue = "無法儲存設定：\(error.localizedDescription)"
             status.textColor = .systemRed
             return false
@@ -451,6 +464,35 @@ private final class WineActivationWaiter {
     }
 }
 
+private struct CyderProcessResult {
+    let status: Int32
+    let terminationReason: Process.TerminationReason
+    let logURL: URL
+    let outputTail: String
+
+    var succeeded: Bool {
+        terminationReason == .exit && status == 0
+    }
+
+    var terminationDescription: String {
+        switch terminationReason {
+        case .exit:
+            return "exit"
+        case .uncaughtSignal:
+            return "uncaught-signal"
+        @unknown default:
+            return "unknown"
+        }
+    }
+}
+
+private enum CyderLaunchOutcome {
+    case success
+    case cancelled
+    case environmentNotReady
+    case failure(CyderFailure)
+}
+
 final class CyderAppDelegate: NSObject, NSApplicationDelegate {
     private var pendingFiles: [String] = []
     private var didFinishLaunch = false
@@ -500,6 +542,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        CyderDiagnostics.shared.enter(.appStart, detail: hasDocumentArgument ? "finder-exe" : "settings")
         DistributedNotificationCenter.default().addObserver(
             self,
             selector: #selector(wineAppWillActivate(_:)),
@@ -509,6 +552,13 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         )
         installMainMenu()
         didFinishLaunch = true
+        if ProcessInfo.processInfo.environment["CYDER_DIAGNOSTICS_SELF_TEST"] == "1" {
+            CyderDiagnostics.shared.enter(.resourceValidation, detail: "self-test")
+            CyderDiagnostics.shared.finish(outcome: "diagnostics-self-test")
+            NSApp.terminate(nil)
+            return
+        }
+        showPreviousCrashIfNeeded()
         for arg in CommandLine.arguments.dropFirst() {
             if arg.hasPrefix("-psn_") {
                 continue
@@ -528,6 +578,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         DistributedNotificationCenter.default().removeObserver(self)
+        CyderDiagnostics.shared.finish(outcome: "terminated")
     }
 
     private var hasDocumentArgument: Bool {
@@ -587,8 +638,13 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
     private func stopAllExes() {
         guard let resourcePath = Bundle.main.resourcePath else { return }
         let context = CyderLaunchContext(resourcePath: resourcePath)
-        let status = runLauncher(context: context, args: [context.launcher, "--stop-all"])
-        if status != 0 {
+        let result = runLauncher(
+            context: context,
+            args: [context.launcher, "--stop-all"],
+            stage: .settingsApply,
+            operation: "stop-all"
+        )
+        if !result.succeeded {
             showAlert("有些遊戲未能關閉", "請先手動關閉遊戲，再重新套用設定。")
         }
     }
@@ -596,7 +652,12 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
     private func hasRunningExes() -> Bool {
         guard let resourcePath = Bundle.main.resourcePath else { return false }
         let context = CyderLaunchContext(resourcePath: resourcePath)
-        return runLauncher(context: context, args: [context.launcher, "--has-running-exes"]) == 0
+        return runLauncher(
+            context: context,
+            args: [context.launcher, "--has-running-exes"],
+            stage: .engineValidation,
+            operation: "has-running-exes"
+        ).status == 0
     }
 
     private func prepareEnvironmentAfterSettings(stopAll: Bool) {
@@ -609,25 +670,38 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
                 self.showSetup("正在關閉遊戲…")
                 self.stopAllExes()
             }
-            let status = self.ensureEnvironment(context: context)
-            var settingsStatus = status
-            if status == 0 {
+            let preparationFailure = self.ensureEnvironment(context: context)
+            var settingsFailure = preparationFailure
+            if preparationFailure == nil {
                 self.showSetup("正在套用新設定…")
-                settingsStatus = self.runLauncher(context: context, args: [
-                    context.launcher, "--apply-settings-only",
-                ])
+                let result = self.runLauncher(
+                    context: context,
+                    args: [context.launcher, "--apply-settings-only"],
+                    stage: .settingsApply,
+                    operation: "apply-settings"
+                )
+                if !result.succeeded {
+                    settingsFailure = self.failure(
+                        code: "CYD-SET-002",
+                        stage: .settingsApply,
+                        summary: "套用設定時發生問題。",
+                        result: result
+                    )
+                }
             }
             DispatchQueue.main.async {
                 self.hideSetup()
                 self.environmentPreparationInProgress = false
-                if settingsStatus == 0 {
+                if settingsFailure == nil {
                     self.showAlert(
                         "設定完成",
                         "新設定已儲存，下次開啟遊戲時會自動使用。",
                         style: .informational
                     )
-                } else if status == 0 {
-                    self.showAlert("設定未完成", "套用設定時發生問題。請重新開啟 Cyder 再試一次。")
+                    CyderDiagnostics.shared.finish(outcome: "settings-completed")
+                } else if let settingsFailure {
+                    self.presentFailure(settingsFailure)
+                    CyderDiagnostics.shared.finish(outcome: "settings-failed")
                 }
                 NSApp.terminate(nil)
             }
@@ -648,7 +722,15 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         NSApp.setActivationPolicy(.prohibited)
 
         guard let resourcePath = Bundle.main.resourcePath else {
-            fputs("Cyder: missing Resources path\n", stderr)
+            let failure = CyderFailure(
+                code: "CYD-APP-001",
+                stage: .resourceValidation,
+                summary: "Cyder 缺少必要的 Resources 目錄。",
+                technicalDetails: "Bundle.main.resourcePath returned nil.",
+                logURL: CyderDiagnostics.shared.sessionLogURL
+            )
+            presentFailure(failure)
+            CyderDiagnostics.shared.finish(outcome: "resource-validation-failed")
             NSApp.terminate(nil)
             return
         }
@@ -659,17 +741,25 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             guard let self else {
                 return
             }
-            let status = self.runPhasedLaunch(context: context)
+            let outcome = self.runPhasedLaunch(context: context)
             DispatchQueue.main.async {
                 self.hideSetup()
-                if status == 2 {
+                switch outcome {
+                case .success:
+                    CyderDiagnostics.shared.finish(outcome: "wine-launched")
+                case .cancelled:
+                    CyderDiagnostics.shared.finish(outcome: "cancelled")
+                case .environmentNotReady:
                     self.showAlert(
                         "遊戲尚未準備完成",
                         "請先單獨開啟 Cyder.app，按「確認」完成首次準備，再重新開啟遊戲。"
                     )
+                    CyderDiagnostics.shared.finish(outcome: "environment-not-ready")
+                case .failure(let failure):
+                    self.presentFailure(failure)
+                    CyderDiagnostics.shared.finish(outcome: "launch-failed")
                 }
                 NSApp.terminate(nil)
-                exit(status)
             }
         }
     }
@@ -685,20 +775,25 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         return (needsEngine, needsBootstrap)
     }
 
-    private func ensureEnvironment(context: CyderLaunchContext) -> Int32 {
+    private func ensureEnvironment(context: CyderLaunchContext) -> CyderFailure? {
         let state = environmentState(context: context)
 
         if state.needsEngine {
+            CyderDiagnostics.shared.enter(.engineExtraction)
             showSetup("正在準備遊戲執行元件…")
-            let code = runLauncher(context: context, args: [
-                context.launcher, "--engine-src", context.engineSrc, "--ensure-engine-only",
-            ])
-            if code != 0 {
-                showAlert(
-                    "無法完成遊戲準備",
-                    "準備遊戲所需元件時發生問題。請重新開啟 Cyder 再試一次。"
+            let result = runLauncher(
+                context: context,
+                args: [context.launcher, "--engine-src", context.engineSrc, "--ensure-engine-only"],
+                stage: .engineExtraction,
+                operation: "engine-install"
+            )
+            if !result.succeeded {
+                return failure(
+                    code: "CYD-ENG-003",
+                    stage: .engineExtraction,
+                    summary: "準備遊戲執行元件時發生問題。",
+                    result: result
                 )
-                return code
             }
         }
 
@@ -709,27 +804,32 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             || state.needsBootstrap
             || environmentState(context: context).needsBootstrap
         if bootstrapNeeded {
+            CyderDiagnostics.shared.enter(.bootstrap)
             showSetup("正在準備遊戲環境…")
-            let code = runLauncher(context: context, args: [
-                context.launcher, "--engine-src", context.engineSrc, "--bootstrap-only",
-            ])
-            if code != 0 {
-                showAlert(
-                    "無法完成遊戲準備",
-                    "準備遊戲環境時發生問題。請重新開啟 Cyder 再試一次。"
+            let result = runLauncher(
+                context: context,
+                args: [context.launcher, "--engine-src", context.engineSrc, "--bootstrap-only"],
+                stage: .bootstrap,
+                operation: "bootstrap"
+            )
+            if !result.succeeded {
+                return failure(
+                    code: "CYD-BTS-001",
+                    stage: .bootstrap,
+                    summary: "準備遊戲環境時發生問題。",
+                    result: result
                 )
-                return code
             }
         }
-        return 0
+        return nil
     }
 
-    private func runPhasedLaunch(context: CyderLaunchContext) -> Int32 {
+    private func runPhasedLaunch(context: CyderLaunchContext) -> CyderLaunchOutcome {
         var exePaths = normalizeExePaths(pendingFiles)
         if exePaths.isEmpty {
             hideSetup()
             guard let chosen = chooseExeOnMainThread() else {
-                return 1
+                return .cancelled
             }
             exePaths = [chosen]
         }
@@ -738,12 +838,12 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         // environment.  That work is completed by the settings flow first.
         let state = environmentState(context: context)
         guard !state.needsEngine, !state.needsBootstrap else {
-            return 2
+            return .environmentNotReady
         }
 
         let wine = CyderPaths.engine.appendingPathComponent("bin/wine")
         guard FileManager.default.isExecutableFile(atPath: wine.path) else {
-            return 2
+            return .environmentNotReady
         }
         return runDirectWine(wine: wine, exe: exePaths[0])
     }
@@ -752,7 +852,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
     /// for CrossOver Wine to publish the actual foreground application PID in
     /// WineAppWillActivateNotification.  The wrapper Process PID is not used
     /// for activation. Wine continues independently after Cyder exits.
-    private func runDirectWine(wine: URL, exe: String) -> Int32 {
+    private func runDirectWine(wine: URL, exe: String) -> CyderLaunchOutcome {
         let support = CyderPaths.support
         let logDirectory = support.appendingPathComponent("Logs", isDirectory: true)
         let prefix = CyderPaths.sharedBottle.path
@@ -771,11 +871,21 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         do {
             try FileManager.default.createDirectory(at: logDirectory, withIntermediateDirectories: true)
         } catch {
-            fputs("Cyder: unable to create log directory: \(error)\n", stderr)
-            return 1
+            return .failure(CyderFailure(
+                code: "CYD-LOG-001",
+                stage: .wineSpawn,
+                summary: "無法建立 Cyder 記錄資料夾。",
+                technicalDetails: String(describing: error),
+                logURL: CyderDiagnostics.shared.sessionLogURL
+            ))
         }
 
-        let launchLog = logDirectory.appendingPathComponent("last-launch.log")
+        CyderDiagnostics.shared.enter(.wineSpawn, detail: CyderDiagnostics.shared.redact(exe))
+        let launchLog = CyderDiagnostics.shared.makeOperationLog("wine-launch")
+        FileManager.default.createFile(atPath: launchLog.path, contents: nil)
+        let legacyLog = logDirectory.appendingPathComponent("last-launch.log")
+        try? FileManager.default.removeItem(at: legacyLog)
+        try? FileManager.default.createSymbolicLink(at: legacyLog, withDestinationURL: launchLog)
 
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/arch")
@@ -783,25 +893,75 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         process.currentDirectoryURL = URL(fileURLWithPath: exe).deletingLastPathComponent()
         process.environment = wineEnvironment(wine: wine, support: support)
 
-        let command = "arch -x86_64 \(wine.path) \(exe)\n"
-        FileManager.default.createFile(atPath: launchLog.path, contents: command.data(using: .utf8))
-        if let handle = FileHandle(forWritingAtPath: launchLog.path) {
-            process.standardOutput = handle
-            process.standardError = handle
+        guard let handle = FileHandle(forWritingAtPath: launchLog.path) else {
+            return .failure(CyderFailure(
+                code: "CYD-LOG-002",
+                stage: .wineSpawn,
+                summary: "無法建立 Wine 啟動記錄。",
+                technicalDetails: "Unable to open \(launchLog.path) for writing.",
+                logURL: CyderDiagnostics.shared.sessionLogURL
+            ))
         }
+        let command = CyderDiagnostics.shared.redact(
+            "cmd=arch -x86_64 \(wine.path) \(exe)\nWINEPREFIX=\(prefix)\ncwd=\((exe as NSString).deletingLastPathComponent)\n\n"
+        )
+        try? handle.write(contentsOf: Data(command.utf8))
+        process.standardOutput = handle
+        process.standardError = handle
 
         do {
             try process.run()
+            CyderDiagnostics.shared.info("wine process started pid=\(process.processIdentifier) log=\(launchLog.path)")
         } catch {
-            fputs("Cyder: failed to run Wine: \(error)\n", stderr)
-            return 1
+            try? handle.close()
+            return .failure(CyderFailure(
+                code: "CYD-WIN-001",
+                stage: .wineSpawn,
+                summary: "無法啟動 Wine。",
+                technicalDetails: String(describing: error),
+                logURL: launchLog
+            ))
         }
 
-        // The distributed notification is normally posted as soon as Wine's
-        // first activatable Cocoa window is ready. Keep this hidden launcher
-        // alive only long enough to receive that exact foreground PID.
-        _ = activationWaiter.semaphore.wait(timeout: .now() + 30)
-        return 0
+        // Race Wine activation against an early process exit.  A living Wine
+        // process without an activation notification is only a warning because
+        // some console-style EXEs intentionally create no regular Cocoa window.
+        let deadline = Date().addingTimeInterval(30)
+        while Date() < deadline {
+            if activationWaiter.semaphore.wait(timeout: .now() + 0.2) == .success {
+                CyderDiagnostics.shared.enter(.wineActivation, detail: "notification-received")
+                try? handle.close()
+                return .success
+            }
+            if !process.isRunning {
+                process.waitUntilExit()
+                try? handle.close()
+                let reason: String
+                let code: String
+                if process.terminationReason == .uncaughtSignal {
+                    reason = "uncaught-signal \(process.terminationStatus)"
+                    code = "CYD-WIN-003"
+                } else {
+                    reason = "exit \(process.terminationStatus)"
+                    code = "CYD-WIN-002"
+                }
+                let tail = CyderDiagnostics.shared.tail(of: launchLog)
+                return .failure(CyderFailure(
+                    code: code,
+                    stage: .wineSpawn,
+                    summary: process.terminationReason == .uncaughtSignal
+                        ? "Wine 因系統 signal 異常終止。"
+                        : "Wine 啟動後在顯示遊戲視窗前結束。",
+                    technicalDetails: tail.isEmpty ? "Wine terminated: \(reason)" : tail,
+                    exitCode: process.terminationStatus,
+                    terminationReason: reason,
+                    logURL: launchLog
+                ))
+            }
+        }
+        try? handle.close()
+        CyderDiagnostics.shared.warning("wine activation timed out after 30s pid=\(process.processIdentifier); process remains running")
+        return .success
     }
 
     private func wineEnvironment(wine: URL, support: URL) -> [String: String] {
@@ -925,11 +1085,75 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         style: NSAlert.Style = .warning
     ) {
         onMainThread {
+            // Finder launches begin as an accessory app. Promote Cyder before
+            // presenting any modal alert so warnings cannot appear invisibly.
+            NSApp.setActivationPolicy(.regular)
+            NSApp.activate(ignoringOtherApps: true)
             let alert = NSAlert()
             alert.messageText = title
             alert.informativeText = message
             alert.alertStyle = style
             alert.runModal()
+        }
+    }
+
+    private func showPreviousCrashIfNeeded() {
+        guard let previous = CyderDiagnostics.shared.previousUnexpectedSession else { return }
+        onMainThread {
+            NSApp.setActivationPolicy(.regular)
+            NSApp.activate(ignoringOtherApps: true)
+            let alert = NSAlert()
+            alert.messageText = "Cyder 上次未正常結束"
+            alert.informativeText = "上次執行在「\(previous.stage)」階段中斷。已保留診斷記錄，您可以繼續使用 Cyder。"
+            alert.alertStyle = .warning
+            alert.addButton(withTitle: "繼續")
+            alert.addButton(withTitle: "開啟上次記錄")
+            let response = alert.runModal()
+            if response == .alertSecondButtonReturn, !previous.logPath.isEmpty {
+                NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: previous.logPath)])
+            }
+        }
+    }
+
+    private func presentFailure(_ failure: CyderFailure) {
+        CyderDiagnostics.shared.record(failure)
+        onMainThread {
+            NSApp.setActivationPolicy(.regular)
+            NSApp.activate(ignoringOtherApps: true)
+            let alert = NSAlert()
+            alert.messageText = "Cyder 發生錯誤"
+            var message = "\(failure.summary)\n\n錯誤代碼：\(failure.code)\n階段：\(failure.stage.rawValue)"
+            if let exitCode = failure.exitCode {
+                message += "\n結束狀態：\(exitCode)"
+            }
+            alert.informativeText = message
+            alert.alertStyle = .critical
+            if !failure.technicalDetails.isEmpty {
+                let scrollView = NSScrollView(frame: NSRect(x: 0, y: 0, width: 540, height: 150))
+                scrollView.hasVerticalScroller = true
+                scrollView.borderType = .bezelBorder
+                let textView = NSTextView(frame: scrollView.bounds)
+                textView.isEditable = false
+                textView.isSelectable = true
+                textView.font = .monospacedSystemFont(ofSize: 11, weight: .regular)
+                textView.string = CyderDiagnostics.shared.redact(failure.technicalDetails)
+                scrollView.documentView = textView
+                alert.accessoryView = scrollView
+            }
+            alert.addButton(withTitle: "關閉")
+            alert.addButton(withTitle: "複製診斷資訊")
+            alert.addButton(withTitle: "開啟記錄資料夾")
+            let response = alert.runModal()
+            if response == .alertSecondButtonReturn {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(
+                    CyderDiagnostics.shared.redact(failure.diagnosticText),
+                    forType: .string
+                )
+            } else if response == .alertThirdButtonReturn {
+                let selected = failure.logURL ?? CyderDiagnostics.shared.sessionLogURL
+                NSWorkspace.shared.activateFileViewerSelecting([selected])
+            }
         }
     }
 
@@ -961,7 +1185,23 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         return result
     }
 
-    private func runLauncher(context: CyderLaunchContext, args: [String]) -> Int32 {
+    private func runLauncher(
+        context: CyderLaunchContext,
+        args: [String],
+        stage: CyderStage,
+        operation: String
+    ) -> CyderProcessResult {
+        CyderDiagnostics.shared.enter(stage, detail: operation)
+        let operationLog = CyderDiagnostics.shared.makeOperationLog(operation)
+        FileManager.default.createFile(atPath: operationLog.path, contents: nil)
+        guard let handle = FileHandle(forWritingAtPath: operationLog.path) else {
+            return CyderProcessResult(
+                status: 1,
+                terminationReason: .exit,
+                logURL: operationLog,
+                outputTail: "Unable to create operation log at \(operationLog.path)"
+            )
+        }
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/bin/bash")
         process.arguments = args
@@ -969,15 +1209,77 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         for (key, value) in CyderSettingsStore.shared.environment {
             environment[key] = value
         }
+        environment["CYDER_DIAGNOSTIC_SESSION_ID"] = CyderDiagnostics.shared.sessionID
+        environment["CYDER_DIAGNOSTIC_STAGE"] = stage.rawValue
+        environment["CYDER_DIAGNOSTIC_LOG"] = operationLog.path
         process.environment = environment
+        let command = CyderDiagnostics.shared.redact(
+            "cmd=/bin/bash \(args.joined(separator: " "))\nstage=\(stage.rawValue)\n\n"
+        )
+        try? handle.write(contentsOf: Data(command.utf8))
+        process.standardOutput = handle
+        process.standardError = handle
         do {
             try process.run()
             process.waitUntilExit()
-            return process.terminationStatus
+            try? handle.close()
+            let tail = CyderDiagnostics.shared.tail(of: operationLog)
+            CyderDiagnostics.shared.info(
+                "operation=\(operation) status=\(process.terminationStatus) reason=\(process.terminationReason.rawValue) log=\(operationLog.path)"
+            )
+            return CyderProcessResult(
+                status: process.terminationStatus,
+                terminationReason: process.terminationReason,
+                logURL: operationLog,
+                outputTail: tail
+            )
         } catch {
-            fputs("Cyder: failed to run launcher: \(error)\n", stderr)
-            return 1
+            try? handle.close()
+            let message = "Failed to run launcher: \(error)"
+            CyderDiagnostics.shared.warning(message)
+            return CyderProcessResult(
+                status: 1,
+                terminationReason: .exit,
+                logURL: operationLog,
+                outputTail: message
+            )
         }
+    }
+
+    private func failure(
+        code: String,
+        stage: CyderStage,
+        summary: String,
+        result: CyderProcessResult
+    ) -> CyderFailure {
+        var details = result.outputTail
+        let relatedLogName: String?
+        switch stage {
+        case .bootstrap:
+            relatedLogName = "bootstrap-error.log"
+        case .engineExtraction:
+            relatedLogName = "engine-install.log"
+        default:
+            relatedLogName = nil
+        }
+        if let relatedLogName {
+            let relatedLog = CyderPaths.support
+                .appendingPathComponent("Logs", isDirectory: true)
+                .appendingPathComponent(relatedLogName)
+            let relatedTail = CyderDiagnostics.shared.tail(of: relatedLog)
+            if !relatedTail.isEmpty {
+                details += "\n\n--- \(relatedLogName) ---\n\(relatedTail)"
+            }
+        }
+        return CyderFailure(
+            code: code,
+            stage: stage,
+            summary: summary,
+            technicalDetails: details,
+            exitCode: result.status,
+            terminationReason: result.terminationDescription,
+            logURL: result.logURL
+        )
     }
 }
 
@@ -1089,8 +1391,14 @@ private func resolvedWineLocale(environment: [String: String]) -> String {
     return identifier.contains(".") ? identifier : "\(identifier).UTF-8"
 }
 
-let app = NSApplication.shared
-let delegate = CyderAppDelegate()
-app.delegate = delegate
-app.setActivationPolicy(.regular)
-app.run()
+@main
+struct CyderMain {
+    static func main() {
+        _ = CyderDiagnostics.shared
+        let app = NSApplication.shared
+        let delegate = CyderAppDelegate()
+        app.delegate = delegate
+        app.setActivationPolicy(.regular)
+        app.run()
+    }
+}

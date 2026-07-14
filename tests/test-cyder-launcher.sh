@@ -17,6 +17,15 @@ set -e
 assert_eq "$launch_status" 1 "launch-exe with missing file should fail"
 assert_contains "$launch_out" "Missing or invalid .exe" "launch-exe should reach launch handler"
 
+set +e
+diagnostic_out="$(CYDER_DIAGNOSTIC_SESSION_ID=test-session \
+  bash "$ROOT/scripts/cyder_launcher.sh" --launch-exe /nonexistent/missing.exe 2>&1)"
+diagnostic_status=$?
+set -e
+assert_eq "$diagnostic_status" 1 "diagnostic launch should preserve the original exit status"
+assert_contains "$diagnostic_out" "stage=exe-validation" "diagnostic output should identify the failing stage"
+assert_contains "$diagnostic_out" "event=exit" "explicit nonzero exits should be recorded"
+
 touch "$TMP/not-ready.exe"
 set +e
 not_ready_out="$(CYDER_SUPPORT="$TMP/not-ready-support" bash "$ROOT/scripts/cyder_launcher.sh" --launch-exe "$TMP/not-ready.exe" 2>&1)"
@@ -79,6 +88,12 @@ assert_eq "$(run_wine_args direct)" "$TMP/foreground-test.exe" \
   "direct mode should invoke wine with the EXE only"
 assert_eq "$(run_wine_args start)" "start /wait /unix $TMP/foreground-test.exe" \
   "start mode should invoke start /wait /unix"
+assert test -L "$TMP/run-support/Logs/last-launch.log"
+launch_log_count="$(find "$TMP/run-support/Logs" -maxdepth 1 -type f -name 'launch-*.log' | wc -l | tr -d ' ')"
+if [[ "$launch_log_count" -lt 2 ]]; then
+  echo "ASSERT failed: timestamped Wine logs should not overwrite the previous launch" >&2
+  exit 1
+fi
 
 # Sync modes are mutually exclusive, and normal Cyder launches must not add
 # global DLL overrides now that those settings live in the prefix registry.

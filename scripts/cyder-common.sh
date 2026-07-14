@@ -511,6 +511,17 @@ cyder_log_engine() {
   printf '%s %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >>"$log"
 }
 
+cyder_diagnostic_stage() {
+  local stage="$1"
+  if declare -F cyder_set_stage >/dev/null 2>&1; then
+    cyder_set_stage "$stage"
+  elif [[ -n "${CYDER_DIAGNOSTIC_SESSION_ID:-}" ]]; then
+    export CYDER_DIAGNOSTIC_STAGE="$stage"
+    printf 'diagnostic event=stage session=%s stage=%s\n' \
+      "$CYDER_DIAGNOSTIC_SESSION_ID" "$stage" >&2
+  fi
+}
+
 cyder_remove_path() {
   local path="$1"
   [[ -e "$path" || -L "$path" ]] || return 0
@@ -748,7 +759,7 @@ cyder_init_bottle() {
     cyder_wine_locale_exports
     export WINEPREFIX="$bottle" WINESERVER="$wineserver"
     cyder_run arch -x86_64 "$wine_bin" wineboot -u
-  )
+  ) || return $?
   local dos="$bottle/dosdevices"
   mkdir -p "$dos"
   rm -f "$dos/c:" "$dos/z:"
@@ -784,7 +795,7 @@ cyder_ensure_font_replacements() {
   fi
 
   echo "Applying Songti TC font replacements..." >&2
-  WINEPREFIX="$CYDER_SHARED_PREFIX" WINE_INSTALL="$engine_root" bash "$font_sh"
+  WINEPREFIX="$CYDER_SHARED_PREFIX" WINE_INSTALL="$engine_root" bash "$font_sh" || return $?
   printf 'ok\n' >"$CYDER_FONT_MARKER"
 }
 
@@ -838,35 +849,41 @@ cyder_has_running_exes() {
 cyder_bootstrap_shared_prefix() {
   local wine_bin="$1"
   local engine_root="$2"
-  cyder_ensure_shared_prefix "$wine_bin"
-  cyder_ensure_font_replacements "$wine_bin" "$engine_root"
+  cyder_diagnostic_stage wineboot
+  cyder_ensure_shared_prefix "$wine_bin" || return $?
+  cyder_diagnostic_stage font-setup
+  cyder_ensure_font_replacements "$wine_bin" "$engine_root" || return $?
   if [[ -f "$CYDER_BOOTSTRAP_MARKER" ]]; then
     return 0
   fi
   local mono_sh="$CYDER_SCRIPTS/install-wine-mono.sh"
   if [[ -f "$mono_sh" ]]; then
+    cyder_diagnostic_stage mono-install
     (
       export WINEPREFIX="$CYDER_SHARED_PREFIX"
       export WINE_INSTALL="$engine_root"
       export CYDER_DOWNLOADS="$CYDER_DOWNLOADS"
       bash "$mono_sh"
-    )
+    ) || return $?
   fi
   local tar_sh="$CYDER_SCRIPTS/install-libarchive-tar.sh"
   if [[ -f "$tar_sh" ]]; then
+    cyder_diagnostic_stage libarchive-install
     (
       export WINEPREFIX="$CYDER_SHARED_PREFIX"
       export WINE_INSTALL="$engine_root"
       export OGOM="${CYDER_OGOM:-${OGOM:-}}"
       export CYDER_LIBARCHIVE_SRC="${CYDER_LIBARCHIVE_SRC:-$(cyder_resolve_libarchive_src)}"
       bash "$tar_sh" --prefix "$CYDER_SHARED_PREFIX"
-    )
+    ) || return $?
   fi
   local hires_sh="$CYDER_SCRIPTS/enable-mac-retina-hires.sh"
   if [[ -f "$hires_sh" ]]; then
-    WINEPREFIX="$CYDER_SHARED_PREFIX" WINE_INSTALL="$engine_root" bash "$hires_sh"
+    cyder_diagnostic_stage display-setup
+    WINEPREFIX="$CYDER_SHARED_PREFIX" WINE_INSTALL="$engine_root" bash "$hires_sh" || return $?
   fi
-  cyder_apply_user_settings "$wine_bin" "$engine_root"
+  cyder_diagnostic_stage settings-apply
+  cyder_apply_user_settings "$wine_bin" "$engine_root" || return $?
   printf 'ok\n' >"$CYDER_BOOTSTRAP_MARKER"
 }
 
@@ -883,7 +900,12 @@ cyder_run_wine_exe() {
   cyder_wine_locale_exports
   local log_dir="$CYDER_SUPPORT/Logs"
   mkdir -p "$log_dir"
-  local log_file="$log_dir/last-launch.log"
+  local log_file="$log_dir/launch-$(date '+%Y%m%d-%H%M%S')-$$.log"
+  local latest_log="$log_dir/last-launch.log"
+  : >"$log_file"
+  rm -f "$latest_log"
+  ln -s "$(basename "$log_file")" "$latest_log"
+  find "$log_dir" -maxdepth 1 -type f -name 'launch-*.log' -mtime +30 -delete 2>/dev/null || true
   if [[ "$detach" == 1 && -n "$pid_file" ]]; then
     mkdir -p "$(dirname "$pid_file")"
     rm -f "$pid_file" "${pid_file}.tmp"
