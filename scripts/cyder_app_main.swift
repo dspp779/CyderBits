@@ -852,10 +852,16 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             }
 
             // The notification comes from the Wine Cocoa process that is
-            // ready to become foreground. No PID search or activation polling
-            // is needed after this point.
+            // ready to become foreground. Cooperatively hand activation to it
+            // on macOS 14+, without PID searches or activation polling.
             self.wineActivationWaiter = nil
-            _ = application.activate(options: [.activateAllWindows, .activateIgnoringOtherApps])
+            if #available(macOS 14.0, *) {
+                let source = NSRunningApplication.current
+                NSApp.yieldActivation(to: application)
+                _ = application.activate(from: source, options: [.activateAllWindows])
+            } else {
+                _ = application.activate(options: [.activateAllWindows, .activateIgnoringOtherApps])
+            }
             waiter.semaphore.signal()
         }
         if Thread.isMainThread {

@@ -30,7 +30,8 @@ assert_contains "$output" "RetinaMode /t REG_SZ /d n" "Retina off should be appl
 assert_contains "$output" "LogPixels /t REG_DWORD /d 144" "selected DPI should be applied"
 assert_contains "$output" "FontSmoothingType /t REG_DWORD /d 1" "grayscale smoothing should be applied"
 assert_contains "$output" "reg delete HKCU\\Software\\Wine\\DllOverrides /v ddraw" "old global DirectDraw override should be removed"
-assert_contains "$output" "AppDefaults\\BlueLauncher.exe\\DllOverrides /v ddraw /t REG_SZ /d native,builtin" "BlueLauncher should receive its own DirectDraw override"
+assert_contains "$output" "reg delete HKCU\\Software\\Wine\\AppDefaults\\BlueLauncher.exe\\DllOverrides /v ddraw" "old BlueLauncher override should be removed"
+assert_contains "$output" "AppDefaults\\bluecg.exe\\DllOverrides /v ddraw /t REG_SZ /d native,builtin" "bluecg.exe should receive its own DirectDraw override"
 assert_contains "$output" "reg delete HKCU\\Software\\Wine\\Fonts\\Replacements /v MingLiU" "MingLiU should resolve an installed font"
 assert_contains "$output" "PMingLiU /t REG_SZ /d MingLiU" "font aliases should use MingLiU"
 
@@ -42,6 +43,6 @@ assert_contains "$defaults" "RetinaMode /t REG_SZ /d y" "Retina should default o
 assert_contains "$defaults" "LogPixels /t REG_DWORD /d 192" "DPI should default to 192"
 assert_contains "$defaults" "FontSmoothing /t REG_SZ /d 2" "font antialiasing should default on"
 assert_contains "$defaults" "FontSmoothingType /t REG_DWORD /d 1" "font smoothing should default to grayscale"
-assert_contains "$defaults" "AppDefaults\\BlueLauncher.exe\\DllOverrides /v ddraw /t REG_SZ /d native,builtin" "BlueLauncher DirectDraw override should always be applied"
+assert_contains "$defaults" "AppDefaults\\bluecg.exe\\DllOverrides /v ddraw /t REG_SZ /d native,builtin" "bluecg.exe DirectDraw override should always be applied"
 
 echo "PASS test-cyder-settings"

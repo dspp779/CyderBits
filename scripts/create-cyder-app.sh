@@ -8,7 +8,7 @@ unset HOMEBREW_PREFIX OGOM WINE_INSTALL ENTITLEMENTS_PLIST
 source "$SCRIPT_DIR/env-x86_64.sh"
 
 OUT_DIR="${OGOM}/dist"
-CYDER_APP_VERSION="${CYDER_APP_VERSION:-0.2.0}"
+CYDER_APP_VERSION="${CYDER_APP_VERSION:-0.2.1}"
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --engine-archive)

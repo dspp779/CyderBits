@@ -75,7 +75,7 @@ Cyder 目前使用一個預設 Wine bottle，所有 `.exe` 共用同一套 Windo
 2. 若 `bottles/shared/system.reg` 不存在 → `wineboot -u` 建立 bottle
 3. 安裝 **wine-mono**、**syswow64/tar.exe**（含 libarchive DLL）
 4. 寫入 **Mac 高解析度** registry（RetinaMode + LogPixels=192）
-5. 套用進階設定，並為 `BlueLauncher.exe` 寫入專屬的 `ddraw=n,b` DLL override
+5. 套用進階設定，並為遊戲畫面主程式 `bluecg.exe` 寫入專屬的 `ddraw=n,b` DLL override
 6. 寫入 `.cyder-bootstrap-v1`；之後啟動跳過上述步驟
 
 執行時環境：
@@ -117,9 +117,9 @@ Cyder 的 `設定…`（`⌘,`）、Dock 右鍵或執行檔選擇器的「進階
 
 直接啟動 EXE 時不再顯示 loading 或執行額外的初始化流程；Universal Cyder 只在 Swift 內檢查 engine、版本與 bootstrap marker，然後直接以 `/usr/bin/arch -x86_64 wine` 啟動。Rosetta 也不在此路徑預先檢查，由 `arch -x86_64` 交給 macOS 處理。
 
-正式啟動路徑不設定 `WINEDLLOVERRIDES`。DLL 相容性設定存放在 prefix Registry；目前僅為 `BlueLauncher.exe` 設定 `HKCU\Software\Wine\AppDefaults\BlueLauncher.exe\DllOverrides` 的 `ddraw=native,builtin`，不影響其他 EXE。
+正式啟動路徑不設定 `WINEDLLOVERRIDES`。DLL 相容性設定存放在 prefix Registry；目前僅為 `bluecg.exe` 設定 `HKCU\Software\Wine\AppDefaults\bluecg.exe\DllOverrides` 的 `ddraw=native,builtin`，不影響 BlueLauncher 或其他 EXE。
 
-Finder 啟動時，Cyder 會在呼叫 `/usr/bin/arch` 前監聽 CrossOver Wine 的 `WineAppWillActivateNotification`。收到與 `bottles/shared` 相同、且 `ActivatingAppPID` 已登記為 `regular/Foreground` 的通知後，Cyder 對該 PID 呼叫一次 `NSRunningApplication.activate(.activateAllWindows)`，隨即退出；wrapper PID 不參與 activation，也不搜尋 process tree 或視窗 owner。若 Wine 未發出通知，隱藏 launcher 最多等待 30 秒後自行退出。Wine 與遊戲會獨立繼續執行，stdout／stderr 重導向到 `Logs/last-launch.log`，不會開啟 Terminal。
+Finder 啟動時，Cyder 會在呼叫 `/usr/bin/arch` 前監聽 CrossOver Wine 的 `WineAppWillActivateNotification`。收到與 `bottles/shared` 相同、且 `ActivatingAppPID` 已登記為 `regular/Foreground` 的通知後，macOS 14 以上會由 Cyder 先讓出焦點，再透過 cooperative activation 將所有 Wine 視窗帶到前方；macOS 12、13 則使用舊版 activation API 作為相容 fallback。送出一次 activation 後 Cyder 隨即退出；wrapper PID 不參與 activation，也不搜尋 process tree 或視窗 owner。若 Wine 未發出通知，隱藏 launcher 最多等待 30 秒後自行退出。Wine 與遊戲會獨立繼續執行，stdout／stderr 重導向到 `Logs/last-launch.log`，不會開啟 Terminal。
 
 命令列直接呼叫 `cyder_launcher.sh` 時仍以前景模式執行，方便腳本等待遊戲結束；只有 Universal Cyder 的 Finder EXE 入口會使用 Swift 直接啟動的分離模式。
 

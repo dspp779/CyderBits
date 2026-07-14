@@ -275,7 +275,7 @@ private final class PIDTestAppDelegate: NSObject, NSApplicationDelegate {
             NSApp.yieldActivation(to: application)
             result = application.activate(
                 from: source,
-                options: [.activateAllWindows, .activateIgnoringOtherApps]
+                options: [.activateAllWindows]
             )
         } else {
             result = application.activate(options: [.activateAllWindows, .activateIgnoringOtherApps])

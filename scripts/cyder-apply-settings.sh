@@ -43,9 +43,10 @@ esac
 "${WINE[@]}" reg add 'HKCU\Control Panel\Desktop' /v FontSmoothingGamma /t REG_DWORD /d "$gamma" /f
 "${WINE[@]}" reg add 'HKCU\Control Panel\Desktop' /v FontSmoothingOrientation /t REG_DWORD /d "$orientation" /f
 
-# Migrate the former Cyder-wide DirectDraw setting to BlueLauncher only.
+# Migrate former global/launcher overrides to the actual BlueCG game process.
 "${WINE[@]}" reg delete 'HKCU\Software\Wine\DllOverrides' /v ddraw /f 2>/dev/null || true
-"${WINE[@]}" reg add 'HKCU\Software\Wine\AppDefaults\BlueLauncher.exe\DllOverrides' /v ddraw /t REG_SZ /d native,builtin /f
+"${WINE[@]}" reg delete 'HKCU\Software\Wine\AppDefaults\BlueLauncher.exe\DllOverrides' /v ddraw /f 2>/dev/null || true
+"${WINE[@]}" reg add 'HKCU\Software\Wine\AppDefaults\bluecg.exe\DllOverrides' /v ddraw /t REG_SZ /d native,builtin /f
 
 if [[ "$font" == songti ]]; then
   face='Songti TC'
