@@ -4,6 +4,12 @@
 
 **CyderBits** — DirectDraw / GDI 舊遊戲 on Mac；**Cyder** — 一鍵啟動 `.exe`；**CyderBits.app** — 包裝 `.exe` 為 game `.app`。
 
+## 發布資訊
+
+| 版本 | 文件 | 重點 |
+|------|------|------|
+| 0.3.0 | [release note](releases/v0.3.0.md) | 錯誤診斷、session log、啟動可靠性與 Universal App |
+
 ## 使用指南
 
 | 文件 | 對象 | 內容 |
