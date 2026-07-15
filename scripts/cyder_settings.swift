@@ -10,12 +10,49 @@ struct CyderExecutableSettings: Codable {
     var fontPreset: String?
     var fontSmoothing: String?
     var powerMode: String?
+
+    init() {}
+
+    init(
+        arguments: [String] = [],
+        environment: [String: String] = [:],
+        msync: Bool? = nil,
+        esync: Bool? = nil,
+        retinaMode: Bool? = nil,
+        dpi: Int? = nil,
+        fontPreset: String? = nil,
+        fontSmoothing: String? = nil,
+        powerMode: String? = nil
+    ) {
+        self.arguments = arguments
+        self.environment = environment
+        self.msync = msync
+        self.esync = esync
+        self.retinaMode = retinaMode
+        self.dpi = dpi
+        self.fontPreset = fontPreset
+        self.fontSmoothing = fontSmoothing
+        self.powerMode = powerMode
+    }
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        arguments = try values.decodeIfPresent([String].self, forKey: .arguments) ?? []
+        environment = try values.decodeIfPresent([String: String].self, forKey: .environment) ?? [:]
+        msync = try values.decodeIfPresent(Bool.self, forKey: .msync)
+        esync = try values.decodeIfPresent(Bool.self, forKey: .esync)
+        retinaMode = try values.decodeIfPresent(Bool.self, forKey: .retinaMode)
+        dpi = try values.decodeIfPresent(Int.self, forKey: .dpi)
+        fontPreset = try values.decodeIfPresent(String.self, forKey: .fontPreset)
+        fontSmoothing = try values.decodeIfPresent(String.self, forKey: .fontSmoothing)
+        powerMode = try values.decodeIfPresent(String.self, forKey: .powerMode)
+    }
 }
 
 struct CyderSettings: Codable {
-    // Schema 2 adds a revision and per-executable overrides. Keep the global
-    // fields flat so schema 1 files remain readable by older launchers.
-    var schemaVersion = 2
+    // Schema 3 adds profile-keyed overrides. Keep perExecutable as a legacy
+    // basename fallback; never infer a profile from a basename.
+    var schemaVersion = 3
     var revision = 0
     var msync = false
     var esync: Bool? = false
@@ -24,6 +61,7 @@ struct CyderSettings: Codable {
     var fontPreset = "songti"
     var fontSmoothing = "grayscale"
     var perExecutable: [String: CyderExecutableSettings] = [:]
+    var perProfile: [String: CyderExecutableSettings] = [:]
 
     static let defaults = CyderSettings()
 
@@ -32,10 +70,10 @@ struct CyderSettings: Codable {
     init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
         let version = try values.decodeIfPresent(Int.self, forKey: .schemaVersion) ?? 1
-        guard version <= 2 else { throw DecodingError.dataCorruptedError(
+        guard version <= 3 else { throw DecodingError.dataCorruptedError(
             forKey: .schemaVersion, in: values, debugDescription: "unsupported settings schema \(version)"
         ) }
-        schemaVersion = 2
+        schemaVersion = 3
         revision = try values.decodeIfPresent(Int.self, forKey: .revision) ?? 0
         msync = try values.decodeIfPresent(Bool.self, forKey: .msync) ?? false
         esync = try values.decodeIfPresent(Bool?.self, forKey: .esync) ?? false
@@ -44,6 +82,45 @@ struct CyderSettings: Codable {
         fontPreset = try values.decodeIfPresent(String.self, forKey: .fontPreset) ?? "songti"
         fontSmoothing = try values.decodeIfPresent(String.self, forKey: .fontSmoothing) ?? "grayscale"
         perExecutable = try values.decodeIfPresent([String: CyderExecutableSettings].self, forKey: .perExecutable) ?? [:]
+        let decodedProfiles = try values.decodeIfPresent([String: CyderExecutableSettings].self, forKey: .perProfile) ?? [:]
+        perProfile = decodedProfiles.reduce(into: [:]) { result, item in
+            guard Self.isValidProfileID(item.key) else { return }
+            result[item.key] = Self.sanitized(item.value)
+        }
+        perExecutable = perExecutable.reduce(into: [:]) { result, item in
+            result[item.key] = Self.sanitized(item.value)
+        }
+        dpi = min(480, max(72, dpi))
+        if !["songti", "mingliu"].contains(fontPreset) { fontPreset = "songti" }
+        if !["off", "grayscale", "cleartype-rgb", "cleartype-bgr"].contains(fontSmoothing) {
+            fontSmoothing = "grayscale"
+        }
+    }
+
+    static func isValidProfileID(_ value: String) -> Bool {
+        value.range(of: "^profile-[0-9a-f]{24}$", options: .regularExpression) != nil
+    }
+
+    static func isValidEnvironmentKey(_ value: String) -> Bool {
+        value.range(of: "^[A-Za-z_][A-Za-z0-9_]*$", options: .regularExpression) != nil
+    }
+
+    static func sanitized(_ value: CyderExecutableSettings) -> CyderExecutableSettings {
+        var result = value
+        result.environment = value.environment.filter { isValidEnvironmentKey($0.key) }
+        if let dpi = value.dpi { result.dpi = min(480, max(72, dpi)) }
+        if let preset = value.fontPreset, !["songti", "mingliu"].contains(preset) {
+            result.fontPreset = nil
+        }
+        if let smoothing = value.fontSmoothing,
+           !["off", "grayscale", "cleartype-rgb", "cleartype-bgr"].contains(smoothing) {
+            result.fontSmoothing = nil
+        }
+        if let powerMode = value.powerMode,
+           !["standard", "energySaving"].contains(powerMode) {
+            result.powerMode = nil
+        }
+        return result
     }
 }
 
@@ -62,7 +139,7 @@ final class CyderSettingsStore {
         do {
             let data = try Data(contentsOf: url)
             let decoded = try JSONDecoder().decode(CyderSettings.self, from: data)
-            guard decoded.schemaVersion <= 2 else {
+            guard decoded.schemaVersion <= 3 else {
                 CyderDiagnostics.shared.warning("unsupported settings schema=\(decoded.schemaVersion); using defaults")
                 value = .defaults
                 return
@@ -78,7 +155,14 @@ final class CyderSettingsStore {
         CyderDiagnostics.shared.enter(.settingsSave)
         var next = value
         work(&next)
-        next.schemaVersion = 2
+        next.schemaVersion = 3
+        next.perProfile = next.perProfile.reduce(into: [:]) { result, item in
+            guard CyderSettings.isValidProfileID(item.key) else { return }
+            result[item.key] = CyderSettings.sanitized(item.value)
+        }
+        next.perExecutable = next.perExecutable.reduce(into: [:]) { result, item in
+            result[item.key] = CyderSettings.sanitized(item.value)
+        }
         next.revision = max(value.revision + 1, next.revision)
         next.dpi = min(480, max(72, next.dpi))
         let directory = url.deletingLastPathComponent()
@@ -103,8 +187,18 @@ final class CyderSettingsStore {
     }
 
     func environment(forExecutable basename: String) -> [String: String] {
+        environment(profileID: nil, legacyBasename: basename)
+    }
+
+    func environment(profileID: String?, legacyBasename: String?) -> [String: String] {
         var result = environment
-        guard let rule = value.perExecutable[basename] else { return result }
+        let rule: CyderExecutableSettings?
+        if let profileID {
+            rule = value.perProfile[profileID]
+        } else {
+            rule = legacyBasename.flatMap { value.perExecutable[$0] }
+        }
+        guard let rule else { return result }
         if let v = rule.msync { result["CYDER_MSYNC"] = v ? "1" : "0" }
         if let v = rule.esync { result["CYDER_ESYNC"] = v ? "1" : "0" }
         if let v = rule.retinaMode { result["CYDER_RETINA_MODE"] = v ? "1" : "0" }
@@ -112,16 +206,32 @@ final class CyderSettingsStore {
         if let v = rule.fontPreset { result["CYDER_FONT_PRESET"] = v }
         if let v = rule.fontSmoothing { result["CYDER_FONT_SMOOTHING"] = v }
         if let v = rule.powerMode { result["CYDER_POWER_MODE"] = v == "energySaving" ? "background" : "normal" }
-        result.merge(rule.environment) { _, override in override }
+        result.merge(rule.environment.filter { CyderSettings.isValidEnvironmentKey($0.key) }) { _, override in override }
         return result
     }
 
     func arguments(forExecutable basename: String) -> [String] {
-        value.perExecutable[basename]?.arguments ?? []
+        arguments(profileID: nil, legacyBasename: basename)
     }
 
     func hasSettings(forExecutable basename: String) -> Bool {
         value.perExecutable[basename] != nil
+    }
+
+    func arguments(profileID: String?, legacyBasename: String?) -> [String] {
+        let rule: CyderExecutableSettings?
+        if let profileID {
+            rule = value.perProfile[profileID]
+        } else {
+            rule = legacyBasename.flatMap { value.perExecutable[$0] }
+        }
+        return rule?.arguments ?? []
+    }
+
+    func hasSettings(profileID: String?, legacyBasename: String?) -> Bool {
+        if let profileID, value.perProfile[profileID] != nil { return true }
+        if profileID == nil, let legacyBasename, value.perExecutable[legacyBasename] != nil { return true }
+        return false
     }
 }
 
