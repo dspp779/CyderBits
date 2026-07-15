@@ -244,9 +244,25 @@ if [[ "$BOOTSTRAP_ONLY" -eq 1 ]]; then
   } >"$tmp_log" 2>&1
   status=$?
   set -e
+  bootstrap_kind="${CYDER_OPERATION_ERROR_KIND:-}"
+  bootstrap_code="${CYDER_OPERATION_ERROR_CODE:-}"
+  if [[ "$status" -ne 0 && -z "$bootstrap_kind" ]]; then
+    if (( status >= 128 )); then
+      bootstrap_kind=signal
+      bootstrap_code=CYD-BOOTSTRAP-SIGNAL
+    else
+      bootstrap_kind=exit
+      bootstrap_code=CYD-BOOTSTRAP-EXIT
+    fi
+  fi
   operation_log="$log_dir/operations/bootstrap-$(date '+%Y%m%d-%H%M%S')-$$.log"
   mkdir -p "$log_dir/operations"
   mv -f "$tmp_log" "$operation_log"
+  {
+    echo "exit_status=$status"
+    echo "result=${bootstrap_kind:-success}"
+    echo "error_code=${bootstrap_code:-}"
+  } >>"$operation_log"
   ln -sfn "operations/$(basename "$operation_log")" "$log_dir/last-bootstrap.log"
   if [[ "$status" -ne 0 ]]; then
     cp -f "$operation_log" "$log_dir/bootstrap-error.log"

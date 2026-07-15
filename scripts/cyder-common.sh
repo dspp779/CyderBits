@@ -765,6 +765,9 @@ cyder_ensure_shared_engine() {
 cyder_init_bottle() {
   local wine_bin="$1"
   local bottle="$2"
+  CYDER_OPERATION_ERROR_KIND=""
+  CYDER_OPERATION_ERROR_CODE=""
+  export CYDER_OPERATION_ERROR_KIND CYDER_OPERATION_ERROR_CODE
   local wineserver="${wine_bin%/wine}/wineserver"
   if [[ -f "$bottle/system.reg" ]]; then
     echo "Bottle exists: $bottle" >&2
@@ -775,26 +778,107 @@ cyder_init_bottle() {
   local log_dir="$CYDER_SUPPORT/Logs/operations"
   local log_file="$log_dir/wineboot-$(date '+%Y%m%d-%H%M%S')-$$.log"
   mkdir -p "$log_dir"
+  # Keep operation history bounded without ever removing the stable
+  # last-wineboot symlink (or the operation it currently references).
+  local last_target=""
+  if [[ -L "$CYDER_SUPPORT/Logs/last-wineboot.log" ]]; then
+    last_target="$(readlink "$CYDER_SUPPORT/Logs/last-wineboot.log" 2>/dev/null || true)"
+    last_target="${last_target##*/}"
+  fi
+  local old_log
+  for old_log in "$log_dir"/wineboot-*.log; do
+    [[ -f "$old_log" ]] || continue
+    [[ "$(basename "$old_log")" == "$last_target" ]] && continue
+    find "$old_log" -prune -mtime +30 -delete 2>/dev/null || true
+  done
   : >"$log_file"
+  local engine_version="${CYDER_ENGINE_VERSION_LABEL:-}"
+  if [[ -z "$engine_version" ]]; then
+    engine_version="$(cyder_format_engine_version_from_wine "$wine_bin" 2>/dev/null || true)"
+  fi
+  [[ -n "$engine_version" ]] || engine_version=unknown
+  local os_version
+  os_version="$(sw_vers -productVersion 2>/dev/null || uname -sr 2>/dev/null || true)"
+  [[ -n "$os_version" ]] || os_version=unknown
+  local cpu_arch
+  cpu_arch="$(uname -m 2>/dev/null || true)"
+  [[ -n "$cpu_arch" ]] || cpu_arch=unknown
   {
     echo "operation=wineboot"
     echo "wine=$wine_bin"
     echo "prefix=$bottle"
+    echo "engine_version=$engine_version"
+    echo "os_version=$os_version"
+    echo "cpu_arch=$cpu_arch"
     echo "started=$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
     echo
   } >>"$log_file"
   ln -sfn "operations/$(basename "$log_file")" "$CYDER_SUPPORT/Logs/last-wineboot.log"
-  local status=0
-  if (
+  local status=0 timed_out=0
+  local timeout="${CYDER_WINEBOOT_TIMEOUT:-120}"
+  [[ "$timeout" =~ ^[0-9]+$ ]] || timeout=120
+  (( timeout > 0 )) || timeout=1
+  # Run wineboot asynchronously so a hung Wine process cannot leave Cyder's
+  # first-launch preparation dialog open forever. The timeout is deliberately
+  # implemented with Bash primitives; macOS does not ship GNU timeout.
+  (
     cyder_wine_locale_exports
     export WINEPREFIX="$bottle" WINESERVER="$wineserver"
     cyder_run arch -x86_64 "$wine_bin" wineboot -u >>"$log_file" 2>&1
-  ); then
-    status=0
+  ) &
+  local wineboot_pid=$!
+  local deadline=$((SECONDS + timeout))
+  while kill -0 "$wineboot_pid" 2>/dev/null; do
+    if (( SECONDS >= deadline )); then
+      timed_out=1
+      kill -TERM "$wineboot_pid" 2>/dev/null || true
+      sleep 1
+      kill -KILL "$wineboot_pid" 2>/dev/null || true
+      break
+    fi
+    sleep 1
+  done
+  if (( timed_out )); then
+    wait "$wineboot_pid" 2>/dev/null || true
+    status=124
+    CYDER_OPERATION_ERROR_KIND=timeout
+    CYDER_OPERATION_ERROR_CODE=CYD-WINEBOOT-TIMEOUT
   else
-    status=$?
+    wait "$wineboot_pid" || status=$?
+    if (( status >= 128 )); then
+      CYDER_OPERATION_ERROR_KIND=signal
+      CYDER_OPERATION_ERROR_CODE=CYD-WINEBOOT-SIGNAL
+    elif (( status != 0 )); then
+      CYDER_OPERATION_ERROR_KIND=exit
+      CYDER_OPERATION_ERROR_CODE=CYD-WINEBOOT-EXIT
+    fi
+  fi
+  if (( status == 0 )); then
+    local missing=()
+    [[ -f "$bottle/system.reg" ]] || missing+=(system.reg)
+    [[ -f "$bottle/user.reg" ]] || missing+=(user.reg)
+    [[ -d "$bottle/drive_c" ]] || missing+=(drive_c)
+    [[ -f "$bottle/drive_c/windows/system32/kernel32.dll" || \
+       -f "$bottle/drive_c/windows/syswow64/kernel32.dll" ]] || missing+=(kernel32.dll)
+    if (( ${#missing[@]} > 0 )); then
+      status=125
+      CYDER_OPERATION_ERROR_KIND=artifact-missing
+      CYDER_OPERATION_ERROR_CODE=CYD-WINEBOOT-ARTIFACT
+      echo "missing_artifacts=${missing[*]}" >>"$log_file"
+    fi
+  fi
+  # Any failed wineboot can leave a partially initialized wineserver behind,
+  # not only a timeout. Always clean it before returning an error so the next
+  # attempt starts with a fresh session.
+  if (( status != 0 )) && [[ -x "$wineserver" ]]; then
+    echo "failure_cleanup=wineserver -k" >>"$log_file"
+    WINEPREFIX="$bottle" arch -x86_64 "$wineserver" -k >>"$log_file" 2>&1 || true
+    echo "failure_cleanup=wineserver -w" >>"$log_file"
+    WINEPREFIX="$bottle" arch -x86_64 "$wineserver" -w >>"$log_file" 2>&1 || true
   fi
   echo "exit_status=$status" >>"$log_file"
+  echo "result=${CYDER_OPERATION_ERROR_KIND:-success}" >>"$log_file"
+  echo "error_code=${CYDER_OPERATION_ERROR_CODE:-}" >>"$log_file"
   cat "$log_file" >&2
   if [[ "$status" -ne 0 ]]; then
     return "$status"
