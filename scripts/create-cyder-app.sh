@@ -134,9 +134,11 @@ cp "$SCRIPT_DIR/enable-mac-retina-hires.sh" "$RES/ogom-scripts/"
 cp "$SCRIPT_DIR/cyder-songti-replacements.reg" "$RES/ogom-scripts/"
 cp "$SCRIPT_DIR/install-cyder-font-replacements.sh" "$RES/ogom-scripts/"
 cp "$SCRIPT_DIR/cyder-apply-settings.sh" "$RES/ogom-scripts/"
+cp "$SCRIPT_DIR/cyder-profile.sh" "$RES/ogom-scripts/"
 chmod +x "$RES/ogom-scripts/cyder_launcher.sh"
 chmod +x "$RES/ogom-scripts/install-cyder-font-replacements.sh"
 chmod +x "$RES/ogom-scripts/cyder-apply-settings.sh"
+chmod +x "$RES/ogom-scripts/cyder-profile.sh"
 
 # shellcheck source=cyder-copy-engine-artifact.sh
 source "$SCRIPT_DIR/cyder-copy-engine-artifact.sh"

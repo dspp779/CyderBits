@@ -64,6 +64,8 @@ Options:
   --has-running-exes  Exit 0 if the shared prefix has running EXEs, otherwise 1
   --apply-settings-only Apply saved settings without installing the environment
   --launch-exe PATH   Launch .exe (engine + bootstrap must already be ready)
+  --profile-resolve PATH  Resolve PATH to its per-game bottle and exit
+  --profile-create PATH [pristine|recommended]  Create/resolve a per-game bottle and exit
   -h, --help          Show this help
 EOF
 }
@@ -78,6 +80,9 @@ STOP_ALL=0
 HAS_RUNNING_EXES=0
 APPLY_SETTINGS_ONLY=0
 LAUNCH_ONLY=0
+PROFILE_ACTION=""
+PROFILE_EXE=""
+PROFILE_TEMPLATE="recommended"
 ENGINE_SRC="$CYDER_ENGINE_SRC"
 EXE_ARGS=()
 
@@ -128,6 +133,25 @@ while [[ $# -gt 0 ]]; do
       EXE_ARGS+=("$2")
       shift 2
       ;;
+    --profile-resolve)
+      [[ $# -ge 2 ]] || { echo "--profile-resolve requires PATH" >&2; exit 1; }
+      [[ -z "$PROFILE_ACTION" ]] || { echo "profile action specified more than once" >&2; exit 1; }
+      PROFILE_ACTION=resolve
+      PROFILE_EXE="$2"
+      shift 2
+      ;;
+    --profile-create)
+      [[ $# -ge 2 ]] || { echo "--profile-create requires PATH" >&2; exit 1; }
+      [[ -z "$PROFILE_ACTION" ]] || { echo "profile action specified more than once" >&2; exit 1; }
+      PROFILE_ACTION=create
+      PROFILE_EXE="$2"
+      if [[ $# -ge 3 && ( "$3" == pristine || "$3" == recommended ) ]]; then
+        PROFILE_TEMPLATE="$3"
+        shift 3
+      else
+        shift 2
+      fi
+      ;;
     --engine-src)
       [[ $# -ge 2 ]] || {
         echo "--engine-src requires PATH" >&2
@@ -160,6 +184,44 @@ while [[ $# -gt 0 ]]; do
       ;;
   esac
 done
+
+if [[ -n "$PROFILE_ACTION" ]]; then
+  cyder_set_stage profile-"$PROFILE_ACTION"
+  [[ -f "$PROFILE_EXE" ]] || { echo "Profile EXE does not exist: $PROFILE_EXE" >&2; exit 1; }
+  profile_script="$CYDER_SCRIPTS/cyder-profile.sh"
+  [[ -x "$profile_script" ]] || { echo "Profile backend is unavailable: $profile_script" >&2; exit 1; }
+  if [[ "$PROFILE_ACTION" == resolve ]]; then
+    bash "$profile_script" resolve "$PROFILE_EXE" "$CYDER_SUPPORT"
+  else
+    template_dir="$CYDER_SUPPORT/templates/$PROFILE_TEMPLATE"
+    [[ -d "$template_dir" && -f "$template_dir/manifest.json" ]] || {
+      echo "Profile template is not ready: $template_dir (manifest.json required)" >&2
+      exit 2
+    }
+    profile_wine="$CYDER_ENGINES/$CYDER_ENGINE_NAME/bin/wine"
+    [[ -x "$profile_wine" ]] || {
+      echo "Profile creation requires an installed Wine engine: $profile_wine" >&2
+      exit 2
+    }
+    profile_engine_version="$(cyder_template_engine_version "$profile_wine")"
+    [[ -n "$profile_engine_version" && "$profile_engine_version" != unknown ]] || {
+      echo "Profile creation requires a detectable Wine engine version" >&2
+      exit 2
+    }
+    profile_revision="${CYDER_TEMPLATE_REVISION:-1}"
+    [[ "$profile_revision" =~ ^[1-9][0-9]*$ ]] || {
+      echo "Invalid CYDER_TEMPLATE_REVISION: $profile_revision" >&2
+      exit 2
+    }
+    if ! bash "$profile_script" template-ready "$PROFILE_TEMPLATE" "$CYDER_SUPPORT" \
+        "$profile_revision" "$profile_engine_version" >/dev/null; then
+      echo "Profile template is not ready for revision $profile_revision and engine $profile_engine_version" >&2
+      exit 2
+    fi
+    bash "$profile_script" create "$PROFILE_EXE" "$template_dir" "$CYDER_SUPPORT"
+  fi
+  exit $?
+fi
 
 if [[ "$HAS_RUNNING_EXES" -eq 1 ]]; then
   cyder_set_stage has-running-exes

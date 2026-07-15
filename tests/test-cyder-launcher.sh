@@ -145,4 +145,43 @@ fi
 kill "$detached_pid" 2>/dev/null || true
 wait "$detached_pid" 2>/dev/null || true
 
+# Per-game profile routing uses the complete EXE path and requires a ready
+# versioned template manifest.
+profile_support="$TMP/profile-support"
+mkdir -p "$profile_support/templates/pristine"
+mkdir -p "$TMP/runtime/Engines/wine-x86_64/bin"
+cp "$TMP/fake-bin/wine" "$TMP/runtime/Engines/wine-x86_64/bin/wine"
+chmod +x "$TMP/runtime/Engines/wine-x86_64/bin/wine"
+cat >"$profile_support/templates/pristine/manifest.json" <<'JSON'
+{"schemaVersion":2,"templateId":"pristine","revision":1,"recipeId":null,"engineVersion":"test-engine"}
+JSON
+profile_exe="$TMP/profile game.exe"
+touch "$profile_exe"
+profile_bottle="$(CYDER_SUPPORT="$profile_support" CYDER_ENGINE_VERSION_LABEL=test-engine \
+  bash "$ROOT/scripts/cyder_launcher.sh" --profile-create "$profile_exe" pristine)"
+assert test -d "$profile_bottle"
+resolved_bottle="$(CYDER_SUPPORT="$profile_support" CYDER_ENGINE_VERSION_LABEL=test-engine \
+  bash "$ROOT/scripts/cyder_launcher.sh" --profile-resolve "$profile_exe")"
+assert_eq "$resolved_bottle" "$profile_bottle" "profile resolve should return created bottle"
+assert_contains "$(cat "$profile_support/profiles"/*/profile.json)" "$profile_exe" "profile metadata should use full EXE path"
+
+if CYDER_SUPPORT="$profile_support" CYDER_ENGINE_VERSION_LABEL=other-engine \
+  bash "$ROOT/scripts/cyder_launcher.sh" --profile-create "$profile_exe" pristine >/dev/null 2>&1; then
+  echo "engine version mismatch unexpectedly accepted" >&2
+  exit 1
+fi
+
+# The optional prefix argument routes WINEPREFIX and session guard away from
+# the shared bottle while preserving the existing default call shape.
+custom_prefix="$TMP/custom-bottle"
+CYDER_SUPPORT="$TMP/run-support" \
+CYDER_SCRIPTS="$ROOT/scripts" \
+CYDER_TEST_ARGS="$TMP/profile-prefix-args" \
+CYDER_MSYNC=1 \
+PATH="$TMP/fake-bin:$PATH" \
+  bash -c 'source "$1/scripts/cyder-common.sh"; cyder_init_paths "$1"; cyder_run_wine_exe "$2/wine" "$3" "$4"' \
+    _ "$ROOT" "$TMP/fake-bin" "$TMP/foreground-test.exe" "$custom_prefix"
+assert_contains "$(cat "$TMP/run-support/Logs/last-launch.log")" "$custom_prefix" "custom profile launch should log its prefix"
+assert test ! -e "$custom_prefix/.cyder-runtime/sessions"/*
+
 echo "PASS test-cyder-launcher"

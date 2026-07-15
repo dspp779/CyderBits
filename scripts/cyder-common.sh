@@ -1031,6 +1031,120 @@ cyder_ensure_shared_prefix() {
   cyder_init_bottle "$wine_bin" "$CYDER_SHARED_PREFIX"
 }
 
+# Load the shell profile backend lazily so normal launcher paths do not pay for
+# profile helpers until bootstrap actually needs template lifecycle handling.
+cyder_profile_backend_load() {
+  if ! declare -F cyder_profile_publish_template >/dev/null 2>&1; then
+    local profile_sh="$CYDER_SCRIPTS/cyder-profile.sh"
+    [[ -f "$profile_sh" ]] || {
+      echo "Cyder profile backend is missing: $profile_sh" >&2
+      return 1
+    }
+    # shellcheck source=cyder-profile.sh
+    source "$profile_sh"
+  fi
+}
+
+cyder_stop_prefix_wineserver() {
+  local wine_bin="$1" prefix="$2"
+  local wineserver="${wine_bin%/wine}/wineserver"
+  [[ -x "$wineserver" ]] || return 0
+  WINEPREFIX="$prefix" arch -x86_64 "$wineserver" -k || true
+  WINEPREFIX="$prefix" arch -x86_64 "$wineserver" -w || true
+}
+
+cyder_profile_has_live_sessions() {
+  local prefix="$1" dir file pid
+  dir="$(cyder_session_dir "$prefix")"
+  [[ -d "$dir" ]] || return 1
+  for file in "$dir"/*.session; do
+    [[ -f "$file" ]] || continue
+    pid="$(sed -n 's/^pid=//p' "$file" | head -1)"
+    if [[ "$pid" =~ ^[0-9]+$ ]] && kill -0 "$pid" 2>/dev/null; then
+      echo "active Cyder profile session prevents template publish (pid=$pid)" >&2
+      return 0
+    fi
+    rm -f "$file"
+  done
+  return 1
+}
+
+cyder_template_engine_version() {
+  local wine_bin="$1" version
+  version="${CYDER_ENGINE_VERSION_LABEL:-}"
+  if [[ -z "$version" ]]; then
+    version="$(cyder_format_engine_version_from_wine "$wine_bin" 2>/dev/null || true)"
+  fi
+  [[ -n "$version" ]] || version=unknown
+  printf '%s\n' "$version"
+}
+
+cyder_prepare_pristine_template() {
+  local wine_bin="$1" engine_root="$2"
+  cyder_profile_backend_load || return $?
+  local revision="${CYDER_TEMPLATE_REVISION:-1}"
+  local engine_version
+  engine_version="$(cyder_template_engine_version "$wine_bin")"
+  cyder_profile_init_layout "$CYDER_SUPPORT"
+  if cyder_profile_template_ready pristine "$CYDER_SUPPORT" "$revision" "$engine_version"; then
+    return 0
+  fi
+
+  # A fresh shared prefix is the safest pristine source: publish immediately
+  # after wineboot, before any Cyder components or user settings are applied.
+  if [[ ! -f "$CYDER_SHARED_PREFIX/system.reg" ]]; then
+    cyder_ensure_shared_prefix "$wine_bin" || return $?
+    cyder_profile_publish_template "$CYDER_SHARED_PREFIX" pristine "$CYDER_SUPPORT" \
+      "$revision" "$engine_version" || {
+      echo "Failed to publish pristine template; shared prefix was left intact." >&2
+      return 1
+    }
+    return 0
+  fi
+
+  # Existing shared state is never used as a pristine source when its template
+  # is stale/missing. Build an isolated bottle, publish it, then discard it.
+  local staging
+  mkdir -p "$CYDER_SUPPORT/staging"
+  staging="$(mktemp -d "$CYDER_SUPPORT/staging/.pristine-XXXXXX")"
+  if ! cyder_init_bottle "$wine_bin" "$staging"; then
+    rm -rf "$staging"
+    echo "Failed to create pristine staging prefix: $staging" >&2
+    return 1
+  fi
+  if ! cyder_profile_publish_template "$staging" pristine "$CYDER_SUPPORT" \
+      "$revision" "$engine_version"; then
+    rm -rf "$staging"
+    echo "Failed to publish pristine template; existing shared/template state was left intact." >&2
+    return 1
+  fi
+  rm -rf "$staging"
+}
+
+cyder_publish_recommended_template() {
+  local wine_bin="$1" engine_root="$2"
+  cyder_profile_backend_load || return $?
+  local revision="${CYDER_TEMPLATE_REVISION:-1}"
+  local engine_version
+  engine_version="$(cyder_template_engine_version "$wine_bin")"
+  cyder_profile_init_layout "$CYDER_SUPPORT"
+  if cyder_profile_template_ready recommended "$CYDER_SUPPORT" "$revision" "$engine_version"; then
+    return 0
+  fi
+  if cyder_profile_has_live_sessions "$CYDER_SHARED_PREFIX"; then
+    return 75
+  fi
+  # The caller must ensure no game is active before bootstrap. We still stop
+  # the wineserver after all setup steps so no socket/partial registry enters
+  # the published CoW template.
+  cyder_stop_prefix_wineserver "$wine_bin" "$CYDER_SHARED_PREFIX"
+  cyder_profile_publish_template "$CYDER_SHARED_PREFIX" recommended "$CYDER_SUPPORT" \
+    "$revision" "$engine_version" || {
+    echo "Failed to publish recommended template; shared prefix and old template were left intact." >&2
+    return 1
+  }
+}
+
 cyder_ensure_font_replacements() {
   local wine_bin="${1:-}"
   local engine_root="${2:-}"
@@ -1104,10 +1218,12 @@ cyder_bootstrap_shared_prefix() {
   local wine_bin="$1"
   local engine_root="$2"
   cyder_diagnostic_stage wineboot
+  cyder_prepare_pristine_template "$wine_bin" "$engine_root" || return $?
   cyder_ensure_shared_prefix "$wine_bin" || return $?
   cyder_diagnostic_stage font-setup
   cyder_ensure_font_replacements "$wine_bin" "$engine_root" || return $?
   if [[ -f "$CYDER_BOOTSTRAP_MARKER" ]]; then
+    cyder_publish_recommended_template "$wine_bin" "$engine_root" || return $?
     return 0
   fi
   local mono_sh="$CYDER_SCRIPTS/install-wine-mono.sh"
@@ -1138,12 +1254,14 @@ cyder_bootstrap_shared_prefix() {
   fi
   cyder_diagnostic_stage settings-apply
   cyder_apply_user_settings "$wine_bin" "$engine_root" || return $?
+  cyder_publish_recommended_template "$wine_bin" "$engine_root" || return $?
   printf 'ok\n' >"$CYDER_BOOTSTRAP_MARKER"
 }
 
 cyder_run_wine_exe() {
   local wine_bin="$1"
   local exe="$2"
+  local prefix="${3:-$CYDER_SHARED_PREFIX}"
   local wineserver="${wine_bin%/wine}/wineserver"
   # Keep the legacy direct path as the default.  Wine's ShellExecute-compatible
   # start.exe path is available for A/B testing with CYDER_WINE_START_MODE=start
@@ -1183,12 +1301,12 @@ cyder_run_wine_exe() {
     fi
     echo "power_mode=${CYDER_POWER_MODE:-normal}"
     echo "taskpolicy_available=$([[ -n "$taskpolicy_bin" ]] && echo true || echo false)"
-    echo "WINEPREFIX=$CYDER_SHARED_PREFIX"
+    echo "WINEPREFIX=$prefix"
     echo "cwd=$(dirname "$exe")"
     echo
   } >"$log_file"
   (
-    export WINEPREFIX="$CYDER_SHARED_PREFIX" WINESERVER="$wineserver"
+    export WINEPREFIX="$prefix" WINESERVER="$wineserver"
     if [[ "${CYDER_MSYNC:-0}" == 1 ]]; then
       export WINEMSYNC=1
       unset WINEESYNC
@@ -1202,12 +1320,12 @@ cyder_run_wine_exe() {
     export PATH="${wine_bin%/wine}:$PATH"
     cd "$(dirname "$exe")"
     if [[ "${CYDER_SESSION_GUARD:-1}" != 0 ]]; then
-      cyder_session_acquire "$CYDER_SHARED_PREFIX" "${CYDER_MSYNC:-0}" "${CYDER_ESYNC:-0}" "${CYDER_POWER_MODE:-normal}" || return $?
+      cyder_session_acquire "$prefix" "${CYDER_MSYNC:-0}" "${CYDER_ESYNC:-0}" "${CYDER_POWER_MODE:-normal}" || return $?
       session_id="$CYDER_SESSION_FILE"
     fi
     cyder_session_release_on_exit() {
       if [[ -n "${session_id:-}" ]]; then
-        cyder_session_release "$CYDER_SHARED_PREFIX" "$session_id"
+        cyder_session_release "$prefix" "$session_id"
       fi
       return 0
     }
@@ -1233,7 +1351,7 @@ cyder_run_wine_exe() {
           sed -i "s/^pid=.*/pid=$wine_pid/" "$session_id"
         (
           while kill -0 "$wine_pid" 2>/dev/null; do sleep 1; done
-          cyder_session_release "$CYDER_SHARED_PREFIX" "$session_id"
+          cyder_session_release "$prefix" "$session_id"
         ) &
         session_id=""
       fi
