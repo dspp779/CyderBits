@@ -9,6 +9,13 @@ source "$SCRIPT_DIR/env-x86_64.sh"
 
 OUT_DIR="${OGOM}/dist"
 CYDER_APP_VERSION="${CYDER_APP_VERSION:-0.3.0}"
+# Release identity by default; export SIGN_IDENTITY=- for an unsigned local build.
+SIGN_IDENTITY="${SIGN_IDENTITY:-Developer ID Application: Chun Ho Kwok (3U9565WWM2)}"
+if [[ "$SIGN_IDENTITY" == "-" ]]; then
+  TIMESTAMP_FLAG="--timestamp=none"
+else
+  TIMESTAMP_FLAG="--timestamp"
+fi
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --engine-archive)
@@ -308,7 +315,10 @@ cat > "$CONTENTS/Info.plist" <<PLIST
 </plist>
 PLIST
 
-codesign --force --deep --sign - "$APP" 2>/dev/null || true
+codesign --force --options runtime "$TIMESTAMP_FLAG" \
+  --entitlements "$OGOM/config/entitlements.plist" \
+  --sign "$SIGN_IDENTITY" \
+  "$APP"
 
 echo ""
 echo "Created $APP"
