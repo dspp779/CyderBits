@@ -1,0 +1,51 @@
+[
+  {
+    "id": "age-of-empires-ii",
+    "revision": 1,
+    "displayName": "世紀帝國 II",
+    "baseTemplate": "recommended",
+    "settings": { "retinaMode": false },
+    "environment": {}, "arguments": [], "components": []
+  },
+  {
+    "id": "metal-slug-vietnam",
+    "revision": 1,
+    "displayName": "越南大戰",
+    "baseTemplate": "recommended",
+    "settings": { "dpi": 96 },
+    "environment": {}, "arguments": [], "components": []
+  },
+  {
+    "id": "richman-4",
+    "revision": 1,
+    "displayName": "大富翁 4",
+    "baseTemplate": "recommended",
+    "settings": { "renderer": "cnc-ddraw" },
+    "environment": {}, "arguments": [], "components": []
+  },
+  {
+    "id": "pikachu-volleyball",
+    "revision": 1,
+    "displayName": "皮卡丘排球",
+    "baseTemplate": "recommended",
+    "settings": { "msync": false, "esync": false },
+    "environment": {}, "arguments": [], "components": []
+  },
+  {
+    "id": "bluecg",
+    "revision": 1,
+    "displayName": "水藍魔力",
+    "baseTemplate": "recommended",
+    "settings": { "retinaMode": true, "dpi": 192, "renderer": "builtin" },
+    "environment": {}, "arguments": [], "components": []
+  },
+  {
+    "id": "lf2",
+    "revision": 1,
+    "displayName": "LF2",
+    "baseTemplate": "recommended",
+    "settings": {},
+    "environment": {}, "arguments": [],
+    "components": ["vcrun2005", "wmp9", "quartz", "devenum", "vb6run"]
+  }
+]
