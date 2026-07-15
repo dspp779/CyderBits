@@ -199,9 +199,13 @@ macOS 上使用 **`winemac.drv`（Cocoa）**，不走 X11。下列選項在 Mac 
 2. **目標遊戲架構**：是否為 PE32 → 確認 `--enable-archs=i386,x86_64`。
 3. **圖形世代**：2D DirectDraw vs 3D Vulkan → `--without-vulkan` 或 `--with-vulkan`。
 4. **Vulkan 來源**（若啟用）：`homebrew`（快速）或 `crossover`（與 CX tarball 版本鎖定）。
-5. **瘦身**：考慮 `--disable-tests`、`--disable-win16`；勿關 OpenGL / CoreAudio / FreeType。
+5. **瘦身**：先以受版本控制的 profile 比較 `--disable-win16`、`--without-vulkan` 與不需要的 host integrations；`--disable-tests` 主要是 build-time 最佳化。勿關 OpenGL / CoreAudio / FreeType。
 6. **configure 後**：檢查 `build-wine.sh` 印出的 `configure command:` 是否與預期一致。
-7. **打包前**：`bundle-wine-dylibs.sh`、`sign-wine.sh`、`strip-wine-install.sh`（見 `docs/scripts.md`）。
+7. **安裝／打包**：發布 staging 優先使用 `make install-lib`，再執行 `bundle-wine-dylibs.sh`、簽章與 artifact 分析；PE debug symbols 應使用 LLVM-MinGW 工具 split/strip，macOS `/usr/bin/strip` 不適用。
+
+### Configure 瘦身的限制
+
+`--without-*` 多半控制 host integration 或外部 library，不保證對應 Windows DLL 從 install tree 消失。每個 flag 都必須比較 clean build 的 `install-lib` tree、dylib closure 與 tar.xz exact bytes。現有 CX26 PE 還包含大量 DWARF debug sections，這是解壓體積很大的重要原因；configure profile、runtime-only install 與 symbols 處理應分開量測，不能把 build time、installed bytes、compressed bytes 混成同一項成果。
 
 ---
 

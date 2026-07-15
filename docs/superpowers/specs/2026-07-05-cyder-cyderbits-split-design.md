@@ -139,9 +139,9 @@ WINEMSYNC  = 1
 
 | Phase | 摘要 | 預估 app / engine |
 |-------|------|-------------------|
-| **1** | `strip-wine-install` + Plan B-1 allowlist + 保守 Plan C | ~820 MB |
-| **2** | 精簡 Wine build（對齊 Sikarugir PE ~295 MB） | ~300 MB engine |
-| **3** | App 不內嵌 engine，首次下載 tar.xz | ~4 MB app + 下載 |
+| **1** | CrossOver configure profiles + `install-lib` + debug symbols 實驗 | 以量測決定；不預設解壓目標 |
+| **2** | 證據式能力精簡／可選 classic、modern engine flavors | 以壓縮 artifact 與相容性驗收 |
+| **3** | 壓縮 engine artifact 交付與 symbols 分離 | 約 162 MB 級 artifact（內嵌或按需），依版本量測 |
 
 詳見 [2026-07-06-wine-engine-slim-design.md](2026-07-06-wine-engine-slim-design.md) 與 [Phase 1 實作計畫](../plans/2026-07-06-wine-engine-slim-phase1.md)。
 
