@@ -24,8 +24,13 @@ smoothing="${CYDER_FONT_SMOOTHING:-grayscale}"
 case "$font" in songti|mingliu) ;; *) font=songti ;; esac
 case "$smoothing" in off|grayscale|cleartype-rgb|cleartype-bgr) ;; *) smoothing=grayscale ;; esac
 
-if [[ "$retina" == 1 ]]; then retina_value=y; else retina_value=n; fi
-"${WINE[@]}" reg add 'HKCU\Software\Wine\Mac Driver' /v RetinaMode /t REG_SZ /d "$retina_value" /f
+if [[ "$retina" == 1 ]]; then
+  "${WINE[@]}" reg add 'HKCU\Software\Wine\Mac Driver' /v RetinaMode /t REG_SZ /d y /f
+else
+  # RetinaMode=n is not equivalent to the Wine default on all engine builds.
+  # Remove the override so the driver can use its default non-Retina path.
+  "${WINE[@]}" reg delete 'HKCU\Software\Wine\Mac Driver' /v RetinaMode /f 2>/dev/null || true
+fi
 "${WINE[@]}" reg add 'HKCU\Control Panel\Desktop' /v LogPixels /t REG_DWORD /d "$dpi" /f
 
 case "$smoothing" in

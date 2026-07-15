@@ -26,7 +26,11 @@ export CYDER_FONT_PRESET=mingliu CYDER_FONT_SMOOTHING=grayscale
 bash "$ROOT/scripts/cyder-apply-settings.sh" >/dev/null
 
 output="$(cat "$CYDER_TEST_WINE_LOG")"
-assert_contains "$output" "RetinaMode /t REG_SZ /d n" "Retina off should be applied"
+assert_contains "$output" "reg delete HKCU\\Software\\Wine\\Mac Driver /v RetinaMode /f" "Retina off should remove the override"
+if [[ "$output" == *"RetinaMode /t REG_SZ /d n"* ]]; then
+  echo "ASSERT failed: Retina off must not write RetinaMode=n" >&2
+  exit 1
+fi
 assert_contains "$output" "LogPixels /t REG_DWORD /d 144" "selected DPI should be applied"
 assert_contains "$output" "FontSmoothingType /t REG_DWORD /d 1" "grayscale smoothing should be applied"
 assert_contains "$output" "reg delete HKCU\\Software\\Wine\\DllOverrides /v ddraw" "old global DirectDraw override should be removed"

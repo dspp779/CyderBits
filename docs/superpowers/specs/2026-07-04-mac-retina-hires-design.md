@@ -92,9 +92,9 @@ arch -x86_64 "$WINE_INSTALL/bin/wineserver" -k
 還原為「非高解析度」（視窗較大但較糊）：
 
 ```bash
-# Retina off, DPI 96
+# Retina off: remove the override, DPI 96
 arch -x86_64 "$WINE_INSTALL/bin/wine" reg add \
-  "HKCU\Software\Wine\Mac Driver" /v RetinaMode /t REG_SZ /d n /f
+  "HKCU\Software\Wine\Mac Driver" /v RetinaMode /f
 arch -x86_64 "$WINE_INSTALL/bin/wine" reg add \
   "HKCU\Control Panel\Desktop" /v LogPixels /t REG_DWORD /d 0x60 /f
 ```
