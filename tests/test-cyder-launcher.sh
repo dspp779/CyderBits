@@ -42,7 +42,7 @@ exec "$@"
 SH
 cat >"$TMP/runtime/Engines/wine-x86_64/bin/wineserver" <<'SH'
 #!/usr/bin/env bash
-printf '%s|%s\n' "${WINEPREFIX:-}" "$*" >"$CYDER_TEST_STOP_LOG"
+printf '%s|%s\n' "${WINEPREFIX:-}" "$*" >>"$CYDER_TEST_STOP_LOG"
 SH
 chmod +x "$TMP/bin/arch" "$TMP/runtime/Engines/wine-x86_64/bin/wineserver"
 CYDER_TEST_STOP_LOG="$TMP/stop.log" CYDER_SUPPORT="$TMP/support" PATH="$TMP/bin:$PATH" \
@@ -164,10 +164,72 @@ resolved_bottle="$(CYDER_SUPPORT="$profile_support" CYDER_ENGINE_VERSION_LABEL=t
   bash "$ROOT/scripts/cyder_launcher.sh" --profile-resolve "$profile_exe")"
 assert_eq "$resolved_bottle" "$profile_bottle" "profile resolve should return created bottle"
 assert_contains "$(cat "$profile_support/profiles"/*/profile.json)" "$profile_exe" "profile metadata should use full EXE path"
+if CYDER_SUPPORT="$profile_support" bash "$ROOT/scripts/cyder_launcher.sh" \
+  --profile-resolve "$profile_exe" --dry-run >/dev/null 2>&1; then
+  echo "profile and dry-run actions unexpectedly combined" >&2
+  exit 1
+fi
 
 if CYDER_SUPPORT="$profile_support" CYDER_ENGINE_VERSION_LABEL=other-engine \
   bash "$ROOT/scripts/cyder_launcher.sh" --profile-create "$profile_exe" pristine >/dev/null 2>&1; then
   echo "engine version mismatch unexpectedly accepted" >&2
+  exit 1
+fi
+mkdir -p "$profile_support/templates/recommended"
+cp "$profile_support/templates/pristine/manifest.json" "$profile_support/templates/recommended/manifest.json"
+sed -i '' 's/"pristine"/"recommended"/' "$profile_support/templates/recommended/manifest.json" 2>/dev/null || \
+  sed -i 's/"pristine"/"recommended"/' "$profile_support/templates/recommended/manifest.json"
+CYDER_SUPPORT="$profile_support" CYDER_ENGINE_VERSION_LABEL=test-engine PATH="$TMP/bin:$PATH" \
+  bash "$ROOT/scripts/cyder_launcher.sh" --templates-ready
+set +e
+CYDER_SUPPORT="$profile_support" CYDER_ENGINE_VERSION_LABEL=other-engine PATH="$TMP/bin:$PATH" \
+  bash "$ROOT/scripts/cyder_launcher.sh" --templates-ready >/dev/null 2>&1
+templates_mismatch_status=$?
+set -e
+assert_eq "$templates_mismatch_status" "1" "template engine mismatch should be a negative readiness result"
+
+# Native bridge session API validates bottle scope and supports reservation
+# lifecycle through the same session registry used by Wine launches.
+session_prefix="$profile_support/bottles/session"
+mkdir -p "$session_prefix"
+session_file="$(CYDER_SUPPORT="$profile_support" \
+  bash "$ROOT/scripts/cyder_launcher.sh" --session-acquire "$session_prefix" "$$" 1 0 normal)"
+assert test -f "$session_file"
+updated="$(CYDER_SUPPORT="$profile_support" \
+  bash "$ROOT/scripts/cyder_launcher.sh" --session-update "$session_prefix" "$session_file" "$$" 2>&1)"
+assert_eq "$updated" "" "session update should not emit output"
+CYDER_SUPPORT="$profile_support" \
+  bash "$ROOT/scripts/cyder_launcher.sh" --session-release "$session_prefix" "$session_file"
+assert test ! -e "$session_file"
+if CYDER_SUPPORT="$profile_support" \
+  bash "$ROOT/scripts/cyder_launcher.sh" --session-acquire "$profile_support" "$$" 0 0 normal >/dev/null 2>&1; then
+  echo "out-of-scope session prefix unexpectedly accepted" >&2
+  exit 1
+fi
+if CYDER_SUPPORT="$profile_support" \
+  bash "$ROOT/scripts/cyder_launcher.sh" --session-acquire "$session_prefix" "$$" 1 1 normal >/dev/null 2>&1; then
+  echo "dual sync session unexpectedly accepted" >&2
+  exit 1
+fi
+
+mkdir -p "$profile_support/bottles/settings-target" "$profile_support/bottles/settings-other/.cyder-runtime/sessions"
+printf 'pid=%s\nsync=msync=0;esync=0;power=normal\nmode=normal\n' "$$" >"$profile_support/bottles/settings-other/.cyder-runtime/sessions/live.session"
+set +e
+CYDER_SUPPORT="$profile_support" CYDER_SCRIPTS="$TMP/empty-scripts" \
+  bash "$ROOT/scripts/cyder_launcher.sh" --apply-settings-prefix "$profile_support/bottles/settings-other" >/dev/null 2>&1
+active_status=$?
+set -e
+assert_eq "$active_status" "75" "active target bottle must reject settings"
+settings_stop_log="$TMP/settings-stop.log"
+: >"$settings_stop_log"
+settings_target_real="$(cd "$profile_support/bottles/settings-target" && pwd -P)"
+CYDER_SUPPORT="$profile_support" CYDER_SCRIPTS="$TMP/empty-scripts" CYDER_TEST_STOP_LOG="$settings_stop_log" PATH="$TMP/bin:$PATH" \
+  bash "$ROOT/scripts/cyder_launcher.sh" --apply-settings-prefix "$profile_support/bottles/settings-target"
+assert_contains "$(cat "$settings_stop_log")" "$settings_target_real|-k" "settings cleanup should stop target wineserver"
+assert_contains "$(cat "$settings_stop_log")" "$settings_target_real|-w" "settings cleanup should wait for target wineserver"
+if CYDER_SUPPORT="$profile_support" CYDER_SCRIPTS="$TMP/empty-scripts" \
+  bash "$ROOT/scripts/cyder_launcher.sh" --apply-settings-prefix "" >/dev/null 2>&1; then
+  echo "empty settings prefix unexpectedly accepted" >&2
   exit 1
 fi
 

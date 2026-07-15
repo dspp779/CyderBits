@@ -1170,9 +1170,10 @@ cyder_ensure_font_replacements() {
 cyder_apply_user_settings() {
   local wine_bin="$1"
   local engine_root="$2"
+  local prefix="${3:-$CYDER_SHARED_PREFIX}"
   local settings_sh="$CYDER_SCRIPTS/cyder-apply-settings.sh"
   [[ -f "$settings_sh" ]] || return 0
-  WINEPREFIX="$CYDER_SHARED_PREFIX" WINE_INSTALL="$engine_root" bash "$settings_sh"
+  WINEPREFIX="$prefix" WINE_INSTALL="$engine_root" bash "$settings_sh"
 }
 
 cyder_stop_all_exes() {
