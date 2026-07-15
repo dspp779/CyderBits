@@ -148,6 +148,8 @@ echo "==> Building universal MacOS/Cyder (arm64 + x86_64)"
 SWIFT_BUILD_DIR="$(mktemp -d "${TMPDIR:-/tmp}/cyder-swift.XXXXXX")"
 SWIFT_SOURCES=(
   "$SCRIPT_DIR/cyder_diagnostics.swift"
+  "$SCRIPT_DIR/cyder_paths.swift"
+  "$SCRIPT_DIR/cyder_settings.swift"
   "$SCRIPT_DIR/cyder_app_main.swift"
 )
 SWIFT_OPTIMIZATION="${CYDER_SWIFT_OPTIMIZATION:--O}"
