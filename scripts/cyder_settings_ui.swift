@@ -23,6 +23,8 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
     private let executableRetina = NSSwitch()
     private let executableDpi = NSPopUpButton()
     private let executablePowerMode = NSPopUpButton()
+    private let executableFont = NSPopUpButton()
+    private let executableSmoothing = NSPopUpButton()
     private let executableEnvironment = NSTextField()
     private let executableArguments = NSTextField()
     private let removeExecutableButton = NSButton()
@@ -171,6 +173,8 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
         executableRecommendation.action = #selector(applyExecutableRecommendation)
         executableDpi.addItems(withTitles: ["100%（96 DPI）", "125%（120 DPI）", "150%（144 DPI）", "175%（168 DPI）", "200%（192 DPI）", "250%（240 DPI）"])
         executablePowerMode.addItems(withTitles: ["標準", "省電"])
+        executableFont.addItems(withTitles: ["宋體（Songti TC）", "細明體（MingLiU）"])
+        executableSmoothing.addItems(withTitles: ["關閉", "灰階", "ClearType RGB", "ClearType BGR"])
         executableName.textColor = .secondaryLabelColor
         executableName.lineBreakMode = .byTruncatingMiddle
         executableName.widthAnchor.constraint(equalToConstant: 580).isActive = true
@@ -184,6 +188,10 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
         executableDpi.action = #selector(executableSettingChanged)
         executablePowerMode.target = self
         executablePowerMode.action = #selector(executableSettingChanged)
+        executableFont.target = self
+        executableFont.action = #selector(executableFontChanged)
+        executableSmoothing.target = self
+        executableSmoothing.action = #selector(executableSettingChanged)
         executableEnvironment.placeholderString = "KEY=value；多組以 ; 分隔"
         executableArguments.placeholderString = "參數1 | 參數2；不使用 shell 語法"
         [executableEnvironment, executableArguments].forEach {
@@ -205,6 +213,8 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
             row("Retina Mode", executableRetina),
             row("縮放比例 / DPI", executableDpi),
             row("能源模式", executablePowerMode),
+            row("遊戲字體", executableFont),
+            row("字體平滑", executableSmoothing),
             row("環境變數", executableEnvironment),
             row("命令列參數", executableArguments),
             note("環境變數請使用 KEY=value；命令列參數以 | 分隔。Cyder 會逐項傳遞，不會經過 shell eval。"),
@@ -234,6 +244,7 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
         stack.spacing = 12
         stack.translatesAutoresizingMaskIntoConstraints = false
         let container = NSView()
+        container.translatesAutoresizingMaskIntoConstraints = false
         container.addSubview(stack)
         NSLayoutConstraint.activate([
             stack.topAnchor.constraint(equalTo: container.topAnchor, constant: 24),
@@ -241,7 +252,18 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
             stack.trailingAnchor.constraint(lessThanOrEqualTo: container.trailingAnchor, constant: -22),
             stack.bottomAnchor.constraint(lessThanOrEqualTo: container.bottomAnchor, constant: -20),
         ])
-        item.view = container
+        let scroll = NSScrollView()
+        scroll.hasVerticalScroller = true
+        scroll.autohidesScrollers = true
+        scroll.drawsBackground = false
+        scroll.documentView = container
+        NSLayoutConstraint.activate([
+            container.leadingAnchor.constraint(equalTo: scroll.contentView.leadingAnchor),
+            container.topAnchor.constraint(equalTo: scroll.contentView.topAnchor),
+            container.widthAnchor.constraint(equalTo: scroll.contentView.widthAnchor),
+            container.heightAnchor.constraint(greaterThanOrEqualTo: scroll.contentView.heightAnchor),
+        ])
+        item.view = scroll
         return item
     }
 
@@ -406,6 +428,21 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
         markDirty()
     }
 
+    @objc private func executableFontChanged() {
+        if executableFont.indexOfSelectedItem == 1 {
+            let alert = NSAlert()
+            alert.messageText = "使用細明體前需要先安裝字型"
+            alert.informativeText = "請先在 macOS「字體簿」安裝細明體，或將合法取得的 MingLiU 字型安裝到目前的 Wine 環境。Cyder 只切換字體設定，不會提供或自動安裝細明體。"
+            alert.alertStyle = .informational
+            alert.addButton(withTitle: "我知道了")
+            alert.addButton(withTitle: "取消")
+            if alert.runModal() == .alertSecondButtonReturn {
+                executableFont.selectItem(at: 0)
+            }
+        }
+        executableSettingChanged()
+    }
+
     @objc private func executableMsyncChanged() {
         if executableMsync.state == .on { executableEsync.state = .off }
         executableSettingChanged()
@@ -451,6 +488,8 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
         rule.retinaMode = value.retinaMode
         rule.dpi = value.dpi
         rule.powerMode = "standard"
+        rule.fontPreset = value.fontPreset
+        rule.fontSmoothing = value.fontSmoothing
         return rule
     }
 
@@ -463,6 +502,8 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
         rule.retinaMode = executableRetina.state == .on
         rule.dpi = dpiValues[max(0, executableDpi.indexOfSelectedItem)]
         rule.powerMode = ["standard", "energySaving"][max(0, executablePowerMode.indexOfSelectedItem)]
+        rule.fontPreset = executableFont.indexOfSelectedItem == 1 ? "mingliu" : "songti"
+        rule.fontSmoothing = ["off", "grayscale", "cleartype-rgb", "cleartype-bgr"][max(0, executableSmoothing.indexOfSelectedItem)]
         rule.environment = executableEnvironment.stringValue
             .split(separator: ";", omittingEmptySubsequences: true)
             .compactMap { entry -> (String, String)? in
@@ -498,6 +539,9 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
         executableRetina.state = (rule.retinaMode ?? defaults.retinaMode ?? true) ? .on : .off
         executableDpi.selectItem(at: dpiValues.firstIndex(of: rule.dpi ?? defaults.dpi ?? 192) ?? 4)
         executablePowerMode.selectItem(at: rule.powerMode == "energySaving" ? 1 : 0)
+        executableFont.selectItem(at: rule.fontPreset == "mingliu" ? 1 : 0)
+        let smoothingValues = ["off", "grayscale", "cleartype-rgb", "cleartype-bgr"]
+        executableSmoothing.selectItem(at: smoothingValues.firstIndex(of: rule.fontSmoothing ?? defaults.fontSmoothing ?? "grayscale") ?? 1)
         executableEnvironment.stringValue = rule.environment
             .sorted { $0.key < $1.key }
             .map { "\($0.key)=\($0.value)" }
@@ -548,6 +592,8 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
         executableRetina.isEnabled = enabled
         executableDpi.isEnabled = enabled
         executablePowerMode.isEnabled = enabled
+        executableFont.isEnabled = enabled
+        executableSmoothing.isEnabled = enabled
         executableEnvironment.isEnabled = enabled
         executableArguments.isEnabled = enabled
         removeExecutableButton.isEnabled = enabled
@@ -557,6 +603,8 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
             executableRetina.state = .off
             executableDpi.selectItem(at: 4)
             executablePowerMode.selectItem(at: 0)
+            executableFont.selectItem(at: 0)
+            executableSmoothing.selectItem(at: 1)
             executableEnvironment.stringValue = ""
             executableArguments.stringValue = ""
             executableRecommendation.selectItem(at: 0)
