@@ -64,6 +64,50 @@ legacy_id="$(cyder_profile_id_for_path "$TMP/source")"
 cyder_profile_validate_metadata "$legacy_root/profiles/$legacy_id/profile.json" "$legacy_id"
 assert test -f "$TMP/source/system.reg"
 assert_contains "$(ruby -rjson -e 'puts JSON.parse(File.read(ARGV.fetch(0)))["legacy"]' "$legacy_root/profiles/$legacy_id/profile.json")" true "legacy metadata flag"
+
+game_root="$TMP/games"
+mkdir -p "$game_root/一號 遊戲" "$game_root/另一個"
+printf exe >"$game_root/一號 遊戲/遊戲.exe"
+printf exe >"$game_root/另一個/遊戲.exe"
+store="$TMP/store"
+first_bottle="$(cyder_profile_create "$game_root/一號 遊戲/遊戲.exe" "$TMP/layout/templates/pristine" "$store")"
+first_id="$(cyder_profile_id_for_path "$game_root/一號 遊戲/遊戲.exe")"
+assert test -d "$first_bottle"
+assert test -f "$store/profiles/$first_id/profile.json"
+assert test ! -e "$store/bottles/$first_id/profile.json"
+assert_contains "$(cyder_profile_resolve "$game_root/一號 遊戲/遊戲.exe" "$store")" "$first_bottle" "resolve uses canonical EXE path"
+if cyder_profile_resolve "$game_root/另一個/遊戲.exe" "$store" >/dev/null 2>&1; then
+  echo "same basename unexpectedly resolved to another profile" >&2
+  exit 1
+fi
+second_bottle="$(cyder_profile_create "$game_root/另一個/遊戲.exe" "$TMP/layout/templates/pristine" "$store")"
+second_id="$(cyder_profile_id_for_path "$game_root/另一個/遊戲.exe")"
+if [[ "$first_id" == "$second_id" || "$first_bottle" == "$second_bottle" ]]; then
+  echo "same basename profiles unexpectedly share identity" >&2
+  exit 1
+fi
+mv "$store/profiles/$first_id" "$store/profiles/$first_id.real"
+ln -s "$store/profiles/$first_id.real" "$store/profiles/$first_id"
+if cyder_profile_resolve "$game_root/一號 遊戲/遊戲.exe" "$store" >/dev/null 2>&1; then
+  echo "profile symlink unexpectedly resolved" >&2
+  exit 1
+fi
+rm "$store/profiles/$first_id"
+mv "$store/profiles/$first_id.real" "$store/profiles/$first_id"
+mv "$store/bottles/$first_id" "$store/bottles/$first_id.real"
+ln -s "$store/bottles/$first_id.real" "$store/bottles/$first_id"
+if cyder_profile_resolve "$game_root/一號 遊戲/遊戲.exe" "$store" >/dev/null 2>&1; then
+  echo "bottle symlink unexpectedly resolved" >&2
+  exit 1
+fi
+rm "$store/bottles/$first_id"
+mv "$store/bottles/$first_id.real" "$store/bottles/$first_id"
+assert test "$(cyder_profile_create "$game_root/一號 遊戲/遊戲.exe" "$TMP/layout/templates/pristine" "$store")" = "$first_bottle"
+if cyder_profile_create "$game_root/一號 遊戲/遊戲.exe" "$TMP/layout/templates/invalid" "$store" >/dev/null 2>&1; then
+  echo "invalid template unexpectedly created profile" >&2
+  exit 1
+fi
+assert test ! -e "$store/bottles/profile-invalid"
 cyder_recipe_validate "$ROOT/recipes/defaults.json"
 cat >"$TMP/invalid-recipe.json" <<'JSON'
 [{"id":"Bad ID","revision":0,"displayName":"broken","baseTemplate":"recommended","settings":{},"environment":{},"arguments":[],"components":[]}]

@@ -2,16 +2,84 @@
 # Safe profile/bottle helpers. These helpers deliberately do not run Wine.
 set -Eeuo pipefail
 
+cyder_profile_canonical_path() {
+  local path="$1"
+  [[ -e "$path" ]] || { echo "profile path does not exist: $path" >&2; return 1; }
+  (cd "$(dirname "$path")" && printf '%s/%s\n' "$(pwd -P)" "$(basename "$path")")
+}
+
 cyder_profile_id_for_path() {
   local path="$1" canonical digest
-  [[ -e "$path" ]] || { echo "profile path does not exist: $path" >&2; return 1; }
-  canonical="$(cd "$(dirname "$path")" && printf '%s/%s' "$(pwd -P)" "$(basename "$path")")"
+  canonical="$(cyder_profile_canonical_path "$path")"
   if command -v shasum >/dev/null 2>&1; then
     digest="$(printf '%s' "$canonical" | shasum -a 256 | awk '{print $1}')"
   else
     digest="$(printf '%s' "$canonical" | md5 | awk '{print $NF}')"
   fi
   printf 'profile-%s\n' "${digest:0:24}"
+}
+
+cyder_profile_create() {
+  local exe_path="$1" template_dir="$2" root="$3"
+  [[ -f "$exe_path" ]] || { echo "EXE does not exist: $exe_path" >&2; return 1; }
+  [[ -d "$template_dir" ]] || { echo "template directory does not exist: $template_dir" >&2; return 1; }
+  cyder_profile_init_layout "$root"
+  local template_name id bottle profile canonical
+  template_name="$(basename "$template_dir")"
+  [[ "$template_name" == pristine || "$template_name" == recommended ]] || {
+    echo "template must be pristine or recommended: $template_dir" >&2
+    return 1
+  }
+  cyder_profile_validate_template_manifest "$template_dir/manifest.json" "$template_name" || return 1
+  id="$(cyder_profile_id_for_path "$exe_path")"
+  bottle="$root/bottles/$id"
+  profile="$root/profiles/$id"
+  canonical="$(cyder_profile_canonical_path "$exe_path")"
+  [[ ! -L "$profile" && ! -L "$bottle" ]] || {
+    echo "profile or bottle symlink is not allowed: $id" >&2
+    return 1
+  }
+  if [[ -f "$profile/profile.json" && -d "$bottle" ]]; then
+    cyder_profile_resolve "$exe_path" "$root" >/dev/null || return 1
+    printf '%s\n' "$bottle"
+    return 0
+  fi
+  [[ ! -e "$bottle" && ! -e "$profile" ]] || {
+    echo "incomplete profile already exists: $id" >&2
+    return 1
+  }
+  if ! cyder_profile_clone_bottle "$template_dir" "$bottle"; then
+    rm -rf "$bottle"
+    return 1
+  fi
+  if ! mkdir "$profile" || ! cyder_profile_write_metadata "$profile" "$id" "$canonical" "$template_name"; then
+    rm -rf "$bottle" "$profile"
+    echo "profile metadata publish failed; profile rolled back" >&2
+    return 1
+  fi
+  printf '%s\n' "$bottle"
+}
+
+cyder_profile_resolve() {
+  local exe_path="$1" root="$2"
+  [[ -f "$exe_path" ]] || { echo "EXE does not exist: $exe_path" >&2; return 1; }
+  local id profile bottle canonical metadata_source
+  id="$(cyder_profile_id_for_path "$exe_path")"
+  profile="$root/profiles/$id"
+  bottle="$root/bottles/$id"
+  [[ ! -L "$profile" && ! -L "$bottle" ]] || {
+    echo "profile or bottle symlink is not allowed: $id" >&2
+    return 1
+  }
+  cyder_profile_validate_metadata "$profile/profile.json" "$id" || return 1
+  canonical="$(cyder_profile_canonical_path "$exe_path")"
+  metadata_source="$(ruby -rjson -e 'puts JSON.parse(File.read(ARGV.fetch(0)))["sourcePath"]' "$profile/profile.json")"
+  [[ "$metadata_source" == "$canonical" ]] || {
+    echo "profile metadata source mismatch for $id" >&2
+    return 1
+  }
+  [[ -d "$bottle" ]] || { echo "profile bottle missing: $bottle" >&2; return 1; }
+  printf '%s\n' "$bottle"
 }
 
 cyder_profile_init_layout() {
@@ -285,6 +353,8 @@ cyder_profile_cli() {
   case "${1:-}" in
     id) shift; cyder_profile_id_for_path "$1" ;;
     layout) shift; cyder_profile_init_layout "$1" ;;
+    create) shift; cyder_profile_create "$@" ;;
+    resolve) shift; cyder_profile_resolve "$@" ;;
     metadata) shift; cyder_profile_write_metadata "$@" ;;
     validate-metadata) shift; cyder_profile_validate_metadata "$@" ;;
     template-manifest) shift; cyder_profile_write_template_manifest "$@" ;;
@@ -292,7 +362,7 @@ cyder_profile_cli() {
     clone) shift; cyder_profile_clone_bottle "$1" "$2" ;;
     import-legacy) shift; cyder_profile_import_legacy_bottle "$@" ;;
     validate-recipe) shift; cyder_recipe_validate "$1" ;;
-    *) echo "usage: cyder-profile.sh {id|layout|metadata|validate-metadata|template-manifest|validate-template-manifest|clone|import-legacy|validate-recipe} ..." >&2; return 2 ;;
+    *) echo "usage: cyder-profile.sh {id|layout|create|resolve|metadata|validate-metadata|template-manifest|validate-template-manifest|clone|import-legacy|validate-recipe} ..." >&2; return 2 ;;
   esac
 }
 
