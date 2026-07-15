@@ -151,6 +151,7 @@ SWIFT_SOURCES=(
   "$SCRIPT_DIR/cyder_paths.swift"
   "$SCRIPT_DIR/cyder_settings.swift"
   "$SCRIPT_DIR/cyder_launch_support.swift"
+  "$SCRIPT_DIR/cyder_settings_ui.swift"
   "$SCRIPT_DIR/cyder_app_main.swift"
 )
 SWIFT_OPTIMIZATION="${CYDER_SWIFT_OPTIMIZATION:--O}"

@@ -1,0 +1,602 @@
+import Cocoa
+import Foundation
+
+final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate {
+    var onCommit: ((_ shouldStopAll: Bool, _ requiresPrefixApply: Bool) -> Void)?
+    var onRebuild: (() -> Void)?
+    var onSaveStarted: (() -> Void)?
+    var onSaveFailed: (() -> Void)?
+    var onClose: (() -> Void)?
+    var hasRunningExes: (() -> Bool)?
+    private let store = CyderSettingsStore.shared
+    private let msync = NSSwitch()
+    private let esync = NSSwitch()
+    private let retina = NSSwitch()
+    private let dpi = NSPopUpButton()
+    private let font = NSPopUpButton()
+    private let smoothing = NSPopUpButton()
+    private let executableList = NSPopUpButton()
+    private let executableRecommendation = NSPopUpButton()
+    private let executableName = NSTextField(labelWithString: "尚未選擇 EXE")
+    private let executableMsync = NSSwitch()
+    private let executableEsync = NSSwitch()
+    private let executableRetina = NSSwitch()
+    private let executableDpi = NSPopUpButton()
+    private let executablePowerMode = NSPopUpButton()
+    private let removeExecutableButton = NSButton()
+    private var selectedExecutable: String?
+    private var executableDrafts: [String: CyderExecutableSettings] = [:]
+    private var deletedExecutables: Set<String> = []
+    private let status = NSTextField(labelWithString: "設定將於下次啟動遊戲時生效")
+    private var isDirty = false
+
+    convenience init() {
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 680, height: 620),
+            styleMask: [.titled, .closable],
+            backing: .buffered,
+            defer: false
+        )
+        self.init(window: window)
+        window.title = "Cyder 偏好設定"
+        window.isReleasedWhenClosed = false
+        window.delegate = self
+        window.center()
+        buildUI()
+        reload()
+    }
+
+    func windowWillClose(_ notification: Notification) {
+        if NSApp.modalWindow === window {
+            NSApp.stopModal()
+        }
+        onClose?()
+    }
+
+    func windowShouldClose(_ sender: NSWindow) -> Bool {
+        guard isDirty else { return true }
+        let alert = NSAlert()
+        alert.messageText = "放棄尚未儲存的設定？"
+        alert.informativeText = "按「繼續編輯」可返回設定視窗。"
+        alert.addButton(withTitle: "放棄變更")
+        alert.addButton(withTitle: "繼續編輯")
+        return alert.runModal() == .alertFirstButtonReturn
+    }
+
+    private func buildUI() {
+        guard let content = window?.contentView else { return }
+        let tabs = NSTabView()
+        tabs.translatesAutoresizingMaskIntoConstraints = false
+        tabs.addTabViewItem(makeGeneralTab())
+        tabs.addTabViewItem(makeDisplayTab())
+        tabs.addTabViewItem(makeFontsTab())
+        tabs.addTabViewItem(makeExecutableTab())
+        tabs.addTabViewItem(makeAdvancedTab())
+
+        status.font = .systemFont(ofSize: 11)
+        status.textColor = .secondaryLabelColor
+        status.translatesAutoresizingMaskIntoConstraints = false
+
+        let reset = NSButton(title: "全部恢復預設值…", target: self, action: #selector(resetAll))
+        reset.bezelStyle = .rounded
+        reset.translatesAutoresizingMaskIntoConstraints = false
+        let confirm = NSButton(title: "確認", target: self, action: #selector(confirmChanges))
+        confirm.bezelStyle = .rounded
+        confirm.keyEquivalent = "\r"
+        confirm.translatesAutoresizingMaskIntoConstraints = false
+
+        content.addSubview(tabs)
+        content.addSubview(status)
+        content.addSubview(reset)
+        content.addSubview(confirm)
+        NSLayoutConstraint.activate([
+            tabs.topAnchor.constraint(equalTo: content.topAnchor, constant: 16),
+            tabs.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 18),
+            tabs.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -18),
+            tabs.bottomAnchor.constraint(equalTo: status.topAnchor, constant: -14),
+            status.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 22),
+            status.bottomAnchor.constraint(equalTo: content.bottomAnchor, constant: -18),
+            confirm.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -20),
+            reset.trailingAnchor.constraint(equalTo: confirm.leadingAnchor, constant: -10),
+            reset.centerYAnchor.constraint(equalTo: status.centerYAnchor),
+            confirm.centerYAnchor.constraint(equalTo: status.centerYAnchor),
+        ])
+    }
+
+    private func makeGeneralTab() -> NSTabViewItem {
+        msync.target = self
+        msync.action = #selector(msyncChanged)
+        esync.target = self
+        esync.action = #selector(esyncChanged)
+        let msyncDescription = note("使用 macOS 原生同步機制改善部分遊戲效能；若遊戲凍結或無法啟動，可保持關閉。")
+        let esyncDescription = note("使用事件同步機制降低等待開銷。MSync 與 ESync 不能同時開啟。")
+        return tab("一般", rows: [
+            row("MSync", msync),
+            msyncDescription,
+            row("ESync", esync),
+            esyncDescription,
+        ])
+    }
+
+    private func makeDisplayTab() -> NSTabViewItem {
+        retina.target = self
+        retina.action = #selector(markDirty)
+        dpi.addItems(withTitles: ["100%（96 DPI）", "125%（120 DPI）", "150%（144 DPI）", "175%（168 DPI）", "200%（192 DPI）", "250%（240 DPI）"])
+        dpi.target = self
+        dpi.action = #selector(markDirty)
+        return tab("顯示", rows: [
+            row("高解析度（Retina Mode）", retina),
+            row("縮放比例 / DPI", dpi),
+            note("建議使用高解析度模式與 200%。\n125%、150%、175%、250% 等非整數倍率，可能讓部分老遊戲的像素邊緣出現鋸齒或模糊。"),
+        ])
+    }
+
+    private func makeFontsTab() -> NSTabViewItem {
+        font.addItems(withTitles: ["宋體（Songti TC，預設）", "細明體（MingLiU）"])
+        font.target = self
+        font.action = #selector(fontChanged)
+        smoothing.addItems(withTitles: ["關閉", "灰階", "ClearType RGB", "ClearType BGR"])
+        smoothing.target = self
+        smoothing.action = #selector(markDirty)
+        return tab("字體", rows: [
+            row("Windows 預設字體", font),
+            note("Cyder 只設定 Wine 的字體替代規則，不會自動安裝受授權保護的字型。"),
+            row("字體平滑", smoothing),
+        ])
+    }
+
+    private func makeExecutableTab() -> NSTabViewItem {
+        let choose = NSButton(title: "選擇新的 EXE…", target: self, action: #selector(chooseExecutable))
+        choose.bezelStyle = .rounded
+        removeExecutableButton.title = "移除設定"
+        removeExecutableButton.target = self
+        removeExecutableButton.action = #selector(removeExecutableSettings)
+        removeExecutableButton.bezelStyle = .rounded
+        executableList.target = self
+        executableList.action = #selector(selectConfiguredExecutable)
+        executableList.widthAnchor.constraint(equalToConstant: 280).isActive = true
+        executableRecommendation.addItems(withTitles: [
+            "自行設定",
+            "世紀帝國 II（關閉 Retina）",
+            "越南大戰（96 DPI）",
+            "皮卡丘打排球（關閉同步）",
+            "水藍魔力／BlueCG（Retina、192 DPI）",
+        ])
+        executableRecommendation.target = self
+        executableRecommendation.action = #selector(applyExecutableRecommendation)
+        executableDpi.addItems(withTitles: ["100%（96 DPI）", "125%（120 DPI）", "150%（144 DPI）", "175%（168 DPI）", "200%（192 DPI）", "250%（240 DPI）"])
+        executablePowerMode.addItems(withTitles: ["標準", "省電"])
+        executableName.textColor = .secondaryLabelColor
+        executableName.lineBreakMode = .byTruncatingMiddle
+        executableName.widthAnchor.constraint(equalToConstant: 580).isActive = true
+        [executableMsync, executableEsync, executableRetina].forEach {
+            $0.target = self
+            $0.action = #selector(executableSettingChanged)
+        }
+        executableMsync.action = #selector(executableMsyncChanged)
+        executableEsync.action = #selector(executableEsyncChanged)
+        executableDpi.target = self
+        executableDpi.action = #selector(executableSettingChanged)
+        executablePowerMode.target = self
+        executablePowerMode.action = #selector(executableSettingChanged)
+        let actions = NSStackView(views: [choose, removeExecutableButton])
+        actions.orientation = .horizontal
+        actions.spacing = 8
+        return tab("遊戲設定", rows: [
+            row("已設定遊戲", executableList),
+            actions,
+            executableName,
+            row("建議設定", executableRecommendation),
+            note("目前以 EXE 檔名比對設定；同名 EXE 會使用相同設定。選擇建議設定後仍可逐項調整。"),
+            row("MSync", executableMsync),
+            row("ESync", executableEsync),
+            row("Retina Mode", executableRetina),
+            row("縮放比例 / DPI", executableDpi),
+            row("能源模式", executablePowerMode),
+            note("省電模式可以降低 CPU 使用率，但可能造成畫面卡頓。\n\nApple 晶片會優先使用節能核心，可大幅延長續航；BlueCG 測試中，能耗約為標準模式的 1/10。\n注意：M1 Pro/Max 僅有 2 個節能核心，可能極度卡頓，不建議使用。"),
+        ])
+    }
+
+    private func makeAdvancedTab() -> NSTabViewItem {
+        let rebuild = NSButton(title: "重建 Windows 遊戲環境…", target: self, action: #selector(rebuildEnvironment))
+        rebuild.bezelStyle = .rounded
+        return tab("進階", rows: [
+            rebuild,
+            note("重新建立執行 Windows 遊戲所需的環境。遊戲檔案不會刪除，但已安裝的 Windows 元件與自訂設定需要重新套用。"),
+        ])
+    }
+
+    private func tab(_ title: String, rows: [NSView]) -> NSTabViewItem {
+        let item = NSTabViewItem(identifier: title)
+        item.label = title
+        let stack = NSStackView(views: rows)
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = 12
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        let container = NSView()
+        container.addSubview(stack)
+        NSLayoutConstraint.activate([
+            stack.topAnchor.constraint(equalTo: container.topAnchor, constant: 24),
+            stack.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 22),
+            stack.trailingAnchor.constraint(lessThanOrEqualTo: container.trailingAnchor, constant: -22),
+            stack.bottomAnchor.constraint(lessThanOrEqualTo: container.bottomAnchor, constant: -20),
+        ])
+        item.view = container
+        return item
+    }
+
+    private func row(_ title: String, _ control: NSView) -> NSView {
+        let label = NSTextField(labelWithString: title)
+        label.font = .systemFont(ofSize: 13)
+        let spacer = NSView()
+        let stack = NSStackView(views: [label, spacer, control])
+        stack.orientation = .horizontal
+        stack.alignment = .centerY
+        stack.widthAnchor.constraint(equalToConstant: 590).isActive = true
+        return stack
+    }
+
+    private func note(_ text: String) -> NSView {
+        let label = NSTextField(wrappingLabelWithString: text)
+        label.textColor = .secondaryLabelColor
+        label.font = .systemFont(ofSize: 12)
+        label.maximumNumberOfLines = 7
+        label.widthAnchor.constraint(equalToConstant: 580).isActive = true
+        return label
+    }
+
+    private func reload() {
+        let value = store.value
+        msync.state = value.msync ? .on : .off
+        esync.state = (value.esync ?? false) && !value.msync ? .on : .off
+        retina.state = value.retinaMode ? .on : .off
+        let dpiValues = [96, 120, 144, 168, 192, 240]
+        dpi.selectItem(at: dpiValues.firstIndex(of: value.dpi) ?? 4)
+        font.selectItem(at: value.fontPreset == "mingliu" ? 1 : 0)
+        let smoothingValues = ["off", "grayscale", "cleartype-rgb", "cleartype-bgr"]
+        smoothing.selectItem(at: smoothingValues.firstIndex(of: value.fontSmoothing) ?? 1)
+        executableDrafts = value.perExecutable
+        deletedExecutables.removeAll()
+        selectedExecutable = nil
+        executableName.stringValue = "尚未選擇 EXE"
+        refreshExecutableList()
+        isDirty = false
+        status.stringValue = "設定將於確認後儲存"
+        status.textColor = .secondaryLabelColor
+    }
+
+    func prepareForDisplay() {
+        reload()
+    }
+
+    @objc private func markDirty() {
+        isDirty = true
+        status.stringValue = "有尚未儲存的變更"
+        status.textColor = .systemOrange
+    }
+
+    @objc private func msyncChanged() {
+        if msync.state == .on { esync.state = .off }
+        markDirty()
+    }
+
+    @objc private func esyncChanged() {
+        if esync.state == .on { msync.state = .off }
+        markDirty()
+    }
+
+    private func saveControls() -> Bool {
+        let dpiValues = [96, 120, 144, 168, 192, 240]
+        let smoothingValues = ["off", "grayscale", "cleartype-rgb", "cleartype-bgr"]
+        do {
+            try store.update {
+                $0.msync = msync.state == .on
+                $0.esync = esync.state == .on
+                $0.retinaMode = retina.state == .on
+                $0.dpi = dpiValues[max(0, dpi.indexOfSelectedItem)]
+                $0.fontPreset = font.indexOfSelectedItem == 1 ? "mingliu" : "songti"
+                $0.fontSmoothing = smoothingValues[max(0, smoothing.indexOfSelectedItem)]
+                for basename in deletedExecutables {
+                    $0.perExecutable.removeValue(forKey: basename)
+                }
+                for (basename, rule) in executableDrafts where !deletedExecutables.contains(basename) {
+                    $0.perExecutable[basename] = rule
+                }
+            }
+            status.stringValue = "已儲存；重新啟動遊戲後生效"
+            status.textColor = .secondaryLabelColor
+            isDirty = false
+            return true
+        } catch {
+            CyderDiagnostics.shared.warning("unable to save settings error=\(error)")
+            status.stringValue = "無法儲存設定：\(error.localizedDescription)"
+            status.textColor = .systemRed
+            return false
+        }
+    }
+
+    @objc private func fontChanged() {
+        if font.indexOfSelectedItem == 1 {
+            let alert = NSAlert()
+            alert.messageText = "使用細明體前需要先安裝字型"
+            alert.informativeText = "請先在 macOS「字體簿」安裝細明體，或將合法取得的 MingLiU 字型安裝到目前的 Wine 環境。Cyder 只切換字體設定，不會提供或自動安裝細明體。"
+            alert.alertStyle = .informational
+            alert.addButton(withTitle: "我知道了")
+            alert.addButton(withTitle: "取消")
+            if alert.runModal() == .alertSecondButtonReturn {
+                font.selectItem(at: 0)
+            }
+        }
+        markDirty()
+    }
+
+    @objc private func chooseExecutable() {
+        let panel = NSOpenPanel()
+        panel.title = "選擇要套用個別設定的 EXE"
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        let basename = url.lastPathComponent.lowercased()
+        if executableDrafts[basename] == nil {
+            executableDrafts[basename] = defaultExecutableSettings()
+        }
+        deletedExecutables.remove(basename)
+        selectedExecutable = basename
+        refreshExecutableList(selecting: basename)
+        loadExecutableSettings(basename, displayName: "\(url.lastPathComponent)（\(url.path)）")
+        markDirty()
+    }
+
+    @objc private func selectConfiguredExecutable() {
+        guard executableList.isEnabled,
+              let basename = executableList.selectedItem?.title,
+              executableDrafts[basename] != nil else { return }
+        loadExecutableSettings(basename)
+    }
+
+    @objc private func removeExecutableSettings() {
+        guard let basename = selectedExecutable else { return }
+        let alert = NSAlert()
+        alert.messageText = "移除 \(basename) 的遊戲設定？"
+        alert.informativeText = "確認儲存後，這個 EXE 將改用一般設定。"
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "移除設定")
+        alert.addButton(withTitle: "取消")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        executableDrafts.removeValue(forKey: basename)
+        deletedExecutables.insert(basename)
+        selectedExecutable = nil
+        executableName.stringValue = "尚未選擇 EXE"
+        refreshExecutableList()
+        markDirty()
+    }
+
+    @objc private func executableSettingChanged() {
+        executableRecommendation.selectItem(at: 0)
+        captureExecutableSettings()
+        markDirty()
+    }
+
+    @objc private func executableMsyncChanged() {
+        if executableMsync.state == .on { executableEsync.state = .off }
+        executableSettingChanged()
+    }
+
+    @objc private func executableEsyncChanged() {
+        if executableEsync.state == .on { executableMsync.state = .off }
+        executableSettingChanged()
+    }
+
+    @objc private func applyExecutableRecommendation() {
+        guard let basename = selectedExecutable else {
+            executableRecommendation.selectItem(at: 0)
+            return
+        }
+        let recommendation = executableRecommendation.indexOfSelectedItem
+        var rule = defaultExecutableSettings()
+        switch recommendation {
+        case 1:
+            rule.retinaMode = false
+        case 2:
+            rule.dpi = 96
+        case 3:
+            rule.msync = false
+            rule.esync = false
+        case 4:
+            rule.retinaMode = true
+            rule.dpi = 192
+        default:
+            return
+        }
+        executableDrafts[basename] = rule
+        loadExecutableSettings(basename)
+        executableRecommendation.selectItem(at: recommendation)
+        markDirty()
+    }
+
+    private func defaultExecutableSettings() -> CyderExecutableSettings {
+        let value = store.value
+        var rule = CyderExecutableSettings()
+        rule.msync = value.msync
+        rule.esync = value.esync ?? false
+        rule.retinaMode = value.retinaMode
+        rule.dpi = value.dpi
+        rule.powerMode = "standard"
+        return rule
+    }
+
+    private func captureExecutableSettings() {
+        guard let basename = selectedExecutable else { return }
+        let dpiValues = [96, 120, 144, 168, 192, 240]
+        var rule = executableDrafts[basename] ?? defaultExecutableSettings()
+        rule.msync = executableMsync.state == .on
+        rule.esync = executableEsync.state == .on
+        rule.retinaMode = executableRetina.state == .on
+        rule.dpi = dpiValues[max(0, executableDpi.indexOfSelectedItem)]
+        rule.powerMode = ["standard", "energySaving"][max(0, executablePowerMode.indexOfSelectedItem)]
+        executableDrafts[basename] = rule
+        deletedExecutables.remove(basename)
+    }
+
+    private func loadExecutableSettings(_ basename: String, displayName: String? = nil) {
+        guard let rule = executableDrafts[basename] else { return }
+        let defaults = defaultExecutableSettings()
+        let dpiValues = [96, 120, 144, 168, 192, 240]
+        selectedExecutable = basename
+        executableList.selectItem(withTitle: basename)
+        executableName.stringValue = displayName ?? basename
+        executableMsync.state = (rule.msync ?? defaults.msync ?? false) ? .on : .off
+        executableEsync.state = (rule.esync ?? defaults.esync ?? false) ? .on : .off
+        executableRetina.state = (rule.retinaMode ?? defaults.retinaMode ?? true) ? .on : .off
+        executableDpi.selectItem(at: dpiValues.firstIndex(of: rule.dpi ?? defaults.dpi ?? 192) ?? 4)
+        executablePowerMode.selectItem(at: rule.powerMode == "energySaving" ? 1 : 0)
+        executableRecommendation.selectItem(at: 0)
+        setExecutableControlsEnabled(true)
+    }
+
+    private func refreshExecutableList(selecting preferred: String? = nil) {
+        executableList.removeAllItems()
+        let names = executableDrafts.keys
+            .filter { !deletedExecutables.contains($0) }
+            .sorted { $0.localizedStandardCompare($1) == .orderedAscending }
+        guard !names.isEmpty else {
+            executableList.addItem(withTitle: "尚無已設定遊戲")
+            executableList.isEnabled = false
+            setExecutableControlsEnabled(false)
+            return
+        }
+        executableList.addItems(withTitles: names)
+        executableList.isEnabled = true
+        let selected = preferred.flatMap { names.contains($0) ? $0 : nil } ?? names[0]
+        loadExecutableSettings(selected)
+    }
+
+    private func setExecutableControlsEnabled(_ enabled: Bool) {
+        executableRecommendation.isEnabled = enabled
+        executableMsync.isEnabled = enabled
+        executableEsync.isEnabled = enabled
+        executableRetina.isEnabled = enabled
+        executableDpi.isEnabled = enabled
+        executablePowerMode.isEnabled = enabled
+        removeExecutableButton.isEnabled = enabled
+        if !enabled {
+            executableMsync.state = .off
+            executableEsync.state = .off
+            executableRetina.state = .off
+            executableDpi.selectItem(at: 4)
+            executablePowerMode.selectItem(at: 0)
+            executableRecommendation.selectItem(at: 0)
+        }
+    }
+
+    @objc private func resetAll() {
+        let alert = NSAlert()
+        alert.messageText = "恢復所有進階設定？"
+        alert.informativeText = "這不會刪除遊戲所需元件、遊戲或個人檔案。"
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "恢復預設值")
+        alert.addButton(withTitle: "取消")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        let value = CyderSettings.defaults
+        msync.state = value.msync ? .on : .off
+        esync.state = (value.esync ?? false) ? .on : .off
+        retina.state = value.retinaMode ? .on : .off
+        dpi.selectItem(at: 4)
+        font.selectItem(at: 0)
+        smoothing.selectItem(at: 1)
+        deletedExecutables.formUnion(executableDrafts.keys)
+        executableDrafts.removeAll()
+        selectedExecutable = nil
+        executableName.stringValue = "尚未選擇 EXE"
+        refreshExecutableList()
+        markDirty()
+    }
+
+    @objc private func rebuildEnvironment() {
+        let alert = NSAlert()
+        alert.messageText = "重建 Windows 遊戲環境？"
+        alert.informativeText = "遊戲檔案不會刪除，但已安裝的 Windows 元件與自訂設定需要重新套用。"
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "重建")
+        alert.addButton(withTitle: "取消")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        onRebuild?()
+        close()
+    }
+
+    @objc private func confirmChanges() {
+        // Opening Cyder only to inspect settings should be a no-op: do not
+        // rewrite the settings file or invoke the Wine launcher.
+        guard isDirty else {
+            close()
+            return
+        }
+        // Only registry-backed display/font fields need Wine to be invoked
+        // immediately. Launch policy, sync and per-EXE fields are consumed on
+        // the next launch and should not trigger another environment check.
+        let requiresPrefixApply = prefixSettingsChanged()
+        let requiresSessionRestart = sessionSettingsChanged()
+        let running = (requiresPrefixApply || requiresSessionRestart) && (hasRunningExes?() ?? false)
+        var shouldStopAll = false
+        if running && requiresPrefixApply {
+            let alert = NSAlert()
+            alert.messageText = "重新開啟遊戲後會套用新設定"
+            alert.informativeText = "目前有遊戲正在執行。要立即關閉所有遊戲並套用設定，還是只儲存設定、稍後自行重新開啟？未儲存的遊戲進度可能會遺失。"
+            alert.alertStyle = .warning
+            alert.addButton(withTitle: "儲存並關閉所有遊戲")
+            alert.addButton(withTitle: "只儲存")
+            alert.addButton(withTitle: "取消")
+            let response = alert.runModal()
+            guard response != .alertThirdButtonReturn else { return }
+            shouldStopAll = response == .alertFirstButtonReturn
+        } else if running && requiresSessionRestart {
+            let alert = NSAlert()
+            alert.messageText = "關閉所有遊戲後會使用新的執行模式"
+            alert.informativeText = "能源模式與同步設定由目前的 Windows 遊戲環境共用。這次只會儲存變更；請關閉所有遊戲後再重新開啟。"
+            alert.alertStyle = .informational
+            alert.addButton(withTitle: "只儲存")
+            alert.addButton(withTitle: "取消")
+            guard alert.runModal() == .alertFirstButtonReturn else { return }
+        }
+        if requiresPrefixApply {
+            onSaveStarted?()
+        }
+        guard saveControls() else {
+            onSaveFailed?()
+            return
+        }
+        onCommit?(shouldStopAll, requiresPrefixApply)
+        close()
+    }
+
+    private func prefixSettingsChanged() -> Bool {
+        let value = store.value
+        let dpiValues = [96, 120, 144, 168, 192, 240]
+        let smoothingValues = ["off", "grayscale", "cleartype-rgb", "cleartype-bgr"]
+        return value.retinaMode != (retina.state == .on)
+            || value.dpi != dpiValues[max(0, dpi.indexOfSelectedItem)]
+            || value.fontPreset != (font.indexOfSelectedItem == 1 ? "mingliu" : "songti")
+            || value.fontSmoothing != smoothingValues[max(0, smoothing.indexOfSelectedItem)]
+    }
+
+    private func sessionSettingsChanged() -> Bool {
+        let value = store.value
+        if value.msync != (msync.state == .on)
+            || (value.esync ?? false) != (esync.state == .on) {
+            return true
+        }
+        for basename in deletedExecutables {
+            if value.perExecutable[basename] != nil { return true }
+        }
+        for (basename, rule) in executableDrafts {
+            let stored = value.perExecutable[basename]
+            if stored?.msync != rule.msync
+                || stored?.esync != rule.esync
+                || stored?.powerMode != rule.powerMode {
+                return true
+            }
+        }
+        return false
+    }
+}
