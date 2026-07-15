@@ -20,6 +20,22 @@ Required fields:
 }
 ```
 
-`components` is declarative only. The first implementation must resolve and
-pin installers before running Winetricks. A recipe update never mutates an
+`components` is declarative only. The offline recipe runner intentionally
+rejects recipes that declare components until each installer has a pinned
+source, license status, checksum, and re-entrant install procedure. This is
+why LF2 currently produces a clear "not available offline" error instead of
+pretending to install Winetricks packages.
+
+The current framework can validate and plan recipes, and can apply pure
+settings to one existing bottle:
+
+```sh
+scripts/cyder-recipe.sh validate recipes/defaults.json
+scripts/cyder-recipe.sh plan recipes/defaults.json bluecg
+scripts/cyder-recipe.sh apply recipes/defaults.json bluecg "$WINEPREFIX"
+```
+
+Applying writes `.cyder-recipe-settings.json` and, only after that operation
+completes successfully, `.cyder-recipe-applied.json` inside the target bottle.
+Recipe data is never executed as shell code. A recipe update never mutates an
 existing bottle without an explicit migration/rebuild operation.
