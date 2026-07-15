@@ -26,7 +26,7 @@ cyder_profile_init_layout() {
 # profile.json behind. The source path is canonicalized before it is recorded.
 cyder_profile_write_metadata() {
   local profile_dir="$1" profile_id="$2" source_path="$3"
-  local base_template="${4:-pristine}" recipe_id="${5:-}"
+  local base_template="${4:-pristine}" recipe_id="${5:-}" legacy="${6:-false}"
   [[ -d "$profile_dir" ]] || { echo "profile directory does not exist: $profile_dir" >&2; return 1; }
   [[ "$profile_id" =~ ^profile-[a-f0-9]{24}$ ]] || {
     echo "invalid profile id: $profile_id" >&2; return 1;
@@ -35,18 +35,20 @@ cyder_profile_write_metadata() {
     echo "invalid profile template: $base_template" >&2; return 1;
   }
   [[ -e "$source_path" ]] || { echo "profile source does not exist: $source_path" >&2; return 1; }
+  [[ "$legacy" == true || "$legacy" == false ]] || { echo "invalid legacy flag: $legacy" >&2; return 1; }
   command -v ruby >/dev/null 2>&1 || { echo "metadata writing requires ruby" >&2; return 1; }
   local canonical tmp
   canonical="$(cd "$(dirname "$source_path")" && printf '%s/%s' "$(pwd -P)" "$(basename "$source_path")")"
   tmp="$profile_dir/.profile.json.$$"
-  ruby -rjson - "$tmp" "$profile_id" "$canonical" "$base_template" "$recipe_id" <<'RUBY'
-target, profile_id, source_path, base_template, recipe_id = ARGV
+  ruby -rjson - "$tmp" "$profile_id" "$canonical" "$base_template" "$recipe_id" "$legacy" <<'RUBY'
+target, profile_id, source_path, base_template, recipe_id, legacy = ARGV
 metadata = {
   "schemaVersion" => 1,
   "profileId" => profile_id,
   "sourcePath" => source_path,
   "baseTemplate" => base_template,
   "recipeId" => (recipe_id.empty? ? nil : recipe_id),
+  "legacy" => (legacy == "true"),
   "layoutVersion" => 1
 }
 File.write(target, JSON.pretty_generate(metadata) + "\n")
@@ -72,9 +74,53 @@ begin
   abort "invalid base template" unless %w[pristine recommended].include?(value["baseTemplate"])
   abort "invalid layout version" unless value["layoutVersion"] == 1
   abort "invalid recipe id" unless value["recipeId"].nil? || value["recipeId"].is_a?(String)
+  abort "invalid legacy flag" unless !value.key?("legacy") || value["legacy"] == true || value["legacy"] == false
 rescue JSON::ParserError => error
   abort "invalid metadata JSON: #{error.message}"
 end
+RUBY
+}
+
+cyder_profile_write_template_manifest() {
+  local template_dir="$1" revision="$2" recipe_id="${3:-}"
+  [[ -d "$template_dir" ]] || { echo "template directory does not exist: $template_dir" >&2; return 1; }
+  [[ "$revision" =~ ^[1-9][0-9]*$ ]] || { echo "invalid template revision: $revision" >&2; return 1; }
+  [[ -z "$recipe_id" || "$recipe_id" =~ ^[a-z0-9][a-z0-9-]*$ ]] || { echo "invalid manifest recipe id: $recipe_id" >&2; return 1; }
+  command -v ruby >/dev/null 2>&1 || { echo "manifest writing requires ruby" >&2; return 1; }
+  local template_id tmp
+  template_id="$(basename "$template_dir")"
+  [[ "$template_id" == pristine || "$template_id" == recommended ]] || {
+    echo "invalid template name: $template_id" >&2; return 1;
+  }
+  tmp="$template_dir/.manifest.json.$$"
+  ruby -rjson - "$tmp" "$template_id" "$revision" "$recipe_id" <<'RUBY'
+target, template_id, revision, recipe_id = ARGV
+manifest = {
+  "schemaVersion" => 1,
+  "templateId" => template_id,
+  "revision" => Integer(revision),
+  "recipeId" => (recipe_id.empty? ? nil : recipe_id)
+}
+File.write(target, JSON.pretty_generate(manifest) + "\n")
+RUBY
+  mv "$tmp" "$template_dir/manifest.json"
+}
+
+cyder_profile_validate_template_manifest() {
+  local manifest="$1" expected_template="${2:-}"
+  [[ -f "$manifest" ]] || { echo "template manifest not found: $manifest" >&2; return 1; }
+  command -v ruby >/dev/null 2>&1 || { echo "manifest validation requires ruby" >&2; return 1; }
+  ruby -rjson - "$manifest" "$expected_template" <<'RUBY'
+path, expected_template = ARGV
+value = JSON.parse(File.read(path))
+abort "manifest must be an object" unless value.is_a?(Hash)
+%w[schemaVersion templateId revision recipeId].each { |key| abort "manifest missing #{key}" unless value.key?(key) }
+abort "unsupported manifest schema" unless value["schemaVersion"] == 1
+abort "invalid template id" unless %w[pristine recommended].include?(value["templateId"])
+abort "template id mismatch" unless expected_template.empty? || value["templateId"] == expected_template
+abort "invalid revision" unless value["revision"].is_a?(Integer) && value["revision"] >= 1
+abort "invalid recipe id" unless value["recipeId"].nil? || value["recipeId"].is_a?(String)
+abort "invalid recipe id format" unless value["recipeId"].nil? || value["recipeId"].match?(/\A[a-z0-9][a-z0-9-]*\z/)
 RUBY
 }
 
@@ -90,27 +136,105 @@ cyder_profile_assert_safe_destination() {
   esac
 }
 
+cyder_profile_cleanup_staging() {
+  local parent="$1" destination_name="$2"
+  [[ -d "$parent" ]] || return 0
+  find "$parent" -maxdepth 1 -type d -name ".cyder-clone-${destination_name}-*" -exec rm -rf {} +
+}
+
+cyder_profile_acquire_clone_lock() {
+  local lock="$1" pid
+  if mkdir "$lock" 2>/dev/null; then
+    printf '%s\n' "$$" >"$lock/pid"
+    return 0
+  fi
+  pid="$(cat "$lock/pid" 2>/dev/null || true)"
+  if [[ "$pid" =~ ^[0-9]+$ ]] && kill -0 "$pid" 2>/dev/null; then
+    echo "clone destination is busy: ${lock%.lock}" >&2
+    return 75
+  fi
+  rm -rf "$lock"
+  if ! mkdir "$lock" 2>/dev/null; then
+    echo "clone destination lock could not be acquired: $lock" >&2
+    return 75
+  fi
+  printf '%s\n' "$$" >"$lock/pid"
+}
+
+cyder_profile_release_clone_lock() {
+  local lock="$1"
+  rm -rf "$lock"
+}
+
 # Clone a bottle into destination and publish it atomically. APFS clonefile is
 # requested explicitly; ordinary copy is a portable fallback for non-APFS test
 # environments. Existing destinations are never overwritten.
 cyder_profile_clone_bottle() {
   local source="$1" destination="$2"
   cyder_profile_assert_safe_destination "$source" "$destination" || return $?
-  local parent staging method
+  local parent destination_name staging method lock
   parent="$(dirname "$destination")"
-  staging="$parent/.cyder-clone-$(basename "$destination")-$$"
+  if ! mkdir -p "$parent"; then
+    echo "clone destination parent could not be created: $parent" >&2
+    return 1
+  fi
+  destination_name="$(basename "$destination")"
+  [[ "$destination_name" =~ ^[A-Za-z0-9._-]+$ ]] || {
+    echo "invalid clone destination name: $destination_name" >&2
+    return 1
+  }
+  lock="$parent/.cyder-clone-${destination_name}.lock"
+  cyder_profile_acquire_clone_lock "$lock" || return $?
+  cyder_profile_cleanup_staging "$parent" "$destination_name"
+  staging="$parent/.cyder-clone-${destination_name}-$$"
   rm -rf "$staging"
-  mkdir -p "$parent" "$staging"
+  if ! mkdir -p "$parent" "$staging"; then
+    rm -rf "$staging"
+    cyder_profile_release_clone_lock "$lock"
+    return 1
+  fi
   if [[ "${CYDER_PROFILE_COPY_MODE:-auto}" != fallback ]] && cp -cR -p "$source"/. "$staging"/ 2>/dev/null; then
     method="apfs-clone"
   else
     rm -rf "$staging"
     mkdir -p "$staging"
-    cp -R -p "$source"/. "$staging"/
+    if ! cp -R -p "$source"/. "$staging"/; then
+      rm -rf "$staging"
+      cyder_profile_release_clone_lock "$lock"
+      echo "clone failed; staging removed" >&2
+      return 1
+    fi
     method="ordinary-copy"
   fi
   printf 'clone_method=%s\n' "$method" >&2
-  mv "$staging" "$destination"
+  if ! mv "$staging" "$destination"; then
+    rm -rf "$staging"
+    cyder_profile_release_clone_lock "$lock"
+    echo "clone publish failed; staging removed" >&2
+    return 1
+  fi
+  cyder_profile_release_clone_lock "$lock"
+}
+
+# Register an existing shared bottle without copying or modifying it. This
+# gives legacy users a profile identity while preserving the original bottle.
+cyder_profile_import_legacy_bottle() {
+  local source="$1" root="$2"
+  [[ -d "$source" ]] || { echo "legacy bottle does not exist: $source" >&2; return 1; }
+  cyder_profile_init_layout "$root"
+  local id profile_dir
+  id="$(cyder_profile_id_for_path "$source")"
+  profile_dir="$root/profiles/$id"
+  if [[ -e "$profile_dir" ]]; then
+    cyder_profile_validate_metadata "$profile_dir/profile.json" "$id"
+    return $?
+  fi
+  mkdir "$profile_dir"
+  if ! cyder_profile_write_metadata "$profile_dir" "$id" "$source" pristine "" true; then
+    rmdir "$profile_dir"
+    return 1
+  fi
+  printf '%s\n' "$id"
 }
 
 cyder_recipe_validate() {
@@ -163,9 +287,12 @@ cyder_profile_cli() {
     layout) shift; cyder_profile_init_layout "$1" ;;
     metadata) shift; cyder_profile_write_metadata "$@" ;;
     validate-metadata) shift; cyder_profile_validate_metadata "$@" ;;
+    template-manifest) shift; cyder_profile_write_template_manifest "$@" ;;
+    validate-template-manifest) shift; cyder_profile_validate_template_manifest "$@" ;;
     clone) shift; cyder_profile_clone_bottle "$1" "$2" ;;
+    import-legacy) shift; cyder_profile_import_legacy_bottle "$@" ;;
     validate-recipe) shift; cyder_recipe_validate "$1" ;;
-    *) echo "usage: cyder-profile.sh {id|layout|metadata|validate-metadata|clone|validate-recipe} ..." >&2; return 2 ;;
+    *) echo "usage: cyder-profile.sh {id|layout|metadata|validate-metadata|template-manifest|validate-template-manifest|clone|import-legacy|validate-recipe} ..." >&2; return 2 ;;
   esac
 }
 
