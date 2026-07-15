@@ -24,9 +24,11 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
     private let executableDpi = NSPopUpButton()
     private let executablePowerMode = NSPopUpButton()
     private let removeExecutableButton = NSButton()
-    private var selectedExecutable: String?
-    private var executableDrafts: [String: CyderExecutableSettings] = [:]
-    private var deletedExecutables: Set<String> = []
+    private let profileStore = CyderProfileStore(root: CyderPaths.support)
+    private var profileRecords: [String: CyderProfileRecord] = [:]
+    private var selectedProfileID: String?
+    private var profileDrafts: [String: CyderExecutableSettings] = [:]
+    private var deletedProfiles: Set<String> = []
     private let status = NSTextField(labelWithString: "設定將於下次啟動遊戲時生效")
     private var isDirty = false
 
@@ -183,11 +185,11 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
         actions.orientation = .horizontal
         actions.spacing = 8
         return tab("遊戲設定", rows: [
-            row("已設定遊戲", executableList),
+            row("已建立遊戲", executableList),
             actions,
             executableName,
             row("建議設定", executableRecommendation),
-            note("目前以 EXE 檔名比對設定；同名 EXE 會使用相同設定。選擇建議設定後仍可逐項調整。"),
+            note("設定會套用到已建立的 Profile；清單顯示 EXE 名稱與父目錄，可區分同名遊戲。選擇建議設定後仍可逐項調整。"),
             row("MSync", executableMsync),
             row("ESync", executableEsync),
             row("Retina Mode", executableRetina),
@@ -256,9 +258,10 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
         font.selectItem(at: value.fontPreset == "mingliu" ? 1 : 0)
         let smoothingValues = ["off", "grayscale", "cleartype-rgb", "cleartype-bgr"]
         smoothing.selectItem(at: smoothingValues.firstIndex(of: value.fontSmoothing) ?? 1)
-        executableDrafts = value.perExecutable
-        deletedExecutables.removeAll()
-        selectedExecutable = nil
+        profileDrafts = value.perProfile
+        profileRecords = Dictionary(uniqueKeysWithValues: profileStore.listRecords().map { ($0.profileId, $0) })
+        deletedProfiles.removeAll()
+        selectedProfileID = nil
         executableName.stringValue = "尚未選擇 EXE"
         refreshExecutableList()
         isDirty = false
@@ -297,11 +300,11 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
                 $0.dpi = dpiValues[max(0, dpi.indexOfSelectedItem)]
                 $0.fontPreset = font.indexOfSelectedItem == 1 ? "mingliu" : "songti"
                 $0.fontSmoothing = smoothingValues[max(0, smoothing.indexOfSelectedItem)]
-                for basename in deletedExecutables {
-                    $0.perExecutable.removeValue(forKey: basename)
+                for profileID in deletedProfiles {
+                    $0.perProfile.removeValue(forKey: profileID)
                 }
-                for (basename, rule) in executableDrafts where !deletedExecutables.contains(basename) {
-                    $0.perExecutable[basename] = rule
+                for (profileID, rule) in profileDrafts where !deletedProfiles.contains(profileID) {
+                    $0.perProfile[profileID] = rule
                 }
             }
             status.stringValue = "已儲存；重新啟動遊戲後生效"
@@ -337,36 +340,39 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
         panel.canChooseFiles = true
         panel.canChooseDirectories = false
         guard panel.runModal() == .OK, let url = panel.url else { return }
-        let basename = url.lastPathComponent.lowercased()
-        if executableDrafts[basename] == nil {
-            executableDrafts[basename] = defaultExecutableSettings()
+        switch profileStore.resolve(executable: url) {
+        case .ready(let record):
+            let profileID = record.profileId
+            deletedProfiles.remove(profileID)
+            selectedProfileID = profileID
+            profileRecords[profileID] = record
+            refreshExecutableList(selecting: profileID)
+            loadExecutableSettings(profileID)
+        case .uncreated(let profileID):
+            profileAlert("尚未建立遊戲 Profile", "此 EXE 尚未建立 Profile（\(profileID)）。請先由 Cyder 主流程建立遊戲環境，再回到這裡設定。", warning: false)
+        case .damaged(let profileID, let reason):
+            profileAlert("遊戲 Profile 無法使用", "Profile \(profileID) 目前損毀或不完整：\(reason)\n請先由主流程修復，再重新選擇 EXE。", warning: true)
         }
-        deletedExecutables.remove(basename)
-        selectedExecutable = basename
-        refreshExecutableList(selecting: basename)
-        loadExecutableSettings(basename, displayName: "\(url.lastPathComponent)（\(url.path)）")
-        markDirty()
     }
 
     @objc private func selectConfiguredExecutable() {
         guard executableList.isEnabled,
-              let basename = executableList.selectedItem?.title,
-              executableDrafts[basename] != nil else { return }
-        loadExecutableSettings(basename)
+              let profileID = executableList.selectedItem?.representedObject as? String else { return }
+        loadExecutableSettings(profileID)
     }
 
     @objc private func removeExecutableSettings() {
-        guard let basename = selectedExecutable else { return }
+        guard let profileID = selectedProfileID else { return }
         let alert = NSAlert()
-        alert.messageText = "移除 \(basename) 的遊戲設定？"
-        alert.informativeText = "確認儲存後，這個 EXE 將改用一般設定。"
+        alert.messageText = "移除這個遊戲的 Profile 設定？"
+        alert.informativeText = "確認儲存後，這個 Profile 將改用一般設定；Profile bottle 本身不會刪除。"
         alert.alertStyle = .warning
         alert.addButton(withTitle: "移除設定")
         alert.addButton(withTitle: "取消")
         guard alert.runModal() == .alertFirstButtonReturn else { return }
-        executableDrafts.removeValue(forKey: basename)
-        deletedExecutables.insert(basename)
-        selectedExecutable = nil
+        profileDrafts.removeValue(forKey: profileID)
+        deletedProfiles.insert(profileID)
+        selectedProfileID = nil
         executableName.stringValue = "尚未選擇 EXE"
         refreshExecutableList()
         markDirty()
@@ -389,7 +395,7 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
     }
 
     @objc private func applyExecutableRecommendation() {
-        guard let basename = selectedExecutable else {
+        guard let profileID = selectedProfileID else {
             executableRecommendation.selectItem(at: 0)
             return
         }
@@ -409,8 +415,8 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
         default:
             return
         }
-        executableDrafts[basename] = rule
-        loadExecutableSettings(basename)
+        profileDrafts[profileID] = rule
+        loadExecutableSettings(profileID)
         executableRecommendation.selectItem(at: recommendation)
         markDirty()
     }
@@ -427,25 +433,29 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
     }
 
     private func captureExecutableSettings() {
-        guard let basename = selectedExecutable else { return }
+        guard let profileID = selectedProfileID else { return }
         let dpiValues = [96, 120, 144, 168, 192, 240]
-        var rule = executableDrafts[basename] ?? defaultExecutableSettings()
+        var rule = profileDrafts[profileID] ?? defaultExecutableSettings()
         rule.msync = executableMsync.state == .on
         rule.esync = executableEsync.state == .on
         rule.retinaMode = executableRetina.state == .on
         rule.dpi = dpiValues[max(0, executableDpi.indexOfSelectedItem)]
         rule.powerMode = ["standard", "energySaving"][max(0, executablePowerMode.indexOfSelectedItem)]
-        executableDrafts[basename] = rule
-        deletedExecutables.remove(basename)
+        profileDrafts[profileID] = rule
+        deletedProfiles.remove(profileID)
     }
 
-    private func loadExecutableSettings(_ basename: String, displayName: String? = nil) {
-        guard let rule = executableDrafts[basename] else { return }
+    private func loadExecutableSettings(_ profileID: String) {
+        guard let record = profileRecords[profileID] else { return }
+        let rule = profileDrafts[profileID] ?? defaultExecutableSettings()
         let defaults = defaultExecutableSettings()
         let dpiValues = [96, 120, 144, 168, 192, 240]
-        selectedExecutable = basename
-        executableList.selectItem(withTitle: basename)
-        executableName.stringValue = displayName ?? basename
+        selectedProfileID = profileID
+        if let index = executableList.itemArray.firstIndex(where: { ($0.representedObject as? String) == profileID }) {
+            executableList.selectItem(at: index)
+        }
+        let sourceURL = URL(fileURLWithPath: record.sourcePath)
+        executableName.stringValue = "\(sourceURL.lastPathComponent)（\(sourceURL.deletingLastPathComponent().path)）"
         executableMsync.state = (rule.msync ?? defaults.msync ?? false) ? .on : .off
         executableEsync.state = (rule.esync ?? defaults.esync ?? false) ? .on : .off
         executableRetina.state = (rule.retinaMode ?? defaults.retinaMode ?? true) ? .on : .off
@@ -457,19 +467,36 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
 
     private func refreshExecutableList(selecting preferred: String? = nil) {
         executableList.removeAllItems()
-        let names = executableDrafts.keys
-            .filter { !deletedExecutables.contains($0) }
-            .sorted { $0.localizedStandardCompare($1) == .orderedAscending }
-        guard !names.isEmpty else {
-            executableList.addItem(withTitle: "尚無已設定遊戲")
+        let ids = profileRecords.keys
+            .filter { !deletedProfiles.contains($0) }
+            .sorted { profileDisplayName(profileRecords[$0]!).localizedStandardCompare(profileDisplayName(profileRecords[$1]!)) == .orderedAscending }
+        guard !ids.isEmpty else {
+            executableList.addItem(withTitle: "尚無已建立遊戲")
             executableList.isEnabled = false
             setExecutableControlsEnabled(false)
             return
         }
-        executableList.addItems(withTitles: names)
+        for profileID in ids {
+            executableList.addItem(withTitle: profileDisplayName(profileRecords[profileID]!))
+            executableList.item(at: executableList.numberOfItems - 1)?.representedObject = profileID
+        }
         executableList.isEnabled = true
-        let selected = preferred.flatMap { names.contains($0) ? $0 : nil } ?? names[0]
+        let selected = preferred.flatMap { ids.contains($0) ? $0 : nil } ?? ids[0]
         loadExecutableSettings(selected)
+    }
+
+    private func profileDisplayName(_ record: CyderProfileRecord) -> String {
+        let sourceURL = URL(fileURLWithPath: record.sourcePath)
+        return "\(sourceURL.lastPathComponent) — \(sourceURL.deletingLastPathComponent().path)"
+    }
+
+    private func profileAlert(_ title: String, _ message: String, warning: Bool) {
+        let alert = NSAlert()
+        alert.messageText = title
+        alert.informativeText = message
+        alert.alertStyle = warning ? .warning : .informational
+        alert.addButton(withTitle: "知道了")
+        alert.runModal()
     }
 
     private func setExecutableControlsEnabled(_ enabled: Bool) {
@@ -505,9 +532,9 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
         dpi.selectItem(at: 4)
         font.selectItem(at: 0)
         smoothing.selectItem(at: 1)
-        deletedExecutables.formUnion(executableDrafts.keys)
-        executableDrafts.removeAll()
-        selectedExecutable = nil
+        deletedProfiles.formUnion(profileDrafts.keys)
+        profileDrafts.removeAll()
+        selectedProfileID = nil
         executableName.stringValue = "尚未選擇 EXE"
         refreshExecutableList()
         markDirty()
@@ -586,11 +613,11 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
             || (value.esync ?? false) != (esync.state == .on) {
             return true
         }
-        for basename in deletedExecutables {
-            if value.perExecutable[basename] != nil { return true }
+        for profileID in deletedProfiles {
+            if value.perProfile[profileID] != nil { return true }
         }
-        for (basename, rule) in executableDrafts {
-            let stored = value.perExecutable[basename]
+        for (profileID, rule) in profileDrafts {
+            let stored = value.perProfile[profileID]
             if stored?.msync != rule.msync
                 || stored?.esync != rule.esync
                 || stored?.powerMode != rule.powerMode {
