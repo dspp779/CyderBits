@@ -40,6 +40,7 @@ assert_contains "$output" "reg delete HKCU\\Software\\Wine\\Fonts\\Replacements 
 assert_contains "$output" "PMingLiU /t REG_SZ /d MingLiU" "font aliases should use MingLiU"
 
 : >"$CYDER_TEST_WINE_LOG"
+rm -f "$TMP/prefix/.cyder-settings-applied.tsv"
 unset CYDER_RETINA_MODE CYDER_DPI CYDER_FONT_PRESET CYDER_FONT_SMOOTHING
 bash "$ROOT/scripts/cyder-apply-settings.sh" >/dev/null
 defaults="$(cat "$CYDER_TEST_WINE_LOG")"

@@ -14,6 +14,7 @@ WINEPREFIX="${WINEPREFIX:-}"
 }
 
 WINE=(arch -x86_64 "$WINE_INSTALL/bin/wine")
+STATE_FILE="${CYDER_SETTINGS_STATE_FILE:-$WINEPREFIX/.cyder-settings-applied.tsv}"
 retina="${CYDER_RETINA_MODE:-1}"
 dpi="${CYDER_DPI:-192}"
 font="${CYDER_FONT_PRESET:-songti}"
@@ -23,15 +24,6 @@ smoothing="${CYDER_FONT_SMOOTHING:-grayscale}"
 [[ "$dpi" =~ ^[0-9]+$ ]] && (( dpi >= 72 && dpi <= 480 )) || dpi=192
 case "$font" in songti|mingliu) ;; *) font=songti ;; esac
 case "$smoothing" in off|grayscale|cleartype-rgb|cleartype-bgr) ;; *) smoothing=grayscale ;; esac
-
-if [[ "$retina" == 1 ]]; then
-  "${WINE[@]}" reg add 'HKCU\Software\Wine\Mac Driver' /v RetinaMode /t REG_SZ /d y /f
-else
-  # RetinaMode=n is not equivalent to the Wine default on all engine builds.
-  # Remove the override so the driver can use its default non-Retina path.
-  "${WINE[@]}" reg delete 'HKCU\Software\Wine\Mac Driver' /v RetinaMode /f 2>/dev/null || true
-fi
-"${WINE[@]}" reg add 'HKCU\Control Panel\Desktop' /v LogPixels /t REG_DWORD /d "$dpi" /f
 
 case "$smoothing" in
   off)
@@ -43,10 +35,35 @@ case "$smoothing" in
   *)
     smooth=2; smooth_type=2; gamma=1400; orientation=1 ;;
 esac
-"${WINE[@]}" reg add 'HKCU\Control Panel\Desktop' /v FontSmoothing /t REG_SZ /d "$smooth" /f
-"${WINE[@]}" reg add 'HKCU\Control Panel\Desktop' /v FontSmoothingType /t REG_DWORD /d "$smooth_type" /f
-"${WINE[@]}" reg add 'HKCU\Control Panel\Desktop' /v FontSmoothingGamma /t REG_DWORD /d "$gamma" /f
-"${WINE[@]}" reg add 'HKCU\Control Panel\Desktop' /v FontSmoothingOrientation /t REG_DWORD /d "$orientation" /f
+
+# Keep a small, prefix-local ledger so confirming unchanged settings does not
+# rewrite every registry value.  This is intentionally not treated as the
+# source of truth: callers can delete it to force a complete re-apply.
+state_value() {
+  [[ -f "$STATE_FILE" ]] || return 1
+  awk -F '\t' -v key="$1" '$1 == key { print $2; found=1; exit } END { if (!found) exit 1 }' "$STATE_FILE"
+}
+apply_reg_if_changed() {
+  local key="$1" value="$2"
+  shift 2
+  if [[ "${CYDER_FORCE_SETTINGS:-0}" != 1 ]] && [[ "$(state_value "$key" 2>/dev/null || true)" == "$value" ]]; then
+    return 0
+  fi
+  "${WINE[@]}" reg "$@"
+}
+
+if [[ "$retina" == 1 ]]; then
+  apply_reg_if_changed retina "$retina" add 'HKCU\Software\Wine\Mac Driver' /v RetinaMode /t REG_SZ /d y /f
+else
+  if [[ "${CYDER_FORCE_SETTINGS:-0}" == 1 || "$(state_value retina 2>/dev/null || true)" != 0 ]]; then
+    "${WINE[@]}" reg delete 'HKCU\Software\Wine\Mac Driver' /v RetinaMode /f 2>/dev/null || true
+  fi
+fi
+apply_reg_if_changed dpi "$dpi" add 'HKCU\Control Panel\Desktop' /v LogPixels /t REG_DWORD /d "$dpi" /f
+apply_reg_if_changed smoothing "$smooth" add 'HKCU\Control Panel\Desktop' /v FontSmoothing /t REG_SZ /d "$smooth" /f
+apply_reg_if_changed smoothing-type "$smooth_type" add 'HKCU\Control Panel\Desktop' /v FontSmoothingType /t REG_DWORD /d "$smooth_type" /f
+apply_reg_if_changed smoothing-gamma "$gamma" add 'HKCU\Control Panel\Desktop' /v FontSmoothingGamma /t REG_DWORD /d "$gamma" /f
+apply_reg_if_changed smoothing-orientation "$orientation" add 'HKCU\Control Panel\Desktop' /v FontSmoothingOrientation /t REG_DWORD /d "$orientation" /f
 
 # Migrate former global/launcher overrides to the actual BlueCG game process.
 "${WINE[@]}" reg delete 'HKCU\Software\Wine\DllOverrides' /v ddraw /f 2>/dev/null || true
@@ -59,12 +76,33 @@ if [[ "$font" == songti ]]; then
 else
   face='MingLiU'
   # Do not map MingLiU to itself; let Wine/macOS resolve an actually installed font.
-  "${WINE[@]}" reg delete 'HKCU\Software\Wine\Fonts\Replacements' /v MingLiU /f 2>/dev/null || true
+  if [[ "${CYDER_FORCE_SETTINGS:-0}" == 1 || "$(state_value font 2>/dev/null || true)" != mingliu ]]; then
+    "${WINE[@]}" reg delete 'HKCU\Software\Wine\Fonts\Replacements' /v MingLiU /f 2>/dev/null || true
+  fi
 fi
 for name in PMingLiU 細明體 新細明體 SimSun NSimSun 'MS Shell Dlg' 'MS Shell Dlg 2' 'Microsoft Sans Serif'; do
-  "${WINE[@]}" reg add 'HKCU\Software\Wine\Fonts\Replacements' /v "$name" /t REG_SZ /d "$face" /f
+  apply_reg_if_changed "font-$name" "$face" add 'HKCU\Software\Wine\Fonts\Replacements' /v "$name" /t REG_SZ /d "$face" /f
 done
-"${WINE[@]}" reg add 'HKCU\Software\Wine\Fonts\Replacements' /v @PMingLiU /t REG_SZ /d "@$face" /f
-"${WINE[@]}" reg add 'HKCU\Software\Wine\Fonts\Replacements' /v @細明體 /t REG_SZ /d "@$face" /f
+apply_reg_if_changed font-at-PMingLiU "@$face" add 'HKCU\Software\Wine\Fonts\Replacements' /v @PMingLiU /t REG_SZ /d "@$face" /f
+apply_reg_if_changed font-at-細明體 "@$face" add 'HKCU\Software\Wine\Fonts\Replacements' /v @細明體 /t REG_SZ /d "@$face" /f
+
+state_dir="$(dirname "$STATE_FILE")"
+mkdir -p "$state_dir"
+state_tmp="$(mktemp "${STATE_FILE}.XXXXXX")"
+{
+  printf 'retina\t%s\n' "$retina"
+  printf 'dpi\t%s\n' "$dpi"
+  printf 'smoothing\t%s\n' "$smooth"
+  printf 'smoothing-type\t%s\n' "$smooth_type"
+  printf 'smoothing-gamma\t%s\n' "$gamma"
+  printf 'smoothing-orientation\t%s\n' "$orientation"
+  printf 'font\t%s\n' "$font"
+  for name in PMingLiU 細明體 新細明體 SimSun NSimSun 'MS Shell Dlg' 'MS Shell Dlg 2' 'Microsoft Sans Serif'; do
+    printf 'font-%s\t%s\n' "$name" "$face"
+  done
+  printf 'font-at-PMingLiU\t@%s\n' "$face"
+  printf 'font-at-細明體\t@%s\n' "$face"
+} >"$state_tmp"
+mv -f "$state_tmp" "$STATE_FILE"
 
 echo "Applied Cyder settings: Retina=$retina DPI=$dpi font=$font smoothing=$smoothing"
