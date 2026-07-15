@@ -20,16 +20,51 @@ private enum CyderPaths {
     static let bootstrapMarker = sharedBottle.appendingPathComponent(".cyder-bootstrap-v1")
 }
 
+private struct CyderExecutableSettings: Codable {
+    var arguments: [String] = []
+    var environment: [String: String] = [:]
+    var msync: Bool?
+    var esync: Bool?
+    var retinaMode: Bool?
+    var dpi: Int?
+    var fontPreset: String?
+    var fontSmoothing: String?
+    var powerMode: String?
+}
+
 private struct CyderSettings: Codable {
-    var schemaVersion = 1
+    // Schema 2 adds a revision and per-executable overrides.  Keep the global
+    // fields flat so schema 1 files remain readable by older launchers.
+    var schemaVersion = 2
+    var revision = 0
     var msync = false
     var esync: Bool? = false
     var retinaMode = true
     var dpi = 192
     var fontPreset = "songti"
     var fontSmoothing = "grayscale"
+    var perExecutable: [String: CyderExecutableSettings] = [:]
 
     static let defaults = CyderSettings()
+
+    init() {}
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        let version = try values.decodeIfPresent(Int.self, forKey: .schemaVersion) ?? 1
+        guard version <= 2 else { throw DecodingError.dataCorruptedError(
+            forKey: .schemaVersion, in: values, debugDescription: "unsupported settings schema \(version)"
+        ) }
+        schemaVersion = 2
+        revision = try values.decodeIfPresent(Int.self, forKey: .revision) ?? 0
+        msync = try values.decodeIfPresent(Bool.self, forKey: .msync) ?? false
+        esync = try values.decodeIfPresent(Bool?.self, forKey: .esync) ?? false
+        retinaMode = try values.decodeIfPresent(Bool.self, forKey: .retinaMode) ?? true
+        dpi = try values.decodeIfPresent(Int.self, forKey: .dpi) ?? 192
+        fontPreset = try values.decodeIfPresent(String.self, forKey: .fontPreset) ?? "songti"
+        fontSmoothing = try values.decodeIfPresent(String.self, forKey: .fontSmoothing) ?? "grayscale"
+        perExecutable = try values.decodeIfPresent([String: CyderExecutableSettings].self, forKey: .perExecutable) ?? [:]
+    }
 }
 
 private final class CyderSettingsStore {
@@ -47,7 +82,7 @@ private final class CyderSettingsStore {
         do {
             let data = try Data(contentsOf: url)
             let decoded = try JSONDecoder().decode(CyderSettings.self, from: data)
-            guard decoded.schemaVersion == 1 else {
+            guard decoded.schemaVersion <= 2 else {
                 CyderDiagnostics.shared.warning("unsupported settings schema=\(decoded.schemaVersion); using defaults")
                 value = .defaults
                 return
@@ -63,6 +98,8 @@ private final class CyderSettingsStore {
         CyderDiagnostics.shared.enter(.settingsSave)
         var next = value
         work(&next)
+        next.schemaVersion = 2
+        next.revision = max(value.revision + 1, next.revision)
         next.dpi = min(480, max(72, next.dpi))
         let directory = url.deletingLastPathComponent()
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -83,7 +120,30 @@ private final class CyderSettingsStore {
             "CYDER_DPI": String(value.dpi),
             "CYDER_FONT_PRESET": value.fontPreset,
             "CYDER_FONT_SMOOTHING": value.fontSmoothing,
+            "CYDER_POWER_MODE": "normal",
         ]
+    }
+
+    func environment(forExecutable basename: String) -> [String: String] {
+        var result = environment
+        guard let rule = value.perExecutable[basename] else { return result }
+        if let v = rule.msync { result["CYDER_MSYNC"] = v ? "1" : "0" }
+        if let v = rule.esync { result["CYDER_ESYNC"] = v ? "1" : "0" }
+        if let v = rule.retinaMode { result["CYDER_RETINA_MODE"] = v ? "1" : "0" }
+        if let v = rule.dpi { result["CYDER_DPI"] = String(min(480, max(72, v))) }
+        if let v = rule.fontPreset { result["CYDER_FONT_PRESET"] = v }
+        if let v = rule.fontSmoothing { result["CYDER_FONT_SMOOTHING"] = v }
+        if let v = rule.powerMode { result["CYDER_POWER_MODE"] = v == "energySaving" ? "background" : "normal" }
+        result.merge(rule.environment) { _, override in override }
+        return result
+    }
+
+    func arguments(forExecutable basename: String) -> [String] {
+        value.perExecutable[basename]?.arguments ?? []
+    }
+
+    func hasSettings(forExecutable basename: String) -> Bool {
+        value.perExecutable[basename] != nil
     }
 }
 
@@ -96,7 +156,8 @@ private extension JSONEncoder {
 }
 
 private final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate {
-    var onCommit: ((Bool) -> Void)?
+    var onCommit: ((_ shouldStopAll: Bool, _ requiresPrefixApply: Bool) -> Void)?
+    var onRebuild: (() -> Void)?
     var onSaveStarted: (() -> Void)?
     var onSaveFailed: (() -> Void)?
     var onClose: (() -> Void)?
@@ -108,18 +169,30 @@ private final class CyderSettingsWindowController: NSWindowController, NSWindowD
     private let dpi = NSPopUpButton()
     private let font = NSPopUpButton()
     private let smoothing = NSPopUpButton()
+    private let executableList = NSPopUpButton()
+    private let executableRecommendation = NSPopUpButton()
+    private let executableName = NSTextField(labelWithString: "尚未選擇 EXE")
+    private let executableMsync = NSSwitch()
+    private let executableEsync = NSSwitch()
+    private let executableRetina = NSSwitch()
+    private let executableDpi = NSPopUpButton()
+    private let executablePowerMode = NSPopUpButton()
+    private let removeExecutableButton = NSButton()
+    private var selectedExecutable: String?
+    private var executableDrafts: [String: CyderExecutableSettings] = [:]
+    private var deletedExecutables: Set<String> = []
     private let status = NSTextField(labelWithString: "設定將於下次啟動遊戲時生效")
     private var isDirty = false
 
     convenience init() {
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 620, height: 430),
+            contentRect: NSRect(x: 0, y: 0, width: 680, height: 620),
             styleMask: [.titled, .closable],
             backing: .buffered,
             defer: false
         )
         self.init(window: window)
-        window.title = "Cyder 進階設定"
+        window.title = "Cyder 偏好設定"
         window.isReleasedWhenClosed = false
         window.delegate = self
         window.center()
@@ -151,6 +224,8 @@ private final class CyderSettingsWindowController: NSWindowController, NSWindowD
         tabs.addTabViewItem(makeGeneralTab())
         tabs.addTabViewItem(makeDisplayTab())
         tabs.addTabViewItem(makeFontsTab())
+        tabs.addTabViewItem(makeExecutableTab())
+        tabs.addTabViewItem(makeAdvancedTab())
 
         status.font = .systemFont(ofSize: 11)
         status.textColor = .secondaryLabelColor
@@ -224,13 +299,74 @@ private final class CyderSettingsWindowController: NSWindowController, NSWindowD
         ])
     }
 
+    private func makeExecutableTab() -> NSTabViewItem {
+        let choose = NSButton(title: "選擇新的 EXE…", target: self, action: #selector(chooseExecutable))
+        choose.bezelStyle = .rounded
+        removeExecutableButton.title = "移除設定"
+        removeExecutableButton.target = self
+        removeExecutableButton.action = #selector(removeExecutableSettings)
+        removeExecutableButton.bezelStyle = .rounded
+        executableList.target = self
+        executableList.action = #selector(selectConfiguredExecutable)
+        executableList.widthAnchor.constraint(equalToConstant: 280).isActive = true
+        executableRecommendation.addItems(withTitles: [
+            "自行設定",
+            "世紀帝國 II（關閉 Retina）",
+            "越南大戰（96 DPI）",
+            "皮卡丘打排球（關閉同步）",
+            "水藍魔力／BlueCG（Retina、192 DPI）",
+        ])
+        executableRecommendation.target = self
+        executableRecommendation.action = #selector(applyExecutableRecommendation)
+        executableDpi.addItems(withTitles: ["100%（96 DPI）", "125%（120 DPI）", "150%（144 DPI）", "175%（168 DPI）", "200%（192 DPI）", "250%（240 DPI）"])
+        executablePowerMode.addItems(withTitles: ["標準", "省電"])
+        executableName.textColor = .secondaryLabelColor
+        executableName.lineBreakMode = .byTruncatingMiddle
+        executableName.widthAnchor.constraint(equalToConstant: 580).isActive = true
+        [executableMsync, executableEsync, executableRetina].forEach {
+            $0.target = self
+            $0.action = #selector(executableSettingChanged)
+        }
+        executableMsync.action = #selector(executableMsyncChanged)
+        executableEsync.action = #selector(executableEsyncChanged)
+        executableDpi.target = self
+        executableDpi.action = #selector(executableSettingChanged)
+        executablePowerMode.target = self
+        executablePowerMode.action = #selector(executableSettingChanged)
+        let actions = NSStackView(views: [choose, removeExecutableButton])
+        actions.orientation = .horizontal
+        actions.spacing = 8
+        return tab("遊戲設定", rows: [
+            row("已設定遊戲", executableList),
+            actions,
+            executableName,
+            row("建議設定", executableRecommendation),
+            note("目前以 EXE 檔名比對設定；同名 EXE 會使用相同設定。選擇建議設定後仍可逐項調整。"),
+            row("MSync", executableMsync),
+            row("ESync", executableEsync),
+            row("Retina Mode", executableRetina),
+            row("縮放比例 / DPI", executableDpi),
+            row("能源模式", executablePowerMode),
+            note("省電模式可以降低 CPU 使用率，但可能造成畫面卡頓。\n\nApple 晶片會優先使用節能核心，可大幅延長續航；BlueCG 測試中，能耗約為標準模式的 1/10。\n注意：M1 Pro/Max 僅有 2 個節能核心，可能極度卡頓，不建議使用。"),
+        ])
+    }
+
+    private func makeAdvancedTab() -> NSTabViewItem {
+        let rebuild = NSButton(title: "重建 Windows 遊戲環境…", target: self, action: #selector(rebuildEnvironment))
+        rebuild.bezelStyle = .rounded
+        return tab("進階", rows: [
+            rebuild,
+            note("重新建立執行 Windows 遊戲所需的環境。遊戲檔案不會刪除，但已安裝的 Windows 元件與自訂設定需要重新套用。"),
+        ])
+    }
+
     private func tab(_ title: String, rows: [NSView]) -> NSTabViewItem {
         let item = NSTabViewItem(identifier: title)
         item.label = title
         let stack = NSStackView(views: rows)
         stack.orientation = .vertical
         stack.alignment = .leading
-        stack.spacing = 16
+        stack.spacing = 12
         stack.translatesAutoresizingMaskIntoConstraints = false
         let container = NSView()
         container.addSubview(stack)
@@ -251,7 +387,7 @@ private final class CyderSettingsWindowController: NSWindowController, NSWindowD
         let stack = NSStackView(views: [label, spacer, control])
         stack.orientation = .horizontal
         stack.alignment = .centerY
-        stack.widthAnchor.constraint(equalToConstant: 530).isActive = true
+        stack.widthAnchor.constraint(equalToConstant: 590).isActive = true
         return stack
     }
 
@@ -259,8 +395,8 @@ private final class CyderSettingsWindowController: NSWindowController, NSWindowD
         let label = NSTextField(wrappingLabelWithString: text)
         label.textColor = .secondaryLabelColor
         label.font = .systemFont(ofSize: 12)
-        label.maximumNumberOfLines = 3
-        label.widthAnchor.constraint(equalToConstant: 520).isActive = true
+        label.maximumNumberOfLines = 7
+        label.widthAnchor.constraint(equalToConstant: 580).isActive = true
         return label
     }
 
@@ -274,6 +410,11 @@ private final class CyderSettingsWindowController: NSWindowController, NSWindowD
         font.selectItem(at: value.fontPreset == "mingliu" ? 1 : 0)
         let smoothingValues = ["off", "grayscale", "cleartype-rgb", "cleartype-bgr"]
         smoothing.selectItem(at: smoothingValues.firstIndex(of: value.fontSmoothing) ?? 1)
+        executableDrafts = value.perExecutable
+        deletedExecutables.removeAll()
+        selectedExecutable = nil
+        executableName.stringValue = "尚未選擇 EXE"
+        refreshExecutableList()
         isDirty = false
         status.stringValue = "設定將於確認後儲存"
         status.textColor = .secondaryLabelColor
@@ -310,6 +451,12 @@ private final class CyderSettingsWindowController: NSWindowController, NSWindowD
                 $0.dpi = dpiValues[max(0, dpi.indexOfSelectedItem)]
                 $0.fontPreset = font.indexOfSelectedItem == 1 ? "mingliu" : "songti"
                 $0.fontSmoothing = smoothingValues[max(0, smoothing.indexOfSelectedItem)]
+                for basename in deletedExecutables {
+                    $0.perExecutable.removeValue(forKey: basename)
+                }
+                for (basename, rule) in executableDrafts where !deletedExecutables.contains(basename) {
+                    $0.perExecutable[basename] = rule
+                }
             }
             status.stringValue = "已儲存；重新啟動遊戲後生效"
             status.textColor = .secondaryLabelColor
@@ -338,6 +485,165 @@ private final class CyderSettingsWindowController: NSWindowController, NSWindowD
         markDirty()
     }
 
+    @objc private func chooseExecutable() {
+        let panel = NSOpenPanel()
+        panel.title = "選擇要套用個別設定的 EXE"
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        let basename = url.lastPathComponent.lowercased()
+        if executableDrafts[basename] == nil {
+            executableDrafts[basename] = defaultExecutableSettings()
+        }
+        deletedExecutables.remove(basename)
+        selectedExecutable = basename
+        refreshExecutableList(selecting: basename)
+        loadExecutableSettings(basename, displayName: "\(url.lastPathComponent)（\(url.path)）")
+        markDirty()
+    }
+
+    @objc private func selectConfiguredExecutable() {
+        guard executableList.isEnabled,
+              let basename = executableList.selectedItem?.title,
+              executableDrafts[basename] != nil else { return }
+        loadExecutableSettings(basename)
+    }
+
+    @objc private func removeExecutableSettings() {
+        guard let basename = selectedExecutable else { return }
+        let alert = NSAlert()
+        alert.messageText = "移除 \(basename) 的遊戲設定？"
+        alert.informativeText = "確認儲存後，這個 EXE 將改用一般設定。"
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "移除設定")
+        alert.addButton(withTitle: "取消")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        executableDrafts.removeValue(forKey: basename)
+        deletedExecutables.insert(basename)
+        selectedExecutable = nil
+        executableName.stringValue = "尚未選擇 EXE"
+        refreshExecutableList()
+        markDirty()
+    }
+
+    @objc private func executableSettingChanged() {
+        executableRecommendation.selectItem(at: 0)
+        captureExecutableSettings()
+        markDirty()
+    }
+
+    @objc private func executableMsyncChanged() {
+        if executableMsync.state == .on { executableEsync.state = .off }
+        executableSettingChanged()
+    }
+
+    @objc private func executableEsyncChanged() {
+        if executableEsync.state == .on { executableMsync.state = .off }
+        executableSettingChanged()
+    }
+
+    @objc private func applyExecutableRecommendation() {
+        guard let basename = selectedExecutable else {
+            executableRecommendation.selectItem(at: 0)
+            return
+        }
+        let recommendation = executableRecommendation.indexOfSelectedItem
+        var rule = defaultExecutableSettings()
+        switch recommendation {
+        case 1:
+            rule.retinaMode = false
+        case 2:
+            rule.dpi = 96
+        case 3:
+            rule.msync = false
+            rule.esync = false
+        case 4:
+            rule.retinaMode = true
+            rule.dpi = 192
+        default:
+            return
+        }
+        executableDrafts[basename] = rule
+        loadExecutableSettings(basename)
+        executableRecommendation.selectItem(at: recommendation)
+        markDirty()
+    }
+
+    private func defaultExecutableSettings() -> CyderExecutableSettings {
+        let value = store.value
+        var rule = CyderExecutableSettings()
+        rule.msync = value.msync
+        rule.esync = value.esync ?? false
+        rule.retinaMode = value.retinaMode
+        rule.dpi = value.dpi
+        rule.powerMode = "standard"
+        return rule
+    }
+
+    private func captureExecutableSettings() {
+        guard let basename = selectedExecutable else { return }
+        let dpiValues = [96, 120, 144, 168, 192, 240]
+        var rule = executableDrafts[basename] ?? defaultExecutableSettings()
+        rule.msync = executableMsync.state == .on
+        rule.esync = executableEsync.state == .on
+        rule.retinaMode = executableRetina.state == .on
+        rule.dpi = dpiValues[max(0, executableDpi.indexOfSelectedItem)]
+        rule.powerMode = ["standard", "energySaving"][max(0, executablePowerMode.indexOfSelectedItem)]
+        executableDrafts[basename] = rule
+        deletedExecutables.remove(basename)
+    }
+
+    private func loadExecutableSettings(_ basename: String, displayName: String? = nil) {
+        guard let rule = executableDrafts[basename] else { return }
+        let defaults = defaultExecutableSettings()
+        let dpiValues = [96, 120, 144, 168, 192, 240]
+        selectedExecutable = basename
+        executableList.selectItem(withTitle: basename)
+        executableName.stringValue = displayName ?? basename
+        executableMsync.state = (rule.msync ?? defaults.msync ?? false) ? .on : .off
+        executableEsync.state = (rule.esync ?? defaults.esync ?? false) ? .on : .off
+        executableRetina.state = (rule.retinaMode ?? defaults.retinaMode ?? true) ? .on : .off
+        executableDpi.selectItem(at: dpiValues.firstIndex(of: rule.dpi ?? defaults.dpi ?? 192) ?? 4)
+        executablePowerMode.selectItem(at: rule.powerMode == "energySaving" ? 1 : 0)
+        executableRecommendation.selectItem(at: 0)
+        setExecutableControlsEnabled(true)
+    }
+
+    private func refreshExecutableList(selecting preferred: String? = nil) {
+        executableList.removeAllItems()
+        let names = executableDrafts.keys
+            .filter { !deletedExecutables.contains($0) }
+            .sorted { $0.localizedStandardCompare($1) == .orderedAscending }
+        guard !names.isEmpty else {
+            executableList.addItem(withTitle: "尚無已設定遊戲")
+            executableList.isEnabled = false
+            setExecutableControlsEnabled(false)
+            return
+        }
+        executableList.addItems(withTitles: names)
+        executableList.isEnabled = true
+        let selected = preferred.flatMap { names.contains($0) ? $0 : nil } ?? names[0]
+        loadExecutableSettings(selected)
+    }
+
+    private func setExecutableControlsEnabled(_ enabled: Bool) {
+        executableRecommendation.isEnabled = enabled
+        executableMsync.isEnabled = enabled
+        executableEsync.isEnabled = enabled
+        executableRetina.isEnabled = enabled
+        executableDpi.isEnabled = enabled
+        executablePowerMode.isEnabled = enabled
+        removeExecutableButton.isEnabled = enabled
+        if !enabled {
+            executableMsync.state = .off
+            executableEsync.state = .off
+            executableRetina.state = .off
+            executableDpi.selectItem(at: 4)
+            executablePowerMode.selectItem(at: 0)
+            executableRecommendation.selectItem(at: 0)
+        }
+    }
+
     @objc private func resetAll() {
         let alert = NSAlert()
         alert.messageText = "恢復所有進階設定？"
@@ -353,13 +659,41 @@ private final class CyderSettingsWindowController: NSWindowController, NSWindowD
         dpi.selectItem(at: 4)
         font.selectItem(at: 0)
         smoothing.selectItem(at: 1)
+        deletedExecutables.formUnion(executableDrafts.keys)
+        executableDrafts.removeAll()
+        selectedExecutable = nil
+        executableName.stringValue = "尚未選擇 EXE"
+        refreshExecutableList()
         markDirty()
     }
 
+    @objc private func rebuildEnvironment() {
+        let alert = NSAlert()
+        alert.messageText = "重建 Windows 遊戲環境？"
+        alert.informativeText = "遊戲檔案不會刪除，但已安裝的 Windows 元件與自訂設定需要重新套用。"
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "重建")
+        alert.addButton(withTitle: "取消")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        onRebuild?()
+        close()
+    }
+
     @objc private func confirmChanges() {
-        let running = hasRunningExes?() ?? false
+        // Opening Cyder only to inspect settings should be a no-op: do not
+        // rewrite the settings file or invoke the Wine launcher.
+        guard isDirty else {
+            close()
+            return
+        }
+        // Only registry-backed display/font fields need Wine to be invoked
+        // immediately. Launch policy, sync and per-EXE fields are consumed on
+        // the next launch and should not trigger another environment check.
+        let requiresPrefixApply = prefixSettingsChanged()
+        let requiresSessionRestart = sessionSettingsChanged()
+        let running = (requiresPrefixApply || requiresSessionRestart) && (hasRunningExes?() ?? false)
         var shouldStopAll = false
-        if running {
+        if running && requiresPrefixApply {
             let alert = NSAlert()
             alert.messageText = "重新開啟遊戲後會套用新設定"
             alert.informativeText = "目前有遊戲正在執行。要立即關閉所有遊戲並套用設定，還是只儲存設定、稍後自行重新開啟？未儲存的遊戲進度可能會遺失。"
@@ -370,14 +704,54 @@ private final class CyderSettingsWindowController: NSWindowController, NSWindowD
             let response = alert.runModal()
             guard response != .alertThirdButtonReturn else { return }
             shouldStopAll = response == .alertFirstButtonReturn
+        } else if running && requiresSessionRestart {
+            let alert = NSAlert()
+            alert.messageText = "關閉所有遊戲後會使用新的執行模式"
+            alert.informativeText = "能源模式與同步設定由目前的 Windows 遊戲環境共用。這次只會儲存變更；請關閉所有遊戲後再重新開啟。"
+            alert.alertStyle = .informational
+            alert.addButton(withTitle: "只儲存")
+            alert.addButton(withTitle: "取消")
+            guard alert.runModal() == .alertFirstButtonReturn else { return }
         }
-        onSaveStarted?()
+        if requiresPrefixApply {
+            onSaveStarted?()
+        }
         guard saveControls() else {
             onSaveFailed?()
             return
         }
-        onCommit?(shouldStopAll)
+        onCommit?(shouldStopAll, requiresPrefixApply)
         close()
+    }
+
+    private func prefixSettingsChanged() -> Bool {
+        let value = store.value
+        let dpiValues = [96, 120, 144, 168, 192, 240]
+        let smoothingValues = ["off", "grayscale", "cleartype-rgb", "cleartype-bgr"]
+        return value.retinaMode != (retina.state == .on)
+            || value.dpi != dpiValues[max(0, dpi.indexOfSelectedItem)]
+            || value.fontPreset != (font.indexOfSelectedItem == 1 ? "mingliu" : "songti")
+            || value.fontSmoothing != smoothingValues[max(0, smoothing.indexOfSelectedItem)]
+    }
+
+    private func sessionSettingsChanged() -> Bool {
+        let value = store.value
+        if value.msync != (msync.state == .on)
+            || (value.esync ?? false) != (esync.state == .on) {
+            return true
+        }
+        for basename in deletedExecutables {
+            if value.perExecutable[basename] != nil { return true }
+        }
+        for (basename, rule) in executableDrafts {
+            let stored = value.perExecutable[basename]
+            if stored?.msync != rule.msync
+                || stored?.esync != rule.esync
+                || stored?.powerMode != rule.powerMode {
+                return true
+            }
+        }
+        return false
     }
 }
 
@@ -503,8 +877,10 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
     private var wineActivationWaiter: WineActivationWaiter?
     private lazy var settingsController: CyderSettingsWindowController = {
         let controller = CyderSettingsWindowController()
-        controller.onCommit = { [weak self] shouldStopAll in
-            self?.prepareEnvironmentAfterSettings(stopAll: shouldStopAll)
+        controller.onCommit = { [weak self] shouldStopAll, requiresPrefixApply in
+            if requiresPrefixApply {
+                self?.prepareEnvironmentAfterSettings(stopAll: shouldStopAll)
+            }
         }
         controller.onSaveStarted = { [weak self] in
             self?.environmentPreparationInProgress = true
@@ -515,6 +891,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             self?.environmentPreparationInProgress = false
         }
         controller.hasRunningExes = { [weak self] in self?.hasRunningExes() ?? false }
+        controller.onRebuild = { [weak self] in self?.rebuildEnvironment() }
         controller.onClose = { [weak self] in
             guard let self, self.terminateWhenSettingsClose,
                   !self.environmentPreparationInProgress else { return }
@@ -522,6 +899,37 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         }
         return controller
     }()
+
+    private func rebuildEnvironment() {
+        guard let resourcePath = Bundle.main.resourcePath else { return }
+        environmentPreparationInProgress = true
+        let context = CyderLaunchContext(resourcePath: resourcePath)
+        showSetup("正在重建 Windows 遊戲環境…")
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            guard let self else { return }
+            let result = self.runLauncher(
+                context: context,
+                args: [context.launcher, "--engine-src", context.engineSrc, "--rebuild-prefix"],
+                stage: .bootstrap,
+                operation: "rebuild-prefix"
+            )
+            DispatchQueue.main.async {
+                self.hideSetup()
+                self.environmentPreparationInProgress = false
+                if result.succeeded {
+                    self.showSettings()
+                } else {
+                    self.presentFailure(self.failure(
+                        code: "CYD-REBUILD-001",
+                        stage: .bootstrap,
+                        summary: "重建 Windows 遊戲環境失敗。",
+                        result: result
+                    ))
+                    NSApp.terminate(nil)
+                }
+            }
+        }
+    }
 
     func applicationWillFinishLaunching(_ notification: Notification) {
         // Opening an EXE should not leave a Cyder Dock item behind.  The Wine
@@ -570,7 +978,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         }
         if pendingFiles.isEmpty {
             terminateWhenSettingsClose = true
-            showSettings()
+            prepareEnvironmentAndShowSettings()
         } else {
             scheduleRun()
         }
@@ -670,24 +1078,24 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
                 self.showSetup("正在關閉遊戲…")
                 self.stopAllExes()
             }
-            let preparationFailure = self.ensureEnvironment(context: context)
-            var settingsFailure = preparationFailure
-            if preparationFailure == nil {
-                self.showSetup("正在套用新設定…")
-                let result = self.runLauncher(
-                    context: context,
-                    args: [context.launcher, "--apply-settings-only"],
+            // The environment was already prepared and health-checked before
+            // the settings window was shown. Re-running ensureEnvironment here
+            // made Confirm unnecessarily repeat wine/cmd probes.
+            self.showSetup("正在套用新設定…")
+            let result = self.runLauncher(
+                context: context,
+                args: [context.launcher, "--apply-settings-only"],
+                stage: .settingsApply,
+                operation: "apply-settings"
+            )
+            var settingsFailure: CyderFailure?
+            if !result.succeeded {
+                settingsFailure = self.failure(
+                    code: "CYD-SET-002",
                     stage: .settingsApply,
-                    operation: "apply-settings"
+                    summary: "套用設定時發生問題。",
+                    result: result
                 )
-                if !result.succeeded {
-                    settingsFailure = self.failure(
-                        code: "CYD-SET-002",
-                        stage: .settingsApply,
-                        summary: "套用設定時發生問題。",
-                        result: result
-                    )
-                }
             }
             DispatchQueue.main.async {
                 self.hideSetup()
@@ -821,7 +1229,49 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
                 )
             }
         }
+        // A marker only proves that bootstrap completed once.  Probe the
+        // current prefix on every app launch so a damaged/incomplete Wine
+        // environment cannot reach the game menu silently.
+        CyderDiagnostics.shared.enter(.engineValidation)
+        showSetup("正在檢查遊戲環境…")
+        let health = runLauncher(
+            context: context,
+            args: [context.launcher, "--engine-src", context.engineSrc, "--health-check"],
+            stage: .engineValidation,
+            operation: "health-check"
+        )
+        guard health.succeeded else {
+            return failure(
+                code: "CYD-HLT-001",
+                stage: .engineValidation,
+                summary: "Windows 遊戲環境檢查失敗。",
+                result: health
+            )
+        }
         return nil
+    }
+
+    private func prepareEnvironmentAndShowSettings() {
+        guard let resourcePath = Bundle.main.resourcePath else {
+            showSettings()
+            return
+        }
+        let context = CyderLaunchContext(resourcePath: resourcePath)
+        showSetup("正在準備遊戲環境…")
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            guard let self else { return }
+            let preparationFailure = self.ensureEnvironment(context: context)
+            DispatchQueue.main.async {
+                self.hideSetup()
+                if let preparationFailure {
+                    self.presentFailure(preparationFailure)
+                    CyderDiagnostics.shared.finish(outcome: "environment-check-failed")
+                    NSApp.terminate(nil)
+                    return
+                }
+                self.showSettings()
+            }
+        }
     }
 
     private func runPhasedLaunch(context: CyderLaunchContext) -> CyderLaunchOutcome {
@@ -834,8 +1284,9 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             exePaths = [chosen]
         }
 
-        // Direct EXE launches intentionally do not install or bootstrap the
-        // environment.  That work is completed by the settings flow first.
+        // Opening an EXE is a launch-only path. It must never create or repair
+        // a prefix invisibly; the user can open Cyder.app to see setup progress
+        // and recovery errors.
         let state = environmentState(context: context)
         guard !state.needsEngine, !state.needsBootstrap else {
             return .environmentNotReady
@@ -844,6 +1295,36 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         let wine = CyderPaths.engine.appendingPathComponent("bin/wine")
         guard FileManager.default.isExecutableFile(atPath: wine.path) else {
             return .environmentNotReady
+        }
+        let basename = URL(fileURLWithPath: exePaths[0]).lastPathComponent.lowercased()
+        if CyderSettingsStore.shared.hasSettings(forExecutable: basename) {
+            if hasRunningExes() {
+                return .failure(CyderFailure(
+                    code: "CYD-GAM-001",
+                    stage: .settingsApply,
+                    summary: "無法切換這個遊戲的個別設定。",
+                    technicalDetails: "The shared Windows game environment is already in use. Close all Cyder games before launching an EXE with per-game settings.",
+                    logURL: CyderDiagnostics.shared.sessionLogURL
+                ))
+            }
+            showSetup("正在套用遊戲設定…")
+            var launchSettings = CyderSettingsStore.shared.environment(forExecutable: basename)
+            launchSettings["CYDER_STOP_WINESERVER_AFTER_SETTINGS"] = "1"
+            let applied = runLauncher(
+                context: context,
+                args: [context.launcher, "--apply-settings-only"],
+                stage: .settingsApply,
+                operation: "apply-game-settings",
+                extraEnvironment: launchSettings
+            )
+            guard applied.succeeded else {
+                return .failure(failure(
+                    code: "CYD-GAM-002",
+                    stage: .settingsApply,
+                    summary: "套用遊戲個別設定時發生問題。",
+                    result: applied
+                ))
+            }
         }
         return runDirectWine(wine: wine, exe: exePaths[0])
     }
@@ -888,10 +1369,33 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         try? FileManager.default.createSymbolicLink(at: legacyLog, withDestinationURL: launchLog)
 
         let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/arch")
-        process.arguments = ["-x86_64", wine.path, exe]
+        let environment = wineEnvironment(wine: wine, support: support, exe: exe)
+        let basename = URL(fileURLWithPath: exe).lastPathComponent.lowercased()
+        let gameArguments = CyderSettingsStore.shared.arguments(forExecutable: basename)
+        let powerMode = environment["CYDER_POWER_MODE"] ?? "normal"
+        let taskpolicy = findExecutable(named: "taskpolicy", environment: environment)
+        let hasTaskpolicy = taskpolicy != nil
+        var commandDescription: String
+        if powerMode == "background" {
+            guard let taskpolicy else {
+                return .failure(CyderFailure(
+                    code: "CYD-PWR-001",
+                    stage: .wineSpawn,
+                    summary: "無法使用省電模式啟動遊戲。",
+                    technicalDetails: "taskpolicy was not found in PATH. Select Standard energy mode and try again.",
+                    logURL: launchLog
+                ))
+            }
+            process.executableURL = taskpolicy
+            process.arguments = ["-c", "background", "/usr/bin/arch", "-x86_64", wine.path, exe] + gameArguments
+            commandDescription = "\(taskpolicy.path) \(process.arguments?.joined(separator: " ") ?? "")"
+        } else {
+            process.executableURL = URL(fileURLWithPath: "/usr/bin/arch")
+            process.arguments = ["-x86_64", wine.path, exe] + gameArguments
+            commandDescription = "arch -x86_64 \(wine.path) \(exe) \(gameArguments.joined(separator: " "))"
+        }
         process.currentDirectoryURL = URL(fileURLWithPath: exe).deletingLastPathComponent()
-        process.environment = wineEnvironment(wine: wine, support: support)
+        process.environment = environment
 
         guard let handle = FileHandle(forWritingAtPath: launchLog.path) else {
             return .failure(CyderFailure(
@@ -903,7 +1407,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             ))
         }
         let command = CyderDiagnostics.shared.redact(
-            "cmd=arch -x86_64 \(wine.path) \(exe)\nWINEPREFIX=\(prefix)\ncwd=\((exe as NSString).deletingLastPathComponent)\n\n"
+            "cmd=\(commandDescription)\npower_mode=\(powerMode)\ntaskpolicy_available=\(hasTaskpolicy)\nWINEPREFIX=\(prefix)\ncwd=\((exe as NSString).deletingLastPathComponent)\n\n"
         )
         try? handle.write(contentsOf: Data(command.utf8))
         process.standardOutput = handle
@@ -964,9 +1468,10 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         return .success
     }
 
-    private func wineEnvironment(wine: URL, support: URL) -> [String: String] {
+    private func wineEnvironment(wine: URL, support: URL, exe: String) -> [String: String] {
         var environment = ProcessInfo.processInfo.environment
-        for (key, value) in CyderSettingsStore.shared.environment {
+        let basename = URL(fileURLWithPath: exe).lastPathComponent.lowercased()
+        for (key, value) in CyderSettingsStore.shared.environment(forExecutable: basename) {
             environment[key] = value
         }
 
@@ -1189,7 +1694,8 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         context: CyderLaunchContext,
         args: [String],
         stage: CyderStage,
-        operation: String
+        operation: String,
+        extraEnvironment: [String: String] = [:]
     ) -> CyderProcessResult {
         CyderDiagnostics.shared.enter(stage, detail: operation)
         let operationLog = CyderDiagnostics.shared.makeOperationLog(operation)
@@ -1207,6 +1713,9 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         process.arguments = args
         var environment = context.environment
         for (key, value) in CyderSettingsStore.shared.environment {
+            environment[key] = value
+        }
+        for (key, value) in extraEnvironment {
             environment[key] = value
         }
         environment["CYDER_DIAGNOSTIC_SESSION_ID"] = CyderDiagnostics.shared.sessionID
@@ -1341,6 +1850,26 @@ private func resolveEngineSrc(resourcePath: String) -> String {
         }
     }
     return resourcePath + "/engine-payload"
+}
+
+private func findExecutable(named name: String, environment: [String: String]) -> URL? {
+    var directories = (environment["PATH"] ?? "")
+        .split(separator: ":", omittingEmptySubsequences: true)
+        .map(String.init)
+    // Finder-launched apps can receive a minimal PATH. Keep the standard
+    // system locations as fallbacks while still honoring the caller's order.
+    for fallback in ["/usr/local/bin", "/usr/bin", "/bin", "/usr/sbin", "/sbin"]
+        where !directories.contains(fallback) {
+        directories.append(fallback)
+    }
+    for directory in directories {
+        let candidate = URL(fileURLWithPath: directory, isDirectory: true)
+            .appendingPathComponent(name)
+        if FileManager.default.isExecutableFile(atPath: candidate.path) {
+            return candidate
+        }
+    }
+    return nil
 }
 
 private func normalizeExePaths(_ paths: [String]) -> [String] {
