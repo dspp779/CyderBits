@@ -853,6 +853,45 @@ cyder_init_bottle() {
       CYDER_OPERATION_ERROR_CODE=CYD-WINEBOOT-EXIT
     fi
   fi
+  # `wineboot` may return before wineserver has flushed system.reg/user.reg.
+  # Checking artifacts at that point produces a false CYD-WINEBOOT-ARTIFACT
+  # on real CrossOver engines. Give the flush its own bounded wait, then
+  # inspect the completed prefix.
+  if (( status == 0 )) && [[ -x "$wineserver" ]]; then
+    local wineserver_wait_timeout="${CYDER_WINESERVER_WAIT_TIMEOUT:-30}"
+    [[ "$wineserver_wait_timeout" =~ ^[0-9]+$ ]] || wineserver_wait_timeout=30
+    (( wineserver_wait_timeout > 0 )) || wineserver_wait_timeout=1
+    local wineserver_deadline=$((SECONDS + wineserver_wait_timeout))
+    echo "success_wait=wineserver -w" >>"$log_file"
+    (
+      cyder_wine_locale_exports
+      export WINEPREFIX="$bottle" WINESERVER="$wineserver"
+      cyder_run arch -x86_64 "$wineserver" -w >>"$log_file" 2>&1
+    ) &
+    local wineserver_wait_pid=$!
+    while kill -0 "$wineserver_wait_pid" 2>/dev/null; do
+      if (( SECONDS >= wineserver_deadline )); then
+        timed_out=1
+        kill -TERM "$wineserver_wait_pid" 2>/dev/null || true
+        sleep 1
+        kill -KILL "$wineserver_wait_pid" 2>/dev/null || true
+        break
+      fi
+      sleep 1
+    done
+    if (( timed_out )); then
+      wait "$wineserver_wait_pid" 2>/dev/null || true
+      status=124
+      CYDER_OPERATION_ERROR_KIND=timeout
+      CYDER_OPERATION_ERROR_CODE=CYD-WINEBOOT-TIMEOUT
+    else
+      wait "$wineserver_wait_pid" || status=$?
+      if (( status != 0 )); then
+        CYDER_OPERATION_ERROR_KIND=exit
+        CYDER_OPERATION_ERROR_CODE=CYD-WINEBOOT-EXIT
+      fi
+    fi
+  fi
   if (( status == 0 )); then
     local missing=()
     [[ -f "$bottle/system.reg" ]] || missing+=(system.reg)

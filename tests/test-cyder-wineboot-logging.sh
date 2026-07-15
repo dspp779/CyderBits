@@ -24,6 +24,9 @@ if [[ "${1:-}" == wineboot ]]; then
       : >"$WINEPREFIX/user.reg"
       : >"$WINEPREFIX/drive_c/windows/system32/kernel32.dll"
       ;;
+    delayed)
+      mkdir -p "$WINEPREFIX/drive_c/windows/system32"
+      ;;
     missing)
       mkdir -p "$WINEPREFIX/drive_c"
       ;;
@@ -42,6 +45,11 @@ SH
 cat >"$TMP/engine/bin/wineserver" <<'SH'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >>"$CYDER_WINESERVER_LOG"
+if [[ "${WINEBOOT_FAKE_MODE:-}" == delayed && "${1:-}" == -w ]]; then
+  : >"$WINEPREFIX/system.reg"
+  : >"$WINEPREFIX/user.reg"
+  : >"$WINEPREFIX/drive_c/windows/system32/kernel32.dll"
+fi
 SH
 chmod +x "$TMP/bin/arch" "$TMP/engine/bin/wine" "$TMP/engine/bin/wineserver"
 export PATH="$TMP/bin:$PATH"
@@ -75,13 +83,15 @@ run_case() {
   assert_contains "$(cat "$log")" "engine_version=" "$mode engine metadata"
   assert_contains "$(cat "$log")" "os_version=" "$mode OS metadata"
   assert_contains "$(cat "$log")" "cpu_arch=" "$mode CPU metadata"
-  if [[ "$mode" != success ]]; then
+  if [[ "$expected_status" -ne 0 ]]; then
     assert_contains "$(cat "$log")" "failure_cleanup=wineserver -k" "$mode should clean up wineserver"
     assert_contains "$(cat "$log")" "failure_cleanup=wineserver -w" "$mode should wait for wineserver exit"
   fi
 }
 
 run_case success 0 success ""
+run_case delayed 0 success ""
+assert_contains "$(cat "$TMP/delayed.stderr")" "success_wait=wineserver -w" "delayed registry flush should wait for wineserver"
 if [[ -e "$CYDER_SUPPORT/Logs/operations/wineboot-20000101-000000-1.log" ]]; then
   echo "ASSERT failed: wineboot operation logs older than 30 days should rotate" >&2
   exit 1
