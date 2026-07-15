@@ -867,6 +867,11 @@ private enum CyderLaunchOutcome {
     case failure(CyderFailure)
 }
 
+private enum CyderFailureAction: Equatable {
+    case close
+    case rebuild
+}
+
 final class CyderAppDelegate: NSObject, NSApplicationDelegate {
     private var pendingFiles: [String] = []
     private var didFinishLaunch = false
@@ -900,7 +905,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         return controller
     }()
 
-    private func rebuildEnvironment() {
+    private func rebuildEnvironment(completion: (() -> Void)? = nil) {
         guard let resourcePath = Bundle.main.resourcePath else { return }
         environmentPreparationInProgress = true
         let context = CyderLaunchContext(resourcePath: resourcePath)
@@ -917,15 +922,27 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
                 self.hideSetup()
                 self.environmentPreparationInProgress = false
                 if result.succeeded {
-                    self.showSettings()
+                    if let completion {
+                        completion()
+                    } else {
+                        self.showSettings()
+                    }
                 } else {
-                    self.presentFailure(self.failure(
+                    let rebuildFailure = self.failure(
                         code: "CYD-REBUILD-001",
                         stage: .bootstrap,
                         summary: "重建 Windows 遊戲環境失敗。",
                         result: result
-                    ))
-                    NSApp.terminate(nil)
+                    )
+                    let action = self.presentFailure(rebuildFailure, allowsRebuild: true)
+                    if action == .rebuild {
+                        self.rebuildEnvironment(completion: completion)
+                    } else if completion == nil {
+                        NSApp.terminate(nil)
+                    } else {
+                        CyderDiagnostics.shared.finish(outcome: "rebuild-failed")
+                        NSApp.terminate(nil)
+                    }
                 }
             }
         }
@@ -1264,9 +1281,19 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             DispatchQueue.main.async {
                 self.hideSetup()
                 if let preparationFailure {
-                    self.presentFailure(preparationFailure)
-                    CyderDiagnostics.shared.finish(outcome: "environment-check-failed")
-                    NSApp.terminate(nil)
+                    let action = self.presentFailure(
+                        preparationFailure,
+                        allowsRebuild: preparationFailure.code == "CYD-HLT-001"
+                            || preparationFailure.code == "CYD-BTS-001"
+                    )
+                    if action == .rebuild {
+                        self.rebuildEnvironment {
+                            self.showSettings()
+                        }
+                    } else {
+                        CyderDiagnostics.shared.finish(outcome: "environment-check-failed")
+                        NSApp.terminate(nil)
+                    }
                     return
                 }
                 self.showSettings()
@@ -1620,8 +1647,12 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    private func presentFailure(_ failure: CyderFailure) {
+    private func presentFailure(
+        _ failure: CyderFailure,
+        allowsRebuild: Bool = false
+    ) -> CyderFailureAction {
         CyderDiagnostics.shared.record(failure)
+        var action: CyderFailureAction = .close
         onMainThread {
             NSApp.setActivationPolicy(.regular)
             NSApp.activate(ignoringOtherApps: true)
@@ -1648,6 +1679,9 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             alert.addButton(withTitle: "關閉")
             alert.addButton(withTitle: "複製診斷資訊")
             alert.addButton(withTitle: "開啟記錄資料夾")
+            if allowsRebuild {
+                alert.addButton(withTitle: "重建 Windows 遊戲環境")
+            }
             let response = alert.runModal()
             if response == .alertSecondButtonReturn {
                 NSPasteboard.general.clearContents()
@@ -1658,8 +1692,11 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             } else if response == .alertThirdButtonReturn {
                 let selected = failure.logURL ?? CyderDiagnostics.shared.sessionLogURL
                 NSWorkspace.shared.activateFileViewerSelecting([selected])
+            } else if allowsRebuild && response == .alertFourthButtonReturn {
+                action = .rebuild
             }
         }
+        return action
     }
 
     private func chooseExeOnMainThread() -> String? {
