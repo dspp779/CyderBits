@@ -3,7 +3,25 @@
 > 日期：2026-07-15  
 > 基準：`main` @ `a08b565`（Cyder v0.3 後）  
 > 用途：確認現況、記錄架構決策，並切成可交付給多個 Agent 的任務  
-> 狀態：規劃完成，部分任務實作中
+> 狀態：核心功能已實作，進入整合與實機驗收（2026-07-16 更新）
+
+## 0. 目前開發狀況（2026-07-16）
+
+| 任務 | 狀態 | 已完成 | 尚待處理 |
+|---|---|---|---|
+| T00 Swift 拆分 | 完成 | Paths、Settings、Launch support、Settings UI 已拆檔，build source 與 harness 已更新 | Universal app 最終打包驗收併入 T10 |
+| T01 wineboot 診斷 | 程式完成 | 獨立／輪替 log、last-wineboot、exit／signal／timeout／產物缺失分類、失敗清理 | Intel Mac 真實失敗重現與對話框驗收 |
+| T02 Prefix lifecycle | 程式完成 | staging、artifact probe、安全重建、backup／rollback、active session 保護 | 真實 Wine 損毀後 rollback 實機驗收 |
+| T03 App 啟動／修復 UI | 程式完成 | 啟動前準備與檢查、失敗重試／重建／診斷、進階重建入口 | Intel 與 Apple Silicon 手動操作驗收 |
+| T04 差異套用 | 完成 | 未修改確認 no-op、逐欄位 prefix ledger、部分失敗續跑、force 重套、移除 BlueCG 全域硬編碼 | ledger 採 bottle 內 `.cyder-settings-applied.tsv`，不再另做 settings.json 的 `appliedByBottle` |
+| T05 Template／Profile backend | 程式完成 | pristine／recommended versioned template、APFS clone fallback、path-based Profile、staging publish、legacy shared import | security-scoped bookmark／EXE 移動後重新綁定 |
+| T06 遊戲設定與路由 | 核心完成 | Profile 清單、同名路徑區分、獨立 bottle、DPI／sync／Retina／能源／env／args，安全逐項傳遞 | bookmark、launcher＋game 多 EXE 共用 Profile、實機 UX 驗收 |
+| T07 Recipe | 框架完成 | 已知遊戲 recipe、validate／plan／offline apply、目標 bottle 隔離 | cnc-ddraw 與 LF2 元件仍需固定來源、授權、checksum 與可重入安裝器 |
+| T08 Session guard | 程式完成 | 同 bottle 模式衝突阻擋、不同 bottle 並行、stale lock 回收、Native bridge | 真實多遊戲並行與 MSync 回歸 |
+| T09 能源模式 | 完成 | 標準／省電 UI、`taskpolicy -c background`、量測腳本與 BlueCG 報告 | Intel、M1／M1 Pro／Max 與更多遊戲長時間回歸 |
+| T10 發布驗收 | 進行中 | schema 1 相容、shared bottle 相容、主要自動測試已建立 | Universal app 打包、兩種 CPU smoke test、release notes 與簽署驗證 |
+
+目前不把 T07 的外部元件安裝與 T05/T06 的 bookmark 宣稱為完成。它們需要來源／授權決策或 macOS security-scoped bookmark 的資料遷移設計，應另開後續任務，避免阻塞本輪核心功能實機驗收。
 
 ## 1. 建議結論
 
