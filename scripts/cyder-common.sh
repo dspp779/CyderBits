@@ -1278,12 +1278,41 @@ cyder_session_dir() {
 
 cyder_session_acquire() {
   local prefix="$1" msync="${2:-0}" esync="${3:-0}" power="${4:-normal}"
-  local dir lock file pid existing mode
+  local dir lock file pid existing mode attempts=0 max_attempts="${CYDER_SESSION_LOCK_ATTEMPTS:-250}" owner
+  [[ "$max_attempts" =~ ^[1-9][0-9]*$ ]] || {
+    echo "invalid CYDER_SESSION_LOCK_ATTEMPTS: $max_attempts" >&2
+    return 2
+  }
+  local missing_pid_attempts=0
   dir="$(cyder_session_dir "$prefix")"
   mkdir -p "$dir"
   lock="${dir}/.lock"
-  while ! mkdir "$lock" 2>/dev/null; do sleep 0.02; done
-  trap 'rmdir "$lock" 2>/dev/null || true' RETURN
+  while ! mkdir "$lock" 2>/dev/null; do
+    owner="$(cat "$lock/pid" 2>/dev/null || true)"
+    if [[ ! "$owner" =~ ^[0-9]+$ ]]; then
+      missing_pid_attempts=$((missing_pid_attempts + 1))
+      if (( missing_pid_attempts >= 5 )); then
+        rm -rf "$lock"
+        continue
+      fi
+    else
+      missing_pid_attempts=0
+      if ! kill -0 "$owner" 2>/dev/null; then
+        rm -rf "$lock"
+        continue
+      fi
+    fi
+    (( attempts++ >= max_attempts )) && {
+      echo "timed out acquiring Cyder session lock" >&2
+      return 75
+    }
+    sleep 0.02
+  done
+  if ! printf '%s\n' "$$" >"$lock/pid"; then
+    rm -rf "$lock"
+    echo "failed to initialize Cyder session lock" >&2
+    return 1
+  fi
   for file in "$dir"/*.session; do
     [[ -f "$file" ]] || continue
     pid="$(sed -n 's/^pid=//p' "$file" | head -1)"
@@ -1294,8 +1323,7 @@ cyder_session_acquire() {
     mode="$(sed -n 's/^mode=//p' "$file" | head -1)"
     existing="$(sed -n 's/^sync=//p' "$file" | head -1)"
     if [[ "$existing" != "msync=${msync};esync=${esync};power=${power}" ]]; then
-      rmdir "$lock" 2>/dev/null || true
-      trap - RETURN
+      rm -rf "$lock"
       echo "incompatible Cyder bottle session (pid=$pid mode=$mode)" >&2
       return 75
     fi
@@ -1303,9 +1331,13 @@ cyder_session_acquire() {
   file="$dir/$$-${RANDOM:-0}-$(date +%s).session"
   # Keep compatibility with the macOS system Bash, which does not provide
   # BASHPID. The launcher process remains alive for the whole Wine session.
-  printf 'pid=%s\nsync=msync=%s;esync=%s;power=%s\nmode=%s\n' "$$" "$msync" "$esync" "$power" "$power" >"$file"
-  rmdir "$lock" 2>/dev/null || true
-  trap - RETURN
+  if ! printf 'pid=%s\nsync=msync=%s;esync=%s;power=%s\nmode=%s\n' \
+      "$$" "$msync" "$esync" "$power" "$power" >"$file"; then
+    rm -rf "$lock"
+    echo "failed to write Cyder session state" >&2
+    return 1
+  fi
+  rm -rf "$lock"
   CYDER_SESSION_FILE="$file"
   export CYDER_SESSION_FILE
 }
