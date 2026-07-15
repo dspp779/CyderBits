@@ -141,7 +141,7 @@ begin
   abort "invalid source path" unless value["sourcePath"].is_a?(String) && !value["sourcePath"].empty?
   abort "invalid base template" unless %w[pristine recommended].include?(value["baseTemplate"])
   abort "invalid layout version" unless value["layoutVersion"] == 1
-  abort "invalid recipe id" unless value["recipeId"].nil? || value["recipeId"].is_a?(String)
+  abort "invalid recipe id" unless value["recipeId"].nil? || (value["recipeId"].is_a?(String) && value["recipeId"].match?(/\A[a-z0-9][a-z0-9-]*\z/))
   abort "invalid legacy flag" unless !value.key?("legacy") || value["legacy"] == true || value["legacy"] == false
 rescue JSON::ParserError => error
   abort "invalid metadata JSON: #{error.message}"
@@ -150,25 +150,28 @@ RUBY
 }
 
 cyder_profile_write_template_manifest() {
-  local template_dir="$1" revision="$2" recipe_id="${3:-}"
+  local template_dir="$1" revision="$2" recipe_id="${3:-}" engine_version="${4:-}"
   [[ -d "$template_dir" ]] || { echo "template directory does not exist: $template_dir" >&2; return 1; }
   [[ "$revision" =~ ^[1-9][0-9]*$ ]] || { echo "invalid template revision: $revision" >&2; return 1; }
   [[ -z "$recipe_id" || "$recipe_id" =~ ^[a-z0-9][a-z0-9-]*$ ]] || { echo "invalid manifest recipe id: $recipe_id" >&2; return 1; }
   command -v ruby >/dev/null 2>&1 || { echo "manifest writing requires ruby" >&2; return 1; }
   local template_id tmp
-  template_id="$(basename "$template_dir")"
+  template_id="${5:-$(basename "$template_dir")}"
   [[ "$template_id" == pristine || "$template_id" == recommended ]] || {
     echo "invalid template name: $template_id" >&2; return 1;
   }
   tmp="$template_dir/.manifest.json.$$"
-  ruby -rjson - "$tmp" "$template_id" "$revision" "$recipe_id" <<'RUBY'
-target, template_id, revision, recipe_id = ARGV
+  local schema_version=1
+  [[ -n "$engine_version" ]] && schema_version=2
+  ruby -rjson - "$tmp" "$template_id" "$revision" "$recipe_id" "$engine_version" "$schema_version" <<'RUBY'
+target, template_id, revision, recipe_id, engine_version, schema_version = ARGV
 manifest = {
-  "schemaVersion" => 1,
+  "schemaVersion" => Integer(schema_version),
   "templateId" => template_id,
   "revision" => Integer(revision),
   "recipeId" => (recipe_id.empty? ? nil : recipe_id)
 }
+manifest["engineVersion"] = engine_version unless engine_version.empty?
 File.write(target, JSON.pretty_generate(manifest) + "\n")
 RUBY
   mv "$tmp" "$template_dir/manifest.json"
@@ -182,13 +185,88 @@ cyder_profile_validate_template_manifest() {
 path, expected_template = ARGV
 value = JSON.parse(File.read(path))
 abort "manifest must be an object" unless value.is_a?(Hash)
-%w[schemaVersion templateId revision recipeId].each { |key| abort "manifest missing #{key}" unless value.key?(key) }
-abort "unsupported manifest schema" unless value["schemaVersion"] == 1
+%w[schemaVersion templateId revision].each { |key| abort "manifest missing #{key}" unless value.key?(key) }
+abort "unsupported manifest schema" unless [1, 2].include?(value["schemaVersion"])
 abort "invalid template id" unless %w[pristine recommended].include?(value["templateId"])
 abort "template id mismatch" unless expected_template.empty? || value["templateId"] == expected_template
 abort "invalid revision" unless value["revision"].is_a?(Integer) && value["revision"] >= 1
-abort "invalid recipe id" unless value["recipeId"].nil? || value["recipeId"].is_a?(String)
-abort "invalid recipe id format" unless value["recipeId"].nil? || value["recipeId"].match?(/\A[a-z0-9][a-z0-9-]*\z/)
+abort "invalid recipe id" if value.key?("recipeId") && !value["recipeId"].nil? && (!value["recipeId"].is_a?(String) || !value["recipeId"].match?(/\A[a-z0-9][a-z0-9-]*\z/))
+abort "invalid engine version" if value.key?("engineVersion") && (!value["engineVersion"].is_a?(String) || value["engineVersion"].empty?)
+abort "schema-2 manifest requires engine version" if value["schemaVersion"] == 2 && (!value.key?("engineVersion") || !value["engineVersion"].is_a?(String) || value["engineVersion"].empty?)
+RUBY
+}
+
+# Atomically publish a pristine or recommended template. Callers must stop
+# Wine and verify that the source prefix is inactive before invoking this API.
+# Existing templates remain in place until the complete clone and manifest are
+# ready; an interrupted copy therefore cannot replace a usable template.
+cyder_profile_publish_template() {
+  local source="$1" template_name="$2" root="$3" revision="$4" engine_version="$5" recipe_id="${6:-}"
+  [[ -d "$source" ]] || { echo "template source does not exist: $source" >&2; return 1; }
+  [[ "$template_name" == pristine || "$template_name" == recommended ]] || {
+    echo "template must be pristine or recommended: $template_name" >&2
+    return 1
+  }
+  [[ "$revision" =~ ^[1-9][0-9]*$ ]] || { echo "invalid template revision: $revision" >&2; return 1; }
+  [[ -n "$engine_version" ]] || { echo "engine version is required" >&2; return 1; }
+  cyder_profile_init_layout "$root"
+  local parent="$root/templates" destination="$root/templates/$template_name"
+  local lock="$parent/.cyder-template-${template_name}.lock"
+  local staging="$parent/.cyder-template-${template_name}-$$"
+  local backup="$parent/.cyder-template-${template_name}-old-$$"
+  cyder_profile_acquire_clone_lock "$lock" || return $?
+  find "$parent" -maxdepth 1 -type d -name ".cyder-template-${template_name}-*" -exec rm -rf {} +
+  rm -rf "$staging" "$backup"
+  if ! cyder_profile_clone_bottle "$source" "$staging"; then
+    cyder_profile_release_clone_lock "$lock"
+    return 1
+  fi
+  if ! cyder_profile_write_template_manifest "$staging" "$revision" "$recipe_id" "$engine_version" "$template_name"; then
+    rm -rf "$staging"
+    cyder_profile_release_clone_lock "$lock"
+    return 1
+  fi
+  [[ ! -L "$destination" ]] || {
+    rm -rf "$staging"
+    cyder_profile_release_clone_lock "$lock"
+    echo "template destination must not be a symlink: $destination" >&2
+    return 1
+  }
+  if [[ -e "$destination" ]]; then
+    if ! mv "$destination" "$backup"; then
+      rm -rf "$staging"
+      cyder_profile_release_clone_lock "$lock"
+      return 1
+    fi
+  fi
+  if ! mv "$staging" "$destination"; then
+    rm -rf "$staging"
+    if [[ -e "$backup" ]]; then mv "$backup" "$destination" || true; fi
+    cyder_profile_release_clone_lock "$lock"
+    return 1
+  fi
+  rm -rf "$backup"
+  cyder_profile_release_clone_lock "$lock"
+  printf '%s\n' "$destination"
+}
+
+# Return success only when a template exists and exactly matches the requested
+# revision and engine version. Legacy schema-1 manifests remain readable but
+# are not considered ready until republished with engineVersion.
+cyder_profile_template_ready() {
+  local template_name="$1" root="$2" revision="$3" engine_version="$4"
+  local manifest="$root/templates/$template_name/manifest.json"
+  [[ "$template_name" == pristine || "$template_name" == recommended ]] || return 1
+  [[ ! -L "$root/templates/$template_name" && ! -L "$manifest" ]] || return 1
+  [[ -f "$manifest" ]] || return 1
+  cyder_profile_validate_template_manifest "$manifest" "$template_name" >/dev/null 2>&1 || return 1
+  command -v ruby >/dev/null 2>&1 || return 1
+  ruby -rjson - "$manifest" "$revision" "$engine_version" <<'RUBY'
+path, revision, engine_version = ARGV
+value = JSON.parse(File.read(path))
+exit 1 unless value["revision"] == Integer(revision)
+exit 1 unless value["engineVersion"] == engine_version
+exit 0
 RUBY
 }
 
@@ -359,10 +437,12 @@ cyder_profile_cli() {
     validate-metadata) shift; cyder_profile_validate_metadata "$@" ;;
     template-manifest) shift; cyder_profile_write_template_manifest "$@" ;;
     validate-template-manifest) shift; cyder_profile_validate_template_manifest "$@" ;;
+    publish-template) shift; cyder_profile_publish_template "$@" ;;
+    template-ready) shift; cyder_profile_template_ready "$@" ;;
     clone) shift; cyder_profile_clone_bottle "$1" "$2" ;;
     import-legacy) shift; cyder_profile_import_legacy_bottle "$@" ;;
     validate-recipe) shift; cyder_recipe_validate "$1" ;;
-    *) echo "usage: cyder-profile.sh {id|layout|create|resolve|metadata|validate-metadata|template-manifest|validate-template-manifest|clone|import-legacy|validate-recipe} ..." >&2; return 2 ;;
+    *) echo "usage: cyder-profile.sh {id|layout|create|resolve|metadata|validate-metadata|template-manifest|validate-template-manifest|publish-template|template-ready|clone|import-legacy|validate-recipe} ..." >&2; return 2 ;;
   esac
 }
 
