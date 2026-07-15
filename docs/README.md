@@ -56,6 +56,7 @@
 | [superpowers/plans/2026-07-06-wine-engine-slim-phase1.md](superpowers/plans/2026-07-06-wine-engine-slim-phase1.md) | Engine 瘦身 Phase 1 實作計畫 |
 | [superpowers/specs/2026-07-06-cyderbits-bash-design.md](superpowers/specs/2026-07-06-cyderbits-bash-design.md) | **CyderBits Bash 化** — 打包器 / game app 去 Python |
 | [superpowers/plans/2026-07-06-cyderbits-bash-phase1.md](superpowers/plans/2026-07-06-cyderbits-bash-phase1.md) | CyderBits Bash 化 Phase 1 實作計畫 |
+| [superpowers/plans/2026-07-15-cyder-initialization-multigame-power.md](superpowers/plans/2026-07-15-cyder-initialization-multigame-power.md) | Cyder 初始化可靠性、每遊戲 Profile／Bottle、Sync 隔離與省電模式任務切分 |
 
 ## 未來開發路線
 
