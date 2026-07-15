@@ -2,7 +2,7 @@ import Cocoa
 import Foundation
 
 final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate {
-    var onCommit: ((_ shouldStopAll: Bool, _ requiresPrefixApply: Bool) -> Void)?
+    var onCommit: ((_ shouldStopAll: Bool, _ requiresPrefixApply: Bool, _ forceReapply: Bool) -> Void)?
     var onRebuild: (() -> Void)?
     var onSaveStarted: (() -> Void)?
     var onSaveFailed: (() -> Void)?
@@ -26,6 +26,7 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
     private let executableEnvironment = NSTextField()
     private let executableArguments = NSTextField()
     private let removeExecutableButton = NSButton()
+    private let forceReapply = NSButton(checkboxWithTitle: "重新套用所有設定（疑難排解）", target: nil, action: nil)
     private let profileStore = CyderProfileStore(root: CyderPaths.support)
     private var profileRecords: [String: CyderProfileRecord] = [:]
     private var selectedProfileID: String?
@@ -214,9 +215,13 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
     private func makeAdvancedTab() -> NSTabViewItem {
         let rebuild = NSButton(title: "重建 Windows 遊戲環境…", target: self, action: #selector(rebuildEnvironment))
         rebuild.bezelStyle = .rounded
+        forceReapply.target = self
+        forceReapply.action = #selector(forceReapplyChanged)
         return tab("進階", rows: [
             rebuild,
             note("重新建立執行 Windows 遊戲所需的環境。遊戲檔案不會刪除，但已安裝的 Windows 元件與自訂設定需要重新套用。"),
+            forceReapply,
+            note("勾選後，即使設定值沒有變更，也會重新寫入所有設定；一般情況不需要使用。"),
         ])
     }
 
@@ -279,6 +284,7 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
         isDirty = false
         status.stringValue = "設定將於確認後儲存"
         status.textColor = .secondaryLabelColor
+        forceReapply.state = .off
     }
 
     func prepareForDisplay() {
@@ -289,6 +295,10 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
         isDirty = true
         status.stringValue = "有尚未儲存的變更"
         status.textColor = .systemOrange
+    }
+
+    @objc private func forceReapplyChanged() {
+        markDirty()
     }
 
     @objc private func msyncChanged() {
@@ -568,6 +578,7 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
         dpi.selectItem(at: 4)
         font.selectItem(at: 0)
         smoothing.selectItem(at: 1)
+        forceReapply.state = .off
         deletedProfiles.formUnion(profileDrafts.keys)
         profileDrafts.removeAll()
         selectedProfileID = nil
@@ -591,14 +602,15 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
     @objc private func confirmChanges() {
         // Opening Cyder only to inspect settings should be a no-op: do not
         // rewrite the settings file or invoke the Wine launcher.
-        guard isDirty else {
+        let force = forceReapply.state == .on
+        guard isDirty || force else {
             close()
             return
         }
         // Only registry-backed display/font fields need Wine to be invoked
         // immediately. Launch policy, sync and per-EXE fields are consumed on
         // the next launch and should not trigger another environment check.
-        let requiresPrefixApply = prefixSettingsChanged()
+        let requiresPrefixApply = prefixSettingsChanged() || force
         let requiresSessionRestart = sessionSettingsChanged()
         let running = (requiresPrefixApply || requiresSessionRestart) && (hasRunningExes?() ?? false)
         var shouldStopAll = false
@@ -629,7 +641,7 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
             onSaveFailed?()
             return
         }
-        onCommit?(shouldStopAll, requiresPrefixApply)
+        onCommit?(shouldStopAll, requiresPrefixApply, force)
         close()
     }
 

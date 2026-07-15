@@ -25,9 +25,9 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
     private var wineActivationWaiter: WineActivationWaiter?
     private lazy var settingsController: CyderSettingsWindowController = {
         let controller = CyderSettingsWindowController()
-        controller.onCommit = { [weak self] shouldStopAll, requiresPrefixApply in
+        controller.onCommit = { [weak self] shouldStopAll, requiresPrefixApply, forceReapply in
             if requiresPrefixApply {
-                self?.prepareEnvironmentAfterSettings(stopAll: shouldStopAll)
+                self?.prepareEnvironmentAfterSettings(stopAll: shouldStopAll, forceReapply: forceReapply)
             }
         }
         controller.onSaveStarted = { [weak self] in
@@ -228,7 +228,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         ).status == 0
     }
 
-    private func prepareEnvironmentAfterSettings(stopAll: Bool) {
+    private func prepareEnvironmentAfterSettings(stopAll: Bool, forceReapply: Bool) {
         guard terminateWhenSettingsClose,
               let resourcePath = Bundle.main.resourcePath else { return }
         let context = CyderLaunchContext(resourcePath: resourcePath)
@@ -246,7 +246,8 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
                 context: context,
                 args: [context.launcher, "--apply-settings-only"],
                 stage: .settingsApply,
-                operation: "apply-settings"
+                operation: "apply-settings",
+                extraEnvironment: forceReapply ? ["CYDER_FORCE_SETTINGS": "1"] : [:]
             )
             var settingsFailure: CyderFailure?
             if !result.succeeded {
