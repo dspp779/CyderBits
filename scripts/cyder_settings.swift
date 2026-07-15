@@ -105,9 +105,22 @@ struct CyderSettings: Codable {
         value.range(of: "^[A-Za-z_][A-Za-z0-9_]*$", options: .regularExpression) != nil
     }
 
+    // Values are passed to Process.environment/arguments, never evaluated as
+    // shell syntax. Reject control characters that could corrupt logs or
+    // bridge files while preserving spaces, Unicode, quotes and punctuation.
+    static func isSafeLaunchValue(_ value: String) -> Bool {
+        guard value.utf8.count <= 4096 else { return false }
+        return !value.unicodeScalars.contains { scalar in
+            scalar.value < 0x20 || scalar.value == 0x7f
+        }
+    }
+
     static func sanitized(_ value: CyderExecutableSettings) -> CyderExecutableSettings {
         var result = value
-        result.environment = value.environment.filter { isValidEnvironmentKey($0.key) }
+        result.environment = value.environment.filter {
+            isValidEnvironmentKey($0.key) && isSafeLaunchValue($0.value)
+        }
+        result.arguments = value.arguments.filter { isSafeLaunchValue($0) }
         if let dpi = value.dpi { result.dpi = min(480, max(72, dpi)) }
         if let preset = value.fontPreset, !["songti", "mingliu"].contains(preset) {
             result.fontPreset = nil

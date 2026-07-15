@@ -12,6 +12,8 @@ struct CyderSettingsHarness {
         precondition(profileEnvironment["PROFILE_VALUE"] == "yes")
         precondition(profileEnvironment["LEGACY_VALUE"] == nil)
         precondition(profileEnvironment["BAD-KEY"] == nil)
+        precondition(profileEnvironment["UNICODE_QUOTE"] == "中文 \"測試\"")
+        precondition(profileEnvironment["CONTROL"] == nil)
         precondition(profileEnvironment["CYDER_POWER_MODE"] == "normal")
         precondition(store.arguments(profileID: profileID, legacyBasename: "game.exe") == ["--profile"])
         precondition(store.hasSettings(profileID: profileID, legacyBasename: "game.exe"))
@@ -26,7 +28,7 @@ struct CyderSettingsHarness {
             settings.dpi = 144
             settings.msync = true
             settings.perExecutable["game.exe"] = CyderExecutableSettings(
-                arguments: ["--windowed"], environment: ["GAME_PROFILE": "test"],
+                arguments: ["--windowed", "中文 \"測試\"", "bad\nvalue"], environment: ["GAME_PROFILE": "test"],
                 msync: false, esync: true, retinaMode: false, dpi: 96,
                 powerMode: "energySaving"
             )
@@ -38,7 +40,7 @@ struct CyderSettingsHarness {
         precondition(legacy["CYDER_MSYNC"] == "0")
         precondition(legacy["CYDER_POWER_MODE"] == "background")
         precondition(legacy["GAME_PROFILE"] == "test")
-        precondition(store.arguments(profileID: nil, legacyBasename: "game.exe") == ["--windowed"])
+        precondition(store.arguments(profileID: nil, legacyBasename: "game.exe") == ["--windowed", "中文 \"測試\""])
         let saved = try JSONSerialization.jsonObject(with: Data(contentsOf: path)) as! [String: Any]
         let profiles = saved["perProfile"] as! [String: Any]
         precondition(profiles["not-a-profile"] == nil)

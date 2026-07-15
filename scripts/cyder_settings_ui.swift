@@ -23,6 +23,8 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
     private let executableRetina = NSSwitch()
     private let executableDpi = NSPopUpButton()
     private let executablePowerMode = NSPopUpButton()
+    private let executableEnvironment = NSTextField()
+    private let executableArguments = NSTextField()
     private let removeExecutableButton = NSButton()
     private let profileStore = CyderProfileStore(root: CyderPaths.support)
     private var profileRecords: [String: CyderProfileRecord] = [:]
@@ -181,6 +183,13 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
         executableDpi.action = #selector(executableSettingChanged)
         executablePowerMode.target = self
         executablePowerMode.action = #selector(executableSettingChanged)
+        executableEnvironment.placeholderString = "KEY=value；多組以 ; 分隔"
+        executableArguments.placeholderString = "參數1 | 參數2；不使用 shell 語法"
+        [executableEnvironment, executableArguments].forEach {
+            $0.target = self
+            $0.action = #selector(executableSettingChanged)
+            $0.widthAnchor.constraint(equalToConstant: 360).isActive = true
+        }
         let actions = NSStackView(views: [choose, removeExecutableButton])
         actions.orientation = .horizontal
         actions.spacing = 8
@@ -195,6 +204,9 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
             row("Retina Mode", executableRetina),
             row("縮放比例 / DPI", executableDpi),
             row("能源模式", executablePowerMode),
+            row("環境變數", executableEnvironment),
+            row("命令列參數", executableArguments),
+            note("環境變數請使用 KEY=value；命令列參數以 | 分隔。Cyder 會逐項傳遞，不會經過 shell eval。"),
             note("省電模式可以降低 CPU 使用率，但可能造成畫面卡頓。\n\nApple 晶片會優先使用節能核心，可大幅延長續航；BlueCG 測試中，能耗約為標準模式的 1/10。\n注意：M1 Pro/Max 僅有 2 個節能核心，可能極度卡頓，不建議使用。"),
         ])
     }
@@ -441,6 +453,21 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
         rule.retinaMode = executableRetina.state == .on
         rule.dpi = dpiValues[max(0, executableDpi.indexOfSelectedItem)]
         rule.powerMode = ["standard", "energySaving"][max(0, executablePowerMode.indexOfSelectedItem)]
+        rule.environment = executableEnvironment.stringValue
+            .split(separator: ";", omittingEmptySubsequences: true)
+            .compactMap { entry -> (String, String)? in
+                guard let separator = entry.firstIndex(of: "=") else { return nil }
+                let key = String(entry[..<separator]).trimmingCharacters(in: .whitespaces)
+                let value = String(entry[entry.index(after: separator)...])
+                return (key, value)
+            }
+            .reduce(into: [String: String]()) { result, item in
+                result[item.0] = item.1
+            }
+        rule.arguments = executableArguments.stringValue
+            .components(separatedBy: "|")
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
         profileDrafts[profileID] = rule
         deletedProfiles.remove(profileID)
     }
@@ -461,6 +488,11 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
         executableRetina.state = (rule.retinaMode ?? defaults.retinaMode ?? true) ? .on : .off
         executableDpi.selectItem(at: dpiValues.firstIndex(of: rule.dpi ?? defaults.dpi ?? 192) ?? 4)
         executablePowerMode.selectItem(at: rule.powerMode == "energySaving" ? 1 : 0)
+        executableEnvironment.stringValue = rule.environment
+            .sorted { $0.key < $1.key }
+            .map { "\($0.key)=\($0.value)" }
+            .joined(separator: ";")
+        executableArguments.stringValue = rule.arguments.joined(separator: " | ")
         executableRecommendation.selectItem(at: 0)
         setExecutableControlsEnabled(true)
     }
@@ -506,6 +538,8 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
         executableRetina.isEnabled = enabled
         executableDpi.isEnabled = enabled
         executablePowerMode.isEnabled = enabled
+        executableEnvironment.isEnabled = enabled
+        executableArguments.isEnabled = enabled
         removeExecutableButton.isEnabled = enabled
         if !enabled {
             executableMsync.state = .off
@@ -513,6 +547,8 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
             executableRetina.state = .off
             executableDpi.selectItem(at: 4)
             executablePowerMode.selectItem(at: 0)
+            executableEnvironment.stringValue = ""
+            executableArguments.stringValue = ""
             executableRecommendation.selectItem(at: 0)
         }
     }

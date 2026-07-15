@@ -28,7 +28,7 @@ cat >"$TMP/settings.json" <<'JSON'
   "perProfile": {
     "profile-0123456789abcdef01234567": {
       "arguments": ["--profile"],
-      "environment": {"PROFILE_VALUE": "yes", "BAD-KEY": "ignored"},
+      "environment": {"PROFILE_VALUE": "yes", "UNICODE_QUOTE": "中文 \"測試\"", "CONTROL": "bad\u0001value", "BAD-KEY": "ignored"},
       "powerMode": "turbo"
     },
     "not-a-profile": {"arguments": ["--must-ignore"]}
