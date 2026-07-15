@@ -43,6 +43,17 @@ state_value() {
   [[ -f "$STATE_FILE" ]] || return 1
   awk -F '\t' -v key="$1" '$1 == key { print $2; found=1; exit } END { if (!found) exit 1 }' "$STATE_FILE"
 }
+state_update() {
+  local key="$1" value="$2" state_dir state_tmp
+  state_dir="$(dirname "$STATE_FILE")"
+  mkdir -p "$state_dir"
+  state_tmp="$(mktemp "${STATE_FILE}.XXXXXX")"
+  if [[ -f "$STATE_FILE" ]]; then
+    awk -F '\t' -v key="$key" '$1 != key' "$STATE_FILE" >"$state_tmp"
+  fi
+  printf '%s\t%s\n' "$key" "$value" >>"$state_tmp"
+  mv -f "$state_tmp" "$STATE_FILE"
+}
 apply_reg_if_changed() {
   local key="$1" value="$2"
   shift 2
@@ -50,6 +61,7 @@ apply_reg_if_changed() {
     return 0
   fi
   "${WINE[@]}" reg "$@"
+  state_update "$key" "$value"
 }
 delete_reg_if_changed() {
   local key="$1"
@@ -57,7 +69,9 @@ delete_reg_if_changed() {
   if [[ "${CYDER_FORCE_SETTINGS:-0}" != 1 ]] && [[ "$(state_value "$key" 2>/dev/null || true)" == absent ]]; then
     return 0
   fi
-  "${WINE[@]}" reg delete "$@" 2>/dev/null || true
+  if "${WINE[@]}" reg delete "$@" 2>/dev/null; then
+    state_update "$key" absent
+  fi
 }
 
 if [[ "$retina" == 1 ]]; then
@@ -70,13 +84,6 @@ apply_reg_if_changed smoothing "$smooth" add 'HKCU\Control Panel\Desktop' /v Fon
 apply_reg_if_changed smoothing-type "$smooth_type" add 'HKCU\Control Panel\Desktop' /v FontSmoothingType /t REG_DWORD /d "$smooth_type" /f
 apply_reg_if_changed smoothing-gamma "$gamma" add 'HKCU\Control Panel\Desktop' /v FontSmoothingGamma /t REG_DWORD /d "$gamma" /f
 apply_reg_if_changed smoothing-orientation "$orientation" add 'HKCU\Control Panel\Desktop' /v FontSmoothingOrientation /t REG_DWORD /d "$orientation" /f
-
-# Migrate former global/launcher overrides to the actual BlueCG game process.
-# These are also ledgered: once the stale values are removed and the per-app
-# override is present, confirming unchanged settings performs no registry I/O.
-delete_reg_if_changed bluecg-global-ddraw 'HKCU\Software\Wine\DllOverrides' /v ddraw /f
-delete_reg_if_changed bluecg-launcher-ddraw 'HKCU\Software\Wine\AppDefaults\BlueLauncher.exe\DllOverrides' /v ddraw /f
-apply_reg_if_changed bluecg-ddraw native,builtin add 'HKCU\Software\Wine\AppDefaults\bluecg.exe\DllOverrides' /v ddraw /t REG_SZ /d native,builtin /f
 
 if [[ "$font" == songti ]]; then
   face='Songti TC'
@@ -117,9 +124,6 @@ state_tmp="$(mktemp "${STATE_FILE}.XXXXXX")"
   done
   printf 'font-at-PMingLiU\t@%s\n' "$face"
   printf 'font-at-細明體\t@%s\n' "$face"
-  printf 'bluecg-global-ddraw\tabsent\n'
-  printf 'bluecg-launcher-ddraw\tabsent\n'
-  printf 'bluecg-ddraw\tnative,builtin\n'
 } >"$state_tmp"
 mv -f "$state_tmp" "$STATE_FILE"
 
