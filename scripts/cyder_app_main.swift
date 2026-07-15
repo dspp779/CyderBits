@@ -339,7 +339,13 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         let needsEngine = unsafeEnginePath
             || !FileManager.default.isExecutableFile(atPath: engineWine.path)
             || engineNeedsInstall(context: context, engineWine: engineWine)
+        let pristineManifest = CyderPaths.support
+            .appendingPathComponent("templates/pristine/manifest.json").path
+        let recommendedManifest = CyderPaths.support
+            .appendingPathComponent("templates/recommended/manifest.json").path
         let needsBootstrap = !FileManager.default.fileExists(atPath: CyderPaths.bootstrapMarker.path)
+            || !FileManager.default.fileExists(atPath: pristineManifest)
+            || !FileManager.default.fileExists(atPath: recommendedManifest)
         return (needsEngine, needsBootstrap)
     }
 
@@ -368,9 +374,20 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         // Engine installation can create/replace the engine tree. Recompute
         // the marker decision after that operation so first-run setup cannot
         // be deferred to the next Cyder launch.
+        var templatesReady = false
+        if !state.needsEngine && !state.needsBootstrap {
+            let probe = runLauncher(
+                context: context,
+                args: [context.launcher, "--engine-src", context.engineSrc, "--templates-ready"],
+                stage: .bootstrap,
+                operation: "templates-ready"
+            )
+            templatesReady = probe.succeeded
+        }
         let bootstrapNeeded = state.needsEngine
             || state.needsBootstrap
             || environmentState(context: context).needsBootstrap
+            || !templatesReady && !state.needsEngine
         if bootstrapNeeded {
             CyderDiagnostics.shared.enter(.bootstrap)
             showSetup("正在準備遊戲環境…")
@@ -444,6 +461,20 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    private func confirmProfileCreation(executable: URL) -> Bool {
+        var confirmed = false
+        onMainThread {
+            let alert = NSAlert()
+            alert.messageText = "建立這個遊戲的 Windows 環境？"
+            alert.informativeText = "Cyder 會以建議設定建立獨立環境：\n\(executable.lastPathComponent)\n\n這可能需要一些時間與額外磁碟空間。"
+            alert.alertStyle = .informational
+            alert.addButton(withTitle: "建立")
+            alert.addButton(withTitle: "取消")
+            confirmed = alert.runModal() == .alertFirstButtonReturn
+        }
+        return confirmed
+    }
+
     private func runPhasedLaunch(context: CyderLaunchContext) -> CyderLaunchOutcome {
         var exePaths = normalizeExePaths(pendingFiles)
         if exePaths.isEmpty {
@@ -466,48 +497,98 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         guard FileManager.default.isExecutableFile(atPath: wine.path) else {
             return .environmentNotReady
         }
-        let basename = URL(fileURLWithPath: exePaths[0]).lastPathComponent.lowercased()
-        if CyderSettingsStore.shared.hasSettings(forExecutable: basename) {
-            if hasRunningExes() {
-                return .failure(CyderFailure(
-                    code: "CYD-GAM-001",
-                    stage: .settingsApply,
-                    summary: "無法切換這個遊戲的個別設定。",
-                    technicalDetails: "The shared Windows game environment is already in use. Close all Cyder games before launching an EXE with per-game settings.",
-                    logURL: CyderDiagnostics.shared.sessionLogURL
+        let exeURL = URL(fileURLWithPath: exePaths[0])
+        let profileStore = CyderProfileStore(root: CyderPaths.support)
+        var profileID: String
+        switch profileStore.resolve(executable: exeURL) {
+        case .uncreated:
+            guard confirmProfileCreation(executable: exeURL) else { return .cancelled }
+            showSetup("正在建立遊戲環境…")
+            let created = runLauncher(
+                context: context,
+                args: [context.launcher, "--profile-create", exeURL.path, "recommended"],
+                stage: .bootstrap,
+                operation: "profile-create"
+            )
+            guard created.succeeded else {
+                return .failure(failure(
+                    code: "CYD-PRO-001",
+                    stage: .bootstrap,
+                    summary: "無法建立這個遊戲的 Windows 環境。",
+                    result: created
                 ))
             }
+            switch profileStore.resolve(executable: exeURL) {
+            case .ready(let record):
+                profileID = record.profileId
+            case .uncreated, .damaged:
+                return .failure(CyderFailure(
+                    code: "CYD-PRO-004",
+                    stage: .exeValidation,
+                    summary: "遊戲環境建立後驗證失敗。",
+                    technicalDetails: "Profile creation completed but metadata/bottle could not be resolved.",
+                    logURL: created.logURL
+                ))
+            }
+        case .damaged(let id, let reason):
+            return .failure(CyderFailure(
+                code: "CYD-PRO-002",
+                stage: .exeValidation,
+                summary: "這個遊戲的設定環境已損毀。",
+                technicalDetails: "Profile \(id): \(reason)",
+                logURL: CyderDiagnostics.shared.sessionLogURL
+            ))
+        case .ready(let record):
+            profileID = record.profileId
+        }
+        let prefix = CyderPaths.support
+            .appendingPathComponent("bottles", isDirectory: true)
+            .appendingPathComponent(profileID, isDirectory: true)
+        guard FileManager.default.fileExists(atPath: prefix.path) else {
+            return .failure(CyderFailure(
+                code: "CYD-PRO-003",
+                stage: .exeValidation,
+                summary: "找不到這個遊戲的 Windows 環境。",
+                technicalDetails: prefix.path,
+                logURL: CyderDiagnostics.shared.sessionLogURL
+            ))
+        }
+        if CyderSettingsStore.shared.hasSettings(profileID: profileID, legacyBasename: nil) {
             showSetup("正在套用遊戲設定…")
-            var launchSettings = CyderSettingsStore.shared.environment(forExecutable: basename)
+            var launchSettings = CyderSettingsStore.shared.environment(profileID: profileID, legacyBasename: nil)
             launchSettings["CYDER_STOP_WINESERVER_AFTER_SETTINGS"] = "1"
+            launchSettings["WINEPREFIX"] = prefix.path
             let applied = runLauncher(
                 context: context,
-                args: [context.launcher, "--apply-settings-only"],
+                args: [context.launcher, "--apply-settings-prefix", prefix.path],
                 stage: .settingsApply,
                 operation: "apply-game-settings",
                 extraEnvironment: launchSettings
             )
             guard applied.succeeded else {
+                let conflict = applied.status == 75
                 return .failure(failure(
-                    code: "CYD-GAM-002",
+                    code: conflict ? "CYD-GAM-001" : "CYD-GAM-002",
                     stage: .settingsApply,
-                    summary: "套用遊戲個別設定時發生問題。",
+                    summary: conflict
+                        ? "這個遊戲仍在執行中，請關閉後再套用設定。"
+                        : "套用遊戲個別設定時發生問題。",
                     result: applied
                 ))
             }
         }
-        return runDirectWine(wine: wine, exe: exePaths[0])
+        return runDirectWine(context: context, wine: wine, exe: exeURL.path, profileID: profileID, prefix: prefix)
     }
 
     /// Launch Wine directly through Apple's architecture selector, then wait
     /// for CrossOver Wine to publish the actual foreground application PID in
     /// WineAppWillActivateNotification.  The wrapper Process PID is not used
     /// for activation. Wine continues independently after Cyder exits.
-    private func runDirectWine(wine: URL, exe: String) -> CyderLaunchOutcome {
+    private func runDirectWine(context: CyderLaunchContext, wine: URL, exe: String, profileID: String, prefix: URL) -> CyderLaunchOutcome {
         let support = CyderPaths.support
         let logDirectory = support.appendingPathComponent("Logs", isDirectory: true)
-        let prefix = CyderPaths.sharedBottle.path
-        let activationWaiter = WineActivationWaiter(prefix: prefix)
+        let prefixPath = prefix.path
+        let activationWaiter = WineActivationWaiter(prefix: prefixPath)
         onMainThread {
             wineActivationWaiter = activationWaiter
         }
@@ -539,9 +620,8 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         try? FileManager.default.createSymbolicLink(at: legacyLog, withDestinationURL: launchLog)
 
         let process = Process()
-        let environment = wineEnvironment(wine: wine, support: support, exe: exe)
-        let basename = URL(fileURLWithPath: exe).lastPathComponent.lowercased()
-        let gameArguments = CyderSettingsStore.shared.arguments(forExecutable: basename)
+        let environment = wineEnvironment(wine: wine, support: support, exe: exe, profileID: profileID, prefix: prefix)
+        let gameArguments = CyderSettingsStore.shared.arguments(profileID: profileID, legacyBasename: nil)
         let powerMode = environment["CYDER_POWER_MODE"] ?? "normal"
         let taskpolicy = findExecutable(named: "taskpolicy", environment: environment)
         let hasTaskpolicy = taskpolicy != nil
@@ -577,15 +657,75 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             ))
         }
         let command = CyderDiagnostics.shared.redact(
-            "cmd=\(commandDescription)\npower_mode=\(powerMode)\ntaskpolicy_available=\(hasTaskpolicy)\nWINEPREFIX=\(prefix)\ncwd=\((exe as NSString).deletingLastPathComponent)\n\n"
+            "cmd=\(commandDescription)\nprofile_id=\(profileID)\npower_mode=\(powerMode)\ntaskpolicy_available=\(hasTaskpolicy)\nWINEPREFIX=\(prefixPath)\ncwd=\((exe as NSString).deletingLastPathComponent)\n\n"
         )
         try? handle.write(contentsOf: Data(command.utf8))
         process.standardOutput = handle
         process.standardError = handle
 
+        let ownerPID = ProcessInfo.processInfo.processIdentifier
+        let msync = environment["CYDER_MSYNC"] == "1" ? "1" : "0"
+        let esync = environment["CYDER_ESYNC"] == "1" ? "1" : "0"
+        let sessionAcquire = runLauncher(
+            context: context,
+            args: [
+                context.launcher,
+                "--session-acquire", prefixPath, "\(ownerPID)", msync, esync, powerMode
+            ],
+            stage: .wineSpawn,
+            operation: "session-acquire"
+        )
+        guard sessionAcquire.succeeded,
+              let sessionFile = sessionAcquire.outputTail
+                .split(whereSeparator: { $0 == "\n" || $0 == "\r" })
+                .map(String.init)
+                .reversed()
+                .first(where: { $0.hasSuffix(".session") && FileManager.default.fileExists(atPath: $0) }) else {
+            try? handle.close()
+            let status = sessionAcquire.status == 75 ? "A different sync or energy mode is already using this bottle." : sessionAcquire.outputTail
+            return .failure(CyderFailure(
+                code: "CYD-SES-001",
+                stage: .wineSpawn,
+                summary: sessionAcquire.status == 75
+                    ? "這個遊戲環境目前由其他遊戲使用中。"
+                    : "無法啟動遊戲執行環境。",
+                technicalDetails: status,
+                exitCode: sessionAcquire.status,
+                logURL: sessionAcquire.logURL
+            ))
+        }
+        var sessionCommitted = false
+        defer {
+            if !sessionCommitted {
+                _ = releaseSession(context: context, prefix: prefixPath, sessionFile: sessionFile)
+            }
+        }
+
         do {
             try process.run()
             CyderDiagnostics.shared.info("wine process started pid=\(process.processIdentifier) log=\(launchLog.path)")
+            let sessionUpdate = runLauncher(
+                context: context,
+                args: [
+                    context.launcher,
+                    "--session-update", prefixPath, sessionFile, "\(process.processIdentifier)"
+                ],
+                stage: .wineSpawn,
+                operation: "session-update"
+            )
+            guard sessionUpdate.succeeded else {
+                process.terminate()
+                try? handle.close()
+                return .failure(CyderFailure(
+                    code: "CYD-SES-002",
+                    stage: .wineSpawn,
+                    summary: "無法登錄遊戲執行程序。",
+                    technicalDetails: sessionUpdate.outputTail,
+                    exitCode: sessionUpdate.status,
+                    logURL: sessionUpdate.logURL
+                ))
+            }
+            sessionCommitted = true
         } catch {
             try? handle.close()
             return .failure(CyderFailure(
@@ -638,16 +778,20 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         return .success
     }
 
-    private func wineEnvironment(wine: URL, support: URL, exe: String) -> [String: String] {
+    private func wineEnvironment(
+        wine: URL,
+        support: URL,
+        exe: String,
+        profileID: String,
+        prefix: URL
+    ) -> [String: String] {
         var environment = ProcessInfo.processInfo.environment
-        let basename = URL(fileURLWithPath: exe).lastPathComponent.lowercased()
-        for (key, value) in CyderSettingsStore.shared.environment(forExecutable: basename) {
+        for (key, value) in CyderSettingsStore.shared.environment(profileID: profileID, legacyBasename: nil) {
             environment[key] = value
         }
 
         let engineRoot = wine.deletingLastPathComponent().deletingLastPathComponent()
-        let prefix = CyderPaths.sharedBottle.path
-        environment["WINEPREFIX"] = prefix
+        environment["WINEPREFIX"] = prefix.path
         environment["WINESERVER"] = engineRoot.appendingPathComponent("bin/wineserver").path
         environment["PATH"] = engineRoot.appendingPathComponent("bin").path
             + ":" + (environment["PATH"] ?? "/usr/bin:/bin")
@@ -667,6 +811,19 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         environment["LANG"] = locale
         environment["LC_ALL"] = locale
         return environment
+    }
+
+    private func releaseSession(
+        context: CyderLaunchContext,
+        prefix: String,
+        sessionFile: String
+    ) -> CyderProcessResult {
+        runLauncher(
+            context: context,
+            args: [context.launcher, "--session-release", prefix, sessionFile],
+            stage: .wineSpawn,
+            operation: "session-release"
+        )
     }
 
     @objc private func wineAppWillActivate(_ notification: Notification) {
