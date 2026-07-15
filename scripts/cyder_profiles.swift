@@ -37,6 +37,43 @@ final class CyderProfileStore {
         self.root = root.standardizedFileURL
     }
 
+    /// Enumerate only complete, non-symlinked profile records. Damaged entries
+    /// are intentionally omitted from the settings list; selecting an EXE
+    /// still uses `resolve` to present a precise damaged/uncreated reason.
+    func listRecords() -> [CyderProfileRecord] {
+        let profiles = root.appendingPathComponent("profiles", isDirectory: true)
+        guard isDirectory(profiles), !isSymlink(profiles),
+              let entries = try? FileManager.default.contentsOfDirectory(
+                at: profiles, includingPropertiesForKeys: [.isDirectoryKey, .isSymbolicLinkKey],
+                options: [.skipsHiddenFiles]
+              ) else { return [] }
+        return entries.compactMap { (directory: URL) -> CyderProfileRecord? in
+            guard !isSymlink(directory), isDirectory(directory) else { return nil }
+            let recordID = directory.lastPathComponent
+            guard recordID.range(of: "^profile-[0-9a-f]{24}$", options: .regularExpression) != nil else { return nil }
+            let bottle = root.appendingPathComponent("bottles", isDirectory: true)
+                .appendingPathComponent(recordID, isDirectory: true)
+            guard !isSymlink(bottle), isDirectory(bottle) else { return nil }
+            let metadata = directory.appendingPathComponent("profile.json")
+            guard !isSymlink(metadata), FileManager.default.fileExists(atPath: metadata.path),
+                  let data = try? Data(contentsOf: metadata),
+                  let record = try? JSONDecoder().decode(CyderProfileRecord.self, from: data),
+                  record.schemaVersion == 1, record.layoutVersion == 1,
+                  record.profileId == recordID,
+                  ["pristine", "recommended"].contains(record.baseTemplate),
+                  !record.sourcePath.isEmpty,
+                  FileManager.default.fileExists(atPath: record.sourcePath),
+                  let sourceID = try? self.profileID(for: URL(fileURLWithPath: record.sourcePath)),
+                  sourceID == recordID,
+                  record.recipeId == nil || record.recipeId!.range(of: "^[a-z0-9][a-z0-9-]*$", options: .regularExpression) != nil else {
+                return nil
+            }
+            return record
+        }.sorted { lhs, rhs in
+            lhs.sourcePath.localizedStandardCompare(rhs.sourcePath) == .orderedAscending
+        }
+    }
+
     func canonicalExecutablePath(_ executable: URL) throws -> String {
         let path = executable.path
         guard FileManager.default.fileExists(atPath: path) else {

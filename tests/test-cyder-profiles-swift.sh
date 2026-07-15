@@ -34,6 +34,26 @@ ready="$($BIN "$TMP/store" "$canonical")"
   echo "ASSERT failed: valid metadata should resolve ready: $ready" >&2; exit 1;
 }
 
+mkdir -p "$TMP/store/profiles/$second_id" "$TMP/store/bottles/$second_id"
+second_canonical="$TMP/games/另一個/遊戲.exe"
+printf '{"schemaVersion":1,"profileId":"%s","sourcePath":"%s","baseTemplate":"pristine","recipeId":null,"legacy":false,"layoutVersion":1}\n' "$second_id" "$second_canonical" >"$TMP/store/profiles/$second_id/profile.json"
+listed="$($BIN "$TMP/store" --list)"
+[[ "$listed" == *"$first_id $canonical"* && "$listed" == *"$second_id $second_canonical"* ]] || {
+  echo "ASSERT failed: listRecords should enumerate complete profiles: $listed" >&2; exit 1;
+}
+mkdir -p "$TMP/store/profiles/profile-aaaaaaaaaaaaaaaaaaaaaaaa" "$TMP/store/bottles/profile-aaaaaaaaaaaaaaaaaaaaaaaa"
+ln -s "$TMP/store/profiles/$first_id/profile.json" "$TMP/store/profiles/profile-aaaaaaaaaaaaaaaaaaaaaaaa/profile.json"
+listed_after_link="$($BIN "$TMP/store" --list)"
+[[ "$listed_after_link" != *"profile-aaaaaaaaaaaaaaaaaaaaaaaa"* ]] || {
+  echo "ASSERT failed: listRecords should skip symlink metadata" >&2; exit 1;
+}
+mkdir -p "$TMP/store/profiles/profile-bbbbbbbbbbbbbbbbbbbbbbbb" "$TMP/store/bottles/profile-bbbbbbbbbbbbbbbbbbbbbbbb"
+printf '{"schemaVersion":1,"profileId":"profile-bbbbbbbbbbbbbbbbbbbbbbbb","sourcePath":"%s","baseTemplate":"pristine","recipeId":null,"legacy":false,"layoutVersion":1}\n' "$canonical" >"$TMP/store/profiles/profile-bbbbbbbbbbbbbbbbbbbbbbbb/profile.json"
+listed_after_forged="$($BIN "$TMP/store" --list)"
+[[ "$listed_after_forged" != *"profile-bbbbbbbbbbbbbbbbbbbbbbbb"* ]] || {
+  echo "ASSERT failed: listRecords should reject forged profile/source hash" >&2; exit 1;
+}
+
 rm -rf "$TMP/store/bottles/$first_id"
 printf 'not-a-directory\n' >"$TMP/store/bottles/$first_id"
 regular_bottle="$($BIN "$TMP/store" "$canonical")"
