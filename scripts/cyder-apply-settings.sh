@@ -51,13 +51,19 @@ apply_reg_if_changed() {
   fi
   "${WINE[@]}" reg "$@"
 }
+delete_reg_if_changed() {
+  local key="$1"
+  shift
+  if [[ "${CYDER_FORCE_SETTINGS:-0}" != 1 ]] && [[ "$(state_value "$key" 2>/dev/null || true)" == absent ]]; then
+    return 0
+  fi
+  "${WINE[@]}" reg delete "$@" 2>/dev/null || true
+}
 
 if [[ "$retina" == 1 ]]; then
   apply_reg_if_changed retina "$retina" add 'HKCU\Software\Wine\Mac Driver' /v RetinaMode /t REG_SZ /d y /f
 else
-  if [[ "${CYDER_FORCE_SETTINGS:-0}" == 1 || "$(state_value retina 2>/dev/null || true)" != 0 ]]; then
-    "${WINE[@]}" reg delete 'HKCU\Software\Wine\Mac Driver' /v RetinaMode /f 2>/dev/null || true
-  fi
+  delete_reg_if_changed retina 'HKCU\Software\Wine\Mac Driver' /v RetinaMode /f
 fi
 apply_reg_if_changed dpi "$dpi" add 'HKCU\Control Panel\Desktop' /v LogPixels /t REG_DWORD /d "$dpi" /f
 apply_reg_if_changed smoothing "$smooth" add 'HKCU\Control Panel\Desktop' /v FontSmoothing /t REG_SZ /d "$smooth" /f
@@ -66,19 +72,19 @@ apply_reg_if_changed smoothing-gamma "$gamma" add 'HKCU\Control Panel\Desktop' /
 apply_reg_if_changed smoothing-orientation "$orientation" add 'HKCU\Control Panel\Desktop' /v FontSmoothingOrientation /t REG_DWORD /d "$orientation" /f
 
 # Migrate former global/launcher overrides to the actual BlueCG game process.
-"${WINE[@]}" reg delete 'HKCU\Software\Wine\DllOverrides' /v ddraw /f 2>/dev/null || true
-"${WINE[@]}" reg delete 'HKCU\Software\Wine\AppDefaults\BlueLauncher.exe\DllOverrides' /v ddraw /f 2>/dev/null || true
-"${WINE[@]}" reg add 'HKCU\Software\Wine\AppDefaults\bluecg.exe\DllOverrides' /v ddraw /t REG_SZ /d native,builtin /f
+# These are also ledgered: once the stale values are removed and the per-app
+# override is present, confirming unchanged settings performs no registry I/O.
+delete_reg_if_changed bluecg-global-ddraw 'HKCU\Software\Wine\DllOverrides' /v ddraw /f
+delete_reg_if_changed bluecg-launcher-ddraw 'HKCU\Software\Wine\AppDefaults\BlueLauncher.exe\DllOverrides' /v ddraw /f
+apply_reg_if_changed bluecg-ddraw native,builtin add 'HKCU\Software\Wine\AppDefaults\bluecg.exe\DllOverrides' /v ddraw /t REG_SZ /d native,builtin /f
 
 if [[ "$font" == songti ]]; then
   face='Songti TC'
-  "${WINE[@]}" reg add 'HKCU\Software\Wine\Fonts\Replacements' /v MingLiU /t REG_SZ /d "$face" /f
+  apply_reg_if_changed font-MingLiU "$face" add 'HKCU\Software\Wine\Fonts\Replacements' /v MingLiU /t REG_SZ /d "$face" /f
 else
   face='MingLiU'
   # Do not map MingLiU to itself; let Wine/macOS resolve an actually installed font.
-  if [[ "${CYDER_FORCE_SETTINGS:-0}" == 1 || "$(state_value font 2>/dev/null || true)" != mingliu ]]; then
-    "${WINE[@]}" reg delete 'HKCU\Software\Wine\Fonts\Replacements' /v MingLiU /f 2>/dev/null || true
-  fi
+  delete_reg_if_changed font-MingLiU 'HKCU\Software\Wine\Fonts\Replacements' /v MingLiU /f
 fi
 for name in PMingLiU 細明體 新細明體 SimSun NSimSun 'MS Shell Dlg' 'MS Shell Dlg 2' 'Microsoft Sans Serif'; do
   apply_reg_if_changed "font-$name" "$face" add 'HKCU\Software\Wine\Fonts\Replacements' /v "$name" /t REG_SZ /d "$face" /f
@@ -90,18 +96,30 @@ state_dir="$(dirname "$STATE_FILE")"
 mkdir -p "$state_dir"
 state_tmp="$(mktemp "${STATE_FILE}.XXXXXX")"
 {
-  printf 'retina\t%s\n' "$retina"
+  if [[ "$retina" == 1 ]]; then
+    printf 'retina\t1\n'
+  else
+    printf 'retina\tabsent\n'
+  fi
   printf 'dpi\t%s\n' "$dpi"
   printf 'smoothing\t%s\n' "$smooth"
   printf 'smoothing-type\t%s\n' "$smooth_type"
   printf 'smoothing-gamma\t%s\n' "$gamma"
   printf 'smoothing-orientation\t%s\n' "$orientation"
   printf 'font\t%s\n' "$font"
+  if [[ "$font" == songti ]]; then
+    printf 'font-MingLiU\tSongti TC\n'
+  else
+    printf 'font-MingLiU\tabsent\n'
+  fi
   for name in PMingLiU 細明體 新細明體 SimSun NSimSun 'MS Shell Dlg' 'MS Shell Dlg 2' 'Microsoft Sans Serif'; do
     printf 'font-%s\t%s\n' "$name" "$face"
   done
   printf 'font-at-PMingLiU\t@%s\n' "$face"
   printf 'font-at-細明體\t@%s\n' "$face"
+  printf 'bluecg-global-ddraw\tabsent\n'
+  printf 'bluecg-launcher-ddraw\tabsent\n'
+  printf 'bluecg-ddraw\tnative,builtin\n'
 } >"$state_tmp"
 mv -f "$state_tmp" "$STATE_FILE"
 
