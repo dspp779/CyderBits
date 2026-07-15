@@ -384,6 +384,23 @@ cyder_load_saved_settings() {
   [[ "$value" == songti || "$value" == mingliu ]] && export CYDER_FONT_PRESET="$value"
   value="$(plutil -extract fontSmoothing raw -o - "$settings" 2>/dev/null || true)"
   case "$value" in off|grayscale|cleartype-rgb|cleartype-bgr) export CYDER_FONT_SMOOTHING="$value" ;; esac
+  # Settings UI stores stable, user-facing names and the launcher contract
+  # uses taskpolicy's process class. Keep the translation in one place so
+  # CLI/Finder launches behave identically.
+  value="$(plutil -extract powerMode raw -o - "$settings" 2>/dev/null || true)"
+  case "$value" in
+    standard) export CYDER_POWER_MODE=normal ;;
+    energySaving) export CYDER_POWER_MODE=background ;;
+    *) export CYDER_POWER_MODE=normal ;;
+  esac
+}
+
+cyder_find_taskpolicy() {
+  if [[ -n "${CYDER_TASKPOLICY_BIN:-}" && -x "$CYDER_TASKPOLICY_BIN" ]]; then
+    printf '%s\n' "$CYDER_TASKPOLICY_BIN"
+    return 0
+  fi
+  command -v taskpolicy 2>/dev/null || return 1
 }
 
 cyder_engine_is_installed() {
@@ -755,11 +772,33 @@ cyder_init_bottle() {
   fi
   echo "Creating bottle: $bottle" >&2
   mkdir -p "$bottle"
-  (
+  local log_dir="$CYDER_SUPPORT/Logs/operations"
+  local log_file="$log_dir/wineboot-$(date '+%Y%m%d-%H%M%S')-$$.log"
+  mkdir -p "$log_dir"
+  : >"$log_file"
+  {
+    echo "operation=wineboot"
+    echo "wine=$wine_bin"
+    echo "prefix=$bottle"
+    echo "started=$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+    echo
+  } >>"$log_file"
+  ln -sfn "operations/$(basename "$log_file")" "$CYDER_SUPPORT/Logs/last-wineboot.log"
+  local status=0
+  if (
     cyder_wine_locale_exports
     export WINEPREFIX="$bottle" WINESERVER="$wineserver"
-    cyder_run arch -x86_64 "$wine_bin" wineboot -u
-  ) || return $?
+    cyder_run arch -x86_64 "$wine_bin" wineboot -u >>"$log_file" 2>&1
+  ); then
+    status=0
+  else
+    status=$?
+  fi
+  echo "exit_status=$status" >>"$log_file"
+  cat "$log_file" >&2
+  if [[ "$status" -ne 0 ]]; then
+    return "$status"
+  fi
   local dos="$bottle/dosdevices"
   mkdir -p "$dos"
   rm -f "$dos/c:" "$dos/z:"
@@ -770,6 +809,90 @@ cyder_init_bottle() {
     export WINEPREFIX="$bottle" WINESERVER="$wineserver"
     arch -x86_64 "$wineserver" -k 2>/dev/null || true
   )
+}
+
+cyder_health_check_prefix() {
+  local wine_bin="$1"
+  local prefix="${2:-$CYDER_SHARED_PREFIX}"
+  local wineserver="${wine_bin%/wine}/wineserver"
+  [[ -x "$wine_bin" ]] || { echo "missing wine binary: $wine_bin" >&2; return 1; }
+  [[ -f "$prefix/system.reg" && -f "$prefix/user.reg" ]] || {
+    echo "prefix registry files are missing: $prefix" >&2
+    return 1
+  }
+  [[ -f "$prefix/drive_c/windows/system32/kernel32.dll" || \
+     -f "$prefix/drive_c/windows/syswow64/kernel32.dll" ]] || {
+    echo "prefix kernel32.dll is missing: $prefix" >&2
+    return 1
+  }
+  if cyder_has_running_prefix "$prefix"; then
+    echo "health probe skipped: prefix is in use: $prefix" >&2
+    return 0
+  fi
+  local log_dir="$CYDER_SUPPORT/Logs/operations"
+  local log_file="$log_dir/health-check-$(date '+%Y%m%d-%H%M%S')-$$.log"
+  mkdir -p "$log_dir"
+  : >"$log_file"
+  {
+    echo "operation=health-check"
+    echo "wine=$wine_bin"
+    echo "prefix=$prefix"
+    echo "probe=cmd /c exit 0"
+    echo "started=$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+    echo
+  } >>"$log_file"
+  ln -sfn "operations/$(basename "$log_file")" "$CYDER_SUPPORT/Logs/last-health-check.log"
+  local status=0
+  if (
+    cyder_wine_locale_exports
+    export WINEPREFIX="$prefix" WINESERVER="$wineserver"
+    cyder_run arch -x86_64 "$wine_bin" cmd /c exit 0 >>"$log_file" 2>&1
+  ); then
+    status=0
+  else
+    status=$?
+  fi
+  # The probe is read-only from Cyder's perspective, but it starts a
+  # wineserver. Leaving that server alive would lock in a non-MSync session
+  # and make the next MSync launch fail with bootstrap_look_up.
+  (
+    cyder_wine_locale_exports
+    export WINEPREFIX="$prefix" WINESERVER="$wineserver"
+    arch -x86_64 "$wineserver" -k >>"$log_file" 2>&1 || true
+    arch -x86_64 "$wineserver" -w >>"$log_file" 2>&1 || true
+  )
+  echo "exit_status=$status" >>"$log_file"
+  cat "$log_file" >&2
+  return "$status"
+}
+
+cyder_rebuild_shared_prefix() {
+  local wine_bin="$1" engine_root="$2"
+  cyder_has_running_prefix "$CYDER_SHARED_PREFIX" && {
+    echo "Cannot rebuild prefix while a Wine process is running." >&2
+    return 2
+  }
+  local parent staging backup
+  parent="$(dirname "$CYDER_SHARED_PREFIX")"
+  staging="$parent/.rebuild-$(basename "$CYDER_SHARED_PREFIX")-$$"
+  backup="$parent/backups/$(basename "$CYDER_SHARED_PREFIX")-$(date '+%Y%m%d-%H%M%S')"
+  rm -rf "$staging"
+  mkdir -p "$parent" "$(dirname "$backup")"
+  if ! CYDER_SHARED_PREFIX="$staging" cyder_init_bottle "$wine_bin" "$staging"; then
+    echo "Prefix rebuild failed during wineboot; staging retained: $staging" >&2
+    return 1
+  fi
+  if [[ -e "$CYDER_SHARED_PREFIX" ]]; then
+    mv "$CYDER_SHARED_PREFIX" "$backup"
+  fi
+  mv "$staging" "$CYDER_SHARED_PREFIX"
+  if ! cyder_bootstrap_shared_prefix "$wine_bin" "$engine_root"; then
+    rm -rf "$CYDER_SHARED_PREFIX"
+    mv "$backup" "$CYDER_SHARED_PREFIX"
+    echo "Prefix rebuild failed; previous environment restored." >&2
+    return 1
+  fi
+  cyder_health_check_prefix "$wine_bin" "$CYDER_SHARED_PREFIX"
 }
 
 cyder_ensure_shared_prefix() {
@@ -897,6 +1020,7 @@ cyder_run_wine_exe() {
   local start_mode="${CYDER_WINE_START_MODE:-direct}"
   local detach="${CYDER_WINE_DETACH:-0}"
   local pid_file="${CYDER_WINE_PID_FILE:-}"
+  local session_id=""
   cyder_wine_locale_exports
   local log_dir="$CYDER_SUPPORT/Logs"
   mkdir -p "$log_dir"
@@ -911,11 +1035,23 @@ cyder_run_wine_exe() {
     rm -f "$pid_file" "${pid_file}.tmp"
   fi
   {
+    local taskpolicy_bin=""
+    taskpolicy_bin="$(cyder_find_taskpolicy || true)"
     if [[ "$start_mode" == "start" ]]; then
-      echo "cmd=arch -x86_64 $wine_bin start /wait /unix $exe"
+      if [[ "${CYDER_POWER_MODE:-normal}" == background && -n "$taskpolicy_bin" ]]; then
+        echo "cmd=$taskpolicy_bin -c background /usr/bin/arch -x86_64 $wine_bin start /wait /unix $exe"
+      else
+        echo "cmd=arch -x86_64 $wine_bin start /wait /unix $exe"
+      fi
     else
-      echo "cmd=arch -x86_64 $wine_bin $exe"
+      if [[ "${CYDER_POWER_MODE:-normal}" == background && -n "$taskpolicy_bin" ]]; then
+        echo "cmd=$taskpolicy_bin -c background /usr/bin/arch -x86_64 $wine_bin $exe"
+      else
+        echo "cmd=arch -x86_64 $wine_bin $exe"
+      fi
     fi
+    echo "power_mode=${CYDER_POWER_MODE:-normal}"
+    echo "taskpolicy_available=$([[ -n "$taskpolicy_bin" ]] && echo true || echo false)"
     echo "WINEPREFIX=$CYDER_SHARED_PREFIX"
     echo "cwd=$(dirname "$exe")"
     echo
@@ -934,29 +1070,118 @@ cyder_run_wine_exe() {
     fi
     export PATH="${wine_bin%/wine}:$PATH"
     cd "$(dirname "$exe")"
+    if [[ "${CYDER_SESSION_GUARD:-1}" != 0 ]]; then
+      cyder_session_acquire "$CYDER_SHARED_PREFIX" "${CYDER_MSYNC:-0}" "${CYDER_ESYNC:-0}" "${CYDER_POWER_MODE:-normal}" || return $?
+      session_id="$CYDER_SESSION_FILE"
+    fi
+    cyder_session_release_on_exit() {
+      if [[ -n "${session_id:-}" ]]; then
+        cyder_session_release "$CYDER_SHARED_PREFIX" "$session_id"
+      fi
+      return 0
+    }
+    trap cyder_session_release_on_exit EXIT INT TERM
     if [[ "$detach" == 1 && -n "$pid_file" ]]; then
       # Native Cyder only needs the Wine PID long enough to activate the Wine
       # application.  The Wine process is intentionally asynchronous here;
       # Finder-launched apps have no controlling Terminal, so no nohup is
       # required.  stdout/stderr remain redirected to the persistent log.
       if [[ "$start_mode" == "start" ]]; then
-        arch -x86_64 "$wine_bin" start /wait /unix "$exe" >>"$log_file" 2>&1 &
+        cyder_exec_wine "$wine_bin" start /wait /unix "$exe" >>"$log_file" 2>&1 &
       else
-        arch -x86_64 "$wine_bin" "$exe" >>"$log_file" 2>&1 &
+        cyder_exec_wine "$wine_bin" "$exe" >>"$log_file" 2>&1 &
       fi
       wine_pid=$!
       printf '%s\n' "$wine_pid" >"${pid_file}.tmp"
       mv -f "${pid_file}.tmp" "$pid_file"
+      if [[ -n "${session_id:-}" ]]; then
+        # The detached Wine process, rather than the short-lived wrapper,
+        # owns the runtime session.  A waiter removes the registry entry when
+        # Wine exits so a second incompatible launch remains blocked.
+        sed -i '' "s/^pid=.*/pid=$wine_pid/" "$session_id" 2>/dev/null || \
+          sed -i "s/^pid=.*/pid=$wine_pid/" "$session_id"
+        (
+          while kill -0 "$wine_pid" 2>/dev/null; do sleep 1; done
+          cyder_session_release "$CYDER_SHARED_PREFIX" "$session_id"
+        ) &
+        session_id=""
+      fi
     else
       # CLI launches keep Wine in the foreground so the caller owns the game
       # lifetime. Finder's native entry point opts into the detached branch.
       if [[ "$start_mode" == "start" ]]; then
-        arch -x86_64 "$wine_bin" start /wait /unix "$exe" >>"$log_file" 2>&1
+        cyder_exec_wine "$wine_bin" start /wait /unix "$exe" >>"$log_file" 2>&1
       else
-        arch -x86_64 "$wine_bin" "$exe" >>"$log_file" 2>&1
+        cyder_exec_wine "$wine_bin" "$exe" >>"$log_file" 2>&1
       fi
     fi
   )
+}
+
+# Execute Wine with the requested power policy.  `normal` intentionally does
+# not invoke taskpolicy; background is applied to arch, the process which
+# creates wineserver, so the policy is inherited by the Wine session.
+cyder_exec_wine() {
+  local wine_bin="$1"
+  shift
+  local mode="${CYDER_POWER_MODE:-normal}"
+  local taskpolicy_bin=""
+  taskpolicy_bin="$(cyder_find_taskpolicy || true)"
+  if [[ "$mode" == background && -n "$taskpolicy_bin" ]]; then
+    "$taskpolicy_bin" -c background /usr/bin/arch -x86_64 "$wine_bin" "$@"
+  else
+    if [[ "$mode" != normal && -z "$taskpolicy_bin" ]]; then
+      echo "error: taskpolicy is unavailable; select Standard energy mode" >&2
+      return 127
+    fi
+    /usr/bin/arch -x86_64 "$wine_bin" "$@"
+  fi
+}
+
+# A bottle's wineserver is shared by all clients.  Keep a small, atomic
+# session registry so incompatible sync/power settings cannot be mixed.
+# Return status 75 when a live incompatible session is present.
+cyder_session_dir() {
+  printf '%s\n' "${1%/}/.cyder-runtime/sessions"
+}
+
+cyder_session_acquire() {
+  local prefix="$1" msync="${2:-0}" esync="${3:-0}" power="${4:-normal}"
+  local dir lock file pid existing mode
+  dir="$(cyder_session_dir "$prefix")"
+  mkdir -p "$dir"
+  lock="${dir}/.lock"
+  while ! mkdir "$lock" 2>/dev/null; do sleep 0.02; done
+  trap 'rmdir "$lock" 2>/dev/null || true' RETURN
+  for file in "$dir"/*.session; do
+    [[ -f "$file" ]] || continue
+    pid="$(sed -n 's/^pid=//p' "$file" | head -1)"
+    if [[ -z "$pid" ]] || ! kill -0 "$pid" 2>/dev/null; then
+      rm -f "$file"
+      continue
+    fi
+    mode="$(sed -n 's/^mode=//p' "$file" | head -1)"
+    existing="$(sed -n 's/^sync=//p' "$file" | head -1)"
+    if [[ "$existing" != "msync=${msync};esync=${esync};power=${power}" ]]; then
+      rmdir "$lock" 2>/dev/null || true
+      trap - RETURN
+      echo "incompatible Cyder bottle session (pid=$pid mode=$mode)" >&2
+      return 75
+    fi
+  done
+  file="$dir/$$-${RANDOM:-0}-$(date +%s).session"
+  # Keep compatibility with the macOS system Bash, which does not provide
+  # BASHPID. The launcher process remains alive for the whole Wine session.
+  printf 'pid=%s\nsync=msync=%s;esync=%s;power=%s\nmode=%s\n' "$$" "$msync" "$esync" "$power" "$power" >"$file"
+  rmdir "$lock" 2>/dev/null || true
+  trap - RETURN
+  CYDER_SESSION_FILE="$file"
+  export CYDER_SESSION_FILE
+}
+
+cyder_session_release() {
+  local prefix="$1" session="$2"
+  [[ -n "$session" ]] && rm -f "$session"
 }
 
 cyder_bootstrap_error_dialog() {

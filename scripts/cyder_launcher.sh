@@ -56,6 +56,8 @@ Options:
   --engine-src PATH   Wine engine source (default: install/wine-cx26-x86_64 or app payload)
   --dry-run           Print paths without installing engine or launching
   --bootstrap-only    Bootstrap shared prefix (mono, tar, hi-res) and exit
+  --health-check      Validate the Wine engine and run a minimal prefix probe
+  --rebuild-prefix    Rebuild the shared Windows game environment safely
   --ensure-engine-only  Install shared engine from payload/tarball and exit
   --ensure-rosetta-only Check Rosetta 2 on Apple Silicon and exit
   --stop-all          Stop all EXEs in the Cyder shared prefix and exit
@@ -68,6 +70,8 @@ EOF
 
 DRY_RUN=0
 BOOTSTRAP_ONLY=0
+HEALTH_CHECK=0
+REBUILD_PREFIX=0
 ENSURE_ENGINE_ONLY=0
 ENSURE_ROSETTA_ONLY=0
 STOP_ALL=0
@@ -85,6 +89,14 @@ while [[ $# -gt 0 ]]; do
       ;;
     --bootstrap-only)
       BOOTSTRAP_ONLY=1
+      shift
+      ;;
+    --health-check)
+      HEALTH_CHECK=1
+      shift
+      ;;
+    --rebuild-prefix)
+      REBUILD_PREFIX=1
       shift
       ;;
     --ensure-engine-only)
@@ -181,7 +193,29 @@ if [[ "$APPLY_SETTINGS_ONLY" -eq 1 ]]; then
     exit 2
   fi
   cyder_apply_user_settings "$engine/bin/wine" "$engine"
+  if [[ "${CYDER_STOP_WINESERVER_AFTER_SETTINGS:-0}" == 1 ]]; then
+    WINEPREFIX="$CYDER_SHARED_PREFIX" /usr/bin/arch -x86_64 "$engine/bin/wineserver" -k || true
+    WINEPREFIX="$CYDER_SHARED_PREFIX" /usr/bin/arch -x86_64 "$engine/bin/wineserver" -w || true
+  fi
   exit 0
+fi
+
+if [[ "$HEALTH_CHECK" -eq 1 || "$REBUILD_PREFIX" -eq 1 ]]; then
+  cyder_set_stage engine-validation
+  engine="$(cyder_ensure_shared_engine "$ENGINE_SRC")"
+  wine="$engine/bin/wine"
+  if [[ "$REBUILD_PREFIX" -eq 1 ]]; then
+    cyder_set_stage bootstrap
+    cyder_rebuild_shared_prefix "$wine" "$engine"
+  else
+    cyder_engine_is_ready_for_launch || {
+      echo "Cyder environment is not ready; bootstrap is required." >&2
+      exit 2
+    }
+    cyder_set_stage health-check
+    cyder_health_check_prefix "$wine" "$CYDER_SHARED_PREFIX"
+  fi
+  exit $?
 fi
 
 if [[ "$ENSURE_ENGINE_ONLY" -eq 1 ]]; then
@@ -210,11 +244,14 @@ if [[ "$BOOTSTRAP_ONLY" -eq 1 ]]; then
   } >"$tmp_log" 2>&1
   status=$?
   set -e
+  operation_log="$log_dir/operations/bootstrap-$(date '+%Y%m%d-%H%M%S')-$$.log"
+  mkdir -p "$log_dir/operations"
+  mv -f "$tmp_log" "$operation_log"
+  ln -sfn "operations/$(basename "$operation_log")" "$log_dir/last-bootstrap.log"
   if [[ "$status" -ne 0 ]]; then
-    mv -f "$tmp_log" "$log_dir/bootstrap-error.log"
+    cp -f "$operation_log" "$log_dir/bootstrap-error.log"
     exit "$status"
   fi
-  rm -f "$tmp_log"
   exit 0
 fi
 
