@@ -1692,7 +1692,8 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             } else if response == .alertThirdButtonReturn {
                 let selected = failure.logURL ?? CyderDiagnostics.shared.sessionLogURL
                 NSWorkspace.shared.activateFileViewerSelecting([selected])
-            } else if allowsRebuild && response == .alertFourthButtonReturn {
+            } else if allowsRebuild,
+                      response.rawValue == NSApplication.ModalResponse.alertThirdButtonReturn.rawValue + 1 {
                 action = .rebuild
             }
         }
