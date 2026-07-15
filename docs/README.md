@@ -52,8 +52,8 @@
 | [superpowers/specs/2026-07-04-cyder-mvp-design.md](superpowers/specs/2026-07-04-cyder-mvp-design.md) | Cyder MVP 決策摘要 |
 | [superpowers/specs/2026-07-05-cyder-cyderbits-split-design.md](superpowers/specs/2026-07-05-cyder-cyderbits-split-design.md) | Cyder / CyderBits 產品分流 |
 | [superpowers/plans/2026-07-05-cyder-launcher-phase1.md](superpowers/plans/2026-07-05-cyder-launcher-phase1.md) | Cyder 執行器 Phase 1（已完成） |
-| [superpowers/specs/2026-07-06-wine-engine-slim-design.md](superpowers/specs/2026-07-06-wine-engine-slim-design.md) | **Wine Engine 瘦身** — Windows on Wine PE 設計 |
-| [superpowers/plans/2026-07-06-wine-engine-slim-phase1.md](superpowers/plans/2026-07-06-wine-engine-slim-phase1.md) | Engine 瘦身 Phase 1 實作計畫 |
+| [superpowers/specs/2026-07-06-wine-engine-slim-design.md](superpowers/specs/2026-07-06-wine-engine-slim-design.md) | **Wine Engine 瘦身** — CrossOver configure、runtime install 與 symbols 設計 |
+| [superpowers/plans/2026-07-06-wine-engine-slim-phase1.md](superpowers/plans/2026-07-06-wine-engine-slim-phase1.md) | Engine 瘦身 Phase 1：configure profiles 與 runtime artifact |
 | [superpowers/specs/2026-07-06-cyderbits-bash-design.md](superpowers/specs/2026-07-06-cyderbits-bash-design.md) | **CyderBits Bash 化** — 打包器 / game app 去 Python |
 | [superpowers/plans/2026-07-06-cyderbits-bash-phase1.md](superpowers/plans/2026-07-06-cyderbits-bash-phase1.md) | CyderBits Bash 化 Phase 1 實作計畫 |
 | [superpowers/plans/2026-07-15-cyder-initialization-multigame-power.md](superpowers/plans/2026-07-15-cyder-initialization-multigame-power.md) | Cyder 初始化可靠性、每遊戲 Profile／Bottle、Sync 隔離與省電模式任務切分 |
@@ -64,16 +64,16 @@
 
 | 路線 | Phase | 目標 | 狀態 | 文件 |
 |------|-------|------|------|------|
-| **Wine Engine 瘦身** | 1 | 剝 `include/`、Plan B-1 allowlist、保守 Plan C；app ~820 MB | 待實作 | [design](superpowers/specs/2026-07-06-wine-engine-slim-design.md) · [plan](superpowers/plans/2026-07-06-wine-engine-slim-phase1.md) |
-| **Wine Engine 瘦身** | 2 | 精簡 CrossOver 級 build，PE ~295 MB | 待調查 | 同上 spec §6 |
-| **Wine Engine 瘦身** | 3 | App 不內嵌 engine，首次下載 tar.xz（~4 MB app） | 可選 | 同上 spec §6 |
+| **Wine Engine 瘦身** | 1 | CrossOver configure profiles、`install-lib`、split/strip debug symbols | 待實作 | [design](superpowers/specs/2026-07-06-wine-engine-slim-design.md) · [plan](superpowers/plans/2026-07-06-wine-engine-slim-phase1.md) |
+| **Wine Engine 瘦身** | 2 | 依量測決定能力精簡與 classic／modern flavors | 待調查 | 同上 spec §6 |
+| **Wine Engine 瘦身** | 3 | 壓縮 artifact 與 symbols 分離／按需交付 | 可選 | 同上 spec §6 |
 | **CyderBits Bash 化** | 1 | 打包器 + game launcher 改 shell；icon 保留 `extract-exe-icon.py` | 待實作 | [design](superpowers/specs/2026-07-06-cyderbits-bash-design.md) · [plan](superpowers/plans/2026-07-06-cyderbits-bash-phase1.md) |
 | **CyderBits 重構** | 2 | Bottle 進 game `.app`、APFS CoW template | 待實作 | [split design](superpowers/specs/2026-07-05-cyder-cyderbits-split-design.md) §Phase 2 |
 | **Cyder 生態** | 3 | 容器管理 UI、多引擎切換、加入最愛 | 構想 | 同上 §Phase 3 |
 
 **CyderBits 背景：** `Cyder.app` 已純 shell；`CyderBits.app` 仍 `python3 cyder_create_game_app.py`，產出的 game `.app` 亦內嵌 Python 讀 `meta.json`。Bash 化後對齊 Cyder 模式，僅 PE icon 抽取保留小型 `extract-exe-icon.py`（`winemenubuilder -t` / `sips` 直接讀 exe 不可行）。
 
-**Engine 瘦身背景：** 現況 `Cyder.app` ~1.1 GB，幾乎全是 `engine-payload/` 內 Windows PE 假 DLL（~997 MB）與 `include/`（~62 MB）。對照 Sikarugir `wswine.bundle` PE 僅 ~295 MB。Cyder 已用 prefix Mono + `mshtml=`，故可安全 prune 大量 IE/HTML 與非 runtime 檔；**須保留 `mscoree.dll`**（BlueLauncher .NET）。
+**Engine 瘦身背景：** CX26 install tree 解壓約 1.1 GB，但目前完整 tar.xz 約 162 MB；大型 PE 含高度可壓縮的 DWARF debug sections。Sikarugir 加上 Frameworks 後同樣超過 1 GB，因此不再作尺寸／allowlist 基準。新方向是 CrossOver configure profiles、Wine `install-lib`、split/strip debug symbols，以及同時量測壓縮與安裝大小；**須保留 `mscoree.dll`**（BlueLauncher .NET）。
 
 ## 其他
 
