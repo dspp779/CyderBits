@@ -18,18 +18,20 @@ STATE_FILE="${CYDER_SETTINGS_STATE_FILE:-$WINEPREFIX/.cyder-settings-applied.tsv
 retina="${CYDER_RETINA_MODE:-1}"
 dpi="${CYDER_DPI:-192}"
 font="${CYDER_FONT_PRESET:-songti}"
-smoothing="${CYDER_FONT_SMOOTHING:-grayscale}"
+smoothing="${CYDER_FONT_SMOOTHING:-cleartype-rgb}"
 
 [[ "$retina" == 0 || "$retina" == 1 ]] || retina=1
 [[ "$dpi" =~ ^[0-9]+$ ]] && (( dpi >= 72 && dpi <= 480 )) || dpi=192
 case "$font" in songti|mingliu) ;; *) font=songti ;; esac
-case "$smoothing" in off|grayscale|cleartype-rgb|cleartype-bgr) ;; *) smoothing=grayscale ;; esac
+case "$smoothing" in off|grayscale|cleartype-rgb|cleartype-bgr) ;; *) smoothing=cleartype-rgb ;; esac
 
 case "$smoothing" in
   off)
     smooth=0; smooth_type=1; gamma=0; orientation=1 ;;
   grayscale)
     smooth=2; smooth_type=1; gamma=0; orientation=1 ;;
+  cleartype-rgb)
+    smooth=2; smooth_type=2; gamma=1400; orientation=1 ;;
   cleartype-bgr)
     smooth=2; smooth_type=2; gamma=1400; orientation=0 ;;
   *)

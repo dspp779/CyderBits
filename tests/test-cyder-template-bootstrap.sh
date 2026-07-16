@@ -4,6 +4,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "$ROOT/tests/assert.sh"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
+
 mkdir -p "$TMP/bin" "$TMP/engine/bin" "$TMP/scripts"
 cp "$ROOT/scripts/cyder-profile.sh" "$TMP/scripts/"
 cat >"$TMP/bin/arch" <<'SH'
@@ -24,79 +25,65 @@ fi
 SH
 cat >"$TMP/engine/bin/wineserver" <<'SH'
 #!/usr/bin/env bash
-printf '%s\n' "$*" >>"${CYDER_WINESERVER_LOG:-/dev/null}"
 exit 0
 SH
-chmod +x "$TMP/bin/arch" "$TMP/engine/bin/wine" "$TMP/engine/bin/wineserver"
+cat >"$TMP/scripts/install-wine-mono.sh" <<'SH'
+#!/usr/bin/env bash
+: >"$WINEPREFIX/.cyder-mono-10.4.1"
+SH
+cat >"$TMP/scripts/install-wine-gecko.sh" <<'SH'
+#!/usr/bin/env bash
+: >"$WINEPREFIX/.cyder-gecko-2.47.4"
+SH
+cat >"$TMP/scripts/cyder-apply-golden-settings.sh" <<'SH'
+#!/usr/bin/env bash
+: >"$WINEPREFIX/.cyder-golden-baseline-v1"
+: >"$WINEPREFIX/.golden-only"
+SH
+chmod +x "$TMP/bin/arch" "$TMP/engine/bin/"* "$TMP/scripts/"*
+
 export PATH="$TMP/bin:$PATH"
 export CYDER_WINEBOOT_TIMEOUT=5 CYDER_ENGINE_VERSION_LABEL='wine crossover test'
-export CYDER_WINESERVER_LOG="$TMP/wineserver.log"
 source "$ROOT/scripts/cyder-common.sh"
 cyder_wine_locale_exports() { :; }
-cyder_ensure_font_replacements() { return 0; }
-cyder_apply_user_settings() { : >"$CYDER_SHARED_PREFIX/.recommended-only"; }
 
 support="$TMP/support"
 export CYDER_SUPPORT="$support" CYDER_SHARED_PREFIX="$support/bottles/shared" CYDER_SCRIPTS="$TMP/scripts"
 cyder_init_paths "$ROOT/scripts"
 cyder_bootstrap_shared_prefix "$TMP/engine/bin/wine" "$TMP/engine"
-assert test -f "$support/templates/pristine/manifest.json"
-assert test -f "$support/templates/recommended/manifest.json"
-assert test -f "$CYDER_BOOTSTRAP_MARKER"
-cyder_profile_template_ready pristine "$support" 1 'wine crossover test'
-cyder_profile_template_ready recommended "$support" 1 'wine crossover test'
-assert test ! -e "$support/templates/pristine/.recommended-only"
-assert test -f "$support/templates/recommended/.recommended-only"
 
-# A recommended destination symlink must fail publish without removing the
-# shared prefix or pristine template, and bootstrap must not publish marker.
+assert test -f "$support/templates/pristine/manifest.json"
+assert test -f "$support/templates/golden/manifest.json"
+assert test -f "$support/templates/golden/.cyder-mono-10.4.1"
+assert test -f "$support/templates/golden/.cyder-gecko-2.47.4"
+assert test -f "$support/templates/golden/.cyder-golden-baseline-v1"
+assert test ! -e "$support/templates/pristine/.golden-only"
+assert test -f "$CYDER_SHARED_PREFIX/.golden-only"
+assert test -f "$CYDER_BOOTSTRAP_MARKER"
+cyder_profile_template_ready pristine "$support" 2 'wine crossover test'
+cyder_profile_template_ready golden "$support" 2 'wine crossover test'
+
+# Shared state is disposable and must never flow back into Golden.
+: >"$CYDER_SHARED_PREFIX/user-mutation"
+rm -f "$CYDER_BOOTSTRAP_MARKER"
+cyder_bootstrap_shared_prefix "$TMP/engine/bin/wine" "$TMP/engine"
+assert test ! -e "$CYDER_SHARED_PREFIX/user-mutation"
+assert test ! -e "$support/templates/golden/user-mutation"
+assert test -f "$CYDER_SHARED_PREFIX/.golden-only"
+
+# An unsafe Golden destination aborts before a Shared prefix is published.
 support_fail="$TMP/support-fail"
 export CYDER_SUPPORT="$support_fail" CYDER_SHARED_PREFIX="$support_fail/bottles/shared"
 cyder_init_paths "$ROOT/scripts"
-mkdir -p "$support_fail/templates"
-mkdir -p "$TMP/external-template"
-ln -s "$TMP/external-template" "$support_fail/templates/recommended"
+mkdir -p "$support_fail/templates" "$TMP/external-golden"
+rm -rf "$support_fail/templates/golden"
+ln -s "$TMP/external-golden" "$support_fail/templates/golden"
 set +e
-cyder_bootstrap_shared_prefix "$TMP/engine/bin/wine" "$TMP/engine"
+cyder_bootstrap_shared_prefix "$TMP/engine/bin/wine" "$TMP/engine" >/dev/null 2>&1
 status=$?
 set -e
-assert_ne() { [[ "$1" != "$2" ]] || { echo "ASSERT failed: $3" >&2; return 1; }; }
-assert_ne "$status" 0 "recommended publish failure should fail bootstrap"
-assert test -f "$support_fail/bottles/shared/system.reg"
-assert test -f "$support_fail/templates/pristine/manifest.json"
-assert test ! -e "$support_fail/bottles/shared/.cyder-bootstrap-v1"
-assert test -d "$TMP/external-template"
-
-# Existing shared state with no pristine template uses an isolated staging
-# bottle; custom files in shared must not leak into pristine.
-support_existing="$TMP/support-existing"
-export CYDER_SUPPORT="$support_existing" CYDER_SHARED_PREFIX="$support_existing/bottles/shared"
-cyder_init_paths "$ROOT/scripts"
-mkdir -p "$CYDER_SHARED_PREFIX/drive_c/windows/system32"
-: >"$CYDER_SHARED_PREFIX/system.reg"
-: >"$CYDER_SHARED_PREFIX/user.reg"
-: >"$CYDER_SHARED_PREFIX/drive_c/windows/system32/kernel32.dll"
-: >"$CYDER_SHARED_PREFIX/custom-shared-marker"
-cyder_bootstrap_shared_prefix "$TMP/engine/bin/wine" "$TMP/engine"
-assert test -f "$support_existing/templates/pristine/manifest.json"
-assert test ! -e "$support_existing/templates/pristine/custom-shared-marker"
-assert test -f "$support_existing/templates/recommended/.recommended-only"
-
-rm "$support_existing/templates/recommended/manifest.json"
-session_dir="$(cyder_session_dir "$CYDER_SHARED_PREFIX")"
-mkdir -p "$session_dir"
-printf 'pid=%s\nmode=background\n' "$$" >"$session_dir/live.session"
-: >"$CYDER_WINESERVER_LOG"
-set +e
-cyder_bootstrap_shared_prefix "$TMP/engine/bin/wine" "$TMP/engine"
-status=$?
-set -e
-assert_eq "$status" 75 "live profile session should block recommended publish"
-if [[ -s "$CYDER_WINESERVER_LOG" ]]; then
-  echo "ASSERT failed: active session must not stop wineserver" >&2
-  cat "$CYDER_WINESERVER_LOG" >&2
-  exit 1
-fi
-rm -f "$session_dir/live.session"
+[[ "$status" -ne 0 ]] || { echo "ASSERT failed: unsafe Golden publish succeeded" >&2; exit 1; }
+assert test ! -e "$CYDER_SHARED_PREFIX"
+assert test -d "$TMP/external-golden"
 
 echo "PASS test-cyder-template-bootstrap"

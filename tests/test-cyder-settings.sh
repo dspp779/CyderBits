@@ -65,11 +65,11 @@ defaults="$(cat "$CYDER_TEST_WINE_LOG")"
 assert_contains "$defaults" "RetinaMode /t REG_SZ /d y" "Retina should default on"
 assert_contains "$defaults" "LogPixels /t REG_DWORD /d 192" "DPI should default to 192"
 assert_contains "$defaults" "FontSmoothing /t REG_SZ /d 2" "font antialiasing should default on"
-assert_contains "$defaults" "FontSmoothingType /t REG_DWORD /d 1" "font smoothing should default to grayscale"
+assert_contains "$defaults" "FontSmoothingType /t REG_DWORD /d 2" "font smoothing should default to RGB ClearType"
 
 # A DPI-only change must not touch Retina, font, or unrelated game settings.
 : >"$CYDER_TEST_WINE_LOG"
-export CYDER_RETINA_MODE=1 CYDER_DPI=144 CYDER_FONT_PRESET=songti CYDER_FONT_SMOOTHING=grayscale
+export CYDER_RETINA_MODE=1 CYDER_DPI=144 CYDER_FONT_PRESET=songti CYDER_FONT_SMOOTHING=cleartype-rgb
 bash "$ROOT/scripts/cyder-apply-settings.sh" >/dev/null
 dpi_only="$(cat "$CYDER_TEST_WINE_LOG")"
 assert_contains "$dpi_only" "LogPixels /t REG_DWORD /d 144" "DPI-only change should update LogPixels"

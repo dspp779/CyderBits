@@ -26,8 +26,8 @@ cyder_profile_create() {
   cyder_profile_init_layout "$root"
   local template_name id bottle profile canonical
   template_name="$(basename "$template_dir")"
-  [[ "$template_name" == pristine || "$template_name" == recommended ]] || {
-    echo "template must be pristine or recommended: $template_dir" >&2
+  [[ "$template_name" == pristine || "$template_name" == golden || "$template_name" == recommended ]] || {
+    echo "template must be pristine, golden, or recommended: $template_dir" >&2
     return 1
   }
   cyder_profile_validate_template_manifest "$template_dir/manifest.json" "$template_name" || return 1
@@ -73,7 +73,7 @@ cyder_profile_resolve() {
   }
   cyder_profile_validate_metadata "$profile/profile.json" "$id" || return 1
   canonical="$(cyder_profile_canonical_path "$exe_path")"
-  metadata_source="$(ruby -rjson -e 'puts JSON.parse(File.read(ARGV.fetch(0)))["sourcePath"]' "$profile/profile.json")"
+  metadata_source="$(/usr/bin/plutil -extract sourcePath raw -o - "$profile/profile.json")"
   [[ "$metadata_source" == "$canonical" ]] || {
     echo "profile metadata source mismatch for $id" >&2
     return 1
@@ -85,7 +85,7 @@ cyder_profile_resolve() {
 cyder_profile_init_layout() {
   local root="$1"
   mkdir -p "$root/templates/pristine" \
-    "$root/templates/recommended" "$root/profiles" "$root/bottles" \
+    "$root/templates/golden" "$root/templates/recommended" "$root/profiles" "$root/bottles" \
     "$root/staging" "$root/backups"
 }
 
@@ -99,28 +99,31 @@ cyder_profile_write_metadata() {
   [[ "$profile_id" =~ ^profile-[a-f0-9]{24}$ ]] || {
     echo "invalid profile id: $profile_id" >&2; return 1;
   }
-  [[ "$base_template" == pristine || "$base_template" == recommended ]] || {
+  [[ "$base_template" == pristine || "$base_template" == golden || "$base_template" == recommended ]] || {
     echo "invalid profile template: $base_template" >&2; return 1;
   }
   [[ -e "$source_path" ]] || { echo "profile source does not exist: $source_path" >&2; return 1; }
   [[ "$legacy" == true || "$legacy" == false ]] || { echo "invalid legacy flag: $legacy" >&2; return 1; }
-  command -v ruby >/dev/null 2>&1 || { echo "metadata writing requires ruby" >&2; return 1; }
-  local canonical tmp
+  local canonical tmp plist_tmp
   canonical="$(cd "$(dirname "$source_path")" && printf '%s/%s' "$(pwd -P)" "$(basename "$source_path")")"
   tmp="$profile_dir/.profile.json.$$"
-  ruby -rjson - "$tmp" "$profile_id" "$canonical" "$base_template" "$recipe_id" "$legacy" <<'RUBY'
-target, profile_id, source_path, base_template, recipe_id, legacy = ARGV
-metadata = {
-  "schemaVersion" => 1,
-  "profileId" => profile_id,
-  "sourcePath" => source_path,
-  "baseTemplate" => base_template,
-  "recipeId" => (recipe_id.empty? ? nil : recipe_id),
-  "legacy" => (legacy == "true"),
-  "layoutVersion" => 1
-}
-File.write(target, JSON.pretty_generate(metadata) + "\n")
-RUBY
+  plist_tmp="$profile_dir/.profile.plist.$$"
+  rm -f "$tmp" "$plist_tmp"
+  /usr/bin/plutil -create xml1 "$plist_tmp"
+  /usr/bin/plutil -insert schemaVersion -integer 1 "$plist_tmp"
+  /usr/bin/plutil -insert profileId -string "$profile_id" "$plist_tmp"
+  /usr/bin/plutil -insert sourcePath -string "$canonical" "$plist_tmp"
+  /usr/bin/plutil -insert baseTemplate -string "$base_template" "$plist_tmp"
+  if [[ -n "$recipe_id" ]]; then
+    /usr/bin/plutil -insert recipeId -string "$recipe_id" "$plist_tmp"
+  fi
+  /usr/bin/plutil -insert legacy -bool "$legacy" "$plist_tmp"
+  /usr/bin/plutil -insert layoutVersion -integer 1 "$plist_tmp"
+  if ! /usr/bin/plutil -convert json -o "$tmp" "$plist_tmp"; then
+    rm -f "$tmp" "$plist_tmp"
+    return 1
+  fi
+  rm -f "$plist_tmp"
   mv "$tmp" "$profile_dir/profile.json"
 }
 
@@ -139,7 +142,7 @@ begin
   abort "invalid profile id" unless value["profileId"].is_a?(String) && value["profileId"].match?(/\Aprofile-[a-f0-9]{24}\z/)
   abort "profile id mismatch" unless expected_id.empty? || value["profileId"] == expected_id
   abort "invalid source path" unless value["sourcePath"].is_a?(String) && !value["sourcePath"].empty?
-  abort "invalid base template" unless %w[pristine recommended].include?(value["baseTemplate"])
+  abort "invalid base template" unless %w[pristine golden recommended].include?(value["baseTemplate"])
   abort "invalid layout version" unless value["layoutVersion"] == 1
   abort "invalid recipe id" unless value["recipeId"].nil? || (value["recipeId"].is_a?(String) && value["recipeId"].match?(/\A[a-z0-9][a-z0-9-]*\z/))
   abort "invalid legacy flag" unless !value.key?("legacy") || value["legacy"] == true || value["legacy"] == false
@@ -157,7 +160,7 @@ cyder_profile_write_template_manifest() {
   command -v ruby >/dev/null 2>&1 || { echo "manifest writing requires ruby" >&2; return 1; }
   local template_id tmp
   template_id="${5:-$(basename "$template_dir")}"
-  [[ "$template_id" == pristine || "$template_id" == recommended ]] || {
+  [[ "$template_id" == pristine || "$template_id" == golden || "$template_id" == recommended ]] || {
     echo "invalid template name: $template_id" >&2; return 1;
   }
   tmp="$template_dir/.manifest.json.$$"
@@ -187,7 +190,7 @@ value = JSON.parse(File.read(path))
 abort "manifest must be an object" unless value.is_a?(Hash)
 %w[schemaVersion templateId revision].each { |key| abort "manifest missing #{key}" unless value.key?(key) }
 abort "unsupported manifest schema" unless [1, 2].include?(value["schemaVersion"])
-abort "invalid template id" unless %w[pristine recommended].include?(value["templateId"])
+abort "invalid template id" unless %w[pristine golden recommended].include?(value["templateId"])
 abort "template id mismatch" unless expected_template.empty? || value["templateId"] == expected_template
 abort "invalid revision" unless value["revision"].is_a?(Integer) && value["revision"] >= 1
 abort "invalid recipe id" if value.key?("recipeId") && !value["recipeId"].nil? && (!value["recipeId"].is_a?(String) || !value["recipeId"].match?(/\A[a-z0-9][a-z0-9-]*\z/))
@@ -196,15 +199,15 @@ abort "schema-2 manifest requires engine version" if value["schemaVersion"] == 2
 RUBY
 }
 
-# Atomically publish a pristine or recommended template. Callers must stop
+# Atomically publish a pristine, golden, or recommended template. Callers must stop
 # Wine and verify that the source prefix is inactive before invoking this API.
 # Existing templates remain in place until the complete clone and manifest are
 # ready; an interrupted copy therefore cannot replace a usable template.
 cyder_profile_publish_template() {
   local source="$1" template_name="$2" root="$3" revision="$4" engine_version="$5" recipe_id="${6:-}"
   [[ -d "$source" ]] || { echo "template source does not exist: $source" >&2; return 1; }
-  [[ "$template_name" == pristine || "$template_name" == recommended ]] || {
-    echo "template must be pristine or recommended: $template_name" >&2
+  [[ "$template_name" == pristine || "$template_name" == golden || "$template_name" == recommended ]] || {
+    echo "template must be pristine, golden, or recommended: $template_name" >&2
     return 1
   }
   [[ "$revision" =~ ^[1-9][0-9]*$ ]] || { echo "invalid template revision: $revision" >&2; return 1; }
@@ -256,7 +259,7 @@ cyder_profile_publish_template() {
 cyder_profile_template_ready() {
   local template_name="$1" root="$2" revision="$3" engine_version="$4"
   local manifest="$root/templates/$template_name/manifest.json"
-  [[ "$template_name" == pristine || "$template_name" == recommended ]] || return 1
+  [[ "$template_name" == pristine || "$template_name" == golden || "$template_name" == recommended ]] || return 1
   [[ ! -L "$root/templates/$template_name" && ! -L "$manifest" ]] || return 1
   [[ -f "$manifest" ]] || return 1
   cyder_profile_validate_template_manifest "$manifest" "$template_name" >/dev/null 2>&1 || return 1
@@ -403,7 +406,7 @@ begin
     abort "recipe #{index} has invalid id" unless recipe["id"].is_a?(String) && recipe["id"].match?(/\A[a-z0-9][a-z0-9-]*\z/)
     abort "recipe #{index} has invalid revision" unless recipe["revision"].is_a?(Integer) && recipe["revision"] >= 1
     abort "recipe #{index} has empty displayName" unless recipe["displayName"].is_a?(String) && !recipe["displayName"].empty?
-    abort "recipe #{index} has invalid baseTemplate" unless %w[pristine recommended].include?(recipe["baseTemplate"])
+    abort "recipe #{index} has invalid baseTemplate" unless %w[pristine golden recommended].include?(recipe["baseTemplate"])
     settings = recipe["settings"]
     abort "recipe #{index} settings must be an object" unless settings.is_a?(Hash)
     abort "recipe #{index} has unknown setting" unless (settings.keys - settings_allowed).empty?

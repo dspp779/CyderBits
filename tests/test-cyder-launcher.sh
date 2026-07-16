@@ -153,7 +153,7 @@ mkdir -p "$TMP/runtime/Engines/wine-x86_64/bin"
 cp "$TMP/fake-bin/wine" "$TMP/runtime/Engines/wine-x86_64/bin/wine"
 chmod +x "$TMP/runtime/Engines/wine-x86_64/bin/wine"
 cat >"$profile_support/templates/pristine/manifest.json" <<'JSON'
-{"schemaVersion":2,"templateId":"pristine","revision":1,"recipeId":null,"engineVersion":"test-engine"}
+{"schemaVersion":2,"templateId":"pristine","revision":2,"recipeId":null,"engineVersion":"test-engine"}
 JSON
 profile_exe="$TMP/profile game.exe"
 touch "$profile_exe"
@@ -163,7 +163,10 @@ assert test -d "$profile_bottle"
 resolved_bottle="$(CYDER_SUPPORT="$profile_support" CYDER_ENGINE_VERSION_LABEL=test-engine \
   bash "$ROOT/scripts/cyder_launcher.sh" --profile-resolve "$profile_exe")"
 assert_eq "$resolved_bottle" "$profile_bottle" "profile resolve should return created bottle"
-assert_contains "$(cat "$profile_support/profiles"/*/profile.json)" "$profile_exe" "profile metadata should use full EXE path"
+metadata_path="$(find "$profile_support/profiles" -name profile.json -print -quit)"
+profile_exe_canonical="$(cd "$(dirname "$profile_exe")" && printf '%s/%s' "$(pwd -P)" "$(basename "$profile_exe")")"
+assert_eq "$(/usr/bin/plutil -extract sourcePath raw -o - "$metadata_path")" "$profile_exe_canonical" \
+  "profile metadata should use full EXE path"
 if CYDER_SUPPORT="$profile_support" bash "$ROOT/scripts/cyder_launcher.sh" \
   --profile-resolve "$profile_exe" --dry-run >/dev/null 2>&1; then
   echo "profile and dry-run actions unexpectedly combined" >&2
@@ -175,10 +178,10 @@ if CYDER_SUPPORT="$profile_support" CYDER_ENGINE_VERSION_LABEL=other-engine \
   echo "engine version mismatch unexpectedly accepted" >&2
   exit 1
 fi
-mkdir -p "$profile_support/templates/recommended"
-cp "$profile_support/templates/pristine/manifest.json" "$profile_support/templates/recommended/manifest.json"
-sed -i '' 's/"pristine"/"recommended"/' "$profile_support/templates/recommended/manifest.json" 2>/dev/null || \
-  sed -i 's/"pristine"/"recommended"/' "$profile_support/templates/recommended/manifest.json"
+mkdir -p "$profile_support/templates/golden"
+cp "$profile_support/templates/pristine/manifest.json" "$profile_support/templates/golden/manifest.json"
+sed -i '' 's/"pristine"/"golden"/' "$profile_support/templates/golden/manifest.json" 2>/dev/null || \
+  sed -i 's/"pristine"/"golden"/' "$profile_support/templates/golden/manifest.json"
 CYDER_SUPPORT="$profile_support" CYDER_ENGINE_VERSION_LABEL=test-engine PATH="$TMP/bin:$PATH" \
   bash "$ROOT/scripts/cyder_launcher.sh" --templates-ready
 set +e
@@ -192,9 +195,12 @@ assert_eq "$templates_mismatch_status" "1" "template engine mismatch should be a
 # lifecycle through the same session registry used by Wine launches.
 session_prefix="$profile_support/bottles/session"
 mkdir -p "$session_prefix"
-session_file="$(CYDER_SUPPORT="$profile_support" \
+session_result="$TMP/session-result.plist"
+session_file="$(CYDER_SUPPORT="$profile_support" CYDER_RESULT_FILE="$session_result" \
   bash "$ROOT/scripts/cyder_launcher.sh" --session-acquire "$session_prefix" "$$" 1 0 normal)"
 assert test -f "$session_file"
+assert_eq "$(/usr/bin/plutil -extract sessionFile raw -o - "$session_result")" "$session_file" \
+  "session acquire should publish an absolute machine-readable result"
 updated="$(CYDER_SUPPORT="$profile_support" \
   bash "$ROOT/scripts/cyder_launcher.sh" --session-update "$session_prefix" "$session_file" "$$" 2>&1)"
 assert_eq "$updated" "" "session update should not emit output"

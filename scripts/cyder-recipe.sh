@@ -47,7 +47,7 @@ root.each_with_index do |recipe, index|
   ids[id] = true
   abort "CYD-REC-001: recipe #{id} revision must be a positive integer" unless recipe['revision'].is_a?(Integer) && recipe['revision'] >= 1
   abort "CYD-REC-001: recipe #{id} displayName must not be empty" unless recipe['displayName'].is_a?(String) && !recipe['displayName'].empty?
-  abort "CYD-REC-001: recipe #{id} has invalid baseTemplate" unless %w[pristine recommended].include?(recipe['baseTemplate'])
+  abort "CYD-REC-001: recipe #{id} has invalid baseTemplate" unless %w[pristine golden recommended].include?(recipe['baseTemplate'])
   settings = recipe['settings']
   abort "CYD-REC-001: recipe #{id} settings must be an object" unless settings.is_a?(Hash)
   unknown_settings = settings.keys - allowed_settings

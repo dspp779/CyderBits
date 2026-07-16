@@ -54,12 +54,12 @@ struct CyderSettings: Codable {
     // basename fallback; never infer a profile from a basename.
     var schemaVersion = 3
     var revision = 0
-    var msync = false
+    var msync = true
     var esync: Bool? = false
     var retinaMode = true
     var dpi = 192
     var fontPreset = "songti"
-    var fontSmoothing = "grayscale"
+    var fontSmoothing = "cleartype-rgb"
     var perExecutable: [String: CyderExecutableSettings] = [:]
     var perProfile: [String: CyderExecutableSettings] = [:]
 
@@ -75,12 +75,12 @@ struct CyderSettings: Codable {
         ) }
         schemaVersion = 3
         revision = try values.decodeIfPresent(Int.self, forKey: .revision) ?? 0
-        msync = try values.decodeIfPresent(Bool.self, forKey: .msync) ?? false
+        msync = try values.decodeIfPresent(Bool.self, forKey: .msync) ?? true
         esync = try values.decodeIfPresent(Bool?.self, forKey: .esync) ?? false
         retinaMode = try values.decodeIfPresent(Bool.self, forKey: .retinaMode) ?? true
         dpi = try values.decodeIfPresent(Int.self, forKey: .dpi) ?? 192
         fontPreset = try values.decodeIfPresent(String.self, forKey: .fontPreset) ?? "songti"
-        fontSmoothing = try values.decodeIfPresent(String.self, forKey: .fontSmoothing) ?? "grayscale"
+        fontSmoothing = try values.decodeIfPresent(String.self, forKey: .fontSmoothing) ?? "cleartype-rgb"
         perExecutable = try values.decodeIfPresent([String: CyderExecutableSettings].self, forKey: .perExecutable) ?? [:]
         let decodedProfiles = try values.decodeIfPresent([String: CyderExecutableSettings].self, forKey: .perProfile) ?? [:]
         perProfile = decodedProfiles.reduce(into: [:]) { result, item in
@@ -93,7 +93,7 @@ struct CyderSettings: Codable {
         dpi = min(480, max(72, dpi))
         if !["songti", "mingliu"].contains(fontPreset) { fontPreset = "songti" }
         if !["off", "grayscale", "cleartype-rgb", "cleartype-bgr"].contains(fontSmoothing) {
-            fontSmoothing = "grayscale"
+            fontSmoothing = "cleartype-rgb"
         }
     }
 

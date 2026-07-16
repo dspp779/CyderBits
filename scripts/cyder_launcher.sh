@@ -67,10 +67,10 @@ Options:
   --session-acquire PREFIX OWNER_PID MSYNC ESYNC POWER Reserve a bottle session
   --session-update PREFIX SESSION_FILE NEW_PID Update a reserved session PID
   --session-release PREFIX SESSION_FILE Release a reserved session
-  --templates-ready  Check pristine/recommended template compatibility
+  --templates-ready  Check pristine/golden template compatibility
   --launch-exe PATH   Launch .exe (engine + bootstrap must already be ready)
   --profile-resolve PATH  Resolve PATH to its per-game bottle and exit
-  --profile-create PATH [pristine|recommended]  Create/resolve a per-game bottle and exit
+  --profile-create PATH [pristine|golden]  Create/resolve a per-game bottle and exit
   -h, --help          Show this help
 EOF
 }
@@ -87,7 +87,7 @@ APPLY_SETTINGS_ONLY=0
 LAUNCH_ONLY=0
 PROFILE_ACTION=""
 PROFILE_EXE=""
-PROFILE_TEMPLATE="recommended"
+PROFILE_TEMPLATE="golden"
 APPLY_SETTINGS_PREFIX=""
 APPLY_SETTINGS_PREFIX_SET=0
 SESSION_ACTION=""
@@ -96,6 +96,20 @@ TEMPLATES_READY=0
 ENGINE_SRC="$CYDER_ENGINE_SRC"
 EXE_ARGS=()
 POSITIONAL_EXE=0
+
+cyder_write_machine_result() {
+  local key="$1" value="$2" result_file="${CYDER_RESULT_FILE:-}"
+  [[ -n "$result_file" ]] || return 0
+  local result_dir tmp
+  result_dir="$(dirname "$result_file")"
+  mkdir -p "$result_dir"
+  tmp="${result_file}.tmp.$$"
+  rm -f "$tmp"
+  /usr/bin/plutil -create xml1 "$tmp"
+  /usr/bin/plutil -insert schemaVersion -integer 1 "$tmp"
+  /usr/bin/plutil -insert "$key" -string "$value" "$tmp"
+  mv -f "$tmp" "$result_file"
+}
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -176,7 +190,7 @@ while [[ $# -gt 0 ]]; do
       [[ -z "$PROFILE_ACTION" ]] || { echo "profile action specified more than once" >&2; exit 1; }
       PROFILE_ACTION=create
       PROFILE_EXE="$2"
-      if [[ $# -ge 3 && ( "$3" == pristine || "$3" == recommended ) ]]; then
+      if [[ $# -ge 3 && ( "$3" == pristine || "$3" == golden ) ]]; then
         PROFILE_TEMPLATE="$3"
         shift 3
       else
@@ -284,7 +298,7 @@ if [[ "$TEMPLATES_READY" -eq 1 ]]; then
   fi
   engine_version="$(cyder_template_engine_version "$engine")"
   [[ -n "$engine_version" && "$engine_version" != unknown ]] || exit 1
-  for template_name in pristine recommended; do
+  for template_name in pristine golden; do
     bash "$profile_script" template-ready "$template_name" "$CYDER_SUPPORT" \
       "$revision" "$engine_version" >/dev/null 2>&1 || exit 1
   done
@@ -345,6 +359,7 @@ if [[ -n "$SESSION_ACTION" ]]; then
         echo "Failed to assign session owner PID" >&2
         exit 1
       fi
+      cyder_write_machine_result sessionFile "$session_file"
       printf '%s\n' "$session_file"
       ;;
     update)

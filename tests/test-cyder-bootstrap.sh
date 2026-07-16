@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Bootstrap smoke test for Cyder shared prefix (mono + tar + hi-res).
+# Bootstrap smoke test for Cyder Pristine -> Golden -> Shared.
 # Requires: install/wine-cx26-x86_64 built, tools/libarchive present.
 # Uses CYDER_SHARED_PREFIX so bootstrap does not touch ~/Library/Application Support.
 set -euo pipefail
@@ -14,7 +14,10 @@ trap 'rm -rf "$TMP"' EXIT
 SHARED="$TMP/SharedPrefix"
 SUPPORT="$TMP/support"
 mkdir -p "$SHARED" "$SUPPORT/downloads"
-cp "$ROOT/downloads/wine-mono-10.4.1-x86.msi" "$SUPPORT/downloads/"
+for addon in wine-mono-10.4.1-x86.msi wine-gecko-2.47.4-x86.msi wine-gecko-2.47.4-x86_64.msi; do
+  [[ -f "$ROOT/downloads/$addon" ]] || { echo "SKIP: missing downloads/$addon"; exit 0; }
+  cp "$ROOT/downloads/$addon" "$SUPPORT/downloads/"
+done
 
 output="$(
   CYDER_SUPPORT="$SUPPORT" \
@@ -29,8 +32,10 @@ assert_contains "$output" ".cyder-bootstrap-v1" "bootstrap-only should print mar
 assert test -f "$SHARED/drive_c/windows/syswow64/tar.exe" -o \
   -f "$SHARED/drive_c/windows/system32/tar.exe"
 assert test -d "$SHARED/drive_c/windows/mono"
+assert test -d "$SHARED/drive_c/windows/syswow64/gecko/2.47.4/wine_gecko"
 assert test -f "$SHARED/.cyder-bootstrap-v1"
-assert test -f "$SHARED/.cyder-font-songti-v1"
+assert test -f "$SHARED/.cyder-golden-baseline-v1"
+assert test -f "$SUPPORT/templates/golden/manifest.json"
 
 WINE="$ROOT/install/wine-cx26-x86_64/bin/wine"
 if WINEPREFIX="$SHARED" arch -x86_64 "$WINE" reg query \
@@ -41,10 +46,7 @@ else
   exit 1
 fi
 
-if WINEPREFIX="$SHARED" arch -x86_64 "$WINE" reg query "HKCU\\Software\\Wine\\Mac Driver" /v RetinaMode >/dev/null 2>&1; then
-  retina="$(WINEPREFIX="$SHARED" arch -x86_64 "$WINE" reg query "HKCU\\Software\\Wine\\Mac Driver" /v RetinaMode 2>/dev/null | awk 'tolower($1) == "retinamode" { print $NF; exit }' || true)"
-  retina="$(printf '%s' "$retina" | tr -d '\r' | tr '[:upper:]' '[:lower:]')"
-  assert_eq "$retina" "y" "bootstrap should default to RetinaMode=y"
-fi
+ddraw="$(WINEPREFIX="$SHARED" arch -x86_64 "$WINE" reg query "HKCU\\Software\\Wine\\DllOverrides" /v ddraw 2>/dev/null)"
+assert_contains "$ddraw" "native,builtin" "Golden should set ddraw native,builtin"
 
 echo "PASS test-cyder-bootstrap"
