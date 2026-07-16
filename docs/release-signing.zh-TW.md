@@ -12,7 +12,7 @@
 - macOS 13 以上,並安裝 Xcode Command Line Tools:`xcode-select --install`
 - 本 repo 的 clone
 - 引擎 tarball(見下方「取得引擎檔案」)
-- 向 Isaac 索取以下四樣東西(**務必透過密碼管理器等安全管道傳遞,不要用 email 或即時通訊明文**):
+- 向 團隊成員 索取以下四樣東西(**務必透過密碼管理器等安全管道傳遞,不要用 email 或即時通訊明文**):
 
 | 項目 | 說明 |
 |---|---|
@@ -61,7 +61,7 @@ xcrun notarytool store-credentials cyder-notary \
 
 建置腳本會依 `config/cyder-engine-archive.txt` 尋找已打包好的引擎 tarball(目前為
 `dist/artifacts/a6-final/engine-wine-x86_64-CX26-2-0-W11-Cyder003.tar.xz`)。
-`dist/` 不在版本控制內,所以 clone 後不會有這個檔案 — 向 Isaac 拿到 tarball 後放到上述路徑,
+`dist/` 不在版本控制內,所以 clone 後不會有這個檔案 — 向 團隊成員 拿到 tarball 後放到上述路徑,
 或建置時用 `--engine-archive /path/to/engine.tar.xz` 指定。
 
 ## 每次發佈流程
@@ -153,6 +153,6 @@ spctl -a -vv dist/Cyder.app
 
 - `.p12` 等同於整個團隊的簽章身分 — 持有者簽出來的軟體都掛名
   「Chun Ho Kwok (3U9565WWM2)」。請存放在密碼管理器,絕對不要提交進 repo。
-- 若裝置遺失或懷疑外洩,立刻通知 Isaac 到 Apple Developer 網站撤銷憑證
+- 若裝置遺失或懷疑外洩,立刻通知 團隊成員 到 Apple Developer 網站撤銷憑證
   (已公證發佈的舊版本不受影響,票據仍然有效)。
 - `.p8` API 金鑰可隨時在 App Store Connect 撤銷重發。
