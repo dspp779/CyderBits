@@ -712,12 +712,16 @@ cyder_sign_installed_engine() {
   local dest="$1"
   local sign_sh="$CYDER_SCRIPTS/sign-wine.sh"
   local env_sh="$CYDER_SCRIPTS/env-x86_64.sh"
-  [[ -f "$sign_sh" ]] || return 0
+  [[ -f "$sign_sh" ]] || {
+    echo "Wine signing helper is missing: $sign_sh" >&2
+    return 1
+  }
   if [[ -f "$env_sh" ]]; then
     cyder_run bash -c "source \"$env_sh\" && WINE_INSTALL=\"$dest\" ENTITLEMENTS_PLIST=\"$CYDER_ENTITLEMENTS\" bash \"$sign_sh\" --root \"$dest\""
   else
     cyder_run bash "$sign_sh" --root "$dest" --entitlements "$CYDER_ENTITLEMENTS"
   fi
+  printf 'signed\n' >"$dest/.cyder-engine-signed"
 }
 
 cyder_ensure_shared_engine() {
@@ -733,6 +737,9 @@ cyder_ensure_shared_engine() {
     installed_version="$(cyder_read_installed_engine_version "$dest" 2>/dev/null || true)"
     if [[ -z "$bundled_version" || "$installed_version" == "$bundled_version" ]]; then
       echo "Shared engine present: $dest" >&2
+      if [[ ! -f "$dest/.cyder-engine-signed" ]]; then
+        cyder_sign_installed_engine "$dest" || exit 1
+      fi
       echo "$dest"
       return 0
     fi
@@ -763,7 +770,7 @@ cyder_ensure_shared_engine() {
     cyder_write_engine_version_file "$dest" "$bundled_version"
     rm -f "$dest/.cyder-engine-version"
   fi
-  cyder_sign_installed_engine "$dest"
+  cyder_sign_installed_engine "$dest" || exit 1
   echo "$dest"
 }
 

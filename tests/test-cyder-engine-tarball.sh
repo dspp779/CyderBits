@@ -35,6 +35,12 @@ cyder_write_app_engine_metadata() {
 }
 cyder_write_app_engine_metadata "$RES" "$ENGINE_TAR" "$ENGINE_VERSION_LABEL"
 
+# This fixture tests extraction/version lifecycle, not macOS codesign. The
+# production app bundles sign-wine.sh and cyder-common invokes it here.
+cyder_sign_installed_engine() {
+  printf 'signed\n' >"$1/.cyder-engine-signed"
+}
+
 CYDER_SUPPORT="$TMP/CyderSupport"
 CYDER_ENGINES="$ENGINE_ROOT"
 CYDER_SHARED_PREFIX="$TMP/SharedPrefix"

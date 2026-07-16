@@ -127,6 +127,7 @@ cp "$SCRIPT_DIR/cyder_launcher.sh" "$RES/ogom-scripts/"
 cp "$SCRIPT_DIR/cyder-common.sh" "$RES/ogom-scripts/"
 cp "$SCRIPT_DIR/cyder-ensure-rosetta.sh" "$RES/ogom-scripts/"
 cp "$SCRIPT_DIR/env-x86_64.sh" "$RES/ogom-scripts/"
+cp "$SCRIPT_DIR/sign-wine.sh" "$RES/ogom-scripts/"
 cp "$SCRIPT_DIR/install-wine-mono.sh" "$RES/ogom-scripts/"
 cp "$SCRIPT_DIR/install-wine-gecko.sh" "$RES/ogom-scripts/"
 cp "$SCRIPT_DIR/cyder-apply-golden-settings.sh" "$RES/ogom-scripts/"
@@ -138,6 +139,7 @@ cp "$SCRIPT_DIR/install-cyder-font-replacements.sh" "$RES/ogom-scripts/"
 cp "$SCRIPT_DIR/cyder-apply-settings.sh" "$RES/ogom-scripts/"
 cp "$SCRIPT_DIR/cyder-profile.sh" "$RES/ogom-scripts/"
 chmod +x "$RES/ogom-scripts/cyder_launcher.sh"
+chmod +x "$RES/ogom-scripts/sign-wine.sh"
 chmod +x "$RES/ogom-scripts/install-cyder-font-replacements.sh"
 chmod +x "$RES/ogom-scripts/cyder-apply-settings.sh"
 chmod +x "$RES/ogom-scripts/cyder-profile.sh"
@@ -317,6 +319,10 @@ cat > "$CONTENTS/Info.plist" <<PLIST
 </plist>
 PLIST
 
+# A downloaded source archive can carry com.apple.quarantine.  Do not carry
+# that attribute into the nested runtime payload; the app itself is signed
+# immediately afterwards and may still receive quarantine when downloaded.
+xattr -cr "$APP" 2>/dev/null || true
 codesign --force --deep --sign - "$APP" 2>/dev/null || true
 
 echo ""

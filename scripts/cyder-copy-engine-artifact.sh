@@ -38,6 +38,7 @@ copy_engine_artifact_into_app() {
     fi
     dest_archive="$res_dir/$(basename "$override")"
     cp "$override" "$dest_archive"
+    xattr -c "$dest_archive" 2>/dev/null || true
     cyder_write_app_engine_metadata "$res_dir" "$dest_archive" "$override_ver"
     echo "==> Bundled engine archive: $(basename "$dest_archive") ($(du -sh "$override" | awk '{print $1}'))"
     echo "==> Engine version: $override_ver"
@@ -68,6 +69,7 @@ copy_engine_artifact_into_app() {
 
   dest_archive="$res_dir/$(basename "$archive")"
   cp "$archive" "$dest_archive"
+  xattr -c "$dest_archive" 2>/dev/null || true
   cyder_write_app_engine_metadata "$res_dir" "$dest_archive" "$version"
   echo "==> Bundled engine artifact: $(basename "$archive") ($(du -sh "$archive" | awk '{print $1}'))"
   echo "==> Engine version: $version"

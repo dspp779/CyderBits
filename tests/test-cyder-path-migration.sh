@@ -13,6 +13,9 @@ export CYDER_RUNTIME_ROOT="$HOME/.cyder/runtime"
 export CYDER_SCRIPTS="$TMP/empty-scripts"
 mkdir -p "$CYDER_SCRIPTS"
 cyder_init_paths "$ROOT/scripts"
+cyder_sign_installed_engine() {
+  printf 'signed\n' >"$1/.cyder-engine-signed"
+}
 
 legacy_engine="$CYDER_LEGACY_ENGINES/$CYDER_ENGINE_NAME"
 mkdir -p "$legacy_engine/bin" "$CYDER_LEGACY_SHARED_PREFIX/drive_c"
