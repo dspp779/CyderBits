@@ -19,6 +19,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
     private var pendingFiles: [String] = []
     private var didFinishLaunch = false
     private var didRunLauncher = false
+    private var documentLaunchRequested = false
     private var setupPanel: CyderSetupPanel?
     private var terminateWhenSettingsClose = false
     private var environmentPreparationInProgress = false
@@ -92,25 +93,37 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillFinishLaunching(_ notification: Notification) {
-        // Opening an EXE should not leave a Cyder Dock item behind.  The Wine
-        // process owns the game windows and will become the regular frontmost
-        // application after the native launcher activates it.  Settings mode
-        // remains a normal AppKit application with a Dock item.
-        NSApp.setActivationPolicy(hasDocumentArgument ? .prohibited : .regular)
+        // Finder document URLs are delivered through openFiles, not argv, so
+        // launch hidden until the post-launch mode decision. Settings mode is
+        // promoted below; an EXE launch stays out of the Dock unless it needs
+        // to ask the user a question or show an error.
+        NSApp.setActivationPolicy(.prohibited)
     }
 
     func application(_ application: NSApplication, openFiles filenames: [String]) {
+        let executableFiles = normalizeExePaths(filenames)
+        CyderDiagnostics.shared.info(
+            "open-files received=\(filenames.count) executable=\(executableFiles.count) bundle=\(Bundle.main.bundlePath)"
+        )
+        guard !executableFiles.isEmpty else {
+            application.reply(toOpenOrPrint: .failure)
+            return
+        }
+        documentLaunchRequested = true
         terminateWhenSettingsClose = false
         NSApp.setActivationPolicy(.prohibited)
         if settingsController.window?.isVisible == true {
             settingsController.close()
         }
-        pendingFiles.append(contentsOf: filenames)
+        pendingFiles.append(contentsOf: executableFiles)
+        application.reply(toOpenOrPrint: .success)
+        if ProcessInfo.processInfo.environment["CYDER_OPEN_FILES_SELF_TEST"] == "1" {
+            return
+        }
         scheduleRun()
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        CyderDiagnostics.shared.enter(.appStart, detail: hasDocumentArgument ? "finder-exe" : "settings")
         DistributedNotificationCenter.default().addObserver(
             self,
             selector: #selector(wineAppWillActivate(_:)),
@@ -120,6 +133,14 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         )
         installMainMenu()
         didFinishLaunch = true
+        if ProcessInfo.processInfo.environment["CYDER_OPEN_FILES_SELF_TEST"] == "1" {
+            CyderDiagnostics.shared.enter(.appStart, detail: "open-files-self-test")
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                CyderDiagnostics.shared.finish(outcome: "open-files-self-test")
+                NSApp.terminate(nil)
+            }
+            return
+        }
         if ProcessInfo.processInfo.environment["CYDER_DIAGNOSTICS_SELF_TEST"] == "1" {
             CyderDiagnostics.shared.enter(.resourceValidation, detail: "self-test")
             CyderDiagnostics.shared.finish(outcome: "diagnostics-self-test")
@@ -136,24 +157,35 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             }
             pendingFiles.append(arg)
         }
-        if pendingFiles.isEmpty {
-            terminateWhenSettingsClose = true
-            prepareEnvironmentAndShowSettings()
-        } else {
-            scheduleRun()
+        pendingFiles = normalizeExePaths(pendingFiles)
+        if !pendingFiles.isEmpty { documentLaunchRequested = true }
+        CyderDiagnostics.shared.enter(
+            .appStart,
+            detail: documentLaunchRequested ? "finder-exe" : "settings"
+        )
+        CyderDiagnostics.shared.info(
+            "launch-context args=\(CommandLine.arguments.count - 1) pending=\(pendingFiles.count) bundle=\(Bundle.main.bundlePath)"
+        )
+        // LaunchServices can deliver application(_:openFiles:) just after
+        // applicationDidFinishLaunching. Defer the settings-mode decision one
+        // short turn so a document launch cannot start a competing health
+        // check or expose the settings window behind an EXE launch.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
+            guard let self else { return }
+            if self.documentLaunchRequested || !self.pendingFiles.isEmpty {
+                self.scheduleRun()
+            } else {
+                self.terminateWhenSettingsClose = true
+                NSApp.setActivationPolicy(.regular)
+                NSApp.activate(ignoringOtherApps: true)
+                self.prepareEnvironmentAndShowSettings()
+            }
         }
     }
 
     func applicationWillTerminate(_ notification: Notification) {
         DistributedNotificationCenter.default().removeObserver(self)
         CyderDiagnostics.shared.finish(outcome: "terminated")
-    }
-
-    private var hasDocumentArgument: Bool {
-        CommandLine.arguments.dropFirst().contains { raw in
-            let path = raw.replacingOccurrences(of: "file://", with: "")
-            return path.lowercased().hasSuffix(".exe")
-        }
     }
 
     func applicationDockMenu(_ sender: NSApplication) -> NSMenu? {
@@ -440,6 +472,10 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             guard let self else { return }
             let preparationFailure = self.ensureEnvironment(context: context)
             DispatchQueue.main.async {
+                if self.documentLaunchRequested {
+                    self.hideSetup()
+                    return
+                }
                 self.hideSetup()
                 if let preparationFailure {
                     let action = self.presentFailure(
@@ -465,6 +501,11 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
     private func confirmProfileCreation(executable: URL) -> Bool {
         var confirmed = false
         onMainThread {
+            // A new Profile requires explicit user confirmation. Finder EXE
+            // launches normally run without a Dock item, so temporarily make
+            // the app regular or the modal can exist with no visible window.
+            NSApp.setActivationPolicy(.regular)
+            NSApp.activate(ignoringOtherApps: true)
             let alert = NSAlert()
             alert.messageText = "建立這個遊戲的 Windows 環境？"
             alert.informativeText = "Cyder 會以建議設定建立獨立環境：\n\(executable.lastPathComponent)\n\n這可能需要一些時間與額外磁碟空間。"
@@ -472,6 +513,9 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             alert.addButton(withTitle: "建立")
             alert.addButton(withTitle: "取消")
             confirmed = alert.runModal() == .alertFirstButtonReturn
+            if confirmed {
+                NSApp.setActivationPolicy(.prohibited)
+            }
         }
         return confirmed
     }
