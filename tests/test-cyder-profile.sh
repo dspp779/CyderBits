@@ -98,6 +98,14 @@ if [[ "$first_id" == "$second_id" || "$first_bottle" == "$second_bottle" ]]; the
   exit 1
 fi
 
+remove_exe="$game_root/remove-me.exe"
+printf exe >"$remove_exe"
+remove_bottle="$(cyder_profile_create "$remove_exe" "$TMP/layout/templates/pristine" "$store")"
+remove_id="$(cyder_profile_id_for_path "$remove_exe")"
+cyder_profile_remove "$remove_exe" "$store"
+assert test ! -e "$remove_bottle"
+assert test ! -e "$store/profiles/$remove_id"
+
 # Template publication keeps pristine/recommended independent and publishes
 # the manifest only after the complete clone is ready.
 template_root="$TMP/template-root"

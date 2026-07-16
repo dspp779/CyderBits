@@ -8,7 +8,7 @@ unset HOMEBREW_PREFIX OGOM WINE_INSTALL ENTITLEMENTS_PLIST
 source "$SCRIPT_DIR/env-x86_64.sh"
 
 OUT_DIR="${OGOM}/dist"
-CYDER_APP_VERSION="${CYDER_APP_VERSION:-0.3.0}"
+CYDER_APP_VERSION="${CYDER_APP_VERSION:-0.4.0}"
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --engine-archive)
@@ -161,6 +161,8 @@ SWIFT_SOURCES=(
   "$SCRIPT_DIR/cyder_launch_support.swift"
   "$SCRIPT_DIR/cyder_profiles.swift"
   "$SCRIPT_DIR/cyder_settings_ui.swift"
+  "$SCRIPT_DIR/cyder_game_library.swift"
+  "$SCRIPT_DIR/cyder_game_library_ui.swift"
   "$SCRIPT_DIR/cyder_app_main.swift"
 )
 SWIFT_OPTIMIZATION="${CYDER_SWIFT_OPTIMIZATION:--O}"

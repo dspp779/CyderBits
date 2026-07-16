@@ -22,6 +22,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
     private var documentLaunchRequested = false
     private var setupPanel: CyderSetupPanel?
     private var terminateWhenSettingsClose = false
+    private var openingGameLibrary = false
     private var environmentPreparationInProgress = false
     private var wineActivationWaiter: WineActivationWaiter?
     private lazy var settingsController: CyderSettingsWindowController = {
@@ -45,18 +46,45 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         controller.onCreateProfile = { [weak self] executable in
             self?.createIndependentProfile(for: executable)
         }
+        controller.onOpenGameLibrary = { [weak self] in
+            self?.showGameLibrary()
+        }
         controller.onClose = { [weak self] in
             guard let self, self.terminateWhenSettingsClose,
-                  !self.environmentPreparationInProgress else { return }
+                  !self.environmentPreparationInProgress,
+                  !self.openingGameLibrary else { return }
             NSApp.terminate(nil)
         }
         return controller
     }()
 
-    private func createIndependentProfile(for executable: URL) {
+    private lazy var gameLibraryController: CyderGameLibraryWindowController = {
+        let controller = CyderGameLibraryWindowController()
+        controller.onLaunch = { [weak self] executable in
+            self?.launchGameFromLibrary(executable)
+        }
+        controller.onCreateProfile = { [weak self] executable in
+            self?.createIndependentProfile(for: executable, returnToLibrary: true)
+        }
+        controller.onRemoveProfile = { [weak self] executable, completion in
+            guard let self else { completion(false); return }
+            self.removeIndependentProfile(for: executable, completion: completion)
+        }
+        controller.onClose = { [weak self] in
+            guard let self,
+                  self.terminateWhenSettingsClose,
+                  !self.environmentPreparationInProgress,
+                  self.settingsController.window?.isVisible != true else { return }
+            NSApp.terminate(nil)
+        }
+        return controller
+    }()
+
+    private func createIndependentProfile(for executable: URL, returnToLibrary: Bool = false) {
         guard let resourcePath = Bundle.main.resourcePath else { return }
         environmentPreparationInProgress = true
         settingsController.close()
+        gameLibraryController.close()
         let context = CyderLaunchContext(resourcePath: resourcePath)
         showSetup("正在建立獨立遊戲環境…")
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
@@ -71,7 +99,11 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
                 self.hideSetup()
                 self.environmentPreparationInProgress = false
                 if result.succeeded {
-                    self.showSettings()
+                    if returnToLibrary {
+                        self.showGameLibrary()
+                    } else {
+                        self.showSettings()
+                    }
                     self.showAlert("獨立遊戲環境已建立", executable.lastPathComponent, style: .informational)
                 } else {
                     self.presentFailure(self.failure(
@@ -80,7 +112,54 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
                         summary: "無法建立這個遊戲的獨立 Windows 環境。",
                         result: result
                     ))
-                    self.showSettings()
+                    if returnToLibrary {
+                        self.showGameLibrary()
+                    } else {
+                        self.showSettings()
+                    }
+                }
+            }
+        }
+    }
+
+    private func removeIndependentProfile(for executable: URL, completion: @escaping (Bool) -> Void) {
+        guard let resourcePath = Bundle.main.resourcePath else {
+            completion(false)
+            return
+        }
+        environmentPreparationInProgress = true
+        let context = CyderLaunchContext(resourcePath: resourcePath)
+        showSetup("正在移除獨立遊戲環境…")
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            guard let self else { return }
+            let result = self.runLauncher(
+                context: context,
+                args: [context.launcher, "--profile-remove", executable.path],
+                stage: .bootstrap,
+                operation: "profile-remove"
+            )
+            DispatchQueue.main.async {
+                self.hideSetup()
+                self.environmentPreparationInProgress = false
+                guard result.succeeded else {
+                    completion(false)
+                    _ = self.presentFailure(self.failure(
+                        code: result.status == 75 ? "CYD-PRO-003" : "CYD-PRO-004",
+                        stage: .bootstrap,
+                        summary: result.status == 75
+                            ? "遊戲仍在執行中，無法移除獨立設定。"
+                            : "無法移除這個遊戲的獨立設定。",
+                        result: result
+                    ))
+                    return
+                }
+                do {
+                    let profileID = try CyderProfileStore(root: CyderPaths.support).profileID(for: executable)
+                    try CyderSettingsStore.shared.update { $0.perProfile.removeValue(forKey: profileID) }
+                    completion(true)
+                } catch {
+                    completion(false)
+                    self.showAlert("設定未完成", "prefix 已移除，但無法更新設定檔：\(error.localizedDescription)")
                 }
             }
         }
@@ -226,6 +305,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDockMenu(_ sender: NSApplication) -> NSMenu? {
         let menu = NSMenu(title: "Cyder")
+        menu.addItem(withTitle: "遊戲庫…", action: #selector(showGameLibrary), keyEquivalent: "")
         menu.addItem(withTitle: "選擇 Windows 執行檔…", action: #selector(chooseExecutableFromMenu), keyEquivalent: "")
         menu.addItem(withTitle: "進階設定…", action: #selector(showSettings), keyEquivalent: "")
         for item in menu.items { item.target = self }
@@ -239,6 +319,8 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         let appMenu = NSMenu(title: "Cyder")
         let settings = appMenu.addItem(withTitle: "設定…", action: #selector(showSettings), keyEquivalent: ",")
         settings.target = self
+        let library = appMenu.addItem(withTitle: "遊戲庫…", action: #selector(showGameLibrary), keyEquivalent: "")
+        library.target = self
         appMenu.addItem(NSMenuItem.separator())
         appMenu.addItem(withTitle: "結束 Cyder", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         appItem.submenu = appMenu
@@ -251,6 +333,29 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         settingsController.showWindow(nil)
         settingsController.window?.makeKeyAndOrderFront(nil)
         settingsController.window?.orderFrontRegardless()
+    }
+
+    @objc private func showGameLibrary() {
+        openingGameLibrary = true
+        if settingsController.window?.isVisible == true {
+            settingsController.close()
+        }
+        openingGameLibrary = false
+        activateCyderUI(dockVisible: true)
+        gameLibraryController.prepareForDisplay()
+        gameLibraryController.showWindow(nil)
+        gameLibraryController.window?.makeKeyAndOrderFront(nil)
+        gameLibraryController.window?.orderFrontRegardless()
+    }
+
+    private func launchGameFromLibrary(_ executable: URL) {
+        terminateWhenSettingsClose = false
+        documentLaunchRequested = true
+        settingsController.close()
+        gameLibraryController.close()
+        pendingFiles = [executable.path]
+        didRunLauncher = false
+        scheduleRun()
     }
 
     @objc private func showSettingsModal() {

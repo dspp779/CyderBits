@@ -82,6 +82,33 @@ cyder_profile_resolve() {
   printf '%s\n' "$bottle"
 }
 
+# Remove a per-game profile and its bottle after the caller has confirmed that
+# the bottle is not running. The EXE itself is never touched.
+cyder_profile_remove() {
+  local exe_path="$1" root="$2"
+  [[ -f "$exe_path" ]] || { echo "EXE does not exist: $exe_path" >&2; return 1; }
+  local id profile bottle canonical metadata_source
+  id="$(cyder_profile_id_for_path "$exe_path")"
+  profile="$root/profiles/$id"
+  bottle="$root/bottles/$id"
+  [[ ! -L "$profile" && ! -L "$bottle" ]] || {
+    echo "profile or bottle symlink is not allowed: $id" >&2
+    return 1
+  }
+  cyder_profile_validate_metadata "$profile/profile.json" "$id" || return 1
+  canonical="$(cyder_profile_canonical_path "$exe_path")"
+  metadata_source="$(/usr/bin/plutil -extract sourcePath raw -o - "$profile/profile.json")"
+  [[ "$metadata_source" == "$canonical" ]] || {
+    echo "profile metadata source mismatch for $id" >&2
+    return 1
+  }
+  [[ -d "$profile" && -d "$bottle" ]] || {
+    echo "profile bottle is incomplete: $id" >&2
+    return 1
+  }
+  rm -rf "$profile" "$bottle"
+}
+
 cyder_profile_init_layout() {
   local root="$1"
   mkdir -p "$root/templates/pristine" \
@@ -436,6 +463,7 @@ cyder_profile_cli() {
     layout) shift; cyder_profile_init_layout "$1" ;;
     create) shift; cyder_profile_create "$@" ;;
     resolve) shift; cyder_profile_resolve "$@" ;;
+    remove) shift; cyder_profile_remove "$@" ;;
     metadata) shift; cyder_profile_write_metadata "$@" ;;
     validate-metadata) shift; cyder_profile_validate_metadata "$@" ;;
     template-manifest) shift; cyder_profile_write_template_manifest "$@" ;;
@@ -445,7 +473,7 @@ cyder_profile_cli() {
     clone) shift; cyder_profile_clone_bottle "$1" "$2" ;;
     import-legacy) shift; cyder_profile_import_legacy_bottle "$@" ;;
     validate-recipe) shift; cyder_recipe_validate "$1" ;;
-    *) echo "usage: cyder-profile.sh {id|layout|create|resolve|metadata|validate-metadata|template-manifest|validate-template-manifest|publish-template|template-ready|clone|import-legacy|validate-recipe} ..." >&2; return 2 ;;
+    *) echo "usage: cyder-profile.sh {id|layout|create|resolve|remove|metadata|validate-metadata|template-manifest|validate-template-manifest|publish-template|template-ready|clone|import-legacy|validate-recipe} ..." >&2; return 2 ;;
   esac
 }
 

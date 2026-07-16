@@ -71,6 +71,7 @@ Options:
   --launch-exe PATH   Launch .exe (engine + bootstrap must already be ready)
   --profile-resolve PATH  Resolve PATH to its per-game bottle and exit
   --profile-create PATH [pristine|golden]  Create/resolve a per-game bottle and exit
+  --profile-remove PATH  Remove a per-game bottle/profile and exit
   -h, --help          Show this help
 EOF
 }
@@ -197,6 +198,13 @@ while [[ $# -gt 0 ]]; do
         shift 2
       fi
       ;;
+    --profile-remove)
+      [[ $# -ge 2 ]] || { echo "--profile-remove requires PATH" >&2; exit 1; }
+      [[ -z "$PROFILE_ACTION" ]] || { echo "profile action specified more than once" >&2; exit 1; }
+      PROFILE_ACTION=remove
+      PROFILE_EXE="$2"
+      shift 2
+      ;;
     --engine-src)
       [[ $# -ge 2 ]] || {
         echo "--engine-src requires PATH" >&2
@@ -257,6 +265,15 @@ if [[ -n "$PROFILE_ACTION" ]]; then
   [[ -x "$profile_script" ]] || { echo "Profile backend is unavailable: $profile_script" >&2; exit 1; }
   if [[ "$PROFILE_ACTION" == resolve ]]; then
     bash "$profile_script" resolve "$PROFILE_EXE" "$CYDER_SUPPORT"
+  elif [[ "$PROFILE_ACTION" == remove ]]; then
+    cyder_profile_backend_load
+    profile_id="$(bash "$profile_script" id "$PROFILE_EXE")"
+    profile_bottle="$CYDER_SUPPORT/bottles/$profile_id"
+    if cyder_has_running_prefix "$profile_bottle" || cyder_profile_has_live_sessions "$profile_bottle"; then
+      echo "Cannot remove a per-game bottle while it is running: $profile_bottle" >&2
+      exit 75
+    fi
+    bash "$profile_script" remove "$PROFILE_EXE" "$CYDER_SUPPORT"
   else
     template_dir="$CYDER_SUPPORT/templates/$PROFILE_TEMPLATE"
     [[ -d "$template_dir" && -f "$template_dir/manifest.json" ]] || {

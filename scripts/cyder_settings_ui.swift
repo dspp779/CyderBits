@@ -6,6 +6,7 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
     var onApplyAll: ((_ shouldStopAll: Bool) -> Void)?
     var onRebuild: (() -> Void)?
     var onCreateProfile: ((URL) -> Void)?
+    var onOpenGameLibrary: (() -> Void)?
     var onSaveStarted: (() -> Void)?
     var onSaveFailed: (() -> Void)?
     var onClose: (() -> Void)?
@@ -72,7 +73,6 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
         tabs.addTabViewItem(makeGeneralTab())
         tabs.addTabViewItem(makeDisplayTab())
         tabs.addTabViewItem(makeFontsTab())
-        tabs.addTabViewItem(makeExecutableTab())
         tabs.addTabViewItem(makeAdvancedTab())
 
         status.font = .systemFont(ofSize: 11)
@@ -112,6 +112,10 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
         ])
     }
 
+    @objc private func openGameLibrary() {
+        onOpenGameLibrary?()
+    }
+
     private func makeDisplayTab() -> NSTabViewItem {
         retina.target = self
         retina.action = #selector(retinaChanged)
@@ -136,77 +140,6 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
             row("Windows 預設字體", font),
             note("Cyder 只設定 Wine 的字體替代規則，不會自動安裝受授權保護的字型。"),
             row("字體平滑", smoothing),
-        ])
-    }
-
-    private func makeExecutableTab() -> NSTabViewItem {
-        let choose = NSButton(title: "建立獨立遊戲環境…", target: self, action: #selector(chooseExecutable))
-        choose.bezelStyle = .rounded
-        removeExecutableButton.title = "移除設定"
-        removeExecutableButton.target = self
-        removeExecutableButton.action = #selector(removeExecutableSettings)
-        removeExecutableButton.bezelStyle = .rounded
-        executableList.target = self
-        executableList.action = #selector(selectConfiguredExecutable)
-        executableList.widthAnchor.constraint(equalToConstant: 280).isActive = true
-        executableRecommendation.addItems(withTitles: [
-            "自行設定",
-            "世紀帝國 II（關閉 Retina）",
-            "越南大戰（96 DPI）",
-            "皮卡丘打排球（關閉同步）",
-            "水藍魔力／BlueCG（Retina、192 DPI）",
-        ])
-        executableRecommendation.target = self
-        executableRecommendation.action = #selector(applyExecutableRecommendation)
-        executableDpi.addItems(withTitles: ["100%（96 DPI）", "125%（120 DPI）", "150%（144 DPI）", "175%（168 DPI）", "200%（192 DPI）", "250%（240 DPI）"])
-        executablePowerMode.addItems(withTitles: ["標準", "省電"])
-        executableFont.addItems(withTitles: ["宋體（Songti TC）", "細明體（MingLiU）"])
-        executableSmoothing.addItems(withTitles: ["關閉", "灰階", "ClearType RGB", "ClearType BGR"])
-        executableName.textColor = .secondaryLabelColor
-        executableName.lineBreakMode = .byTruncatingMiddle
-        executableName.widthAnchor.constraint(equalToConstant: 580).isActive = true
-        [executableMsync, executableEsync, executableRetina].forEach {
-            $0.target = self
-            $0.action = #selector(executableSettingChanged)
-        }
-        executableMsync.action = #selector(executableMsyncChanged)
-        executableEsync.action = #selector(executableEsyncChanged)
-        executableRetina.action = #selector(executableRetinaChanged)
-        executableDpi.target = self
-        executableDpi.action = #selector(executableSettingChanged)
-        executablePowerMode.target = self
-        executablePowerMode.action = #selector(executableSettingChanged)
-        executableFont.target = self
-        executableFont.action = #selector(executableFontChanged)
-        executableSmoothing.target = self
-        executableSmoothing.action = #selector(executableSettingChanged)
-        executableEnvironment.placeholderString = "KEY=value；多組以 ; 分隔"
-        executableArguments.placeholderString = "參數1 | 參數2；不使用 shell 語法"
-        [executableEnvironment, executableArguments].forEach {
-            $0.target = self
-            $0.action = #selector(executableSettingChanged)
-            $0.widthAnchor.constraint(equalToConstant: 360).isActive = true
-        }
-        let actions = NSStackView(views: [choose, removeExecutableButton])
-        actions.orientation = .horizontal
-        actions.spacing = 8
-        return tab("遊戲設定", rows: [
-            row("已建立遊戲", executableList),
-            actions,
-            executableName,
-            row("建議設定", executableRecommendation),
-            note("設定會套用到已建立的 Profile；清單顯示 EXE 名稱與父目錄，可區分同名遊戲。選擇建議設定後仍可逐項調整。"),
-            row("MSync", executableMsync),
-            row("ESync", executableEsync),
-            row("Retina Mode", executableRetina),
-            row("縮放比例 / DPI", executableDpi),
-            row("能源模式", executablePowerMode),
-            row("遊戲字體", executableFont),
-            row("字體平滑", executableSmoothing),
-            row("環境變數", executableEnvironment),
-            row("命令列參數", executableArguments),
-            note("環境變數請使用 KEY=value；命令列參數以 | 分隔。Cyder 會逐項傳遞，不會經過 shell eval。"),
-            note("省電模式可以降低 CPU 使用率，但可能造成畫面卡頓。\n\nApple 晶片會優先使用節能核心，可大幅延長續航；BlueCG 測試中，能耗約為標準模式的 1/10。\n注意：M1 Pro/Max 僅有 2 個節能核心，可能極度卡頓，不建議使用。"),
         ])
     }
 
@@ -654,11 +587,6 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
         dpi.selectItem(at: 4)
         font.selectItem(at: 0)
         smoothing.selectItem(at: 2)
-        deletedProfiles.formUnion(profileDrafts.keys)
-        profileDrafts.removeAll()
-        selectedProfileID = nil
-        executableName.stringValue = "尚未選擇 EXE"
-        refreshExecutableList()
         saveImmediately(registrySetting: "all")
     }
 

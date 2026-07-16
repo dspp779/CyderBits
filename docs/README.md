@@ -8,6 +8,7 @@
 
 | 版本 | 文件 | 重點 |
 |------|------|------|
+| 0.4.0 | [release note](releases/v0.4.0.md) | 初始化可靠性、Shared/Golden template、遊戲庫初版與可選 Profile |
 | 0.3.0 | [release note](releases/v0.3.0.md) | 錯誤診斷、session log、啟動可靠性與 Universal App |
 
 ## 使用指南
