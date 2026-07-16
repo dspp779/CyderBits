@@ -958,7 +958,10 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             alert.alertStyle = style
             _ = runFrontmostAlert(
                 alert,
-                dockVisible: terminateWhenSettingsClose && !documentLaunchRequested
+                dockVisible: terminateWhenSettingsClose && !documentLaunchRequested,
+                anchorWindow: terminateWhenSettingsClose && !documentLaunchRequested
+                    ? settingsController.window
+                    : nil
             )
         }
     }

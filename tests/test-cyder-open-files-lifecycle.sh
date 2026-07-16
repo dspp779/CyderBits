@@ -18,6 +18,10 @@ assert_contains "$source_text" "NSApp.setActivationPolicy(.accessory)" \
   "document launches must remain UI-capable without adding a Dock icon"
 assert_contains "$support_text" "NSRunningApplication.current.activate" \
   "setup and error panels must explicitly activate Cyder"
+assert_contains "$support_text" "anchorWindow: NSWindow? = nil" \
+  "alerts should accept an optional window anchor"
+assert_contains "$support_text" "alert.window.setFrameOrigin" \
+  "alerts should be positioned explicitly instead of using a stale saved frame"
 assert_contains "$source_text" "var prefix = CyderPaths.sharedBottle" \
   "an EXE without a Profile must use the prepared Shared bottle"
 

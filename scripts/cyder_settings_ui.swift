@@ -128,7 +128,7 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
 
     private func makeDisplayTab() -> NSTabViewItem {
         retina.target = self
-        retina.action = #selector(markDirty)
+        retina.action = #selector(retinaChanged)
         dpi.addItems(withTitles: ["100%（96 DPI）", "125%（120 DPI）", "150%（144 DPI）", "175%（168 DPI）", "200%（192 DPI）", "250%（240 DPI）"])
         dpi.target = self
         dpi.action = #selector(markDirty)
@@ -185,6 +185,7 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
         }
         executableMsync.action = #selector(executableMsyncChanged)
         executableEsync.action = #selector(executableEsyncChanged)
+        executableRetina.action = #selector(executableRetinaChanged)
         executableDpi.target = self
         executableDpi.action = #selector(executableSettingChanged)
         executablePowerMode.target = self
@@ -320,6 +321,16 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
         status.textColor = .systemOrange
     }
 
+    @objc private func retinaChanged() {
+        // RetinaMode changes the effective coordinate scale.  Offer the
+        // matching conventional DPI as a starting point, while leaving the
+        // popup enabled so users can immediately choose a custom value.
+        let dpiValues = [96, 120, 144, 168, 192, 240]
+        let targetDPI = retina.state == .on ? 192 : 96
+        dpi.selectItem(at: dpiValues.firstIndex(of: targetDPI) ?? 0)
+        markDirty()
+    }
+
     @objc private func forceReapplyChanged() {
         markDirty()
     }
@@ -438,6 +449,13 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
         executableRecommendation.selectItem(at: 0)
         captureExecutableSettings()
         markDirty()
+    }
+
+    @objc private func executableRetinaChanged() {
+        let dpiValues = [96, 120, 144, 168, 192, 240]
+        let targetDPI = executableRetina.state == .on ? 192 : 96
+        executableDpi.selectItem(at: dpiValues.firstIndex(of: targetDPI) ?? 0)
+        executableSettingChanged()
     }
 
     @objc private func executableFontChanged() {

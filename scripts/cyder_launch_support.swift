@@ -9,10 +9,39 @@ func activateCyderUI(dockVisible: Bool) {
     NSApp.activate(ignoringOtherApps: true)
 }
 
-func runFrontmostAlert(_ alert: NSAlert, dockVisible: Bool) -> NSApplication.ModalResponse {
+func runFrontmostAlert(
+    _ alert: NSAlert,
+    dockVisible: Bool,
+    anchorWindow: NSWindow? = nil
+) -> NSApplication.ModalResponse {
     activateCyderUI(dockVisible: dockVisible)
     alert.window.level = .modalPanel
     alert.window.collectionBehavior.insert(.canJoinAllSpaces)
+
+    // NSAlert defaults to the last remembered window position.  That can be
+    // outside the active display (in particular after a settings window has
+    // just closed), which makes the completion dialog look like it opened at
+    // the left edge.  Place it in the visible center of the settings display
+    // whenever an anchor is available, falling back to the main display.
+    let anchorPoint = anchorWindow.map {
+        NSPoint(x: $0.frame.midX, y: $0.frame.midY)
+    }
+    let screen = anchorWindow?.screen
+        ?? anchorPoint.flatMap { point in
+            NSScreen.screens.first { $0.frame.contains(point) }
+        }
+        ?? NSScreen.main
+    if let screen {
+        alert.window.displayIfNeeded()
+        let alertFrame = alert.window.frame
+        let visibleFrame = screen.visibleFrame
+        alert.window.setFrameOrigin(NSPoint(
+            x: visibleFrame.midX - alertFrame.width / 2,
+            y: visibleFrame.midY - alertFrame.height / 2
+        ))
+    } else {
+        alert.window.center()
+    }
     alert.window.makeKeyAndOrderFront(nil)
     alert.window.orderFrontRegardless()
     return alert.runModal()
