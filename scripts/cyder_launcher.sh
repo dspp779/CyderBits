@@ -426,16 +426,21 @@ fi
 
 if [[ "$HEALTH_CHECK" -eq 1 || "$REBUILD_PREFIX" -eq 1 ]]; then
   cyder_set_stage engine-validation
-  engine="$(cyder_ensure_shared_engine "$ENGINE_SRC")"
-  wine="$engine/bin/wine"
   if [[ "$REBUILD_PREFIX" -eq 1 ]]; then
+    engine="$(cyder_ensure_shared_engine "$ENGINE_SRC")"
+    wine="$engine/bin/wine"
     cyder_set_stage bootstrap
     cyder_rebuild_shared_prefix "$wine" "$engine"
   else
+    # The native launcher already compared the bundled engine-version.txt with
+    # the installed version. Do the same cheap file-based readiness check here;
+    # do not stream-decompress the bundled engine archive on every health check.
     cyder_engine_is_ready_for_launch || {
       echo "Cyder environment is not ready; bootstrap is required." >&2
       exit 2
     }
+    engine="$CYDER_ENGINES/$CYDER_ENGINE_NAME"
+    wine="$engine/bin/wine"
     cyder_set_stage health-check
     cyder_health_check_prefix "$wine" "$CYDER_SHARED_PREFIX"
   fi

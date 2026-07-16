@@ -56,6 +56,23 @@ running_status=$?
 set -e
 assert_eq "$running_status" "1" "inactive shared prefix should report no running EXEs"
 
+# Routine health checks must trust the bundled/installed version files and
+# must not stream-decompress the engine archive merely to rediscover a version.
+cat >"$TMP/runtime/Engines/wine-x86_64/bin/wine" <<'SH'
+#!/usr/bin/env bash
+exit 0
+SH
+chmod +x "$TMP/runtime/Engines/wine-x86_64/bin/wine"
+mkdir -p "$TMP/support/bottles/shared/drive_c/windows/system32"
+: >"$TMP/support/bottles/shared/.cyder-bootstrap-v1"
+: >"$TMP/support/bottles/shared/system.reg"
+: >"$TMP/support/bottles/shared/user.reg"
+: >"$TMP/support/bottles/shared/drive_c/windows/system32/kernel32.dll"
+printf 'this is intentionally not an engine archive\n' >"$TMP/must-not-read.tar.xz"
+CYDER_RUNTIME_ROOT="$TMP/runtime" CYDER_SUPPORT="$TMP/support" \
+CYDER_TEST_STOP_LOG="$TMP/health-stop.log" PATH="$TMP/bin:$PATH" \
+  bash "$ROOT/scripts/cyder_launcher.sh" --engine-src "$TMP/must-not-read.tar.xz" --health-check >/dev/null 2>&1
+
 # The ShellExecute-compatible path is opt-in for A/B testing.  The default
 # remains direct wine because start.exe does not guarantee macOS activation.
 mkdir -p "$TMP/fake-bin" "$TMP/run-support"
