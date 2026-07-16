@@ -40,7 +40,7 @@ security find-identity -v -p codesigning
 輸出必須包含這一行(建置腳本預設使用這個身分):
 
 ```
-Developer ID Application: Chun Ho Kwok (3U9565WWM2)
+Developer ID Application: <developer_id_application>
 ```
 
 > 第一次執行 codesign 時,macOS 可能跳出鑰匙圈存取的詢問視窗 —
@@ -79,7 +79,7 @@ bash scripts/create-cyder-app.sh
 讓 tarball 內的所有 Mach-O 都有 Developer ID 簽章:
 
 ```bash
-SIGN_IDENTITY="Developer ID Application: Chun Ho Kwok (3U9565WWM2)" \
+SIGN_IDENTITY="Developer ID Application: <developer_id_application>" \
   bash scripts/pack-engine-artifact.sh
 ```
 
@@ -152,7 +152,7 @@ spctl -a -vv dist/Cyder.app
 ## 安全注意事項
 
 - `.p12` 等同於整個團隊的簽章身分 — 持有者簽出來的軟體都掛名
-  「Chun Ho Kwok (3U9565WWM2)」。請存放在密碼管理器,絕對不要提交進 repo。
+  「<developer_id_application>」。請存放在密碼管理器,絕對不要提交進 repo。
 - 若裝置遺失或懷疑外洩,立刻通知 團隊成員 到 Apple Developer 網站撤銷憑證
   (已公證發佈的舊版本不受影響,票據仍然有效)。
 - `.p8` API 金鑰可隨時在 App Store Connect 撤銷重發。
