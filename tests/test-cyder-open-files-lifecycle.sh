@@ -13,7 +13,12 @@ assert_contains "$source_text" "asyncAfter(deadline: .now() + 0.2)" \
   "settings-mode startup must allow the open-file event to arrive"
 assert_contains "$source_text" "if self.documentLaunchRequested" \
   "a late open-file request must suppress the settings completion"
-assert_contains "$source_text" "NSApp.activate(ignoringOtherApps: true)" \
-  "Profile creation confirmation must be visible"
+support_text="$(cat "$ROOT/scripts/cyder_launch_support.swift")"
+assert_contains "$source_text" "NSApp.setActivationPolicy(.accessory)" \
+  "document launches must remain UI-capable without adding a Dock icon"
+assert_contains "$support_text" "NSRunningApplication.current.activate" \
+  "setup and error panels must explicitly activate Cyder"
+assert_contains "$source_text" "var prefix = CyderPaths.sharedBottle" \
+  "an EXE without a Profile must use the prepared Shared bottle"
 
 echo "PASS test-cyder-open-files-lifecycle"

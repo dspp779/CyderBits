@@ -3,6 +3,21 @@
 import Cocoa
 import Foundation
 
+func activateCyderUI(dockVisible: Bool) {
+    NSApp.setActivationPolicy(dockVisible ? .regular : .accessory)
+    NSRunningApplication.current.activate(options: [.activateAllWindows, .activateIgnoringOtherApps])
+    NSApp.activate(ignoringOtherApps: true)
+}
+
+func runFrontmostAlert(_ alert: NSAlert, dockVisible: Bool) -> NSApplication.ModalResponse {
+    activateCyderUI(dockVisible: dockVisible)
+    alert.window.level = .modalPanel
+    alert.window.collectionBehavior.insert(.canJoinAllSpaces)
+    alert.window.makeKeyAndOrderFront(nil)
+    alert.window.orderFrontRegardless()
+    return alert.runModal()
+}
+
 final class CyderSetupPanel {
     private let window: NSWindow
     private let progress: NSProgressIndicator
@@ -66,8 +81,9 @@ final class CyderSetupPanel {
     }
 
     func show() {
+        activateCyderUI(dockVisible: false)
         window.makeKeyAndOrderFront(nil)
-        NSApp.activate(ignoringOtherApps: true)
+        window.orderFrontRegardless()
         window.displayIfNeeded()
     }
 
@@ -91,6 +107,21 @@ struct CyderProcessResult {
     let terminationReason: Process.TerminationReason
     let logURL: URL
     let outputTail: String
+    let machineResult: [String: String]
+
+    init(
+        status: Int32,
+        terminationReason: Process.TerminationReason,
+        logURL: URL,
+        outputTail: String,
+        machineResult: [String: String] = [:]
+    ) {
+        self.status = status
+        self.terminationReason = terminationReason
+        self.logURL = logURL
+        self.outputTail = outputTail
+        self.machineResult = machineResult
+    }
 
     var succeeded: Bool {
         terminationReason == .exit && status == 0

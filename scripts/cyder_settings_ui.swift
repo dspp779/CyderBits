@@ -4,6 +4,7 @@ import Foundation
 final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate {
     var onCommit: ((_ shouldStopAll: Bool, _ requiresPrefixApply: Bool, _ forceReapply: Bool) -> Void)?
     var onRebuild: (() -> Void)?
+    var onCreateProfile: ((URL) -> Void)?
     var onSaveStarted: (() -> Void)?
     var onSaveFailed: (() -> Void)?
     var onClose: (() -> Void)?
@@ -153,7 +154,7 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
     }
 
     private func makeExecutableTab() -> NSTabViewItem {
-        let choose = NSButton(title: "選擇新的 EXE…", target: self, action: #selector(chooseExecutable))
+        let choose = NSButton(title: "建立獨立遊戲環境…", target: self, action: #selector(chooseExecutable))
         choose.bezelStyle = .rounded
         removeExecutableButton.title = "移除設定"
         removeExecutableButton.target = self
@@ -296,7 +297,7 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
         dpi.selectItem(at: dpiValues.firstIndex(of: value.dpi) ?? 4)
         font.selectItem(at: value.fontPreset == "mingliu" ? 1 : 0)
         let smoothingValues = ["off", "grayscale", "cleartype-rgb", "cleartype-bgr"]
-        smoothing.selectItem(at: smoothingValues.firstIndex(of: value.fontSmoothing) ?? 1)
+        smoothing.selectItem(at: smoothingValues.firstIndex(of: value.fontSmoothing) ?? 2)
         profileDrafts = value.perProfile
         profileRecords = Dictionary(uniqueKeysWithValues: profileStore.listRecords().map { ($0.profileId, $0) })
         deletedProfiles.removeAll()
@@ -392,8 +393,19 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
             profileRecords[profileID] = record
             refreshExecutableList(selecting: profileID)
             loadExecutableSettings(profileID)
-        case .uncreated(let profileID):
-            profileAlert("尚未建立遊戲 Profile", "此 EXE 尚未建立 Profile（\(profileID)）。請先由 Cyder 主流程建立遊戲環境，再回到這裡設定。", warning: false)
+        case .uncreated:
+            guard !isDirty else {
+                profileAlert("請先儲存目前變更", "建立獨立遊戲環境前，請先按「確認」儲存目前的偏好設定。", warning: false)
+                return
+            }
+            let alert = NSAlert()
+            alert.messageText = "建立獨立遊戲環境？"
+            alert.informativeText = "Cyder 會從乾淨的標準環境複製一份給 \(url.lastPathComponent)，不會修改共用環境。"
+            alert.alertStyle = .informational
+            alert.addButton(withTitle: "建立")
+            alert.addButton(withTitle: "取消")
+            guard alert.runModal() == .alertFirstButtonReturn else { return }
+            onCreateProfile?(url)
         case .damaged(let profileID, let reason):
             profileAlert("遊戲 Profile 無法使用", "Profile \(profileID) 目前損毀或不完整：\(reason)\n請先由主流程修復，再重新選擇 EXE。", warning: true)
         }
@@ -541,7 +553,7 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
         executablePowerMode.selectItem(at: rule.powerMode == "energySaving" ? 1 : 0)
         executableFont.selectItem(at: rule.fontPreset == "mingliu" ? 1 : 0)
         let smoothingValues = ["off", "grayscale", "cleartype-rgb", "cleartype-bgr"]
-        executableSmoothing.selectItem(at: smoothingValues.firstIndex(of: rule.fontSmoothing ?? defaults.fontSmoothing ?? "grayscale") ?? 1)
+        executableSmoothing.selectItem(at: smoothingValues.firstIndex(of: rule.fontSmoothing ?? defaults.fontSmoothing ?? "cleartype-rgb") ?? 2)
         executableEnvironment.stringValue = rule.environment
             .sorted { $0.key < $1.key }
             .map { "\($0.key)=\($0.value)" }
@@ -604,7 +616,7 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
             executableDpi.selectItem(at: 4)
             executablePowerMode.selectItem(at: 0)
             executableFont.selectItem(at: 0)
-            executableSmoothing.selectItem(at: 1)
+            executableSmoothing.selectItem(at: 2)
             executableEnvironment.stringValue = ""
             executableArguments.stringValue = ""
             executableRecommendation.selectItem(at: 0)
@@ -625,7 +637,7 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
         retina.state = value.retinaMode ? .on : .off
         dpi.selectItem(at: 4)
         font.selectItem(at: 0)
-        smoothing.selectItem(at: 1)
+        smoothing.selectItem(at: 2)
         forceReapply.state = .off
         deletedProfiles.formUnion(profileDrafts.keys)
         profileDrafts.removeAll()

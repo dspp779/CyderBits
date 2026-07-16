@@ -41,6 +41,9 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         }
         controller.hasRunningExes = { [weak self] in self?.hasRunningExes() ?? false }
         controller.onRebuild = { [weak self] in self?.rebuildEnvironment() }
+        controller.onCreateProfile = { [weak self] executable in
+            self?.createIndependentProfile(for: executable)
+        }
         controller.onClose = { [weak self] in
             guard let self, self.terminateWhenSettingsClose,
                   !self.environmentPreparationInProgress else { return }
@@ -48,6 +51,39 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         }
         return controller
     }()
+
+    private func createIndependentProfile(for executable: URL) {
+        guard let resourcePath = Bundle.main.resourcePath else { return }
+        environmentPreparationInProgress = true
+        settingsController.close()
+        let context = CyderLaunchContext(resourcePath: resourcePath)
+        showSetup("正在建立獨立遊戲環境…")
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            guard let self else { return }
+            let result = self.runLauncher(
+                context: context,
+                args: [context.launcher, "--profile-create", executable.path, "golden"],
+                stage: .bootstrap,
+                operation: "profile-create"
+            )
+            DispatchQueue.main.async {
+                self.hideSetup()
+                self.environmentPreparationInProgress = false
+                if result.succeeded {
+                    self.showSettings()
+                    self.showAlert("獨立遊戲環境已建立", executable.lastPathComponent, style: .informational)
+                } else {
+                    self.presentFailure(self.failure(
+                        code: "CYD-PRO-001",
+                        stage: .bootstrap,
+                        summary: "無法建立這個遊戲的獨立 Windows 環境。",
+                        result: result
+                    ))
+                    self.showSettings()
+                }
+            }
+        }
+    }
 
     private func rebuildEnvironment(completion: (() -> Void)? = nil) {
         guard let resourcePath = Bundle.main.resourcePath else { return }
@@ -97,7 +133,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         // launch hidden until the post-launch mode decision. Settings mode is
         // promoted below; an EXE launch stays out of the Dock unless it needs
         // to ask the user a question or show an error.
-        NSApp.setActivationPolicy(.prohibited)
+        NSApp.setActivationPolicy(.accessory)
     }
 
     func application(_ application: NSApplication, openFiles filenames: [String]) {
@@ -111,7 +147,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         }
         documentLaunchRequested = true
         terminateWhenSettingsClose = false
-        NSApp.setActivationPolicy(.prohibited)
+        NSApp.setActivationPolicy(.accessory)
         if settingsController.window?.isVisible == true {
             settingsController.close()
         }
@@ -176,8 +212,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
                 self.scheduleRun()
             } else {
                 self.terminateWhenSettingsClose = true
-                NSApp.setActivationPolicy(.regular)
-                NSApp.activate(ignoringOtherApps: true)
+                activateCyderUI(dockVisible: true)
                 self.prepareEnvironmentAndShowSettings()
             }
         }
@@ -210,10 +245,11 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func showSettings() {
+        activateCyderUI(dockVisible: true)
         settingsController.prepareForDisplay()
         settingsController.showWindow(nil)
         settingsController.window?.makeKeyAndOrderFront(nil)
-        NSApp.activate(ignoringOtherApps: true)
+        settingsController.window?.orderFrontRegardless()
     }
 
     @objc private func showSettingsModal() {
@@ -320,7 +356,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             return
         }
         didRunLauncher = true
-        NSApp.setActivationPolicy(.prohibited)
+        NSApp.setActivationPolicy(.accessory)
 
         guard let resourcePath = Bundle.main.resourcePath else {
             let failure = CyderFailure(
@@ -374,11 +410,11 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             || engineNeedsInstall(context: context, engineWine: engineWine)
         let pristineManifest = CyderPaths.support
             .appendingPathComponent("templates/pristine/manifest.json").path
-        let recommendedManifest = CyderPaths.support
-            .appendingPathComponent("templates/recommended/manifest.json").path
+        let goldenManifest = CyderPaths.support
+            .appendingPathComponent("templates/golden/manifest.json").path
         let needsBootstrap = !FileManager.default.fileExists(atPath: CyderPaths.bootstrapMarker.path)
             || !FileManager.default.fileExists(atPath: pristineManifest)
-            || !FileManager.default.fileExists(atPath: recommendedManifest)
+            || !FileManager.default.fileExists(atPath: goldenManifest)
         return (needsEngine, needsBootstrap)
     }
 
@@ -498,28 +534,6 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    private func confirmProfileCreation(executable: URL) -> Bool {
-        var confirmed = false
-        onMainThread {
-            // A new Profile requires explicit user confirmation. Finder EXE
-            // launches normally run without a Dock item, so temporarily make
-            // the app regular or the modal can exist with no visible window.
-            NSApp.setActivationPolicy(.regular)
-            NSApp.activate(ignoringOtherApps: true)
-            let alert = NSAlert()
-            alert.messageText = "建立這個遊戲的 Windows 環境？"
-            alert.informativeText = "Cyder 會以建議設定建立獨立環境：\n\(executable.lastPathComponent)\n\n這可能需要一些時間與額外磁碟空間。"
-            alert.alertStyle = .informational
-            alert.addButton(withTitle: "建立")
-            alert.addButton(withTitle: "取消")
-            confirmed = alert.runModal() == .alertFirstButtonReturn
-            if confirmed {
-                NSApp.setActivationPolicy(.prohibited)
-            }
-        }
-        return confirmed
-    }
-
     private func runPhasedLaunch(context: CyderLaunchContext) -> CyderLaunchOutcome {
         var exePaths = normalizeExePaths(pendingFiles)
         if exePaths.isEmpty {
@@ -544,37 +558,11 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         }
         let exeURL = URL(fileURLWithPath: exePaths[0])
         let profileStore = CyderProfileStore(root: CyderPaths.support)
-        var profileID: String
+        var profileID: String?
+        var prefix = CyderPaths.sharedBottle
         switch profileStore.resolve(executable: exeURL) {
         case .uncreated:
-            guard confirmProfileCreation(executable: exeURL) else { return .cancelled }
-            showSetup("正在建立遊戲環境…")
-            let created = runLauncher(
-                context: context,
-                args: [context.launcher, "--profile-create", exeURL.path, "recommended"],
-                stage: .bootstrap,
-                operation: "profile-create"
-            )
-            guard created.succeeded else {
-                return .failure(failure(
-                    code: "CYD-PRO-001",
-                    stage: .bootstrap,
-                    summary: "無法建立這個遊戲的 Windows 環境。",
-                    result: created
-                ))
-            }
-            switch profileStore.resolve(executable: exeURL) {
-            case .ready(let record):
-                profileID = record.profileId
-            case .uncreated, .damaged:
-                return .failure(CyderFailure(
-                    code: "CYD-PRO-004",
-                    stage: .exeValidation,
-                    summary: "遊戲環境建立後驗證失敗。",
-                    technicalDetails: "Profile creation completed but metadata/bottle could not be resolved.",
-                    logURL: created.logURL
-                ))
-            }
+            profileID = nil
         case .damaged(let id, let reason):
             return .failure(CyderFailure(
                 code: "CYD-PRO-002",
@@ -585,10 +573,10 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             ))
         case .ready(let record):
             profileID = record.profileId
+            prefix = CyderPaths.support
+                .appendingPathComponent("bottles", isDirectory: true)
+                .appendingPathComponent(record.profileId, isDirectory: true)
         }
-        let prefix = CyderPaths.support
-            .appendingPathComponent("bottles", isDirectory: true)
-            .appendingPathComponent(profileID, isDirectory: true)
         guard FileManager.default.fileExists(atPath: prefix.path) else {
             return .failure(CyderFailure(
                 code: "CYD-PRO-003",
@@ -598,7 +586,8 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
                 logURL: CyderDiagnostics.shared.sessionLogURL
             ))
         }
-        if CyderSettingsStore.shared.hasSettings(profileID: profileID, legacyBasename: nil) {
+        if let profileID,
+           CyderSettingsStore.shared.hasSettings(profileID: profileID, legacyBasename: nil) {
             showSetup("正在套用遊戲設定…")
             var launchSettings = CyderSettingsStore.shared.environment(profileID: profileID, legacyBasename: nil)
             launchSettings["CYDER_STOP_WINESERVER_AFTER_SETTINGS"] = "1"
@@ -629,7 +618,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
     /// for CrossOver Wine to publish the actual foreground application PID in
     /// WineAppWillActivateNotification.  The wrapper Process PID is not used
     /// for activation. Wine continues independently after Cyder exits.
-    private func runDirectWine(context: CyderLaunchContext, wine: URL, exe: String, profileID: String, prefix: URL) -> CyderLaunchOutcome {
+    private func runDirectWine(context: CyderLaunchContext, wine: URL, exe: String, profileID: String?, prefix: URL) -> CyderLaunchOutcome {
         let support = CyderPaths.support
         let logDirectory = support.appendingPathComponent("Logs", isDirectory: true)
         let prefixPath = prefix.path
@@ -702,7 +691,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             ))
         }
         let command = CyderDiagnostics.shared.redact(
-            "cmd=\(commandDescription)\nprofile_id=\(profileID)\npower_mode=\(powerMode)\ntaskpolicy_available=\(hasTaskpolicy)\nWINEPREFIX=\(prefixPath)\ncwd=\((exe as NSString).deletingLastPathComponent)\n\n"
+            "cmd=\(commandDescription)\nprofile_id=\(profileID ?? "shared")\npower_mode=\(powerMode)\ntaskpolicy_available=\(hasTaskpolicy)\nWINEPREFIX=\(prefixPath)\ncwd=\((exe as NSString).deletingLastPathComponent)\n\n"
         )
         try? handle.write(contentsOf: Data(command.utf8))
         process.standardOutput = handle
@@ -718,14 +707,13 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
                 "--session-acquire", prefixPath, "\(ownerPID)", msync, esync, powerMode
             ],
             stage: .wineSpawn,
-            operation: "session-acquire"
+            operation: "session-acquire",
+            expectsMachineResult: true
         )
         guard sessionAcquire.succeeded,
-              let sessionFile = sessionAcquire.outputTail
-                .split(whereSeparator: { $0 == "\n" || $0 == "\r" })
-                .map(String.init)
-                .reversed()
-                .first(where: { $0.hasSuffix(".session") && FileManager.default.fileExists(atPath: $0) }) else {
+              let sessionFile = sessionAcquire.machineResult["sessionFile"],
+              sessionFile.hasSuffix(".session"),
+              FileManager.default.fileExists(atPath: sessionFile) else {
             try? handle.close()
             let status = sessionAcquire.status == 75 ? "A different sync or energy mode is already using this bottle." : sessionAcquire.outputTail
             return .failure(CyderFailure(
@@ -827,7 +815,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         wine: URL,
         support: URL,
         exe: String,
-        profileID: String,
+        profileID: String?,
         prefix: URL
     ) -> [String: String] {
         var environment = ProcessInfo.processInfo.environment
@@ -964,28 +952,27 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         onMainThread {
             // Finder launches begin as an accessory app. Promote Cyder before
             // presenting any modal alert so warnings cannot appear invisibly.
-            NSApp.setActivationPolicy(.regular)
-            NSApp.activate(ignoringOtherApps: true)
             let alert = NSAlert()
             alert.messageText = title
             alert.informativeText = message
             alert.alertStyle = style
-            alert.runModal()
+            _ = runFrontmostAlert(
+                alert,
+                dockVisible: terminateWhenSettingsClose && !documentLaunchRequested
+            )
         }
     }
 
     private func showPreviousCrashIfNeeded() {
         guard let previous = CyderDiagnostics.shared.previousUnexpectedSession else { return }
         onMainThread {
-            NSApp.setActivationPolicy(.regular)
-            NSApp.activate(ignoringOtherApps: true)
             let alert = NSAlert()
             alert.messageText = "Cyder 上次未正常結束"
             alert.informativeText = "上次執行在「\(previous.stage)」階段中斷。已保留診斷記錄，您可以繼續使用 Cyder。"
             alert.alertStyle = .warning
             alert.addButton(withTitle: "繼續")
             alert.addButton(withTitle: "開啟上次記錄")
-            let response = alert.runModal()
+            let response = runFrontmostAlert(alert, dockVisible: true)
             if response == .alertSecondButtonReturn, !previous.logPath.isEmpty {
                 NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: previous.logPath)])
             }
@@ -1000,8 +987,6 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         CyderDiagnostics.shared.record(failure)
         var action: CyderFailureAction = .close
         onMainThread {
-            NSApp.setActivationPolicy(.regular)
-            NSApp.activate(ignoringOtherApps: true)
             let alert = NSAlert()
             alert.messageText = "Cyder 發生錯誤"
             var message = "\(failure.summary)\n\n錯誤代碼：\(failure.code)\n階段：\(failure.stage.rawValue)"
@@ -1028,7 +1013,10 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             if allowsRebuild {
                 alert.addButton(withTitle: "重建 Windows 遊戲環境")
             }
-            let response = alert.runModal()
+            let response = runFrontmostAlert(
+                alert,
+                dockVisible: terminateWhenSettingsClose && !documentLaunchRequested
+            )
             if response == .alertSecondButtonReturn {
                 NSPasteboard.general.clearContents()
                 NSPasteboard.general.setString(
@@ -1079,7 +1067,8 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         args: [String],
         stage: CyderStage,
         operation: String,
-        extraEnvironment: [String: String] = [:]
+        extraEnvironment: [String: String] = [:],
+        expectsMachineResult: Bool = false
     ) -> CyderProcessResult {
         CyderDiagnostics.shared.enter(stage, detail: operation)
         let operationLog = CyderDiagnostics.shared.makeOperationLog(operation)
@@ -1102,6 +1091,13 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         for (key, value) in extraEnvironment {
             environment[key] = value
         }
+        let resultURL = operationLog
+            .deletingPathExtension()
+            .appendingPathExtension("result.plist")
+        if expectsMachineResult {
+            try? FileManager.default.removeItem(at: resultURL)
+            environment["CYDER_RESULT_FILE"] = resultURL.path
+        }
         environment["CYDER_DIAGNOSTIC_SESSION_ID"] = CyderDiagnostics.shared.sessionID
         environment["CYDER_DIAGNOSTIC_STAGE"] = stage.rawValue
         environment["CYDER_DIAGNOSTIC_LOG"] = operationLog.path
@@ -1117,6 +1113,16 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             process.waitUntilExit()
             try? handle.close()
             let tail = CyderDiagnostics.shared.tail(of: operationLog)
+            var machineResult: [String: String] = [:]
+            if expectsMachineResult,
+               let data = try? Data(contentsOf: resultURL),
+               let plist = try? PropertyListSerialization.propertyList(from: data, format: nil),
+               let dictionary = plist as? [String: Any] {
+                for (key, value) in dictionary where key != "schemaVersion" {
+                    if let value = value as? String { machineResult[key] = value }
+                }
+            }
+            try? FileManager.default.removeItem(at: resultURL)
             CyderDiagnostics.shared.info(
                 "operation=\(operation) status=\(process.terminationStatus) reason=\(process.terminationReason.rawValue) log=\(operationLog.path)"
             )
@@ -1124,7 +1130,8 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
                 status: process.terminationStatus,
                 terminationReason: process.terminationReason,
                 logURL: operationLog,
-                outputTail: tail
+                outputTail: tail,
+                machineResult: machineResult
             )
         } catch {
             try? handle.close()

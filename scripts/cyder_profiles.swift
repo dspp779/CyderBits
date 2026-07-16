@@ -60,7 +60,7 @@ final class CyderProfileStore {
                   let record = try? JSONDecoder().decode(CyderProfileRecord.self, from: data),
                   record.schemaVersion == 1, record.layoutVersion == 1,
                   record.profileId == recordID,
-                  ["pristine", "recommended"].contains(record.baseTemplate),
+                  ["pristine", "golden", "recommended"].contains(record.baseTemplate),
                   !record.sourcePath.isEmpty,
                   FileManager.default.fileExists(atPath: record.sourcePath),
                   let sourceID = try? self.profileID(for: URL(fileURLWithPath: record.sourcePath)),
@@ -141,7 +141,7 @@ final class CyderProfileStore {
             guard record.sourcePath == canonical else {
                 return .damaged(profileID: id, reason: "sourcePath 與 canonical EXE 不一致")
             }
-            guard ["pristine", "recommended"].contains(record.baseTemplate) else {
+            guard ["pristine", "golden", "recommended"].contains(record.baseTemplate) else {
                 return .damaged(profileID: id, reason: "baseTemplate 不合法")
             }
             if let recipeId = record.recipeId,
