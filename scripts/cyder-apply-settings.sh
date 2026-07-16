@@ -75,11 +75,21 @@ delete_reg_if_changed() {
     state_update "$key" absent
   fi
 }
+move_key_if_present() {
+  local state="$1" desired="$2" source="$3" target="$4"
+  if [[ "${CYDER_FORCE_SETTINGS:-0}" != 1 ]] && [[ "$(state_value "$state" 2>/dev/null || true)" == "$desired" ]]; then
+    return 0
+  fi
+  if "${WINE[@]}" reg copy "$source" "$target" /s /f 2>/dev/null; then
+    "${WINE[@]}" reg delete "$source" /f
+  fi
+  state_update "$state" "$desired"
+}
 
 if [[ "$retina" == 1 ]]; then
   apply_reg_if_changed retina "$retina" add 'HKCU\Software\Wine\Mac Driver' /v RetinaMode /t REG_SZ /d y /f
 else
-  delete_reg_if_changed retina 'HKCU\Software\Wine\Mac Driver' /v RetinaMode /f
+  apply_reg_if_changed retina "$retina" add 'HKCU\Software\Wine\Mac Driver' /v RetinaMode /t REG_SZ /d n /f
 fi
 apply_reg_if_changed dpi "$dpi" add 'HKCU\Control Panel\Desktop' /v LogPixels /t REG_DWORD /d "$dpi" /f
 apply_reg_if_changed smoothing "$smooth" add 'HKCU\Control Panel\Desktop' /v FontSmoothing /t REG_SZ /d "$smooth" /f
@@ -89,17 +99,20 @@ apply_reg_if_changed smoothing-orientation "$orientation" add 'HKCU\Control Pane
 
 if [[ "$font" == songti ]]; then
   face='Songti TC'
-  apply_reg_if_changed font-MingLiU "$face" add 'HKCU\Software\Wine\Fonts\Replacements' /v MingLiU /t REG_SZ /d "$face" /f
+  font_key='HKCU\Software\Wine\Fonts\Replacements'
+  move_key_if_present font-section active \
+    'HKCU\Software\Wine\Fonts\Replacements(disabled)' "$font_key"
 else
   face='MingLiU'
-  # Do not map MingLiU to itself; let Wine/macOS resolve an actually installed font.
-  delete_reg_if_changed font-MingLiU 'HKCU\Software\Wine\Fonts\Replacements' /v MingLiU /f
+  font_key='HKCU\Software\Wine\Fonts\Replacements(disabled)'
+  move_key_if_present font-section disabled \
+    'HKCU\Software\Wine\Fonts\Replacements' "$font_key"
 fi
-for name in PMingLiU 細明體 新細明體 SimSun NSimSun 'MS Shell Dlg' 'MS Shell Dlg 2' 'Microsoft Sans Serif'; do
-  apply_reg_if_changed "font-$name" "$face" add 'HKCU\Software\Wine\Fonts\Replacements' /v "$name" /t REG_SZ /d "$face" /f
+for name in MingLiU PMingLiU 細明體 新細明體 SimSun NSimSun 'MS Shell Dlg' 'MS Shell Dlg 2' 'Microsoft Sans Serif'; do
+  apply_reg_if_changed "font-$name" "$face" add "$font_key" /v "$name" /t REG_SZ /d "$face" /f
 done
-apply_reg_if_changed font-at-PMingLiU "@$face" add 'HKCU\Software\Wine\Fonts\Replacements' /v @PMingLiU /t REG_SZ /d "@$face" /f
-apply_reg_if_changed font-at-細明體 "@$face" add 'HKCU\Software\Wine\Fonts\Replacements' /v @細明體 /t REG_SZ /d "@$face" /f
+apply_reg_if_changed font-at-PMingLiU "@$face" add "$font_key" /v @PMingLiU /t REG_SZ /d "@$face" /f
+apply_reg_if_changed font-at-細明體 "@$face" add "$font_key" /v @細明體 /t REG_SZ /d "@$face" /f
 
 state_dir="$(dirname "$STATE_FILE")"
 mkdir -p "$state_dir"
@@ -108,7 +121,7 @@ state_tmp="$(mktemp "${STATE_FILE}.XXXXXX")"
   if [[ "$retina" == 1 ]]; then
     printf 'retina\t1\n'
   else
-    printf 'retina\tabsent\n'
+    printf 'retina\t0\n'
   fi
   printf 'dpi\t%s\n' "$dpi"
   printf 'smoothing\t%s\n' "$smooth"
@@ -117,11 +130,11 @@ state_tmp="$(mktemp "${STATE_FILE}.XXXXXX")"
   printf 'smoothing-orientation\t%s\n' "$orientation"
   printf 'font\t%s\n' "$font"
   if [[ "$font" == songti ]]; then
-    printf 'font-MingLiU\tSongti TC\n'
+    printf 'font-section\tactive\n'
   else
-    printf 'font-MingLiU\tabsent\n'
+    printf 'font-section\tdisabled\n'
   fi
-  for name in PMingLiU 細明體 新細明體 SimSun NSimSun 'MS Shell Dlg' 'MS Shell Dlg 2' 'Microsoft Sans Serif'; do
+  for name in MingLiU PMingLiU 細明體 新細明體 SimSun NSimSun 'MS Shell Dlg' 'MS Shell Dlg 2' 'Microsoft Sans Serif'; do
     printf 'font-%s\t%s\n' "$name" "$face"
   done
   printf 'font-at-PMingLiU\t@%s\n' "$face"

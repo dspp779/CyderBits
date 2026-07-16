@@ -30,14 +30,11 @@ export CYDER_FONT_PRESET=mingliu CYDER_FONT_SMOOTHING=grayscale
 bash "$ROOT/scripts/cyder-apply-settings.sh" >/dev/null
 
 output="$(cat "$CYDER_TEST_WINE_LOG")"
-assert_contains "$output" "reg delete HKCU\\Software\\Wine\\Mac Driver /v RetinaMode /f" "Retina off should remove the override"
-if [[ "$output" == *"RetinaMode /t REG_SZ /d n"* ]]; then
-  echo "ASSERT failed: Retina off must not write RetinaMode=n" >&2
-  exit 1
-fi
+assert_contains "$output" "RetinaMode /t REG_SZ /d n" "Retina off should be explicit"
 assert_contains "$output" "LogPixels /t REG_DWORD /d 144" "selected DPI should be applied"
 assert_contains "$output" "FontSmoothingType /t REG_DWORD /d 1" "grayscale smoothing should be applied"
-assert_contains "$output" "reg delete HKCU\\Software\\Wine\\Fonts\\Replacements /v MingLiU" "MingLiU should resolve an installed font"
+assert_contains "$output" "reg copy HKCU\\Software\\Wine\\Fonts\\Replacements HKCU\\Software\\Wine\\Fonts\\Replacements(disabled) /s /f" "MingLiU should rename the replacement key"
+assert_contains "$output" "HKCU\\Software\\Wine\\Fonts\\Replacements(disabled) /v MingLiU" "disabled replacements should retain their values"
 assert_contains "$output" "PMingLiU /t REG_SZ /d MingLiU" "font aliases should use MingLiU"
 
 # Re-confirming identical settings must not issue any registry commands.
@@ -105,12 +102,11 @@ if [[ "$retry_log" == *"LogPixels"* ]]; then
   exit 1
 fi
 
-# Retina off is represented as deletion in the ledger.  Changing from the
-# default-on state applies the deletion once; a second off apply is a no-op.
+# Retina off is represented explicitly as n. A second off apply is a no-op.
 : >"$CYDER_TEST_WINE_LOG"
 export CYDER_RETINA_MODE=0
 bash "$ROOT/scripts/cyder-apply-settings.sh" >/dev/null
-assert_contains "$(cat "$CYDER_TEST_WINE_LOG")" "reg delete HKCU\\Software\\Wine\\Mac Driver /v RetinaMode /f" "changing Retina off should delete the override"
+assert_contains "$(cat "$CYDER_TEST_WINE_LOG")" "RetinaMode /t REG_SZ /d n" "changing Retina off should write n"
 : >"$CYDER_TEST_WINE_LOG"
 bash "$ROOT/scripts/cyder-apply-settings.sh" >/dev/null
 if [[ -s "$CYDER_TEST_WINE_LOG" ]]; then

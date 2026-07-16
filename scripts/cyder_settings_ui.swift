@@ -2,7 +2,8 @@ import Cocoa
 import Foundation
 
 final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate {
-    var onCommit: ((_ shouldStopAll: Bool, _ requiresPrefixApply: Bool, _ forceReapply: Bool) -> Void)?
+    var onImmediateSave: ((_ registrySetting: String) -> Bool)?
+    var onApplyAll: ((_ shouldStopAll: Bool) -> Void)?
     var onRebuild: (() -> Void)?
     var onCreateProfile: ((URL) -> Void)?
     var onSaveStarted: (() -> Void)?
@@ -29,7 +30,6 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
     private let executableEnvironment = NSTextField()
     private let executableArguments = NSTextField()
     private let removeExecutableButton = NSButton()
-    private let forceReapply = NSButton(checkboxWithTitle: "重新套用所有設定（疑難排解）", target: nil, action: nil)
     private let profileStore = CyderProfileStore(root: CyderPaths.support)
     private var profileRecords: [String: CyderProfileRecord] = [:]
     private var selectedProfileID: String?
@@ -62,13 +62,7 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
     }
 
     func windowShouldClose(_ sender: NSWindow) -> Bool {
-        guard isDirty else { return true }
-        let alert = NSAlert()
-        alert.messageText = "放棄尚未儲存的設定？"
-        alert.informativeText = "按「繼續編輯」可返回設定視窗。"
-        alert.addButton(withTitle: "放棄變更")
-        alert.addButton(withTitle: "繼續編輯")
-        return alert.runModal() == .alertFirstButtonReturn
+        true
     }
 
     private func buildUI() {
@@ -88,15 +82,9 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
         let reset = NSButton(title: "全部恢復預設值…", target: self, action: #selector(resetAll))
         reset.bezelStyle = .rounded
         reset.translatesAutoresizingMaskIntoConstraints = false
-        let confirm = NSButton(title: "確認", target: self, action: #selector(confirmChanges))
-        confirm.bezelStyle = .rounded
-        confirm.keyEquivalent = "\r"
-        confirm.translatesAutoresizingMaskIntoConstraints = false
-
         content.addSubview(tabs)
         content.addSubview(status)
         content.addSubview(reset)
-        content.addSubview(confirm)
         NSLayoutConstraint.activate([
             tabs.topAnchor.constraint(equalTo: content.topAnchor, constant: 16),
             tabs.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 18),
@@ -104,10 +92,8 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
             tabs.bottomAnchor.constraint(equalTo: status.topAnchor, constant: -14),
             status.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 22),
             status.bottomAnchor.constraint(equalTo: content.bottomAnchor, constant: -18),
-            confirm.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -20),
-            reset.trailingAnchor.constraint(equalTo: confirm.leadingAnchor, constant: -10),
+            reset.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -20),
             reset.centerYAnchor.constraint(equalTo: status.centerYAnchor),
-            confirm.centerYAnchor.constraint(equalTo: status.centerYAnchor),
         ])
     }
 
@@ -131,7 +117,7 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
         retina.action = #selector(retinaChanged)
         dpi.addItems(withTitles: ["100%（96 DPI）", "125%（120 DPI）", "150%（144 DPI）", "175%（168 DPI）", "200%（192 DPI）", "250%（240 DPI）"])
         dpi.target = self
-        dpi.action = #selector(markDirty)
+        dpi.action = #selector(dpiChanged)
         return tab("顯示", rows: [
             row("高解析度（Retina Mode）", retina),
             row("縮放比例 / DPI", dpi),
@@ -145,7 +131,7 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
         font.action = #selector(fontChanged)
         smoothing.addItems(withTitles: ["關閉", "灰階", "ClearType RGB", "ClearType BGR"])
         smoothing.target = self
-        smoothing.action = #selector(markDirty)
+        smoothing.action = #selector(smoothingChanged)
         return tab("字體", rows: [
             row("Windows 預設字體", font),
             note("Cyder 只設定 Wine 的字體替代規則，不會自動安裝受授權保護的字型。"),
@@ -227,13 +213,13 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
     private func makeAdvancedTab() -> NSTabViewItem {
         let rebuild = NSButton(title: "重建 Windows 遊戲環境…", target: self, action: #selector(rebuildEnvironment))
         rebuild.bezelStyle = .rounded
-        forceReapply.target = self
-        forceReapply.action = #selector(forceReapplyChanged)
+        let applyAll = NSButton(title: "套用所有設定", target: self, action: #selector(applyAllSettings))
+        applyAll.bezelStyle = .rounded
         return tab("進階", rows: [
             rebuild,
             note("重新建立執行 Windows 遊戲所需的環境。遊戲檔案不會刪除，但已安裝的 Windows 元件與自訂設定需要重新套用。"),
-            forceReapply,
-            note("勾選後，即使設定值沒有變更，也會重新寫入所有設定；一般情況不需要使用。"),
+            applyAll,
+            note("使用 Wine 完整寫入目前所有設定；一般調整會在點選控制項時立即快速儲存。"),
         ])
     }
 
@@ -306,9 +292,8 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
         executableName.stringValue = "尚未選擇 EXE"
         refreshExecutableList()
         isDirty = false
-        status.stringValue = "設定將於確認後儲存"
+        status.stringValue = "變更會立即儲存"
         status.textColor = .secondaryLabelColor
-        forceReapply.state = .off
     }
 
     func prepareForDisplay() {
@@ -316,9 +301,22 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
     }
 
     @objc private func markDirty() {
+        saveImmediately()
+    }
+
+    private func saveImmediately(registrySetting: String? = nil) {
+        let requiresPrefixApply = prefixSettingsChanged()
         isDirty = true
-        status.stringValue = "有尚未儲存的變更"
-        status.textColor = .systemOrange
+        guard saveControls() else { return }
+        guard requiresPrefixApply else { return }
+        if hasRunningExes?() ?? false {
+            status.stringValue = "已儲存；關閉遊戲後將於下次啟動前套用"
+            return
+        }
+        if onImmediateSave?(registrySetting ?? "all") == false {
+            status.stringValue = "設定已儲存，但無法更新 Windows 環境"
+            status.textColor = .systemRed
+        }
     }
 
     @objc private func retinaChanged() {
@@ -328,11 +326,15 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
         let dpiValues = [96, 120, 144, 168, 192, 240]
         let targetDPI = retina.state == .on ? 192 : 96
         dpi.selectItem(at: dpiValues.firstIndex(of: targetDPI) ?? 0)
-        markDirty()
+        saveImmediately(registrySetting: "display")
     }
 
-    @objc private func forceReapplyChanged() {
-        markDirty()
+    @objc private func dpiChanged() {
+        saveImmediately(registrySetting: "dpi")
+    }
+
+    @objc private func smoothingChanged() {
+        saveImmediately(registrySetting: "smoothing")
     }
 
     @objc private func msyncChanged() {
@@ -363,7 +365,7 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
                     $0.perProfile[profileID] = rule
                 }
             }
-            status.stringValue = "已儲存；重新啟動遊戲後生效"
+            status.stringValue = "已儲存"
             status.textColor = .secondaryLabelColor
             isDirty = false
             return true
@@ -387,7 +389,7 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
                 font.selectItem(at: 0)
             }
         }
-        markDirty()
+        saveImmediately(registrySetting: "font")
     }
 
     @objc private func chooseExecutable() {
@@ -405,10 +407,6 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
             refreshExecutableList(selecting: profileID)
             loadExecutableSettings(profileID)
         case .uncreated:
-            guard !isDirty else {
-                profileAlert("請先儲存目前變更", "建立獨立遊戲環境前，請先按「確認」儲存目前的偏好設定。", warning: false)
-                return
-            }
             let alert = NSAlert()
             alert.messageText = "建立獨立遊戲環境？"
             alert.informativeText = "Cyder 會從乾淨的標準環境複製一份給 \(url.lastPathComponent)，不會修改共用環境。"
@@ -432,7 +430,7 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
         guard let profileID = selectedProfileID else { return }
         let alert = NSAlert()
         alert.messageText = "移除這個遊戲的 Profile 設定？"
-        alert.informativeText = "確認儲存後，這個 Profile 將改用一般設定；Profile bottle 本身不會刪除。"
+        alert.informativeText = "這個 Profile 將立即改用一般設定；Profile bottle 本身不會刪除。"
         alert.alertStyle = .warning
         alert.addButton(withTitle: "移除設定")
         alert.addButton(withTitle: "取消")
@@ -656,13 +654,12 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
         dpi.selectItem(at: 4)
         font.selectItem(at: 0)
         smoothing.selectItem(at: 2)
-        forceReapply.state = .off
         deletedProfiles.formUnion(profileDrafts.keys)
         profileDrafts.removeAll()
         selectedProfileID = nil
         executableName.stringValue = "尚未選擇 EXE"
         refreshExecutableList()
-        markDirty()
+        saveImmediately(registrySetting: "all")
     }
 
     @objc private func rebuildEnvironment() {
@@ -677,49 +674,21 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
         close()
     }
 
-    @objc private func confirmChanges() {
-        // Opening Cyder only to inspect settings should be a no-op: do not
-        // rewrite the settings file or invoke the Wine launcher.
-        let force = forceReapply.state == .on
-        guard isDirty || force else {
-            close()
-            return
-        }
-        // Only registry-backed display/font fields need Wine to be invoked
-        // immediately. Launch policy, sync and per-EXE fields are consumed on
-        // the next launch and should not trigger another environment check.
-        let requiresPrefixApply = prefixSettingsChanged() || force
-        let requiresSessionRestart = sessionSettingsChanged()
-        let running = (requiresPrefixApply || requiresSessionRestart) && (hasRunningExes?() ?? false)
+    @objc private func applyAllSettings() {
+        let running = hasRunningExes?() ?? false
         var shouldStopAll = false
-        if running && requiresPrefixApply {
+        if running {
             let alert = NSAlert()
-            alert.messageText = "重新開啟遊戲後會套用新設定"
-            alert.informativeText = "目前有遊戲正在執行。要立即關閉所有遊戲並套用設定，還是只儲存設定、稍後自行重新開啟？未儲存的遊戲進度可能會遺失。"
+            alert.messageText = "套用所有設定前需要關閉遊戲"
+            alert.informativeText = "這會關閉所有正在執行的遊戲，未儲存的遊戲進度可能會遺失。"
             alert.alertStyle = .warning
-            alert.addButton(withTitle: "儲存並關閉所有遊戲")
-            alert.addButton(withTitle: "只儲存")
-            alert.addButton(withTitle: "取消")
-            let response = alert.runModal()
-            guard response != .alertThirdButtonReturn else { return }
-            shouldStopAll = response == .alertFirstButtonReturn
-        } else if running && requiresSessionRestart {
-            let alert = NSAlert()
-            alert.messageText = "關閉所有遊戲後會使用新的執行模式"
-            alert.informativeText = "能源模式與同步設定由目前的 Windows 遊戲環境共用。這次只會儲存變更；請關閉所有遊戲後再重新開啟。"
-            alert.alertStyle = .informational
-            alert.addButton(withTitle: "只儲存")
+            alert.addButton(withTitle: "關閉遊戲並套用")
             alert.addButton(withTitle: "取消")
             guard alert.runModal() == .alertFirstButtonReturn else { return }
+            shouldStopAll = true
         }
-        if requiresPrefixApply {
-            onSaveStarted?()
-        }
-        guard saveControls() else {
-            onSaveFailed?()
-            return
-        }
-        onCommit?(shouldStopAll, requiresPrefixApply, force)
+        onSaveStarted?()
+        onApplyAll?(shouldStopAll)
         close()
     }
 

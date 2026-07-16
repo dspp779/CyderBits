@@ -26,10 +26,11 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
     private var wineActivationWaiter: WineActivationWaiter?
     private lazy var settingsController: CyderSettingsWindowController = {
         let controller = CyderSettingsWindowController()
-        controller.onCommit = { [weak self] shouldStopAll, requiresPrefixApply, forceReapply in
-            if requiresPrefixApply {
-                self?.prepareEnvironmentAfterSettings(stopAll: shouldStopAll, forceReapply: forceReapply)
-            }
+        controller.onImmediateSave = { [weak self] registrySetting in
+            self?.applySettingsImmediately(registrySetting: registrySetting) ?? false
+        }
+        controller.onApplyAll = { [weak self] shouldStopAll in
+            self?.prepareEnvironmentAfterSettings(stopAll: shouldStopAll)
         }
         controller.onSaveStarted = { [weak self] in
             self?.environmentPreparationInProgress = true
@@ -296,7 +297,19 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         ).status == 0
     }
 
-    private func prepareEnvironmentAfterSettings(stopAll: Bool, forceReapply: Bool) {
+    private func applySettingsImmediately(registrySetting: String) -> Bool {
+        guard let resourcePath = Bundle.main.resourcePath else { return false }
+        let context = CyderLaunchContext(resourcePath: resourcePath)
+        return runLauncher(
+            context: context,
+            args: [context.launcher, "--apply-settings-only"],
+            stage: .settingsApply,
+            operation: "apply-settings-fast",
+            extraEnvironment: ["CYDER_FAST_SETTING": registrySetting]
+        ).succeeded
+    }
+
+    private func prepareEnvironmentAfterSettings(stopAll: Bool) {
         guard terminateWhenSettingsClose,
               let resourcePath = Bundle.main.resourcePath else { return }
         let context = CyderLaunchContext(resourcePath: resourcePath)
@@ -315,7 +328,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
                 args: [context.launcher, "--apply-settings-only"],
                 stage: .settingsApply,
                 operation: "apply-settings",
-                extraEnvironment: forceReapply ? ["CYDER_FORCE_SETTINGS": "1"] : [:]
+                extraEnvironment: ["CYDER_FORCE_SETTINGS": "1"]
             )
             var settingsFailure: CyderFailure?
             if !result.succeeded {
@@ -389,7 +402,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
                 case .environmentNotReady:
                     self.showAlert(
                         "遊戲尚未準備完成",
-                        "請先單獨開啟 Cyder.app，按「確認」完成首次準備，再重新開啟遊戲。"
+                        "請先單獨開啟 Cyder.app 完成首次準備，再重新開啟遊戲。"
                     )
                     CyderDiagnostics.shared.finish(outcome: "environment-not-ready")
                 case .failure(let failure):
