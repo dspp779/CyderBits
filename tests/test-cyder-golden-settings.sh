@@ -20,8 +20,14 @@ assert_contains "$log" 'HKCU\Software\Wine\DllOverrides /v ddraw /t REG_SZ /d na
   "Golden should set ddraw native,builtin"
 assert_contains "$log" 'HKCU\Control Panel\Desktop /v FontSmoothingType /t REG_DWORD /d 2' \
   "Golden should use RGB ClearType globally"
-assert_contains "$log" 'HKCU\Software\Wine\AppDefaults\BlueLauncher.exe\Control Panel\Desktop /v FontSmoothingType /t REG_DWORD /d 1' \
-  "BlueLauncher should use grayscale smoothing"
-assert test -f "$TMP/prefix/.cyder-golden-baseline-v1"
+assert_contains "$log" 'HKCU\Software\Wine\Mac Driver /v RetinaMode /t REG_SZ /d n' \
+  "Golden should disable Retina explicitly"
+assert_contains "$log" 'HKCU\Control Panel\Desktop /v LogPixels /t REG_DWORD /d 96' \
+  "Golden should use 96 DPI"
+if [[ "$log" == *'AppDefaults\BlueLauncher.exe\Control Panel\Desktop'* ]]; then
+  echo "ASSERT failed: Golden should not write ineffective BlueLauncher smoothing values" >&2
+  exit 1
+fi
+assert test -f "$TMP/prefix/.cyder-golden-baseline-v2"
 
 echo "PASS test-cyder-golden-settings"

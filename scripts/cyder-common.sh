@@ -1180,7 +1180,7 @@ cyder_prepare_golden_template() {
   if cyder_profile_template_ready golden "$CYDER_SUPPORT" "$revision" "$engine_version" \
       && [[ -f "$golden/.cyder-mono-10.4.1" \
          && -f "$golden/.cyder-gecko-2.47.4" \
-         && -f "$golden/.cyder-golden-baseline-v1" ]]; then
+         && -f "$golden/.cyder-golden-baseline-v2" ]]; then
     return 0
   fi
 
@@ -1241,7 +1241,7 @@ cyder_clone_golden_to_shared() {
   local wine_bin="$1"
   cyder_profile_backend_load || return $?
   local golden="$CYDER_SUPPORT/templates/golden"
-  [[ -f "$golden/system.reg" && -f "$golden/.cyder-golden-baseline-v1" ]] || {
+  [[ -f "$golden/system.reg" && -f "$golden/.cyder-golden-baseline-v2" ]] || {
     echo "Golden template is incomplete: $golden" >&2
     return 1
   }
@@ -1282,6 +1282,14 @@ cyder_apply_user_settings() {
   local prefix="${3:-$CYDER_SHARED_PREFIX}"
   local settings_sh="$CYDER_SCRIPTS/cyder-apply-settings.sh"
   [[ -f "$settings_sh" ]] || return 0
+  if [[ "${CYDER_FORCE_SETTINGS:-0}" != 1 && -f "$CYDER_SCRIPTS/cyder-edit-user-reg.sh" ]]; then
+    if cyder_has_running_prefix "$prefix"; then
+      echo "Cannot edit user.reg while Wine is running for $prefix" >&2
+      return 75
+    fi
+    WINEPREFIX="$prefix" bash "$CYDER_SCRIPTS/cyder-edit-user-reg.sh"
+    return $?
+  fi
   WINEPREFIX="$prefix" WINE_INSTALL="$engine_root" bash "$settings_sh"
 }
 
@@ -1333,7 +1341,7 @@ cyder_bootstrap_shared_prefix() {
   cyder_prepare_golden_template "$wine_bin" "$engine_root" || return $?
   if [[ -f "$CYDER_BOOTSTRAP_MARKER" \
         && -f "$CYDER_SHARED_PREFIX/system.reg" \
-        && -f "$CYDER_SHARED_PREFIX/.cyder-golden-baseline-v1" ]]; then
+        && -f "$CYDER_SHARED_PREFIX/.cyder-golden-baseline-v2" ]]; then
     return 0
   fi
   cyder_has_running_prefix "$CYDER_SHARED_PREFIX" && {

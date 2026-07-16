@@ -37,7 +37,7 @@ cat >"$TMP/scripts/install-wine-gecko.sh" <<'SH'
 SH
 cat >"$TMP/scripts/cyder-apply-golden-settings.sh" <<'SH'
 #!/usr/bin/env bash
-: >"$WINEPREFIX/.cyder-golden-baseline-v1"
+: >"$WINEPREFIX/.cyder-golden-baseline-v2"
 : >"$WINEPREFIX/.golden-only"
 SH
 chmod +x "$TMP/bin/arch" "$TMP/engine/bin/"* "$TMP/scripts/"*
@@ -56,7 +56,7 @@ assert test -f "$support/templates/pristine/manifest.json"
 assert test -f "$support/templates/golden/manifest.json"
 assert test -f "$support/templates/golden/.cyder-mono-10.4.1"
 assert test -f "$support/templates/golden/.cyder-gecko-2.47.4"
-assert test -f "$support/templates/golden/.cyder-golden-baseline-v1"
+assert test -f "$support/templates/golden/.cyder-golden-baseline-v2"
 assert test ! -e "$support/templates/pristine/.golden-only"
 assert test -f "$CYDER_SHARED_PREFIX/.golden-only"
 assert test -f "$CYDER_BOOTSTRAP_MARKER"

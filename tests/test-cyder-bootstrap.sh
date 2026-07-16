@@ -34,7 +34,7 @@ assert test -f "$SHARED/drive_c/windows/syswow64/tar.exe" -o \
 assert test -d "$SHARED/drive_c/windows/mono"
 assert test -d "$SHARED/drive_c/windows/syswow64/gecko/2.47.4/wine_gecko"
 assert test -f "$SHARED/.cyder-bootstrap-v1"
-assert test -f "$SHARED/.cyder-golden-baseline-v1"
+assert test -f "$SHARED/.cyder-golden-baseline-v2"
 assert test -f "$SUPPORT/templates/golden/manifest.json"
 
 WINE="$ROOT/install/wine-cx26-x86_64/bin/wine"

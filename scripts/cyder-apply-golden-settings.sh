@@ -11,6 +11,8 @@ reg_add() {
 }
 
 # Global default: Songti TC with RGB subpixel smoothing.
+reg_add 'HKCU\Software\Wine\Mac Driver' /v RetinaMode /t REG_SZ /d n
+reg_add 'HKCU\Control Panel\Desktop' /v LogPixels /t REG_DWORD /d 96
 reg_add 'HKCU\Control Panel\Desktop' /v FontSmoothing /t REG_SZ /d 2
 reg_add 'HKCU\Control Panel\Desktop' /v FontSmoothingType /t REG_DWORD /d 2
 reg_add 'HKCU\Control Panel\Desktop' /v FontSmoothingGamma /t REG_DWORD /d 1400
@@ -25,12 +27,5 @@ reg_add 'HKCU\Software\Wine\Fonts\Replacements' /v @細明體 /t REG_SZ /d '@Son
 # Cyder baseline for DirectDraw. Wine's n,b notation is native,builtin.
 reg_add 'HKCU\Software\Wine\DllOverrides' /v ddraw /t REG_SZ /d native,builtin
 
-# BlueLauncher only: grayscale smoothing, without changing the global default.
-blue_desktop='HKCU\Software\Wine\AppDefaults\BlueLauncher.exe\Control Panel\Desktop'
-reg_add "$blue_desktop" /v FontSmoothing /t REG_SZ /d 2
-reg_add "$blue_desktop" /v FontSmoothingType /t REG_DWORD /d 1
-reg_add "$blue_desktop" /v FontSmoothingGamma /t REG_DWORD /d 0
-reg_add "$blue_desktop" /v FontSmoothingOrientation /t REG_DWORD /d 1
-
-printf 'schema=1\nfont=songti\nsmoothing=cleartype-rgb\nddraw=native,builtin\nblue-launcher-smoothing=grayscale\n' \
-  >"$WINEPREFIX/.cyder-golden-baseline-v1"
+printf 'schema=2\nretina=0\ndpi=96\nfont=songti\nsmoothing=cleartype-rgb\nddraw=native,builtin\n' \
+  >"$WINEPREFIX/.cyder-golden-baseline-v2"
