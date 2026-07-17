@@ -7,6 +7,10 @@ source "$ROOT/tests/assert.sh"
 source_text="$(cat "$ROOT/scripts/cyder_app_main.swift")"
 assert_contains "$source_text" "application.reply(toOpenOrPrint: .success)" \
   "Finder open-file requests must receive a LaunchServices reply"
+assert_contains "$source_text" "openGameInDetachedCyder" \
+  "Finder requests received by a visible library must be delegated"
+assert_contains "$source_text" "createsNewApplicationInstance = true" \
+  "delegated requests must not reuse the library process"
 assert_contains "$source_text" "documentLaunchRequested = true" \
   "open-file requests must switch the app out of settings mode"
 assert_contains "$source_text" "asyncAfter(deadline: .now() + 0.2)" \
@@ -22,6 +26,8 @@ assert_contains "$support_text" "anchorWindow: NSWindow? = nil" \
   "alerts should accept an optional window anchor"
 assert_contains "$support_text" "alert.window.setFrameOrigin" \
   "alerts should be positioned explicitly instead of using a stale saved frame"
+assert_contains "$support_text" "seen.insert(path).inserted" \
+  "argv and openFiles delivery of the same EXE must be deduplicated"
 assert_contains "$source_text" "var prefix = CyderPaths.sharedBottle" \
   "an EXE without a Profile must use the prepared Shared bottle"
 

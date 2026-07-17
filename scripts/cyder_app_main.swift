@@ -20,6 +20,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
     private var didFinishLaunch = false
     private var didRunLauncher = false
     private var documentLaunchRequested = false
+    private var openLibraryOnLaunch = false
     private var setupPanel: CyderSetupPanel?
     private var terminateWhenSettingsClose = false
     private var openingGameLibrary = false
@@ -52,7 +53,8 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         controller.onClose = { [weak self] in
             guard let self, self.terminateWhenSettingsClose,
                   !self.environmentPreparationInProgress,
-                  !self.openingGameLibrary else { return }
+                  !self.openingGameLibrary,
+                  self.gameLibraryController.window?.isVisible != true else { return }
             NSApp.terminate(nil)
         }
         return controller
@@ -74,7 +76,8 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             guard let self,
                   self.terminateWhenSettingsClose,
                   !self.environmentPreparationInProgress,
-                  self.settingsController.window?.isVisible != true else { return }
+                  self.settingsController.window?.isVisible != true,
+                  !self.gameLibraryController.isGameSettingsVisible else { return }
             NSApp.terminate(nil)
         }
         return controller
@@ -225,6 +228,13 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             application.reply(toOpenOrPrint: .failure)
             return
         }
+        if gameLibraryController.window?.isVisible == true {
+            executableFiles.forEach {
+                openGameInDetachedCyder(URL(fileURLWithPath: $0))
+            }
+            application.reply(toOpenOrPrint: .success)
+            return
+        }
         documentLaunchRequested = true
         terminateWhenSettingsClose = false
         NSApp.setActivationPolicy(.accessory)
@@ -271,6 +281,10 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             if arg == "--args" {
                 continue
             }
+            if arg == "--game-library" {
+                openLibraryOnLaunch = true
+                continue
+            }
             pendingFiles.append(arg)
         }
         pendingFiles = normalizeExePaths(pendingFiles)
@@ -292,6 +306,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
                 self.scheduleRun()
             } else {
                 self.terminateWhenSettingsClose = true
+                self.openLibraryOnLaunch = self.openLibraryOnLaunch || self.shouldOpenGameLibraryOnLaunch()
                 activateCyderUI(dockVisible: true)
                 self.prepareEnvironmentAndShowSettings()
             }
@@ -337,25 +352,42 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func showGameLibrary() {
         openingGameLibrary = true
-        if settingsController.window?.isVisible == true {
-            settingsController.close()
-        }
-        openingGameLibrary = false
+        let settingsWasVisible = settingsController.window?.isVisible == true
         activateCyderUI(dockVisible: true)
         gameLibraryController.prepareForDisplay()
         gameLibraryController.showWindow(nil)
         gameLibraryController.window?.makeKeyAndOrderFront(nil)
         gameLibraryController.window?.orderFrontRegardless()
+        // Keep a visible key window throughout the transition. In particular,
+        // accessibility clients can briefly collapse a hidden scroll view to
+        // zero width when the settings window is ordered out first.
+        if settingsWasVisible {
+            settingsController.window?.orderOut(nil)
+        }
+        openingGameLibrary = false
+    }
+
+    private func shouldOpenGameLibraryOnLaunch() -> Bool {
+        let library = CyderGameLibraryStore.shared
+        library.reload()
+        if !library.games.isEmpty { return true }
+        return !CyderProfileStore(root: CyderPaths.support).listRecords().isEmpty
     }
 
     private func launchGameFromLibrary(_ executable: URL) {
-        terminateWhenSettingsClose = false
-        documentLaunchRequested = true
-        settingsController.close()
-        gameLibraryController.close()
-        pendingFiles = [executable.path]
-        didRunLauncher = false
-        scheduleRun()
+        openGameInDetachedCyder(executable)
+    }
+
+    private func openGameInDetachedCyder(_ executable: URL) {
+        let configuration = NSWorkspace.OpenConfiguration()
+        configuration.activates = false
+        configuration.createsNewApplicationInstance = true
+        configuration.arguments = [executable.path]
+        NSWorkspace.shared.openApplication(
+            at: Bundle.main.bundleURL,
+            configuration: configuration,
+            completionHandler: nil
+        )
     }
 
     @objc private func showSettingsModal() {
@@ -647,7 +679,11 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
                     }
                     return
                 }
-                self.showSettings()
+                if self.openLibraryOnLaunch {
+                    self.showGameLibrary()
+                } else {
+                    self.showSettings()
+                }
             }
         }
     }

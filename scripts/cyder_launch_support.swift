@@ -248,13 +248,17 @@ func findExecutable(named name: String, environment: [String: String]) -> URL? {
 
 func normalizeExePaths(_ paths: [String]) -> [String] {
     var out: [String] = []
+    var seen: Set<String> = []
     for raw in paths {
         var path = raw
         if path.hasPrefix("file://"), let url = URL(string: path) {
             path = url.path
         }
         if path.isEmpty { continue }
-        if path.lowercased().hasSuffix(".exe") { out.append(path) }
+        path = (path as NSString).standardizingPath
+        if path.lowercased().hasSuffix(".exe"), seen.insert(path).inserted {
+            out.append(path)
+        }
     }
     return out
 }

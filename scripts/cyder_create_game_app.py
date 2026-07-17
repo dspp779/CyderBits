@@ -190,7 +190,11 @@ def _pe_list_ids(data: bytes, sections: list[tuple[int, int, int]], res_rva: int
 
 def extract_exe_ico(exe: Path, ico_path: Path) -> bool:
     """Extract the largest icon group from a PE EXE into a .ico file."""
-    data = exe.read_bytes()
+    return extract_exe_ico_data(exe.read_bytes(), ico_path)
+
+
+def extract_exe_ico_data(data: bytes, ico_path: Path) -> bool:
+    """Extract the largest icon group from PE bytes into a .ico file."""
     parsed = _pe_parse_sections(data)
     if not parsed:
         return False
@@ -352,6 +356,47 @@ def exe_to_icns(exe: Path, icns_path: Path) -> bool:
         except (subprocess.CalledProcessError, FileNotFoundError):
             return False
     return icns_path.is_file()
+
+
+def exe_data_to_png(data: bytes, png_path: Path, size: int = 256) -> bool:
+    """Convert the best icon from PE bytes to a game-library PNG."""
+    with tempfile.TemporaryDirectory(prefix="cyder-library-icon-") as tmp:
+        work = Path(tmp)
+        ico = work / "app.ico"
+        try:
+            if not extract_exe_ico_data(data, ico):
+                return False
+        except OSError as e:
+            print(f"Warning: could not read EXE icon: {e}", file=sys.stderr)
+            return False
+
+        source = _ico_best_png(ico, work) or ico
+        converted = work / "icon.png"
+        if not _sips_to_png(source, converted):
+            return False
+
+        png_path.parent.mkdir(parents=True, exist_ok=True)
+        staged = png_path.with_name(f".{png_path.name}.{os.getpid()}.tmp.png")
+        try:
+            subprocess.check_call(
+                ["sips", "-z", str(size), str(size), str(converted), "--out", str(staged)],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            staged.replace(png_path)
+        except (subprocess.CalledProcessError, OSError):
+            staged.unlink(missing_ok=True)
+            return False
+    return png_path.is_file()
+
+
+def exe_to_png(exe: Path, png_path: Path, size: int = 256) -> bool:
+    """Extract the best PE icon as a PNG suitable for the native game library."""
+    try:
+        return exe_data_to_png(exe.read_bytes(), png_path, size=size)
+    except OSError as e:
+        print(f"Warning: could not read EXE icon: {e}", file=sys.stderr)
+        return False
 
 
 def write_game_launcher(path: Path) -> None:
@@ -645,7 +690,30 @@ def main() -> None:
         help="Do not set WINEMSYNC=1 (Wine sync performance on macOS)",
     )
     parser.add_argument("--engine-src", type=Path, default=DEFAULT_ENGINE_SRC)
+    parser.add_argument(
+        "--extract-icon",
+        nargs=2,
+        metavar=("EXE", "PNG"),
+        help="Extract an EXE icon to a PNG for Cyder's game library",
+    )
+    parser.add_argument(
+        "--extract-icon-stdin",
+        type=Path,
+        metavar="PNG",
+        help="Read PE bytes from stdin and extract an icon without reopening the EXE",
+    )
     args = parser.parse_args()
+
+    if args.extract_icon_stdin:
+        if not exe_data_to_png(sys.stdin.buffer.read(), args.extract_icon_stdin.expanduser(), size=256):
+            sys.exit(2)
+        return
+
+    if args.extract_icon:
+        exe, png = map(Path, args.extract_icon)
+        if not exe_to_png(exe.expanduser().resolve(), png.expanduser(), size=256):
+            sys.exit(2)
+        return
 
     if args.gui or args.exe is None:
         exe = choose_exe()

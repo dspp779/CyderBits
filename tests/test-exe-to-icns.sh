@@ -9,6 +9,9 @@ content="$(cat "$PY")"
 
 assert_contains "$content" 'icon_16x16@2x.png' "exe_to_icns iconset should include icon_16x16@2x.png"
 assert_contains "$content" 'icon_512x512@2x.png' "exe_to_icns iconset should include icon_512x512@2x.png"
+assert_contains "$content" 'def exe_to_png(' "game library should reuse the PE icon extractor"
+assert_contains "$content" '"--extract-icon"' "PE icon extraction should expose a non-interactive CLI"
+assert_contains "$content" '"--extract-icon-stdin"' "game library icon extraction should accept an inherited file descriptor"
 
 if echo "$content" | grep -qE '@example\.(org|net)'; then
   echo "ASSERT failed: cyder_create_game_app.py still has placeholder iconset filenames" >&2

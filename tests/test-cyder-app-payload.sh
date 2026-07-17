@@ -10,6 +10,10 @@ assert_contains "$build_script" 'cp "$SCRIPT_DIR/sign-wine.sh" "$RES/ogom-script
   "Cyder.app must bundle the runtime signing helper"
 assert_contains "$build_script" 'cp "$SCRIPT_DIR/cyder-edit-user-reg.sh" "$RES/ogom-scripts/"' \
   "Cyder.app must bundle the fast registry editor"
+assert_contains "$build_script" 'cp "$SCRIPT_DIR/cyder_create_game_app.py" "$RES/ogom-scripts/"' \
+  "Cyder.app must bundle the PE icon extraction helper"
+assert_contains "$build_script" 'cp "$SCRIPT_DIR/cyder_common.py" "$RES/ogom-scripts/"' \
+  "the PE icon extraction helper must include its common module"
 assert_contains "$build_script" 'xattr -cr "$APP"' \
   "Cyder.app packaging must clear nested quarantine attributes before signing"
 assert_contains "$copy_script" 'xattr -c "$dest_archive"' \

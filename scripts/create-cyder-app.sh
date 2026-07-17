@@ -139,12 +139,15 @@ cp "$SCRIPT_DIR/install-cyder-font-replacements.sh" "$RES/ogom-scripts/"
 cp "$SCRIPT_DIR/cyder-apply-settings.sh" "$RES/ogom-scripts/"
 cp "$SCRIPT_DIR/cyder-edit-user-reg.sh" "$RES/ogom-scripts/"
 cp "$SCRIPT_DIR/cyder-profile.sh" "$RES/ogom-scripts/"
+cp "$SCRIPT_DIR/cyder_create_game_app.py" "$RES/ogom-scripts/"
+cp "$SCRIPT_DIR/cyder_common.py" "$RES/ogom-scripts/"
 chmod +x "$RES/ogom-scripts/cyder_launcher.sh"
 chmod +x "$RES/ogom-scripts/sign-wine.sh"
 chmod +x "$RES/ogom-scripts/install-cyder-font-replacements.sh"
 chmod +x "$RES/ogom-scripts/cyder-apply-settings.sh"
 chmod +x "$RES/ogom-scripts/cyder-edit-user-reg.sh"
 chmod +x "$RES/ogom-scripts/cyder-profile.sh"
+chmod +x "$RES/ogom-scripts/cyder_create_game_app.py"
 
 # shellcheck source=cyder-copy-engine-artifact.sh
 source "$SCRIPT_DIR/cyder-copy-engine-artifact.sh"
@@ -162,6 +165,7 @@ SWIFT_SOURCES=(
   "$SCRIPT_DIR/cyder_profiles.swift"
   "$SCRIPT_DIR/cyder_settings_ui.swift"
   "$SCRIPT_DIR/cyder_game_library.swift"
+  "$SCRIPT_DIR/cyder_game_icon.swift"
   "$SCRIPT_DIR/cyder_game_library_ui.swift"
   "$SCRIPT_DIR/cyder_app_main.swift"
 )

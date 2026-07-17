@@ -13,7 +13,7 @@ struct CyderGameRecord: Codable, Equatable, Identifiable {
     }
 
     var displayName: String {
-        executableURL.lastPathComponent
+        executableURL.deletingPathExtension().lastPathComponent
     }
 
     init(id: String, executablePath: String, addedAt: Date = Date()) {

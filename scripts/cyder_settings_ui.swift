@@ -41,7 +41,7 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
 
     convenience init() {
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 680, height: 460),
+            contentRect: NSRect(x: 0, y: 0, width: 560, height: 380),
             styleMask: [.titled, .closable],
             backing: .buffered,
             defer: false
@@ -144,11 +144,15 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
     }
 
     private func makeAdvancedTab() -> NSTabViewItem {
+        let gameLibrary = NSButton(title: "打開遊戲庫…", target: self, action: #selector(openGameLibrary))
+        gameLibrary.bezelStyle = .rounded
         let rebuild = NSButton(title: "重建 Windows 遊戲環境…", target: self, action: #selector(rebuildEnvironment))
         rebuild.bezelStyle = .rounded
         let applyAll = NSButton(title: "套用所有設定", target: self, action: #selector(applyAllSettings))
         applyAll.bezelStyle = .rounded
         return tab("進階", rows: [
+            gameLibrary,
+            note("加入 Windows 遊戲、直接啟動，或管理每個遊戲的獨立 Wine prefix 與設定。"),
             rebuild,
             note("重新建立執行 Windows 遊戲所需的環境。遊戲檔案不會刪除，但已安裝的 Windows 元件與自訂設定需要重新套用。"),
             applyAll,
@@ -195,7 +199,7 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
         let stack = NSStackView(views: [label, spacer, control])
         stack.orientation = .horizontal
         stack.alignment = .centerY
-        stack.widthAnchor.constraint(equalToConstant: 590).isActive = true
+        stack.widthAnchor.constraint(equalToConstant: 470).isActive = true
         return stack
     }
 
@@ -204,7 +208,7 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
         label.textColor = .secondaryLabelColor
         label.font = .systemFont(ofSize: 12)
         label.maximumNumberOfLines = 7
-        label.widthAnchor.constraint(equalToConstant: 580).isActive = true
+        label.widthAnchor.constraint(equalToConstant: 460).isActive = true
         return label
     }
 
