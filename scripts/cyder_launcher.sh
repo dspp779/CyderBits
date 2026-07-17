@@ -340,23 +340,17 @@ if [[ "$APPLY_SETTINGS_PREFIX_SET" -eq 1 ]]; then
   prefix="$(cyder_validate_bottle_prefix "$APPLY_SETTINGS_PREFIX")" || exit 2
   engine="$CYDER_ENGINES/$CYDER_ENGINE_NAME"
   [[ -x "$engine/bin/wine" ]] || { echo "Cyder Wine engine is not ready: $engine" >&2; exit 2; }
-  if cyder_has_running_prefix "$prefix" || cyder_profile_has_live_sessions "$prefix"; then
-    echo "Cannot apply settings while this bottle is running" >&2
-    exit 75
-  fi
+  prefix_was_running=0
+  cyder_has_running_prefix "$prefix" && prefix_was_running=1
   apply_status=0
   cyder_apply_user_settings "$engine/bin/wine" "$engine" "$prefix" || apply_status=$?
-  cleanup_status=0
-  wineserver="$engine/bin/wineserver"
-  if [[ -x "$wineserver" ]]; then
-    WINEPREFIX="$prefix" arch -x86_64 "$wineserver" -k || cleanup_status=$?
-    WINEPREFIX="$prefix" arch -x86_64 "$wineserver" -w || cleanup_status=$?
-  fi
-  if [[ "$cleanup_status" -ne 0 ]]; then
-    echo "Warning: failed to stop settings wineserver for $prefix (status $cleanup_status)" >&2
+  # Applying through the fast user.reg path normally starts no wineserver at
+  # all. Cleanup must therefore be idempotent: "no server to stop" is not an
+  # apply failure. The common helper intentionally ignores those exit codes.
+  if [[ "$prefix_was_running" -eq 0 ]]; then
+    cyder_stop_prefix_wineserver "$engine/bin/wine" "$prefix"
   fi
   [[ "$apply_status" -eq 0 ]] || exit "$apply_status"
-  [[ "$cleanup_status" -eq 0 ]] || exit "$cleanup_status"
   exit 0
 fi
 
@@ -527,9 +521,15 @@ if [[ "$LAUNCH_ONLY" -eq 1 ]]; then
     echo "Cyder environment is not ready; open Cyder.app to finish setup." >&2
     exit 2
   fi
-  wine="$CYDER_ENGINES/$CYDER_ENGINE_NAME/bin/wine"
+  engine="$CYDER_ENGINES/$CYDER_ENGINE_NAME"
+  wine="$engine/bin/wine"
+  cyder_set_stage settings-apply
+  cyder_prepare_game_launch_settings "$wine" "$engine" "$CYDER_SHARED_PREFIX" "$exe" || {
+    settings_status=$?
+    exit "$settings_status"
+  }
   cyder_set_stage wine-launch
-  cyder_run_wine_exe "$wine" "$exe"
+  cyder_run_wine_exe "$wine" "$exe" "$CYDER_SHARED_PREFIX" "${CYDER_GAME_ARGUMENTS[@]}"
   exit 0
 fi
 
@@ -568,5 +568,10 @@ if [[ "$bootstrap_status" -ne 0 ]]; then
   cyder_bootstrap_error_dialog "bootstrap failed (exit $bootstrap_status)"
   exit 1
 fi
+cyder_set_stage settings-apply
+cyder_prepare_game_launch_settings "$wine" "$engine" "$CYDER_SHARED_PREFIX" "$exe" || {
+  settings_status=$?
+  exit "$settings_status"
+}
 cyder_set_stage wine-launch
-cyder_run_wine_exe "$wine" "$exe"
+cyder_run_wine_exe "$wine" "$exe" "$CYDER_SHARED_PREFIX" "${CYDER_GAME_ARGUMENTS[@]}"

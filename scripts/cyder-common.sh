@@ -370,34 +370,65 @@ cyder_migrate_legacy_layout() {
 
 cyder_load_saved_settings() {
   local settings="$CYDER_SUPPORT/settings.json"
+  # Process-level values are authoritative. Native Cyder uses them for the
+  # currently selected game's overrides; reloading the global settings file
+  # here used to replace Retina=0/DPI=96 with the global Retina=1/DPI=192.
+  local keep_msync=0 keep_esync=0 keep_retina=0 keep_dpi=0
+  local keep_font=0 keep_smoothing=0 keep_power=0
+  case "${CYDER_MSYNC-}" in 0|1) keep_msync=1 ;; esac
+  case "${CYDER_ESYNC-}" in 0|1) keep_esync=1 ;; esac
+  case "${CYDER_RETINA_MODE-}" in 0|1) keep_retina=1 ;; esac
+  if [[ "${CYDER_DPI-}" =~ ^[0-9]+$ ]] && (( CYDER_DPI >= 72 && CYDER_DPI <= 480 )); then keep_dpi=1; fi
+  case "${CYDER_FONT_PRESET-}" in songti|mingliu) keep_font=1 ;; esac
+  case "${CYDER_FONT_SMOOTHING-}" in off|grayscale|cleartype-rgb|cleartype-bgr) keep_smoothing=1 ;; esac
+  case "${CYDER_POWER_MODE-}" in normal|background) keep_power=1 ;; esac
+
   export CYDER_MSYNC="${CYDER_MSYNC:-1}"
   export CYDER_ESYNC="${CYDER_ESYNC:-0}"
+  export CYDER_RETINA_MODE="${CYDER_RETINA_MODE:-1}"
+  export CYDER_DPI="${CYDER_DPI:-192}"
+  export CYDER_FONT_PRESET="${CYDER_FONT_PRESET:-songti}"
   export CYDER_FONT_SMOOTHING="${CYDER_FONT_SMOOTHING:-cleartype-rgb}"
+  export CYDER_POWER_MODE="${CYDER_POWER_MODE:-normal}"
   [[ -f "$settings" ]] || return 0
   command -v plutil >/dev/null 2>&1 || return 0
 
   local value
-  value="$(plutil -extract msync raw -o - "$settings" 2>/dev/null || true)"
-  case "$value" in true) export CYDER_MSYNC=1 ;; false) export CYDER_MSYNC=0 ;; esac
-  value="$(plutil -extract esync raw -o - "$settings" 2>/dev/null || true)"
-  case "$value" in true) export CYDER_ESYNC=1 ;; false) export CYDER_ESYNC=0 ;; esac
-  value="$(plutil -extract retinaMode raw -o - "$settings" 2>/dev/null || true)"
-  case "$value" in true) export CYDER_RETINA_MODE=1 ;; false) export CYDER_RETINA_MODE=0 ;; esac
-  value="$(plutil -extract dpi raw -o - "$settings" 2>/dev/null || true)"
-  [[ "$value" =~ ^[0-9]+$ ]] && export CYDER_DPI="$value"
-  value="$(plutil -extract fontPreset raw -o - "$settings" 2>/dev/null || true)"
-  [[ "$value" == songti || "$value" == mingliu ]] && export CYDER_FONT_PRESET="$value"
-  value="$(plutil -extract fontSmoothing raw -o - "$settings" 2>/dev/null || true)"
-  case "$value" in off|grayscale|cleartype-rgb|cleartype-bgr) export CYDER_FONT_SMOOTHING="$value" ;; esac
+  if [[ "$keep_msync" -eq 0 ]]; then
+    value="$(plutil -extract msync raw -o - "$settings" 2>/dev/null || true)"
+    case "$value" in true) export CYDER_MSYNC=1 ;; false) export CYDER_MSYNC=0 ;; esac
+  fi
+  if [[ "$keep_esync" -eq 0 ]]; then
+    value="$(plutil -extract esync raw -o - "$settings" 2>/dev/null || true)"
+    case "$value" in true) export CYDER_ESYNC=1 ;; false) export CYDER_ESYNC=0 ;; esac
+  fi
+  if [[ "$keep_retina" -eq 0 ]]; then
+    value="$(plutil -extract retinaMode raw -o - "$settings" 2>/dev/null || true)"
+    case "$value" in true) export CYDER_RETINA_MODE=1 ;; false) export CYDER_RETINA_MODE=0 ;; esac
+  fi
+  if [[ "$keep_dpi" -eq 0 ]]; then
+    value="$(plutil -extract dpi raw -o - "$settings" 2>/dev/null || true)"
+    [[ "$value" =~ ^[0-9]+$ ]] && export CYDER_DPI="$value"
+  fi
+  if [[ "$keep_font" -eq 0 ]]; then
+    value="$(plutil -extract fontPreset raw -o - "$settings" 2>/dev/null || true)"
+    [[ "$value" == songti || "$value" == mingliu ]] && export CYDER_FONT_PRESET="$value"
+  fi
+  if [[ "$keep_smoothing" -eq 0 ]]; then
+    value="$(plutil -extract fontSmoothing raw -o - "$settings" 2>/dev/null || true)"
+    case "$value" in off|grayscale|cleartype-rgb|cleartype-bgr) export CYDER_FONT_SMOOTHING="$value" ;; esac
+  fi
   # Settings UI stores stable, user-facing names and the launcher contract
   # uses taskpolicy's process class. Keep the translation in one place so
   # CLI/Finder launches behave identically.
-  value="$(plutil -extract powerMode raw -o - "$settings" 2>/dev/null || true)"
-  case "$value" in
-    standard) export CYDER_POWER_MODE=normal ;;
-    energySaving) export CYDER_POWER_MODE=background ;;
-    *) export CYDER_POWER_MODE=normal ;;
-  esac
+  if [[ "$keep_power" -eq 0 ]]; then
+    value="$(plutil -extract powerMode raw -o - "$settings" 2>/dev/null || true)"
+    case "$value" in
+      standard) export CYDER_POWER_MODE=normal ;;
+      energySaving) export CYDER_POWER_MODE=background ;;
+      *) export CYDER_POWER_MODE=normal ;;
+    esac
+  fi
 }
 
 cyder_find_taskpolicy() {
@@ -1276,20 +1307,111 @@ cyder_ensure_font_replacements() {
   printf 'ok\n' >"$CYDER_FONT_MARKER"
 }
 
+# Settings entered from the game-library UI are keyed by the stable EXE ID.
+# Keep the shell launch path in sync with the native AppKit path so Finder
+# associations and --launch-exe receive the same per-game settings.
+CYDER_GAME_ARGUMENTS=()
+CYDER_GAME_SETTINGS_FOUND=0
+
+cyder_load_game_settings() {
+  local exe="$1"
+  local profile_script="$CYDER_SCRIPTS/cyder-profile.sh"
+  local settings_file="$CYDER_SUPPORT/settings.json"
+  local profile_id game_json
+  CYDER_GAME_ARGUMENTS=()
+  CYDER_GAME_SETTINGS_FOUND=0
+
+  [[ -x "$profile_script" && -f "$settings_file" ]] || return 0
+  profile_id="$(bash "$profile_script" id "$exe" 2>/dev/null)" || return 0
+  [[ "$profile_id" =~ ^profile-[0-9a-f]{24}$ ]] || return 0
+  game_json="$(/usr/bin/plutil -extract "perProfile.$profile_id" json -o - "$settings_file" 2>/dev/null)" || return 0
+  [[ -n "$game_json" ]] || return 0
+  CYDER_GAME_SETTINGS_FOUND=1
+
+  # Ruby is part of the supported macOS toolchain used by the project. The
+  # scalar fallback below still applies registry settings on systems where it
+  # is unavailable; custom environment variables/arguments are optional.
+  if [[ -x /usr/bin/ruby ]]; then
+    local kind key value
+    while IFS=$'\t' read -r kind key value; do
+      [[ "$value" != *$'\n'* && "$value" != *$'\r'* && "$value" != *$'\t'* ]] || continue
+      case "$kind" in
+        setting)
+          case "$key" in
+            msync) case "$value" in true) export CYDER_MSYNC=1 ;; false) export CYDER_MSYNC=0 ;; esac ;;
+            esync) case "$value" in true) export CYDER_ESYNC=1 ;; false) export CYDER_ESYNC=0 ;; esac ;;
+            retinaMode) case "$value" in true) export CYDER_RETINA_MODE=1 ;; false) export CYDER_RETINA_MODE=0 ;; esac ;;
+            dpi) [[ "$value" =~ ^[0-9]+$ ]] && (( value >= 72 && value <= 480 )) && export CYDER_DPI="$value" || true ;;
+            fontPreset) [[ "$value" == songti || "$value" == mingliu ]] && export CYDER_FONT_PRESET="$value" || true ;;
+            fontSmoothing) case "$value" in off|grayscale|cleartype-rgb|cleartype-bgr) export CYDER_FONT_SMOOTHING="$value" ;; esac ;;
+            powerMode) case "$value" in standard) export CYDER_POWER_MODE=normal ;; energySaving) export CYDER_POWER_MODE=background ;; esac ;;
+          esac
+          ;;
+        environment)
+          [[ "$key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] && export "$key=$value"
+          ;;
+        argument)
+          CYDER_GAME_ARGUMENTS+=("$key")
+          ;;
+      esac
+    done < <(/usr/bin/ruby -rjson -e '
+      rule = JSON.parse(STDIN.read)
+      %w[msync esync retinaMode dpi fontPreset fontSmoothing powerMode].each do |key|
+        puts "setting\t#{key}\t#{rule[key]}" if rule.key?(key) && !rule[key].nil?
+      end
+      (rule["environment"] || {}).each { |key, value| puts "environment\t#{key}\t#{value}" }
+      (rule["arguments"] || []).each { |value| puts "argument\t#{value}" }
+    ' <<<"$game_json")
+  else
+    local value
+    value="$(/usr/bin/plutil -extract msync raw -o - - 2>/dev/null <<<"$game_json" || true)"
+    case "$value" in true) export CYDER_MSYNC=1 ;; false) export CYDER_MSYNC=0 ;; esac
+    value="$(/usr/bin/plutil -extract esync raw -o - - 2>/dev/null <<<"$game_json" || true)"
+    case "$value" in true) export CYDER_ESYNC=1 ;; false) export CYDER_ESYNC=0 ;; esac
+    value="$(/usr/bin/plutil -extract retinaMode raw -o - - 2>/dev/null <<<"$game_json" || true)"
+    case "$value" in true) export CYDER_RETINA_MODE=1 ;; false) export CYDER_RETINA_MODE=0 ;; esac
+    value="$(/usr/bin/plutil -extract dpi raw -o - - 2>/dev/null <<<"$game_json" || true)"
+    [[ "$value" =~ ^[0-9]+$ ]] && (( value >= 72 && value <= 480 )) && export CYDER_DPI="$value" || true
+  fi
+}
+
+cyder_prepare_game_launch_settings() {
+  local wine_bin="$1"
+  local engine_root="$2"
+  local prefix="$3"
+  local exe="$4"
+  cyder_load_game_settings "$exe"
+  [[ "$CYDER_GAME_SETTINGS_FOUND" -eq 1 ]] || return 0
+
+  local prefix_was_running=0
+  cyder_has_running_prefix "$prefix" && prefix_was_running=1
+  cyder_apply_user_settings "$wine_bin" "$engine_root" "$prefix" || return $?
+  local wineserver="$engine_root/bin/wineserver"
+  if [[ "$prefix_was_running" -eq 0 && -x "$wineserver" ]]; then
+    WINEPREFIX="$prefix" /usr/bin/arch -x86_64 "$wineserver" -k || true
+    WINEPREFIX="$prefix" /usr/bin/arch -x86_64 "$wineserver" -w || true
+  fi
+}
+
 cyder_apply_user_settings() {
   local wine_bin="$1"
   local engine_root="$2"
   local prefix="${3:-$CYDER_SHARED_PREFIX}"
   local settings_sh="$CYDER_SCRIPTS/cyder-apply-settings.sh"
   [[ -f "$settings_sh" ]] || return 0
+  if [[ "${CYDER_FORCE_SETTINGS:-0}" != 1 ]] && cyder_has_running_prefix "$prefix"; then
+    # EXE launches never run a Wine registry client against an active prefix.
+    # Display and font registry settings need a fresh wineserver to take effect
+    # anyway. Keep the saved rule and apply it on the next inactive launch.
+    echo "Skipped Cyder registry settings: prefix is already running; changes are deferred until restart."
+    return 0
+  fi
   if [[ "${CYDER_FORCE_SETTINGS:-0}" != 1 && -f "$CYDER_SCRIPTS/cyder-edit-user-reg.sh" ]]; then
-    if cyder_has_running_prefix "$prefix"; then
-      echo "Cannot edit user.reg while Wine is running for $prefix" >&2
-      return 75
-    fi
     WINEPREFIX="$prefix" bash "$CYDER_SCRIPTS/cyder-edit-user-reg.sh"
     return $?
   fi
+  # The Wine registry client is reserved for Preferences > Advanced > Apply
+  # All Settings, which explicitly sets CYDER_FORCE_SETTINGS=1.
   WINEPREFIX="$prefix" WINE_INSTALL="$engine_root" bash "$settings_sh"
 }
 
@@ -1366,6 +1488,13 @@ cyder_run_wine_exe() {
   local wine_bin="$1"
   local exe="$2"
   local prefix="${3:-$CYDER_SHARED_PREFIX}"
+  if [[ $# -ge 3 ]]; then
+    shift 3
+  else
+    shift 2
+  fi
+  local -a game_args=("$@")
+  local game_args_text="${game_args[*]-}"
   local wineserver="${wine_bin%/wine}/wineserver"
   # Keep the legacy direct path as the default.  Wine's ShellExecute-compatible
   # start.exe path is available for A/B testing with CYDER_WINE_START_MODE=start
@@ -1387,20 +1516,33 @@ cyder_run_wine_exe() {
     mkdir -p "$(dirname "$pid_file")"
     rm -f "$pid_file" "${pid_file}.tmp"
   fi
+  cyder_exec_game() {
+    if [[ "$start_mode" == "start" ]]; then
+      if (( ${#game_args[@]} > 0 )); then
+        cyder_exec_wine "$wine_bin" start /wait /unix "$exe" "${game_args[@]}"
+      else
+        cyder_exec_wine "$wine_bin" start /wait /unix "$exe"
+      fi
+    elif (( ${#game_args[@]} > 0 )); then
+      cyder_exec_wine "$wine_bin" "$exe" "${game_args[@]}"
+    else
+      cyder_exec_wine "$wine_bin" "$exe"
+    fi
+  }
   {
     local taskpolicy_bin=""
     taskpolicy_bin="$(cyder_find_taskpolicy || true)"
     if [[ "$start_mode" == "start" ]]; then
       if [[ "${CYDER_POWER_MODE:-normal}" == background && -n "$taskpolicy_bin" ]]; then
-        echo "cmd=$taskpolicy_bin -c background /usr/bin/arch -x86_64 $wine_bin start /wait /unix $exe"
+        echo "cmd=$taskpolicy_bin -c background /usr/bin/arch -x86_64 $wine_bin start /wait /unix $exe $game_args_text"
       else
-        echo "cmd=arch -x86_64 $wine_bin start /wait /unix $exe"
+        echo "cmd=arch -x86_64 $wine_bin start /wait /unix $exe $game_args_text"
       fi
     else
       if [[ "${CYDER_POWER_MODE:-normal}" == background && -n "$taskpolicy_bin" ]]; then
-        echo "cmd=$taskpolicy_bin -c background /usr/bin/arch -x86_64 $wine_bin $exe"
+        echo "cmd=$taskpolicy_bin -c background /usr/bin/arch -x86_64 $wine_bin $exe $game_args_text"
       else
-        echo "cmd=arch -x86_64 $wine_bin $exe"
+        echo "cmd=arch -x86_64 $wine_bin $exe $game_args_text"
       fi
     fi
     echo "power_mode=${CYDER_POWER_MODE:-normal}"
@@ -1423,7 +1565,7 @@ cyder_run_wine_exe() {
     fi
     export PATH="${wine_bin%/wine}:$PATH"
     cd "$(dirname "$exe")"
-    if [[ "${CYDER_SESSION_GUARD:-1}" != 0 ]]; then
+    if [[ "${CYDER_SESSION_GUARD:-0}" != 0 ]]; then
       cyder_session_acquire "$prefix" "${CYDER_MSYNC:-0}" "${CYDER_ESYNC:-0}" "${CYDER_POWER_MODE:-normal}" || return $?
       session_id="$CYDER_SESSION_FILE"
     fi
@@ -1439,11 +1581,7 @@ cyder_run_wine_exe() {
       # application.  The Wine process is intentionally asynchronous here;
       # Finder-launched apps have no controlling Terminal, so no nohup is
       # required.  stdout/stderr remain redirected to the persistent log.
-      if [[ "$start_mode" == "start" ]]; then
-        cyder_exec_wine "$wine_bin" start /wait /unix "$exe" >>"$log_file" 2>&1 &
-      else
-        cyder_exec_wine "$wine_bin" "$exe" >>"$log_file" 2>&1 &
-      fi
+      cyder_exec_game >>"$log_file" 2>&1 &
       wine_pid=$!
       printf '%s\n' "$wine_pid" >"${pid_file}.tmp"
       mv -f "${pid_file}.tmp" "$pid_file"
@@ -1462,11 +1600,7 @@ cyder_run_wine_exe() {
     else
       # CLI launches keep Wine in the foreground so the caller owns the game
       # lifetime. Finder's native entry point opts into the detached branch.
-      if [[ "$start_mode" == "start" ]]; then
-        cyder_exec_wine "$wine_bin" start /wait /unix "$exe" >>"$log_file" 2>&1
-      else
-        cyder_exec_wine "$wine_bin" "$exe" >>"$log_file" 2>&1
-      fi
+      cyder_exec_game >>"$log_file" 2>&1
     fi
   )
 }

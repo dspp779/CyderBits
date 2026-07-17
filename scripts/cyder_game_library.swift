@@ -1,8 +1,9 @@
 import Foundation
 
 /// A lightweight, user-facing entry in the Cyder game library.  The entry is
-/// deliberately separate from a profile: adding a game only remembers the
-/// EXE, while creating an independent setting later creates the bottle/profile.
+/// deliberately separate from a profile: adding a game remembers the EXE and
+/// its stable ID, while per-game launch options can be stored without creating
+/// a bottle/profile.
 struct CyderGameRecord: Codable, Equatable, Identifiable {
     let id: String
     var executablePath: String
@@ -46,7 +47,8 @@ enum CyderGameLibraryError: LocalizedError {
 }
 
 /// Persistent game-library metadata.  EXE files remain in their original
-/// locations; Cyder only stores their canonical path and a stable profile ID.
+/// locations; Cyder only stores their canonical path and a stable executable
+/// ID (using the same format as legacy profile IDs).
 final class CyderGameLibraryStore {
     static let shared = CyderGameLibraryStore()
 

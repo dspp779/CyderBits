@@ -203,14 +203,13 @@ final class CyderSettingsStore {
         environment(profileID: nil, legacyBasename: basename)
     }
 
-    func environment(profileID: String?, legacyBasename: String?) -> [String: String] {
+    func environment(
+        profileID: String?,
+        legacyBasename: String?,
+        override: CyderExecutableSettings? = nil
+    ) -> [String: String] {
         var result = environment
-        let rule: CyderExecutableSettings?
-        if let profileID {
-            rule = value.perProfile[profileID]
-        } else {
-            rule = legacyBasename.flatMap { value.perExecutable[$0] }
-        }
+        let rule = override ?? executableSettings(profileID: profileID, legacyBasename: legacyBasename)
         guard let rule else { return result }
         if let v = rule.msync { result["CYDER_MSYNC"] = v ? "1" : "0" }
         if let v = rule.esync { result["CYDER_ESYNC"] = v ? "1" : "0" }
@@ -231,14 +230,18 @@ final class CyderSettingsStore {
         value.perExecutable[basename] != nil
     }
 
-    func arguments(profileID: String?, legacyBasename: String?) -> [String] {
-        let rule: CyderExecutableSettings?
-        if let profileID {
-            rule = value.perProfile[profileID]
-        } else {
-            rule = legacyBasename.flatMap { value.perExecutable[$0] }
-        }
-        return rule?.arguments ?? []
+    func arguments(
+        profileID: String?,
+        legacyBasename: String?,
+        override: CyderExecutableSettings? = nil
+    ) -> [String] {
+        (override ?? executableSettings(profileID: profileID, legacyBasename: legacyBasename))?.arguments ?? []
+    }
+
+    func executableSettings(profileID: String?, legacyBasename: String?) -> CyderExecutableSettings? {
+        if let profileID { return value.perProfile[profileID] }
+        if let legacyBasename { return value.perExecutable[legacyBasename] }
+        return nil
     }
 
     func hasSettings(profileID: String?, legacyBasename: String?) -> Bool {

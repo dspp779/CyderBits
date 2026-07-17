@@ -18,7 +18,9 @@ private enum CyderTitlebarBrandAlignment {
 private func addCyderTitlebarBrand(
     to window: NSWindow,
     title: String,
-    alignment: CyderTitlebarBrandAlignment = .centered
+    alignment: CyderTitlebarBrandAlignment = .centered,
+    image: NSImage? = nil,
+    hideImageWhenMissing: Bool = false
 ) {
     window.title = title
     window.titleVisibility = .hidden
@@ -26,16 +28,28 @@ private func addCyderTitlebarBrand(
     window.styleMask.insert(.fullSizeContentView)
 
     let titlebar = NSView(frame: NSRect(x: 0, y: 0, width: 0, height: 32))
-    let imageView = NSImageView(image: NSImage(named: NSImage.applicationIconName) ?? NSImage())
-    imageView.imageScaling = .scaleProportionallyUpOrDown
-    imageView.translatesAutoresizingMaskIntoConstraints = false
-    imageView.widthAnchor.constraint(equalToConstant: 18).isActive = true
-    imageView.heightAnchor.constraint(equalToConstant: 18).isActive = true
-
     let titleLabel = NSTextField(labelWithString: title)
     titleLabel.font = .systemFont(ofSize: 13, weight: .semibold)
     titleLabel.textColor = .labelColor
-    let brand = NSStackView(views: [imageView, titleLabel])
+    let brandViews: [NSView]
+    if let image {
+        let imageView = NSImageView(image: image)
+        imageView.imageScaling = .scaleProportionallyUpOrDown
+        imageView.translatesAutoresizingMaskIntoConstraints = false
+        imageView.widthAnchor.constraint(equalToConstant: 18).isActive = true
+        imageView.heightAnchor.constraint(equalToConstant: 18).isActive = true
+        brandViews = [imageView, titleLabel]
+    } else if hideImageWhenMissing {
+        brandViews = [titleLabel]
+    } else {
+        let imageView = NSImageView(image: NSImage(named: NSImage.applicationIconName) ?? NSImage())
+        imageView.imageScaling = .scaleProportionallyUpOrDown
+        imageView.translatesAutoresizingMaskIntoConstraints = false
+        imageView.widthAnchor.constraint(equalToConstant: 18).isActive = true
+        imageView.heightAnchor.constraint(equalToConstant: 18).isActive = true
+        brandViews = [imageView, titleLabel]
+    }
+    let brand = NSStackView(views: brandViews)
     brand.orientation = .horizontal
     brand.alignment = .centerY
     brand.spacing = 6
@@ -75,6 +89,116 @@ private func addCyderTitlebarButton(to window: NSWindow, button: NSButton) {
     accessory.view = titlebar
     accessory.layoutAttribute = .top
     window.addTitlebarAccessoryViewController(accessory)
+}
+
+/// An information control that works consistently in stack views. Native
+/// `toolTip` handling can be easy to miss in a modal panel, so this control
+/// explicitly tracks hover and presents the same explanation on click.
+private final class CyderInformationButton: NSButton {
+    private let explanation: String
+    private var trackingAreaRef: NSTrackingArea?
+    private var hoverTimer: Timer?
+    private var popover: NSPopover?
+    private var popoverWasOpenedByHover = false
+
+    init(explanation: String) {
+        self.explanation = explanation
+        let symbol = NSImage(systemSymbolName: "info.circle", accessibilityDescription: "說明") ?? NSImage()
+        // Avoid NSButton(image:target:action:). Apple Swift 6.2.3 can emit
+        // an ownership assertion in optimized builds for that Obj-C bridge.
+        super.init(frame: NSRect(x: 0, y: 0, width: 16, height: 16))
+        image = symbol
+        bezelStyle = .inline
+        isBordered = false
+        focusRingType = .none
+        imageScaling = .scaleProportionallyUpOrDown
+        contentTintColor = .secondaryLabelColor
+        toolTip = explanation
+        setAccessibilityLabel("說明")
+        setAccessibilityHelp(explanation)
+        target = self
+        action = #selector(buttonPressed)
+        translatesAutoresizingMaskIntoConstraints = false
+        widthAnchor.constraint(equalToConstant: 16).isActive = true
+        heightAnchor.constraint(equalToConstant: 16).isActive = true
+    }
+
+    required init?(coder: NSCoder) { nil }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let trackingAreaRef { removeTrackingArea(trackingAreaRef) }
+        let trackingArea = NSTrackingArea(
+            rect: bounds,
+            options: [.activeInKeyWindow, .mouseEnteredAndExited, .inVisibleRect],
+            owner: self,
+            userInfo: nil
+        )
+        addTrackingArea(trackingArea)
+        trackingAreaRef = trackingArea
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        super.mouseEntered(with: event)
+        hoverTimer?.invalidate()
+        hoverTimer = Timer.scheduledTimer(withTimeInterval: 0.35, repeats: false) { [weak self] _ in
+            self?.showExplanation(openedByHover: true)
+        }
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        super.mouseExited(with: event)
+        hoverTimer?.invalidate()
+        hoverTimer = nil
+        if popoverWasOpenedByHover {
+            popover?.close()
+            popover = nil
+            popoverWasOpenedByHover = false
+        }
+    }
+
+    @objc private func buttonPressed() {
+        hoverTimer?.invalidate()
+        hoverTimer = nil
+        if let popover, popover.isShown {
+            popover.close()
+            self.popover = nil
+            popoverWasOpenedByHover = false
+        } else {
+            showExplanation(openedByHover: false)
+        }
+    }
+
+    private func showExplanation(openedByHover: Bool) {
+        guard window != nil else { return }
+        if let popover, popover.isShown { return }
+
+        let label = NSTextField(wrappingLabelWithString: explanation)
+        label.font = .systemFont(ofSize: 12)
+        label.textColor = .labelColor
+        label.maximumNumberOfLines = 0
+        label.translatesAutoresizingMaskIntoConstraints = false
+
+        let container = NSView(frame: NSRect(x: 0, y: 0, width: 260, height: 70))
+        container.addSubview(label)
+        NSLayoutConstraint.activate([
+            label.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 14),
+            label.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -14),
+            label.topAnchor.constraint(equalTo: container.topAnchor, constant: 12),
+            label.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -12),
+        ])
+
+        let controller = NSViewController()
+        controller.view = container
+        let nextPopover = NSPopover()
+        nextPopover.behavior = .transient
+        nextPopover.animates = true
+        nextPopover.contentSize = container.frame.size
+        nextPopover.contentViewController = controller
+        nextPopover.show(relativeTo: bounds, of: self, preferredEdge: .maxY)
+        popover = nextPopover
+        popoverWasOpenedByHover = openedByHover
+    }
 }
 
 /// A small root view is used because layer-backed colors resolve once when
@@ -305,21 +429,16 @@ private final class CyderFiveColumnGridLayout: NSCollectionViewLayout {
 /// A dedicated macOS window for per-game launch settings. It keeps advanced
 /// controls out of the library until people explicitly ask for them.
 private final class CyderGameSettingsWindowController: NSWindowController, NSWindowDelegate {
-    var onLaunch: ((URL) -> Void)?
-    var onCreateProfile: ((URL) -> Void)?
+    var onLaunch: ((URL, CyderExecutableSettings) -> Void)?
     var onRemoveProfile: ((URL, @escaping (Bool) -> Void) -> Void)?
     var onSettingsChanged: (() -> Void)?
 
     private let game: CyderGameRecord
     private let settingsStore = CyderSettingsStore.shared
     private var independent: Bool
-    private var isLoading = false
 
-    private let gameTitle = NSTextField(labelWithString: "")
-    private let scopeLabel = NSTextField(labelWithString: "")
-    private let statusLabel = NSTextField(labelWithString: "")
     private let launchButton = NSButton()
-    private let createProfileButton = NSButton()
+    private let launchHint = NSTextField(labelWithString: "使用目前選項啟動遊戲")
     private let removeProfileButton = NSButton()
     private let msync = NSSwitch()
     private let esync = NSSwitch()
@@ -328,10 +447,9 @@ private final class CyderGameSettingsWindowController: NSWindowController, NSWin
     private let power = NSPopUpButton()
     private let font = NSPopUpButton()
     private let smoothing = NSPopUpButton()
-    private let environment = NSTextField()
+    private let environment = NSTextView()
     private let arguments = NSTextField()
     private var settingViews: [NSView] = []
-    private var originalRule: CyderExecutableSettings?
     private let cancelButton = NSButton()
     private let confirmButton = NSButton()
 
@@ -354,7 +472,12 @@ private final class CyderGameSettingsWindowController: NSWindowController, NSWin
         let appearanceRoot = CyderAppearanceView(frame: window.contentView?.bounds ?? .zero)
         appearanceRoot.autoresizingMask = [.width, .height]
         window.contentView = appearanceRoot
-        addCyderTitlebarBrand(to: window, title: "遊戲設定")
+        addCyderTitlebarBrand(
+            to: window,
+            title: "\(game.displayName) 的啟動選項",
+            image: CyderGameIconStore.shared.logo(for: game),
+            hideImageWhenMissing: true
+        )
         buildUI()
         prepareForDisplay()
     }
@@ -363,20 +486,14 @@ private final class CyderGameSettingsWindowController: NSWindowController, NSWin
 
     func windowWillClose(_ notification: Notification) {
         if NSApp.modalWindow === window {
-            restoreOriginalRule()
             NSApp.stopModal(withCode: .cancel)
         }
     }
 
     func prepareForDisplay(independent: Bool? = nil) {
         if let independent { self.independent = independent }
-        isLoading = true
         let global = settingsStore.value
         let rule = settingsStore.value.perProfile[game.id]
-        originalRule = rule
-        gameTitle.stringValue = game.displayName
-        scopeLabel.stringValue = self.independent ? "獨立設定已啟用" : "目前使用全域設定"
-        scopeLabel.textColor = self.independent ? .controlAccentColor : .secondaryLabelColor
         let msyncValue = rule?.msync ?? global.msync
         let esyncValue = rule?.esync ?? (global.esync ?? false)
         let retinaValue = rule?.retinaMode ?? global.retinaMode
@@ -391,23 +508,16 @@ private final class CyderGameSettingsWindowController: NSWindowController, NSWin
         power.selectItem(at: powerValue == "energySaving" ? 1 : 0)
         font.selectItem(at: fontValue == "mingliu" ? 1 : 0)
         smoothing.selectItem(at: smoothingValues.firstIndex(of: smoothingValue) ?? 2)
-        environment.stringValue = (rule?.environment ?? [:]).sorted { $0.key < $1.key }
+        environment.string = (rule?.environment ?? [:]).sorted { $0.key < $1.key }
             .map { "\($0.key)=\($0.value)" }
-            .joined(separator: ";")
-        arguments.stringValue = rule?.arguments.joined(separator: " | ") ?? ""
+            .joined(separator: "\n")
+        arguments.stringValue = formatArguments(rule?.arguments ?? [])
 
         let executableExists = FileManager.default.fileExists(atPath: game.executablePath)
         launchButton.isEnabled = executableExists
-        createProfileButton.isHidden = self.independent
-        createProfileButton.isEnabled = executableExists && !self.independent
         removeProfileButton.isHidden = !self.independent
         removeProfileButton.isEnabled = self.independent
-        statusLabel.stringValue = executableExists
-            ? (self.independent ? "變更會在下次啟動此遊戲時生效" : "建立獨立設定後即可調整下方選項")
-            : "找不到 EXE，請重新加入遊戲庫"
-        statusLabel.textColor = .secondaryLabelColor
-        setControlsEnabled(self.independent && executableExists)
-        isLoading = false
+        setControlsEnabled(executableExists)
     }
 
     private func buildUI() {
@@ -418,20 +528,12 @@ private final class CyderGameSettingsWindowController: NSWindowController, NSWin
             appearanceRoot.onAppearanceChanged = { [weak self] in self?.refreshAppearance() }
         }
 
-        gameTitle.font = .systemFont(ofSize: 19, weight: .semibold)
-        gameTitle.maximumNumberOfLines = 2
-        scopeLabel.font = .systemFont(ofSize: 12, weight: .medium)
-        statusLabel.font = .systemFont(ofSize: 11)
-        statusLabel.maximumNumberOfLines = 2
-
-        launchButton.title = "開啟遊戲"
+        launchButton.title = "測試"
         launchButton.bezelStyle = .rounded
         launchButton.target = self
         launchButton.action = #selector(launchGame)
-        createProfileButton.title = "建立獨立設定…"
-        createProfileButton.bezelStyle = .rounded
-        createProfileButton.target = self
-        createProfileButton.action = #selector(createProfile)
+        launchHint.font = .systemFont(ofSize: 11)
+        launchHint.textColor = .secondaryLabelColor
         removeProfileButton.title = "移除獨立設定"
         removeProfileButton.bezelStyle = .rounded
         removeProfileButton.target = self
@@ -441,7 +543,7 @@ private final class CyderGameSettingsWindowController: NSWindowController, NSWin
         cancelButton.target = self
         cancelButton.action = #selector(cancelSettings)
         cancelButton.keyEquivalent = "\u{1b}"
-        confirmButton.title = "確認"
+        confirmButton.title = "套用"
         confirmButton.bezelStyle = .rounded
         confirmButton.keyEquivalent = "\r"
         confirmButton.target = self
@@ -450,35 +552,36 @@ private final class CyderGameSettingsWindowController: NSWindowController, NSWin
         dpi.addItems(withTitles: dpiTitles)
         power.addItems(withTitles: ["標準", "省電"])
         font.addItems(withTitles: ["宋體（Songti TC）", "細明體（MingLiU）"])
-        smoothing.addItems(withTitles: ["關閉", "灰階", "ClearType RGB", "ClearType BGR"])
-        environment.placeholderString = "KEY=value；多組以 ; 分隔"
-        arguments.placeholderString = "參數1 | 參數2"
-        [environment, arguments].forEach {
-            $0.widthAnchor.constraint(equalToConstant: 240).isActive = true
-            $0.target = self
-            $0.action = #selector(controlChanged)
-        }
+        smoothing.addItems(withTitles: ["關閉", "灰階", "ClearType RGB"])
+        environment.isRichText = false
+        environment.isSelectable = true
+        environment.isEditable = true
+        environment.drawsBackground = false
+        environment.font = .systemFont(ofSize: 12)
+        environment.textColor = .labelColor
+        arguments.placeholderString = "例如：--fullscreen --width 1920"
+        arguments.font = .systemFont(ofSize: 12)
+        arguments.widthAnchor.constraint(equalToConstant: 240).isActive = true
         msync.target = self
         msync.action = #selector(msyncChanged)
         esync.target = self
         esync.action = #selector(esyncChanged)
         retina.target = self
         retina.action = #selector(retinaChanged)
-        [dpi, power, font, smoothing].forEach {
-            $0.target = self
-            $0.action = #selector(controlChanged)
-        }
 
         let root = NSScrollView()
         root.drawsBackground = false
         root.hasVerticalScroller = true
         root.autohidesScrollers = true
         root.translatesAutoresizingMaskIntoConstraints = false
-        let buttonBar = NSStackView(views: [NSView(), cancelButton, confirmButton])
+        let buttonBar = NSStackView(views: [launchButton, launchHint, NSView(), cancelButton, confirmButton])
         buttonBar.orientation = .horizontal
         buttonBar.alignment = .centerY
         buttonBar.spacing = 8
         buttonBar.translatesAutoresizingMaskIntoConstraints = false
+        [launchButton, cancelButton, confirmButton].forEach {
+            $0.heightAnchor.constraint(equalToConstant: 26).isActive = true
+        }
         let document = NSView()
         document.translatesAutoresizingMaskIntoConstraints = false
         let stack = NSStackView()
@@ -487,31 +590,18 @@ private final class CyderGameSettingsWindowController: NSWindowController, NSWin
         stack.spacing = 12
         stack.translatesAutoresizingMaskIntoConstraints = false
 
-        let header = NSStackView(views: [gameTitle, scopeLabel])
-        header.orientation = .vertical
-        header.alignment = .leading
-        header.spacing = 3
-        let actions = NSStackView(views: [launchButton, createProfileButton])
-        actions.orientation = .horizontal
-        actions.spacing = 8
         let form: [NSView] = [
-            sectionTitle("執行選項"),
-            row("MSync", msync),
-            row("ESync", esync),
-            row("Retina Mode", retina),
-            row("縮放比例 / DPI", dpi),
-            row("能源模式", power),
-            row("遊戲字體", font),
-            row("字體平滑", smoothing),
-            row("環境變數", environment),
-            row("命令列參數", arguments),
-            note("這些選項只會套用到這款遊戲。"),
+            row("MSync", msync, information: "使用 macOS 原生同步機制改善部分遊戲效能；若遊戲凍結或無法啟動，可保持關閉。"),
+            row("ESync", esync, information: "使用事件同步機制降低等待開銷；MSync 與 ESync 不能同時開啟。"),
+            row("Retina Mode", retina, information: "啟用 macOS Retina 高解析度模式；部分遊戲可能需要關閉。"),
+            row("縮放比例 / DPI", dpi, information: "設定 Windows 顯示縮放比例；老遊戲視窗可能需要較低 DPI。"),
+            row("能源模式", power, information: "省電模式會降低程序優先級，可能減少耗電但造成遊戲卡頓。"),
+            row("遊戲字體", font, information: "選擇 Wine 的字體替代方案；細明體需要系統已安裝對應字型。"),
+            row("字體平滑", smoothing, information: "控制 Windows 字體平滑方式。"),
+            row("環境變數", multilineInput(environment), information: "每行輸入一個 KEY=value，會在啟動時傳給遊戲。"),
+            row("命令列參數", arguments, information: "直接接在遊戲執行指令後；以空白分隔參數，含空白的參數可用引號包住。"),
         ]
         settingViews = form
-        stack.addArrangedSubview(header)
-        stack.addArrangedSubview(actions)
-        stack.addArrangedSubview(statusLabel)
-        stack.addArrangedSubview(separator())
         form.forEach { stack.addArrangedSubview($0) }
         stack.addArrangedSubview(removeProfileButton)
 
@@ -545,59 +635,62 @@ private final class CyderGameSettingsWindowController: NSWindowController, NSWin
         window?.contentView?.needsDisplay = true
     }
 
-    private func sectionTitle(_ text: String) -> NSView {
-        let label = NSTextField(labelWithString: text)
-        label.font = .systemFont(ofSize: 13, weight: .semibold)
-        return label
-    }
-
-    private func row(_ title: String, _ control: NSView) -> NSView {
+    private func row(_ title: String, _ control: NSView, information: String? = nil) -> NSView {
         let label = NSTextField(labelWithString: title)
         label.font = .systemFont(ofSize: 12)
-        label.widthAnchor.constraint(equalToConstant: 112).isActive = true
-        let row = NSStackView(views: [label, control])
+        let titleViews: [NSView]
+        if let information {
+            titleViews = [label, informationIcon(information)]
+        } else {
+            titleViews = [label]
+        }
+        let titleStack = NSStackView(views: titleViews)
+        titleStack.orientation = .horizontal
+        titleStack.alignment = .centerY
+        titleStack.spacing = 4
+        titleStack.widthAnchor.constraint(equalToConstant: 112).isActive = true
+        let row = NSStackView(views: [titleStack, control])
         row.orientation = .horizontal
         row.alignment = .centerY
         row.spacing = 10
         return row
     }
 
-    private func note(_ text: String) -> NSView {
-        let label = NSTextField(wrappingLabelWithString: text)
-        label.font = .systemFont(ofSize: 11)
-        label.textColor = .secondaryLabelColor
-        label.maximumNumberOfLines = 2
-        label.widthAnchor.constraint(equalToConstant: 310).isActive = true
-        return label
+    private func informationIcon(_ text: String) -> NSView {
+        CyderInformationButton(explanation: text)
     }
 
-    private func separator() -> NSView {
-        let line = NSBox()
-        line.boxType = .separator
-        line.widthAnchor.constraint(equalToConstant: 310).isActive = true
-        return line
+    private func multilineInput(_ textView: NSTextView) -> NSScrollView {
+        let scroll = NSScrollView()
+        scroll.borderType = .bezelBorder
+        scroll.hasVerticalScroller = true
+        scroll.autohidesScrollers = true
+        scroll.drawsBackground = true
+        scroll.backgroundColor = .textBackgroundColor
+        scroll.translatesAutoresizingMaskIntoConstraints = false
+        scroll.widthAnchor.constraint(equalToConstant: 240).isActive = true
+        scroll.heightAnchor.constraint(equalToConstant: 56).isActive = true
+        textView.minSize = NSSize(width: 0, height: 0)
+        textView.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
+        textView.isVerticallyResizable = true
+        textView.isHorizontallyResizable = false
+        textView.autoresizingMask = [.width]
+        textView.textContainer?.widthTracksTextView = true
+        scroll.documentView = textView
+        return scroll
     }
 
     private func setControlsEnabled(_ enabled: Bool) {
-        [msync, esync, retina, dpi, power, font, smoothing, environment, arguments].forEach { $0.isEnabled = enabled }
+        [msync, esync, retina, dpi, power, font, smoothing].forEach { $0.isEnabled = enabled }
+        environment.isEditable = enabled
+        arguments.isEnabled = enabled
         settingViews.forEach { $0.alphaValue = enabled ? 1 : 0.52 }
     }
 
     @objc private func launchGame() {
-        stopModal(.OK)
-        onLaunch?(game.executableURL)
-    }
-
-    @objc private func createProfile() {
-        let alert = NSAlert()
-        alert.messageText = "為這個遊戲建立獨立設定？"
-        alert.informativeText = "Cyder 會為「\(game.displayName)」建立專屬的 Windows 環境，不會修改遊戲檔案。"
-        alert.alertStyle = .informational
-        alert.addButton(withTitle: "建立獨立設定")
-        alert.addButton(withTitle: "取消")
-        guard alert.runModal() == .alertFirstButtonReturn else { return }
-        stopModal(.OK)
-        onCreateProfile?(game.executableURL)
+        // Testing is intentionally non-destructive: keep the draft window
+        // open so the user can compare, adjust, and test again before Apply.
+        onLaunch?(game.executableURL, currentRule())
     }
 
     @objc private func removeProfile() {
@@ -608,7 +701,6 @@ private final class CyderGameSettingsWindowController: NSWindowController, NSWin
         alert.addButton(withTitle: "移除獨立設定")
         alert.addButton(withTitle: "取消")
         guard alert.runModal() == .alertFirstButtonReturn else { return }
-        statusLabel.stringValue = "正在移除獨立設定…"
         setControlsEnabled(false)
         removeProfileButton.isEnabled = false
         stopModal(.OK)
@@ -620,37 +712,29 @@ private final class CyderGameSettingsWindowController: NSWindowController, NSWin
                 self.prepareForDisplay()
             } else {
                 self.prepareForDisplay()
-                self.statusLabel.stringValue = "移除失敗，請查看錯誤訊息後再試"
-                self.statusLabel.textColor = .systemRed
+                self.showAlert(title: "移除失敗", message: "請查看錯誤訊息後再試。")
             }
         }
     }
 
     @objc private func msyncChanged() {
         if msync.state == .on { esync.state = .off }
-        saveRule()
     }
 
     @objc private func esyncChanged() {
         if esync.state == .on { msync.state = .off }
-        saveRule()
     }
 
     @objc private func retinaChanged() {
         dpi.selectItem(at: dpiValues.firstIndex(of: retina.state == .on ? 192 : 96) ?? 0)
-        saveRule()
     }
 
-    @objc private func controlChanged() { saveRule() }
-
     @objc private func cancelSettings() {
-        restoreOriginalRule()
         stopModal(.cancel)
     }
 
     @objc private func confirmSettings() {
-        saveRule()
-        stopModal(.OK)
+        persistRule()
     }
 
     private func stopModal(_ response: NSApplication.ModalResponse) {
@@ -659,23 +743,7 @@ private final class CyderGameSettingsWindowController: NSWindowController, NSWin
         }
     }
 
-    private func restoreOriginalRule() {
-        do {
-            try settingsStore.update { settings in
-                if let originalRule {
-                    settings.perProfile[game.id] = originalRule
-                } else {
-                    settings.perProfile.removeValue(forKey: game.id)
-                }
-            }
-        } catch {
-            statusLabel.stringValue = "無法還原設定：\(error.localizedDescription)"
-            statusLabel.textColor = .systemRed
-        }
-    }
-
-    private func saveRule() {
-        guard !isLoading, independent else { return }
+    private func currentRule() -> CyderExecutableSettings {
         var rule = settingsStore.value.perProfile[game.id] ?? defaultRule()
         rule.msync = msync.state == .on
         rule.esync = esync.state == .on
@@ -684,32 +752,107 @@ private final class CyderGameSettingsWindowController: NSWindowController, NSWin
         rule.powerMode = power.indexOfSelectedItem == 1 ? "energySaving" : "standard"
         rule.fontPreset = font.indexOfSelectedItem == 1 ? "mingliu" : "songti"
         rule.fontSmoothing = smoothingValues[max(0, smoothing.indexOfSelectedItem)]
-        rule.environment = environment.stringValue
-            .split(separator: ";", omittingEmptySubsequences: true)
+        rule.environment = environment.string
+            .components(separatedBy: CharacterSet.newlines)
             .compactMap { entry -> (String, String)? in
+                let entry = entry.trimmingCharacters(in: .whitespaces)
                 guard let separator = entry.firstIndex(of: "=") else { return nil }
                 let key = String(entry[..<separator]).trimmingCharacters(in: .whitespaces)
                 let value = String(entry[entry.index(after: separator)...])
                 return key.isEmpty ? nil : (key, value)
             }
             .reduce(into: [String: String]()) { $0[$1.0] = $1.1 }
-        rule.arguments = arguments.stringValue
-            .components(separatedBy: "|")
-            .map { $0.trimmingCharacters(in: .whitespaces) }
-            .filter { !$0.isEmpty }
+        rule.arguments = parseArguments(arguments.stringValue)
+        return rule
+    }
+
+    private func formatArguments(_ values: [String]) -> String {
+        values.map { value in
+            guard !value.isEmpty else { return "\"\"" }
+            let needsQuotes = value.rangeOfCharacter(from: .whitespacesAndNewlines) != nil
+                || value.contains("\\")
+                || value.contains("\"")
+                || value.contains("'")
+            guard needsQuotes else { return value }
+            let escaped = value
+                .replacingOccurrences(of: "\\", with: "\\\\")
+                .replacingOccurrences(of: "\"", with: "\\\"")
+            return "\"\(escaped)\""
+        }.joined(separator: " ")
+    }
+
+    private func parseArguments(_ text: String) -> [String] {
+        let characters = Array(text)
+        var result: [String] = []
+        var current = ""
+        var quote: Character?
+        var tokenStarted = false
+        var index = 0
+
+        while index < characters.count {
+            let character = characters[index]
+            if let activeQuote = quote {
+                if character == activeQuote {
+                    quote = nil
+                    tokenStarted = true
+                } else if character == "\\",
+                          index + 1 < characters.count,
+                          ["\\", "\"", "'"].contains(characters[index + 1]) {
+                    current.append(characters[index + 1])
+                    index += 1
+                    tokenStarted = true
+                } else {
+                    current.append(character)
+                    tokenStarted = true
+                }
+            } else if character == "\"" || character == "'" {
+                quote = character
+                tokenStarted = true
+            } else if character.isWhitespace {
+                if tokenStarted {
+                    result.append(current)
+                    current.removeAll(keepingCapacity: true)
+                    tokenStarted = false
+                }
+            } else if character == "\\",
+                      index + 1 < characters.count,
+                      ["\\", "\"", "'"].contains(characters[index + 1]) {
+                current.append(characters[index + 1])
+                index += 1
+                tokenStarted = true
+            } else {
+                current.append(character)
+                tokenStarted = true
+            }
+            index += 1
+        }
+        if tokenStarted { result.append(current) }
+        return result
+    }
+
+    private func persistRule() {
+        let rule = currentRule()
         do {
             try settingsStore.update { $0.perProfile[game.id] = rule }
-            statusLabel.stringValue = "已儲存；下次啟動此遊戲時生效"
-            statusLabel.textColor = .secondaryLabelColor
+            onSettingsChanged?()
+            stopModal(.OK)
         } catch {
-            statusLabel.stringValue = "無法儲存：\(error.localizedDescription)"
-            statusLabel.textColor = .systemRed
+            showAlert(title: "無法套用設定", message: error.localizedDescription)
         }
+    }
+
+    private func showAlert(title: String, message: String) {
+        let alert = NSAlert()
+        alert.messageText = title
+        alert.informativeText = message
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "知道了")
+        alert.runModal()
     }
 
     private var dpiValues: [Int] { [96, 120, 144, 168, 192, 240] }
     private var dpiTitles: [String] { ["100%（96 DPI）", "125%（120 DPI）", "150%（144 DPI）", "175%（168 DPI）", "200%（192 DPI）", "250%（240 DPI）"] }
-    private var smoothingValues: [String] { ["off", "grayscale", "cleartype-rgb", "cleartype-bgr"] }
+    private var smoothingValues: [String] { ["off", "grayscale", "cleartype-rgb"] }
 
     private func defaultRule() -> CyderExecutableSettings {
         let value = settingsStore.value
@@ -726,8 +869,7 @@ private final class CyderGameSettingsWindowController: NSWindowController, NSWin
 }
 
 final class CyderGameLibraryWindowController: NSWindowController, NSWindowDelegate, NSCollectionViewDataSource {
-    var onLaunch: ((URL) -> Void)?
-    var onCreateProfile: ((URL) -> Void)?
+    var onLaunch: ((URL, CyderExecutableSettings?) -> Void)?
     var onRemoveProfile: ((URL, @escaping (Bool) -> Void) -> Void)?
     var onClose: (() -> Void)?
 
@@ -933,14 +1075,15 @@ final class CyderGameLibraryWindowController: NSWindowController, NSWindowDelega
             showAlert(title: "找不到遊戲", message: "這個 EXE 已不在原本的位置。")
             return
         }
-        onLaunch?(game.executableURL)
+        onLaunch?(game.executableURL, nil)
     }
 
     @objc private func openSettingsForSelectedGame() {
         guard let game = selectedGame else { return }
         let controller = CyderGameSettingsWindowController(game: game, independent: independentIDs.contains(game.id))
-        controller.onLaunch = { [weak self] executable in self?.onLaunch?(executable) }
-        controller.onCreateProfile = { [weak self] executable in self?.onCreateProfile?(executable) }
+        controller.onLaunch = { [weak self] executable, settings in
+            self?.onLaunch?(executable, settings)
+        }
         controller.onRemoveProfile = { [weak self] executable, completion in
             guard let self else { completion(false); return }
             self.onRemoveProfile?(executable) { succeeded in

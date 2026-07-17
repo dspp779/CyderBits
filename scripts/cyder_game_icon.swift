@@ -13,14 +13,20 @@ final class CyderGameIconStore {
     private var failed: Set<String> = []
 
     func image(for game: CyderGameRecord) -> NSImage {
+        if let logo = logo(for: game) { return logo }
+        return NSWorkspace.shared.icon(forFile: game.executablePath)
+    }
+
+    /// Returns only an icon extracted from the executable. Unlike `image(for:)`,
+    /// this does not fall back to macOS's generic document icon, so title bars
+    /// can omit the image when the game has no logo.
+    func logo(for game: CyderGameRecord) -> NSImage? {
         if let cached = memory[game.id] { return cached }
         let cacheURL = iconURL(for: game)
-        if isFresh(cacheURL: cacheURL, executableURL: game.executableURL),
-           let image = NSImage(contentsOf: cacheURL) {
-            memory[game.id] = image
-            return image
-        }
-        return NSWorkspace.shared.icon(forFile: game.executablePath)
+        guard isFresh(cacheURL: cacheURL, executableURL: game.executableURL),
+              let image = NSImage(contentsOf: cacheURL) else { return nil }
+        memory[game.id] = image
+        return image
     }
 
     /// Call immediately after NSOpenPanel returns so the app opens the EXE

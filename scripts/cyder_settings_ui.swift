@@ -133,7 +133,7 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
         font.addItems(withTitles: ["宋體（Songti TC，預設）", "細明體（MingLiU）"])
         font.target = self
         font.action = #selector(fontChanged)
-        smoothing.addItems(withTitles: ["關閉", "灰階", "ClearType RGB", "ClearType BGR"])
+        smoothing.addItems(withTitles: ["關閉", "灰階", "ClearType RGB"])
         smoothing.target = self
         smoothing.action = #selector(smoothingChanged)
         return tab("字體", rows: [
@@ -220,7 +220,7 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
         let dpiValues = [96, 120, 144, 168, 192, 240]
         dpi.selectItem(at: dpiValues.firstIndex(of: value.dpi) ?? 4)
         font.selectItem(at: value.fontPreset == "mingliu" ? 1 : 0)
-        let smoothingValues = ["off", "grayscale", "cleartype-rgb", "cleartype-bgr"]
+        let smoothingValues = ["off", "grayscale", "cleartype-rgb"]
         smoothing.selectItem(at: smoothingValues.firstIndex(of: value.fontSmoothing) ?? 2)
         profileDrafts = value.perProfile
         profileRecords = Dictionary(uniqueKeysWithValues: profileStore.listRecords().map { ($0.profileId, $0) })
@@ -286,7 +286,7 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
 
     private func saveControls() -> Bool {
         let dpiValues = [96, 120, 144, 168, 192, 240]
-        let smoothingValues = ["off", "grayscale", "cleartype-rgb", "cleartype-bgr"]
+        let smoothingValues = ["off", "grayscale", "cleartype-rgb"]
         do {
             try store.update {
                 $0.msync = msync.state == .on
@@ -468,7 +468,7 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
         rule.dpi = dpiValues[max(0, executableDpi.indexOfSelectedItem)]
         rule.powerMode = ["standard", "energySaving"][max(0, executablePowerMode.indexOfSelectedItem)]
         rule.fontPreset = executableFont.indexOfSelectedItem == 1 ? "mingliu" : "songti"
-        rule.fontSmoothing = ["off", "grayscale", "cleartype-rgb", "cleartype-bgr"][max(0, executableSmoothing.indexOfSelectedItem)]
+        rule.fontSmoothing = ["off", "grayscale", "cleartype-rgb"][max(0, executableSmoothing.indexOfSelectedItem)]
         rule.environment = executableEnvironment.stringValue
             .split(separator: ";", omittingEmptySubsequences: true)
             .compactMap { entry -> (String, String)? in
@@ -505,7 +505,7 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
         executableDpi.selectItem(at: dpiValues.firstIndex(of: rule.dpi ?? defaults.dpi ?? 192) ?? 4)
         executablePowerMode.selectItem(at: rule.powerMode == "energySaving" ? 1 : 0)
         executableFont.selectItem(at: rule.fontPreset == "mingliu" ? 1 : 0)
-        let smoothingValues = ["off", "grayscale", "cleartype-rgb", "cleartype-bgr"]
+        let smoothingValues = ["off", "grayscale", "cleartype-rgb"]
         executableSmoothing.selectItem(at: smoothingValues.firstIndex(of: rule.fontSmoothing ?? defaults.fontSmoothing ?? "cleartype-rgb") ?? 2)
         executableEnvironment.stringValue = rule.environment
             .sorted { $0.key < $1.key }
@@ -627,7 +627,7 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
     private func prefixSettingsChanged() -> Bool {
         let value = store.value
         let dpiValues = [96, 120, 144, 168, 192, 240]
-        let smoothingValues = ["off", "grayscale", "cleartype-rgb", "cleartype-bgr"]
+        let smoothingValues = ["off", "grayscale", "cleartype-rgb"]
         return value.retinaMode != (retina.state == .on)
             || value.dpi != dpiValues[max(0, dpi.indexOfSelectedItem)]
             || value.fontPreset != (font.indexOfSelectedItem == 1 ? "mingliu" : "songti")

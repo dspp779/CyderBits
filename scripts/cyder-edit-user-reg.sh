@@ -71,4 +71,4 @@ case "$SETTING" in
   *) echo "unknown fast setting: $SETTING" >&2; exit 2 ;;
 esac
 
-echo "Applied Cyder $SETTING setting directly to $USER_REG"
+echo "Applied Cyder $SETTING setting directly to $USER_REG (Retina=$retina DPI=$dpi font=$font smoothing=$smoothing)"

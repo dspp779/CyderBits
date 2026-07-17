@@ -96,17 +96,19 @@ Cyder 的 `設定…`（`⌘,`）、Dock 右鍵或執行檔選擇器的「進階
 - ESync（預設關閉；開啟時會自動關閉 MSync）
 - Retina Mode（預設開啟）
 - DPI（預設 192 / 200%；非整數縮放可能讓部分老遊戲出現鋸齒或模糊）
-- 字體平滑（預設灰階，可選關閉、ClearType RGB 或 ClearType BGR；與 Retina Mode 獨立）
+- 字體平滑（預設 ClearType RGB，可選關閉或灰階；與 Retina Mode 獨立）
 - Windows 字體方案：宋體 Songti TC（預設）或細明體 MingLiU
 - 每遊戲能源模式：標準不套用 `taskpolicy`；省電使用 `taskpolicy -c background`。省電模式會降低 CPU 使用率，但可能造成畫面卡頓。Apple 晶片通常會優先使用節能核心；BlueCG 測試中 Wine CPU 能耗約為標準模式的 1/10，可能大幅延長續航。M1 Pro／Max 僅有 2 個節能核心，可能極度卡頓，不建議使用。
 
 選擇細明體前，必須先在 macOS「字體簿」或 Wine prefix 中安裝合法取得的 MingLiU 字型。Cyder 只設定字體替代規則，不會散布或自動安裝該字型。
 
-設定儲存在 `~/Library/Application Support/Cyder/settings.json`。顯示與字體設定會在控制項變更時，以原生 `sed` 直接更新未執行中的 Wine prefix；若遊戲正在執行，則於下次啟動前套用。
+設定儲存在 `~/Library/Application Support/Cyder/settings.json`。全域顯示與字體設定會在控制項變更時，以原生 `sed` 直接更新未執行中的 Wine prefix；遊戲庫的個別設定則在遊戲設定頁按「套用」後保存，並在之後開啟該 EXE 時載入。
 
-遊戲設定目前以小寫 EXE 檔名作為 `perExecutable` 鍵值，介面提供已設定清單與 Cyder 建議範本。每個 EXE 的能源模式使用 `powerMode=standard|energySaving`；啟動契約環境變數為 `CYDER_POWER_MODE=normal|background`。同一 bottle 的 wineserver session 不允許混用不同模式。
+遊戲庫以 EXE 的 canonical path 計算穩定 ID，個別選項存放於 `perProfile`；這不代表一定建立獨立 bottle。遊戲設定頁直接開放 MSync、ESync、Retina、DPI、字體、能源模式、環境變數與命令列參數，命令列參數以單行文字直接接在 EXE 後，空白分隔；含空白的單一參數可用引號保留。提供「測試」以套用目前草稿後開啟遊戲，或按「套用」保存供之後從遊戲庫、Finder／直接 EXE 開啟時使用。每個 EXE 的能源模式使用 `powerMode=standard|energySaving`；啟動契約環境變數為 `CYDER_POWER_MODE=normal|background`。
 
-Wine 的 macOS RetinaMode 是整個 Wine session／bottle 的設定，不能透過 `AppDefaults` 只套用單一 EXE。現階段若 EXE 有個別 Retina／DPI 設定，Cyder 會在啟動前確認共用 bottle 沒有其他遊戲，套用該 EXE 的顯示設定並重新建立乾淨的 wineserver session；要同時執行不同顯示設定，仍需後續的每遊戲 bottle 架構。
+當共用 prefix 沒有執行中的 wineserver，啟動 EXE 前會以快速路徑直接修改 `user.reg`，不會為了套用設定先啟動 Wine。若 prefix 已在執行，EXE 啟動流程會略過 registry 套用並直接開啟遊戲；設定仍保存在 `settings.json`，等 prefix 停止後的下一次啟動再套用。`wine reg` 不會用於一般 EXE 啟動，只保留給「偏好設定 → 進階 → 套用所有設定」。
+
+Wine 的 macOS RetinaMode、DPI 與字體 registry 是整個 Wine session／bottle 的狀態，不能透過 `AppDefaults` 真正隔離到單一 EXE。Cyder 允許同一共用 prefix 同時開啟多個遊戲，不再以 session guard 阻擋；但執行中無法切換這些 registry 設定，因此同時執行的遊戲會沿用目前 wineserver 已載入的值。MSync、ESync、能源模式、環境變數與命令列參數仍會依各次啟動傳入，但最終相容性仍受 Wine 共用 wineserver 限制。
 
 個別遊戲可能需要不同的同步設定；例如皮卡丘打排球目前應關閉 MSync／ESync，並使用無空白的 Wine runtime。請參考 [依遊戲問題文件](games/pikachu-volleyball/README.md)。
 

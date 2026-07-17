@@ -43,6 +43,9 @@ SH
 cat >"$TMP/runtime/Engines/wine-x86_64/bin/wineserver" <<'SH'
 #!/usr/bin/env bash
 printf '%s|%s\n' "${WINEPREFIX:-}" "$*" >>"$CYDER_TEST_STOP_LOG"
+if [[ "${CYDER_TEST_STOP_FAIL:-0}" == 1 ]]; then
+  exit 1
+fi
 SH
 chmod +x "$TMP/bin/arch" "$TMP/runtime/Engines/wine-x86_64/bin/wineserver"
 CYDER_TEST_STOP_LOG="$TMP/stop.log" CYDER_SUPPORT="$TMP/support" PATH="$TMP/bin:$PATH" \
@@ -237,12 +240,9 @@ fi
 
 mkdir -p "$profile_support/bottles/settings-target" "$profile_support/bottles/settings-other/.cyder-runtime/sessions"
 printf 'pid=%s\nsync=msync=0;esync=0;power=normal\nmode=normal\n' "$$" >"$profile_support/bottles/settings-other/.cyder-runtime/sessions/live.session"
-set +e
 CYDER_SUPPORT="$profile_support" CYDER_SCRIPTS="$TMP/empty-scripts" \
-  bash "$ROOT/scripts/cyder_launcher.sh" --apply-settings-prefix "$profile_support/bottles/settings-other" >/dev/null 2>&1
-active_status=$?
-set -e
-assert_eq "$active_status" "75" "active target bottle must reject settings"
+  CYDER_TEST_STOP_LOG="$TMP/active-settings-stop.log" PATH="$TMP/bin:$PATH" \
+  bash "$ROOT/scripts/cyder_launcher.sh" --apply-settings-prefix "$profile_support/bottles/settings-other"
 settings_stop_log="$TMP/settings-stop.log"
 : >"$settings_stop_log"
 settings_target_real="$(cd "$profile_support/bottles/settings-target" && pwd -P)"
@@ -250,6 +250,9 @@ CYDER_SUPPORT="$profile_support" CYDER_SCRIPTS="$TMP/empty-scripts" CYDER_TEST_S
   bash "$ROOT/scripts/cyder_launcher.sh" --apply-settings-prefix "$profile_support/bottles/settings-target"
 assert_contains "$(cat "$settings_stop_log")" "$settings_target_real|-k" "settings cleanup should stop target wineserver"
 assert_contains "$(cat "$settings_stop_log")" "$settings_target_real|-w" "settings cleanup should wait for target wineserver"
+CYDER_SUPPORT="$profile_support" CYDER_SCRIPTS="$TMP/empty-scripts" CYDER_TEST_STOP_LOG="$settings_stop_log" \
+  CYDER_TEST_STOP_FAIL=1 PATH="$TMP/bin:$PATH" \
+  bash "$ROOT/scripts/cyder_launcher.sh" --apply-settings-prefix "$profile_support/bottles/settings-target"
 if CYDER_SUPPORT="$profile_support" CYDER_SCRIPTS="$TMP/empty-scripts" \
   bash "$ROOT/scripts/cyder_launcher.sh" --apply-settings-prefix "" >/dev/null 2>&1; then
   echo "empty settings prefix unexpectedly accepted" >&2

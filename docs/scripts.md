@@ -90,6 +90,7 @@ run-bluecg.sh
 | `tests/test-run-bluecg.sh` | `run-bluecg.sh` |
 | `tests/test-verify-bluecg.sh` | `verify-bluecg.sh` |
 | `tests/test-cyder-launcher.sh` | `cyder_launcher.sh --dry-run` |
+| `tests/test-cyder-game-launch-settings.sh` | stable EXE ID → per-game settings → fast registry/apply launch bridge |
 | `tests/test-cyderbits-app.sh` | CyderBits.app 是否內含 `cyder_common.py`、模組可載入 |
 | `tests/test-cyder-exe-association.sh` | `cyder-exe-association.swift status` |
 | `tests/test-install-libarchive-tar.sh` | `install-libarchive-tar.sh` |

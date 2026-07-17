@@ -26,6 +26,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
     private var openingGameLibrary = false
     private var environmentPreparationInProgress = false
     private var wineActivationWaiter: WineActivationWaiter?
+    private var pendingGameSettings: CyderExecutableSettings?
     private lazy var settingsController: CyderSettingsWindowController = {
         let controller = CyderSettingsWindowController()
         controller.onImmediateSave = { [weak self] registrySetting in
@@ -62,11 +63,8 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
 
     private lazy var gameLibraryController: CyderGameLibraryWindowController = {
         let controller = CyderGameLibraryWindowController()
-        controller.onLaunch = { [weak self] executable in
-            self?.launchGameFromLibrary(executable)
-        }
-        controller.onCreateProfile = { [weak self] executable in
-            self?.createIndependentProfile(for: executable, returnToLibrary: true)
+        controller.onLaunch = { [weak self] executable, settings in
+            self?.launchGameFromLibrary(executable, settings: settings)
         }
         controller.onRemoveProfile = { [weak self] executable, completion in
             guard let self else { completion(false); return }
@@ -273,22 +271,41 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             NSApp.terminate(nil)
             return
         }
-        showPreviousCrashIfNeeded()
-        for arg in CommandLine.arguments.dropFirst() {
-            if arg.hasPrefix("-psn_") {
-                continue
-            }
-            if arg == "--args" {
+        var argumentIndex = 1
+        while argumentIndex < CommandLine.arguments.count {
+            let arg = CommandLine.arguments[argumentIndex]
+            if arg.hasPrefix("-psn_") || arg == "--args" {
+                argumentIndex += 1
                 continue
             }
             if arg == "--game-library" {
                 openLibraryOnLaunch = true
+                argumentIndex += 1
+                continue
+            }
+            if arg == "--cyder-test-settings",
+               argumentIndex + 1 < CommandLine.arguments.count {
+                let requestPath = CommandLine.arguments[argumentIndex + 1]
+                if let data = try? Data(contentsOf: URL(fileURLWithPath: requestPath)),
+                   let settings = try? JSONDecoder().decode(CyderExecutableSettings.self, from: data) {
+                    pendingGameSettings = settings
+                }
+                try? FileManager.default.removeItem(atPath: requestPath)
+                argumentIndex += 2
                 continue
             }
             pendingFiles.append(arg)
+            argumentIndex += 1
         }
         pendingFiles = normalizeExePaths(pendingFiles)
         if !pendingFiles.isEmpty { documentLaunchRequested = true }
+        // A test launch creates a second Cyder process while the library app
+        // remains alive. Its session-state file is therefore expected to be
+        // "running", not evidence of a crash. Only settings-mode launches
+        // should surface a previous-session warning.
+        if !documentLaunchRequested {
+            showPreviousCrashIfNeeded()
+        }
         CyderDiagnostics.shared.enter(
             .appStart,
             detail: documentLaunchRequested ? "finder-exe" : "settings"
@@ -374,15 +391,28 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         return !CyderProfileStore(root: CyderPaths.support).listRecords().isEmpty
     }
 
-    private func launchGameFromLibrary(_ executable: URL) {
-        openGameInDetachedCyder(executable)
+    private func launchGameFromLibrary(_ executable: URL, settings: CyderExecutableSettings?) {
+        openGameInDetachedCyder(executable, settings: settings)
     }
 
-    private func openGameInDetachedCyder(_ executable: URL) {
+    private func openGameInDetachedCyder(_ executable: URL, settings: CyderExecutableSettings? = nil) {
+        var arguments = [executable.path]
+        if let settings {
+            do {
+                let requestDirectory = CyderPaths.support.appendingPathComponent("launch-requests", isDirectory: true)
+                try FileManager.default.createDirectory(at: requestDirectory, withIntermediateDirectories: true)
+                let request = requestDirectory.appendingPathComponent("test-\(UUID().uuidString).json")
+                try JSONEncoder.pretty.encode(settings).write(to: request, options: .atomic)
+                arguments += ["--cyder-test-settings", request.path]
+            } catch {
+                showAlert("無法啟動測試", "無法建立暫存的遊戲設定：\(error.localizedDescription)")
+                return
+            }
+        }
         let configuration = NSWorkspace.OpenConfiguration()
         configuration.activates = false
         configuration.createsNewApplicationInstance = true
-        configuration.arguments = [executable.path]
+        configuration.arguments = arguments
         NSWorkspace.shared.openApplication(
             at: Bundle.main.bundleURL,
             configuration: configuration,
@@ -715,8 +745,10 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         var profileID: String?
         var prefix = CyderPaths.sharedBottle
         switch profileStore.resolve(executable: exeURL) {
-        case .uncreated:
-            profileID = nil
+        case .uncreated(let id):
+            // The stable executable ID is also the key for settings when the
+            // game uses the shared bottle. A profile bottle is optional.
+            profileID = id
         case .damaged(let id, let reason):
             return .failure(CyderFailure(
                 code: "CYD-PRO-002",
@@ -740,11 +772,15 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
                 logURL: CyderDiagnostics.shared.sessionLogURL
             ))
         }
-        if let profileID,
-           CyderSettingsStore.shared.hasSettings(profileID: profileID, legacyBasename: nil) {
+        let gameSettings = pendingGameSettings
+            ?? profileID.flatMap { CyderSettingsStore.shared.value.perProfile[$0] }
+        if let profileID, let gameSettings {
             showSetup("正在套用遊戲設定…")
-            var launchSettings = CyderSettingsStore.shared.environment(profileID: profileID, legacyBasename: nil)
-            launchSettings["CYDER_STOP_WINESERVER_AFTER_SETTINGS"] = "1"
+            var launchSettings = CyderSettingsStore.shared.environment(
+                profileID: profileID,
+                legacyBasename: nil,
+                override: gameSettings
+            )
             launchSettings["WINEPREFIX"] = prefix.path
             let applied = runLauncher(
                 context: context,
@@ -754,25 +790,36 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
                 extraEnvironment: launchSettings
             )
             guard applied.succeeded else {
-                let conflict = applied.status == 75
                 return .failure(failure(
-                    code: conflict ? "CYD-GAM-001" : "CYD-GAM-002",
+                    code: "CYD-GAM-002",
                     stage: .settingsApply,
-                    summary: conflict
-                        ? "這個遊戲仍在執行中，請關閉後再套用設定。"
-                        : "套用遊戲個別設定時發生問題。",
+                    summary: "套用遊戲個別設定時發生問題。",
                     result: applied
                 ))
             }
         }
-        return runDirectWine(context: context, wine: wine, exe: exeURL.path, profileID: profileID, prefix: prefix)
+        return runDirectWine(
+            context: context,
+            wine: wine,
+            exe: exeURL.path,
+            profileID: profileID,
+            prefix: prefix,
+            gameSettings: gameSettings
+        )
     }
 
     /// Launch Wine directly through Apple's architecture selector, then wait
     /// for CrossOver Wine to publish the actual foreground application PID in
     /// WineAppWillActivateNotification.  The wrapper Process PID is not used
     /// for activation. Wine continues independently after Cyder exits.
-    private func runDirectWine(context: CyderLaunchContext, wine: URL, exe: String, profileID: String?, prefix: URL) -> CyderLaunchOutcome {
+    private func runDirectWine(
+        context: CyderLaunchContext,
+        wine: URL,
+        exe: String,
+        profileID: String?,
+        prefix: URL,
+        gameSettings: CyderExecutableSettings?
+    ) -> CyderLaunchOutcome {
         let support = CyderPaths.support
         let logDirectory = support.appendingPathComponent("Logs", isDirectory: true)
         let prefixPath = prefix.path
@@ -808,8 +855,19 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         try? FileManager.default.createSymbolicLink(at: legacyLog, withDestinationURL: launchLog)
 
         let process = Process()
-        let environment = wineEnvironment(wine: wine, support: support, exe: exe, profileID: profileID, prefix: prefix)
-        let gameArguments = CyderSettingsStore.shared.arguments(profileID: profileID, legacyBasename: nil)
+        let environment = wineEnvironment(
+            wine: wine,
+            support: support,
+            exe: exe,
+            profileID: profileID,
+            prefix: prefix,
+            gameSettings: gameSettings
+        )
+        let gameArguments = CyderSettingsStore.shared.arguments(
+            profileID: profileID,
+            legacyBasename: nil,
+            override: gameSettings
+        )
         let powerMode = environment["CYDER_POWER_MODE"] ?? "normal"
         let taskpolicy = findExecutable(named: "taskpolicy", environment: environment)
         let hasTaskpolicy = taskpolicy != nil
@@ -851,68 +909,17 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         process.standardOutput = handle
         process.standardError = handle
 
-        let ownerPID = ProcessInfo.processInfo.processIdentifier
         let msync = environment["CYDER_MSYNC"] == "1" ? "1" : "0"
         let esync = environment["CYDER_ESYNC"] == "1" ? "1" : "0"
-        let sessionAcquire = runLauncher(
-            context: context,
-            args: [
-                context.launcher,
-                "--session-acquire", prefixPath, "\(ownerPID)", msync, esync, powerMode
-            ],
-            stage: .wineSpawn,
-            operation: "session-acquire",
-            expectsMachineResult: true
+        CyderDiagnostics.shared.info(
+            "game-launch effective-settings profile=\(profileID ?? "shared") "
+                + "source=\(gameSettings == nil ? "saved" : "test-or-override") "
+                + "msync=\(msync) esync=\(esync) power=\(powerMode)"
         )
-        guard sessionAcquire.succeeded,
-              let sessionFile = sessionAcquire.machineResult["sessionFile"],
-              sessionFile.hasSuffix(".session"),
-              FileManager.default.fileExists(atPath: sessionFile) else {
-            try? handle.close()
-            let status = sessionAcquire.status == 75 ? "A different sync or energy mode is already using this bottle." : sessionAcquire.outputTail
-            return .failure(CyderFailure(
-                code: "CYD-SES-001",
-                stage: .wineSpawn,
-                summary: sessionAcquire.status == 75
-                    ? "這個遊戲環境目前由其他遊戲使用中。"
-                    : "無法啟動遊戲執行環境。",
-                technicalDetails: status,
-                exitCode: sessionAcquire.status,
-                logURL: sessionAcquire.logURL
-            ))
-        }
-        var sessionCommitted = false
-        defer {
-            if !sessionCommitted {
-                _ = releaseSession(context: context, prefix: prefixPath, sessionFile: sessionFile)
-            }
-        }
 
         do {
             try process.run()
             CyderDiagnostics.shared.info("wine process started pid=\(process.processIdentifier) log=\(launchLog.path)")
-            let sessionUpdate = runLauncher(
-                context: context,
-                args: [
-                    context.launcher,
-                    "--session-update", prefixPath, sessionFile, "\(process.processIdentifier)"
-                ],
-                stage: .wineSpawn,
-                operation: "session-update"
-            )
-            guard sessionUpdate.succeeded else {
-                process.terminate()
-                try? handle.close()
-                return .failure(CyderFailure(
-                    code: "CYD-SES-002",
-                    stage: .wineSpawn,
-                    summary: "無法登錄遊戲執行程序。",
-                    technicalDetails: sessionUpdate.outputTail,
-                    exitCode: sessionUpdate.status,
-                    logURL: sessionUpdate.logURL
-                ))
-            }
-            sessionCommitted = true
         } catch {
             try? handle.close()
             return .failure(CyderFailure(
@@ -970,10 +977,15 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         support: URL,
         exe: String,
         profileID: String?,
-        prefix: URL
+        prefix: URL,
+        gameSettings: CyderExecutableSettings?
     ) -> [String: String] {
         var environment = ProcessInfo.processInfo.environment
-        for (key, value) in CyderSettingsStore.shared.environment(profileID: profileID, legacyBasename: nil) {
+        for (key, value) in CyderSettingsStore.shared.environment(
+            profileID: profileID,
+            legacyBasename: nil,
+            override: gameSettings
+        ) {
             environment[key] = value
         }
 
@@ -998,19 +1010,6 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         environment["LANG"] = locale
         environment["LC_ALL"] = locale
         return environment
-    }
-
-    private func releaseSession(
-        context: CyderLaunchContext,
-        prefix: String,
-        sessionFile: String
-    ) -> CyderProcessResult {
-        runLauncher(
-            context: context,
-            args: [context.launcher, "--session-release", prefix, sessionFile],
-            stage: .wineSpawn,
-            operation: "session-release"
-        )
     }
 
     @objc private func wineAppWillActivate(_ notification: Notification) {
