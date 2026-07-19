@@ -74,6 +74,10 @@ assert_eq "${CYDER_BOOTSTRAP_HEALTH_CHECKED:-0}" "1" \
 assert test ! -e "$CYDER_SHARED_PREFIX/user-mutation"
 assert test ! -e "$support/templates/golden/user-mutation"
 assert test -f "$CYDER_SHARED_PREFIX/.golden-only"
+if find "$support" -type d \( -path '*/backups/*' -o -name '.bootstrap-previous-*' \) -print -quit | grep -q .; then
+  echo "ASSERT failed: successful bootstrap should not retain the previous shared bottle" >&2
+  exit 1
+fi
 
 # An unsafe Golden destination aborts before a Shared prefix is published.
 support_fail="$TMP/support-fail"

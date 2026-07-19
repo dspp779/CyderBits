@@ -1070,13 +1070,12 @@ cyder_rebuild_shared_prefix() {
     echo "Cannot rebuild prefix while a Wine process is running." >&2
     return 2
   }
-  local parent staging backup backup_root prefix_name active_prefix
+  local parent staging previous prefix_name active_prefix
   active_prefix="$CYDER_SHARED_PREFIX"
   parent="$(dirname "$active_prefix")"
   prefix_name="$(basename "$active_prefix")"
-  backup_root="$CYDER_SUPPORT/backups"
   staging="$parent/.rebuild-${prefix_name}-$$"
-  backup="$backup_root/${prefix_name}-$(date '+%Y%m%d-%H%M%S')-$$"
+  previous="$parent/.rebuild-previous-${prefix_name}-$$"
 
   # Refuse to operate on an unexpected symlink or an already-running rebuild.
   # This keeps a stale/attacker-controlled path from being moved into the
@@ -1089,11 +1088,11 @@ cyder_rebuild_shared_prefix() {
     echo "A prefix rebuild is already in progress: $staging" >&2
     return 2
   }
-  [[ ! -e "$backup" && ! -L "$backup" ]] || {
-    echo "Backup path already exists; refusing to overwrite: $backup" >&2
+  [[ ! -e "$previous" && ! -L "$previous" ]] || {
+    echo "Previous-prefix staging path already exists: $previous" >&2
     return 2
   }
-  mkdir -p "$parent" "$backup_root"
+  mkdir -p "$parent"
 
   local had_previous=0
   if [[ -e "$active_prefix" ]]; then
@@ -1103,8 +1102,8 @@ cyder_rebuild_shared_prefix() {
   cyder_rebuild_restore_previous() {
     local reason="$1"
     cyder_remove_path "$active_prefix"
-    if [[ "$had_previous" -eq 1 && -e "$backup" ]]; then
-      mv "$backup" "$active_prefix"
+    if [[ "$had_previous" -eq 1 && -e "$previous" ]]; then
+      mv "$previous" "$active_prefix"
       echo "Prefix rebuild rolled back ($reason); previous environment restored." >&2
     else
       echo "Prefix rebuild rolled back ($reason); no previous environment was available." >&2
@@ -1119,15 +1118,15 @@ cyder_rebuild_shared_prefix() {
     return 1
   fi
   if [[ "$had_previous" -eq 1 ]]; then
-    if ! mv "$active_prefix" "$backup"; then
-      echo "Prefix rebuild failed while creating backup: $backup" >&2
+    if ! mv "$active_prefix" "$previous"; then
+      echo "Prefix rebuild failed while staging the previous environment: $previous" >&2
       return 1
     fi
   fi
   if ! mv "$staging" "$active_prefix"; then
     echo "Prefix rebuild failed while publishing staging prefix: $active_prefix" >&2
-    if [[ "$had_previous" -eq 1 && -e "$backup" && ! -e "$active_prefix" ]]; then
-      mv "$backup" "$active_prefix" || true
+    if [[ "$had_previous" -eq 1 && -e "$previous" && ! -e "$active_prefix" ]]; then
+      mv "$previous" "$active_prefix" || true
     fi
     return 1
   fi
@@ -1136,6 +1135,9 @@ cyder_rebuild_shared_prefix() {
     cyder_rebuild_restore_previous "health check failed"
     return 1
   fi
+  # The previous environment exists only to make the publish transactional.
+  # A successful rebuild must not retain a full bottle-sized backup.
+  [[ "$had_previous" -eq 0 ]] || cyder_remove_path "$previous"
   unset -f cyder_rebuild_restore_previous
   echo "Prefix rebuild completed successfully: $active_prefix" >&2
 }
@@ -1497,14 +1499,15 @@ cyder_bootstrap_shared_prefix() {
     return 75
   }
   if [[ -e "$CYDER_SHARED_PREFIX" ]]; then
-    local old_shared="$CYDER_SUPPORT/backups/shared-bootstrap-$(date '+%Y%m%d-%H%M%S')-$$"
-    mkdir -p "$CYDER_SUPPORT/backups"
+    local old_shared="$(dirname "$CYDER_SHARED_PREFIX")/.bootstrap-previous-$(basename "$CYDER_SHARED_PREFIX")-$$"
     mv "$CYDER_SHARED_PREFIX" "$old_shared" || return $?
     if ! cyder_clone_golden_to_shared "$wine_bin"; then
       rm -rf "$CYDER_SHARED_PREFIX"
       mv "$old_shared" "$CYDER_SHARED_PREFIX" || true
       return 1
     fi
+    # Rollback storage is temporary; never accumulate rebuilt bottles.
+    cyder_remove_path "$old_shared"
   else
     cyder_clone_golden_to_shared "$wine_bin" || return $?
   fi
