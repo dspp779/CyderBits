@@ -139,7 +139,7 @@ Wine 的 macOS RetinaMode、DPI 與字體 registry 是整個 Wine session／bott
 
 正式啟動路徑不設定 `WINEDLLOVERRIDES`。DLL 相容性設定存放在 prefix Registry；目前僅為 `bluecg.exe` 設定 `HKCU\Software\Wine\AppDefaults\bluecg.exe\DllOverrides` 的 `ddraw=native,builtin`，不影響 BlueLauncher 或其他 EXE。
 
-Finder 啟動時，Cyder 會在呼叫 `/usr/bin/arch` 前監聽 CrossOver Wine 的 `WineAppWillActivateNotification`。收到與 `bottles/shared` 相同、且 `ActivatingAppPID` 已登記為 `regular/Foreground` 的通知後，macOS 14 以上會由 Cyder 先讓出焦點，再透過 cooperative activation 將所有 Wine 視窗帶到前方；macOS 12、13 則使用舊版 activation API 作為相容 fallback。送出一次 activation 後 Cyder 隨即退出；wrapper PID 不參與 activation，也不搜尋 process tree 或視窗 owner。若 Wine 未發出通知，隱藏 launcher最多等待 30 秒；Wine 仍在執行時只記錄 warning，不誤判為失敗。若 Wine 在顯示視窗前退出或被 signal 終止，Cyder 會顯示錯誤代碼、結束狀態與記錄內容。Wine stdout／stderr 會保存到每次 session 的獨立記錄，`Logs/last-launch.log` 指向最近一次啟動記錄。
+Finder 啟動時，Cyder 會在呼叫 `/usr/bin/arch` 前監聽 CrossOver Wine 的 `WineAppWillActivateNotification`。收到與 `bottles/shared` 相同、且 `ActivatingAppPID` 已登記為 `regular/Foreground` 的通知後，macOS 14 以上會由 Cyder 先讓出焦點，再透過 cooperative activation 將所有 Wine 視窗帶到前方；macOS 12、13 則使用舊版 activation API 作為相容 fallback。送出一次 activation 後 Cyder 隨即退出；wrapper PID 不參與 activation，也不搜尋 process tree 或視窗 owner。若 Wine 未發出通知，隱藏 launcher最多等待 30 秒；Wine 仍在執行時只記錄 warning，不誤判為失敗。若 Wine 在顯示視窗前退出或被 signal 終止，Cyder 會顯示錯誤代碼與結束狀態。一般啟動不保存 Wine stdout／stderr；需要追查 Wine 問題時可設定 `CYDER_CAPTURE_WINE_LOG=1`，此時 `Logs/last-launch.log` 會指向最近一次啟動記錄。
 
 命令列直接呼叫 `cyder_launcher.sh` 時仍以前景模式執行，方便腳本等待遊戲結束；只有 Universal Cyder 的 Finder EXE 入口會使用 Swift 直接啟動的分離模式。
 
@@ -173,7 +173,7 @@ BlueCG（魔力寶貝）可透過 Cyder 直接開 `BlueLauncher.exe`；遊戲目
 
 ## 錯誤記錄與診斷
 
-Cyder 每次啟動都會建立獨立 session，記錄目前階段、shell worker 輸出、Wine stdout／stderr 與結束原因：
+Cyder 每次啟動都會建立小型 session 記錄，保存目前階段、shell worker 輸出與結束原因；Wine stdout／stderr 預設不保存：
 
 ```text
 ~/Library/Application Support/Cyder/Logs/

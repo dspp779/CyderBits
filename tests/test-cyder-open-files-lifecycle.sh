@@ -30,5 +30,9 @@ assert_contains "$support_text" "seen.insert(path).inserted" \
   "argv and openFiles delivery of the same EXE must be deduplicated"
 assert_contains "$source_text" "var prefix = CyderPaths.sharedBottle" \
   "an EXE without a Profile must use the prepared Shared bottle"
+assert_contains "$source_text" 'result.machineResult["healthChecked"] == "1"' \
+  "bootstrap should consume the machine-readable health result"
+assert_contains "$source_text" "if !bootstrapHealthChecked" \
+  "a successful bootstrap health probe should not run twice"
 
 echo "PASS test-cyder-open-files-lifecycle"

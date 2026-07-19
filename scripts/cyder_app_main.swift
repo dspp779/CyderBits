@@ -640,6 +640,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             || state.needsBootstrap
             || environmentState(context: context).needsBootstrap
             || !templatesReady && !state.needsEngine
+        var bootstrapHealthChecked = false
         if bootstrapNeeded {
             CyderDiagnostics.shared.enter(.bootstrap)
             showSetup("正在準備遊戲環境…")
@@ -647,7 +648,8 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
                 context: context,
                 args: [context.launcher, "--engine-src", context.engineSrc, "--bootstrap-only"],
                 stage: .bootstrap,
-                operation: "bootstrap"
+                operation: "bootstrap",
+                expectsMachineResult: true
             )
             if !result.succeeded {
                 return failure(
@@ -657,25 +659,28 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
                     result: result
                 )
             }
+            bootstrapHealthChecked = result.machineResult["healthChecked"] == "1"
         }
-        // A marker only proves that bootstrap completed once.  Probe the
-        // current prefix on every app launch so a damaged/incomplete Wine
-        // environment cannot reach the game menu silently.
-        CyderDiagnostics.shared.enter(.engineValidation)
-        showSetup("正在檢查遊戲環境…")
-        let health = runLauncher(
-            context: context,
-            args: [context.launcher, "--engine-src", context.engineSrc, "--health-check"],
-            stage: .engineValidation,
-            operation: "health-check"
-        )
-        guard health.succeeded else {
-            return failure(
-                code: "CYD-HLT-001",
+        // A marker only proves that bootstrap completed once. Probe the
+        // current prefix on normal app launches, but reuse the machine-readable
+        // result when this same bootstrap operation already completed a probe.
+        if !bootstrapHealthChecked {
+            CyderDiagnostics.shared.enter(.engineValidation)
+            showSetup("正在檢查遊戲環境…")
+            let health = runLauncher(
+                context: context,
+                args: [context.launcher, "--engine-src", context.engineSrc, "--health-check"],
                 stage: .engineValidation,
-                summary: "Windows 遊戲環境檢查失敗。",
-                result: health
+                operation: "health-check"
             )
+            guard health.succeeded else {
+                return failure(
+                    code: "CYD-HLT-001",
+                    stage: .engineValidation,
+                    summary: "Windows 遊戲環境檢查失敗。",
+                    result: health
+                )
+            }
         }
         return nil
     }
@@ -886,24 +891,18 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             }
         }
 
-        do {
-            try FileManager.default.createDirectory(at: logDirectory, withIntermediateDirectories: true)
-        } catch {
-            return .failure(CyderFailure(
-                code: "CYD-LOG-001",
-                stage: .wineSpawn,
-                summary: "無法建立 Cyder 記錄資料夾。",
-                technicalDetails: String(describing: error),
-                logURL: CyderDiagnostics.shared.sessionLogURL
-            ))
-        }
-
         CyderDiagnostics.shared.enter(.wineSpawn, detail: CyderDiagnostics.shared.redact(exe))
-        let launchLog = CyderDiagnostics.shared.makeOperationLog("wine-launch")
-        FileManager.default.createFile(atPath: launchLog.path, contents: nil)
+        let captureWineLog = ProcessInfo.processInfo.environment["CYDER_CAPTURE_WINE_LOG"] == "1"
+        let launchLog = captureWineLog
+            ? CyderDiagnostics.shared.makeOperationLog("wine-launch")
+            : URL(fileURLWithPath: "/dev/null")
+        let diagnosticLog = captureWineLog ? launchLog : CyderDiagnostics.shared.sessionLogURL
         let legacyLog = logDirectory.appendingPathComponent("last-launch.log")
         try? FileManager.default.removeItem(at: legacyLog)
-        try? FileManager.default.createSymbolicLink(at: legacyLog, withDestinationURL: launchLog)
+        if captureWineLog {
+            FileManager.default.createFile(atPath: launchLog.path, contents: nil)
+            try? FileManager.default.createSymbolicLink(at: legacyLog, withDestinationURL: launchLog)
+        }
 
         let process = Process()
         let environment = wineEnvironment(
@@ -930,7 +929,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
                     stage: .wineSpawn,
                     summary: "無法使用省電模式啟動遊戲。",
                     technicalDetails: "taskpolicy was not found in PATH. Select Standard energy mode and try again.",
-                    logURL: launchLog
+                    logURL: diagnosticLog
                 ))
             }
             process.executableURL = taskpolicy
@@ -965,12 +964,12 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         CyderDiagnostics.shared.info(
             "game-launch effective-settings profile=\(profileID ?? "shared") "
                 + "source=\(gameSettings == nil ? "saved" : "test-or-override") "
-                + "msync=\(msync) esync=\(esync) power=\(powerMode)"
+                + "msync=\(msync) esync=\(esync) power=\(powerMode) captureWineLog=\(captureWineLog)"
         )
 
         do {
             try process.run()
-            CyderDiagnostics.shared.info("wine process started pid=\(process.processIdentifier) log=\(launchLog.path)")
+            CyderDiagnostics.shared.info("wine process started pid=\(process.processIdentifier)")
         } catch {
             try? handle.close()
             return .failure(CyderFailure(
@@ -978,7 +977,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
                 stage: .wineSpawn,
                 summary: "無法啟動 Wine。",
                 technicalDetails: String(describing: error),
-                logURL: launchLog
+                logURL: diagnosticLog
             ))
         }
 
@@ -1004,7 +1003,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
                     reason = "exit \(process.terminationStatus)"
                     code = "CYD-WIN-002"
                 }
-                let tail = CyderDiagnostics.shared.tail(of: launchLog)
+                let tail = captureWineLog ? CyderDiagnostics.shared.tail(of: launchLog) : ""
                 return .failure(CyderFailure(
                     code: code,
                     stage: .wineSpawn,
@@ -1014,7 +1013,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
                     technicalDetails: tail.isEmpty ? "Wine terminated: \(reason)" : tail,
                     exitCode: process.terminationStatus,
                     terminationReason: reason,
-                    logURL: launchLog
+                    logURL: diagnosticLog
                 ))
             }
         }

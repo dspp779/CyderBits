@@ -468,7 +468,7 @@ fi
 if [[ "$HEALTH_CHECK" -eq 1 || "$REBUILD_PREFIX" -eq 1 ]]; then
   cyder_set_stage engine-validation
   if [[ "$REBUILD_PREFIX" -eq 1 ]]; then
-    engine="$(cyder_ensure_shared_engine "$ENGINE_SRC")"
+    engine="$(cyder_resolve_shared_engine "$ENGINE_SRC")"
     wine="$engine/bin/wine"
     cyder_set_stage bootstrap
     cyder_rebuild_shared_prefix "$wine" "$engine"
@@ -496,7 +496,7 @@ fi
 
 if [[ "$BOOTSTRAP_ONLY" -eq 1 ]]; then
   cyder_set_stage engine-validation
-  engine="$(cyder_ensure_shared_engine "$ENGINE_SRC")"
+  engine="$(cyder_resolve_shared_engine "$ENGINE_SRC")"
   wine="$engine/bin/wine"
   echo "WINEPREFIX=$CYDER_SHARED_PREFIX"
   echo "BOOTSTRAP_MARKER=$CYDER_BOOTSTRAP_MARKER"
@@ -538,6 +538,7 @@ if [[ "$BOOTSTRAP_ONLY" -eq 1 ]]; then
     cp -f "$operation_log" "$log_dir/bootstrap-error.log"
     exit "$status"
   fi
+  cyder_write_machine_result healthChecked "${CYDER_BOOTSTRAP_HEALTH_CHECKED:-0}"
   exit 0
 fi
 

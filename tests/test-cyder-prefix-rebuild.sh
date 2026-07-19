@@ -28,7 +28,9 @@ cyder_profile_clone_bottle() {
   mkdir -p "$2"
   cp -R "$1"/. "$2"/
 }
+CYDER_REBUILD_HEALTH_CALLS=0
 cyder_health_check_prefix() {
+  CYDER_REBUILD_HEALTH_CALLS=$((CYDER_REBUILD_HEALTH_CALLS + 1))
   [[ "${CYDER_REBUILD_TEST_HEALTH_FAIL:-0}" != 1 ]]
 }
 
@@ -66,5 +68,15 @@ fi
   echo "ASSERT failed: failed first prefix should not be published" >&2
   exit 1
 }
+
+unset CYDER_REBUILD_TEST_CLONE_FAIL
+mkdir -p "$CYDER_SHARED_PREFIX"
+printf 'old-prefix\n' >"$CYDER_SHARED_PREFIX/system.reg"
+CYDER_REBUILD_HEALTH_CALLS=0
+cyder_rebuild_shared_prefix /tmp/fake-wine /tmp/fake-engine
+assert_eq "$CYDER_REBUILD_HEALTH_CALLS" "1" \
+  "successful rebuild should run only the final active-prefix Wine probe"
+assert_contains "$(cat "$CYDER_SHARED_PREFIX/system.reg")" "new-prefix" \
+  "successful rebuild should publish Golden"
 
 echo "PASS test-cyder-prefix-rebuild"

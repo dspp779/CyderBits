@@ -51,6 +51,8 @@ support="$TMP/support"
 export CYDER_SUPPORT="$support" CYDER_SHARED_PREFIX="$support/bottles/shared" CYDER_SCRIPTS="$TMP/scripts"
 cyder_init_paths "$ROOT/scripts"
 cyder_bootstrap_shared_prefix "$TMP/engine/bin/wine" "$TMP/engine"
+assert_eq "${CYDER_BOOTSTRAP_HEALTH_CHECKED:-0}" "1" \
+  "new Shared prefix should report that bootstrap already ran its health probe"
 
 assert test -f "$support/templates/pristine/manifest.json"
 assert test -f "$support/templates/golden/manifest.json"
@@ -67,6 +69,8 @@ cyder_profile_template_ready golden "$support" 2 'wine crossover test'
 : >"$CYDER_SHARED_PREFIX/user-mutation"
 rm -f "$CYDER_BOOTSTRAP_MARKER"
 cyder_bootstrap_shared_prefix "$TMP/engine/bin/wine" "$TMP/engine"
+assert_eq "${CYDER_BOOTSTRAP_HEALTH_CHECKED:-0}" "1" \
+  "replacement Shared prefix should report its completed health probe"
 assert test ! -e "$CYDER_SHARED_PREFIX/user-mutation"
 assert test ! -e "$support/templates/golden/user-mutation"
 assert test -f "$CYDER_SHARED_PREFIX/.golden-only"

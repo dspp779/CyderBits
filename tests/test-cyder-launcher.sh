@@ -98,6 +98,7 @@ run_wine_args() {
   CYDER_SUPPORT="$TMP/run-support" \
   CYDER_SCRIPTS="$ROOT/scripts" \
   CYDER_TEST_ARGS="$output" \
+  CYDER_CAPTURE_WINE_LOG=1 \
   CYDER_WINE_START_MODE="$mode" \
   PATH="$TMP/fake-bin:$PATH" \
     bash -c 'source "$1/scripts/cyder-common.sh"; cyder_init_paths "$1"; cyder_run_wine_exe "$2/wine" "$3"' \
@@ -115,12 +116,24 @@ if [[ "$launch_log_count" -lt 2 ]]; then
   exit 1
 fi
 
+# Normal launches discard Wine stdout/stderr and do not create persistent
+# launch logs. Diagnostic capture remains an explicit opt-in.
+CYDER_SUPPORT="$TMP/no-log-support" \
+CYDER_SCRIPTS="$ROOT/scripts" \
+CYDER_TEST_ARGS="$TMP/no-log-args" \
+PATH="$TMP/fake-bin:$PATH" \
+  bash -c 'source "$1/scripts/cyder-common.sh"; cyder_init_paths "$1"; cyder_run_wine_exe "$2/wine" "$3"' \
+    _ "$ROOT" "$TMP/fake-bin" "$TMP/foreground-test.exe"
+assert test ! -e "$TMP/no-log-support/Logs/last-launch.log"
+assert test ! -e "$TMP/no-log-support/Logs"
+
 # Sync modes are mutually exclusive, and normal Cyder launches must not add
 # global DLL overrides now that those settings live in the prefix registry.
 CYDER_SUPPORT="$TMP/run-support" \
 CYDER_SCRIPTS="$ROOT/scripts" \
 CYDER_TEST_ARGS="$TMP/esync-args" \
 CYDER_TEST_ENV_LOG="$TMP/esync-env" \
+CYDER_CAPTURE_WINE_LOG=1 \
 CYDER_MSYNC=0 CYDER_ESYNC=1 \
 PATH="$TMP/fake-bin:$PATH" \
   bash -c 'source "$1/scripts/cyder-common.sh"; cyder_init_paths "$1"; cyder_run_wine_exe "$2/wine" "$3"' \
@@ -265,6 +278,7 @@ custom_prefix="$TMP/custom-bottle"
 CYDER_SUPPORT="$TMP/run-support" \
 CYDER_SCRIPTS="$ROOT/scripts" \
 CYDER_TEST_ARGS="$TMP/profile-prefix-args" \
+CYDER_CAPTURE_WINE_LOG=1 \
 CYDER_MSYNC=1 \
 PATH="$TMP/fake-bin:$PATH" \
   bash -c 'source "$1/scripts/cyder-common.sh"; cyder_init_paths "$1"; cyder_run_wine_exe "$2/wine" "$3" "$4"' \
