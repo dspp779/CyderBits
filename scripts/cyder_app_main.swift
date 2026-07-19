@@ -51,6 +51,9 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         controller.onOpenGameLibrary = { [weak self] in
             self?.showGameLibrary()
         }
+        controller.onOpenWinetricks = { [weak self] verbs in
+            self?.installWinetricks(verbs)
+        }
         controller.onClose = { [weak self] in
             guard let self, self.terminateWhenSettingsClose,
                   !self.environmentPreparationInProgress,
@@ -806,6 +809,54 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             prefix: prefix,
             gameSettings: gameSettings
         )
+    }
+
+    private func installWinetricks(_ verbs: [String]) {
+        let warning = NSAlert()
+        warning.messageText = "安裝 Winetricks 元件？"
+        warning.informativeText = "即將安裝：\n\(verbs.joined(separator: ", "))\n\n這會直接修改 Cyder 的 shared prefix。已安裝的元件、DLL override 與 registry 設定可能影響所有共用此環境的遊戲。請先關閉所有遊戲。"
+        warning.alertStyle = .warning
+        warning.addButton(withTitle: "安裝元件")
+        warning.addButton(withTitle: "取消")
+        guard runFrontmostAlert(warning, dockVisible: true, anchorWindow: settingsController.window) == .alertFirstButtonReturn else {
+            return
+        }
+
+        if hasRunningExes() {
+            showAlert("無法安裝 Winetricks 元件", "shared prefix 目前仍有遊戲或 Wine 程序執行中。請關閉遊戲後再試。")
+            return
+        }
+        guard let resourcePath = Bundle.main.resourcePath else {
+            showAlert("無法安裝 Winetricks 元件", "Cyder 缺少必要的 Resources 目錄。")
+            return
+        }
+
+        let context = CyderLaunchContext(resourcePath: resourcePath)
+        environmentPreparationInProgress = true
+        showSetup("正在安裝 Winetricks 元件…")
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            guard let self else { return }
+            let result = self.runLauncher(
+                context: context,
+                args: [context.launcher, "--install-winetricks"] + verbs,
+                stage: .settingsApply,
+                operation: "install-winetricks"
+            )
+            DispatchQueue.main.async {
+                self.hideSetup()
+                self.environmentPreparationInProgress = false
+                if result.succeeded {
+                    self.showAlert("Winetricks 元件安裝完成", verbs.joined(separator: ", "), style: .informational)
+                } else {
+                    self.presentFailure(self.failure(
+                        code: "CYD-WT-001",
+                        stage: .settingsApply,
+                        summary: "無法安裝 Winetricks 元件。",
+                        result: result
+                    ))
+                }
+            }
+        }
     }
 
     /// Launch Wine directly through Apple's architecture selector, then wait

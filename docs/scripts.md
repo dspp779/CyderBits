@@ -37,6 +37,7 @@
 | `cyder-copy-engine-artifact.sh` | 複製預建 artifact 進 app `Resources/` |
 | `create-cyder-app.sh` | `dist/Cyder.app`（`.exe` 啟動器 + engine artifact + bootstrap） |
 | `cyder_launcher.sh` | 解析 `.exe`、bootstrap `bottles/shared`、執行 Wine；`--ensure-engine-only` / `--bootstrap-only` / `--launch-exe` 供 GUI 分階段呼叫 |
+| `cyder-winetricks.sh` | 以 Cyder engine 的 unattended CLI 安裝固定版 Winetricks 元件；目標為 SharedPrefix，供 Cyder 原生元件選擇器呼叫 |
 | `cyder_app_main.swift` | 編譯為 `Cyder.app/Contents/MacOS/Cyder`（Universal）；無 `.exe` 時顯示設定頁，有 `.exe` 時直接啟動 Wine，收到 same-prefix 的 `ActivatingAppPID` Foreground 通知後 activate 並退出 |
 | `create-cyder-pid-test-app.sh` | 建立 `dist/CyderPIDTest.app` Universal 測試工具 |
 | `cyder_pid_test_launcher.swift` | 可選 EXE、比較 wrapper PID 與 Wine `ActivatingAppPID`，測試普通及 cooperative activation |

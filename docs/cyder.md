@@ -106,6 +106,21 @@ Cyder 的 `設定…`（`⌘,`）、Dock 右鍵或執行檔選擇器的「進階
 
 遊戲庫以 EXE 的 canonical path 計算穩定 ID，個別選項存放於 `perProfile`；這不代表一定建立獨立 bottle。遊戲設定頁直接開放 MSync、ESync、Retina、DPI、字體、能源模式、環境變數與命令列參數，命令列參數以單行文字直接接在 EXE 後，空白分隔；含空白的單一參數可用引號保留。提供「測試」以套用目前草稿後開啟遊戲，或按「套用」保存供之後從遊戲庫、Finder／直接 EXE 開啟時使用。每個 EXE 的能源模式使用 `powerMode=standard|energySaving`；啟動契約環境變數為 `CYDER_POWER_MODE=normal|background`。
 
+### Winetricks（SharedPrefix）
+
+偏好設定 → 進階 → **Winetricks 元件…** 會顯示 Cyder 原生元件選擇器，將選取的元件安裝到目前 shared prefix，目標固定為：
+
+```text
+WINEPREFIX=~/Library/Application Support/Cyder/bottles/shared
+WINE=~/.cyder/runtime/Engines/wine-x86_64/bin/wine
+```
+
+Winetricks 會直接修改 shared prefix，因此安裝前必須先關閉所有遊戲；元件與 DLL override 可能影響所有使用 SharedPrefix 的遊戲。Cyder.app 會隨附固定版本的 Winetricks script 與 LGPL license，下載檔案則放在 `~/Library/Application Support/Cyder/downloads/winetricks/`。Cyder 會以 `--unattended` CLI 模式執行，使用者不需要操作 Winetricks TUI，也不需要另外安裝 `zenity` 或 `kdialog`。
+
+目前原生選擇器提供 Visual C++ Redistributable、.NET Framework、.NET Desktop Runtime 6–9，以及 `wmp9`、`quartz`、`devenum`、`vb6run` 等常見元件。若需要其他 Winetricks verb，仍可在開發環境直接呼叫 `cyder-winetricks.sh install VERB`，但這是進階手動操作。
+
+這是 SharedPrefix 的進階手動工具，不會自動替每個遊戲建立隔離 bottle；需要隔離元件時，應使用遊戲 Profile／CyderBits。
+
 當共用 prefix 沒有執行中的 wineserver，啟動 EXE 前會以快速路徑直接修改 `user.reg`，不會為了套用設定先啟動 Wine。若 prefix 已在執行，EXE 啟動流程會略過 registry 套用並直接開啟遊戲；設定仍保存在 `settings.json`，等 prefix 停止後的下一次啟動再套用。`wine reg` 不會用於一般 EXE 啟動，只保留給「偏好設定 → 進階 → 套用所有設定」。
 
 Wine 的 macOS RetinaMode、DPI 與字體 registry 是整個 Wine session／bottle 的狀態，不能透過 `AppDefaults` 真正隔離到單一 EXE。Cyder 允許同一共用 prefix 同時開啟多個遊戲，不再以 session guard 阻擋；但執行中無法切換這些 registry 設定，因此同時執行的遊戲會沿用目前 wineserver 已載入的值。MSync、ESync、能源模式、環境變數與命令列參數仍會依各次啟動傳入，但最終相容性仍受 Wine 共用 wineserver 限制。

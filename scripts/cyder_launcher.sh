@@ -63,6 +63,7 @@ Options:
   --stop-all          Stop all EXEs in the Cyder shared prefix and exit
   --has-running-exes  Exit 0 if the shared prefix has running EXEs, otherwise 1
   --apply-settings-only Apply saved settings without installing the environment
+  --install-winetricks VERB [...]  Install selected Winetricks components into the shared prefix
   --apply-settings-prefix PREFIX Apply saved settings to an existing bottle
   --session-acquire PREFIX OWNER_PID MSYNC ESYNC POWER Reserve a bottle session
   --session-update PREFIX SESSION_FILE NEW_PID Update a reserved session PID
@@ -85,6 +86,8 @@ ENSURE_ROSETTA_ONLY=0
 STOP_ALL=0
 HAS_RUNNING_EXES=0
 APPLY_SETTINGS_ONLY=0
+INSTALL_WINETRICKS=0
+WINETRICKS_VERBS=()
 LAUNCH_ONLY=0
 PROFILE_ACTION=""
 PROFILE_EXE=""
@@ -149,6 +152,13 @@ while [[ $# -gt 0 ]]; do
     --apply-settings-only)
       APPLY_SETTINGS_ONLY=1
       shift
+      ;;
+    --install-winetricks)
+      INSTALL_WINETRICKS=1
+      shift
+      [[ $# -gt 0 ]] || { echo "--install-winetricks requires at least one component" >&2; exit 1; }
+      WINETRICKS_VERBS=("$@")
+      break
       ;;
     --apply-settings-prefix)
       [[ $# -ge 2 ]] || { echo "--apply-settings-prefix requires PREFIX" >&2; exit 1; }
@@ -245,6 +255,7 @@ primary_actions=0
 [[ -n "$SESSION_ACTION" ]] && primary_actions=$((primary_actions + 1))
 [[ "$APPLY_SETTINGS_PREFIX_SET" -eq 1 ]] && primary_actions=$((primary_actions + 1))
 [[ "$APPLY_SETTINGS_ONLY" -eq 1 ]] && primary_actions=$((primary_actions + 1))
+[[ "$INSTALL_WINETRICKS" -eq 1 ]] && primary_actions=$((primary_actions + 1))
 [[ "$LAUNCH_ONLY" -eq 1 ]] && primary_actions=$((primary_actions + 1))
 [[ "$STOP_ALL" -eq 1 ]] && primary_actions=$((primary_actions + 1))
 [[ "$HAS_RUNNING_EXES" -eq 1 ]] && primary_actions=$((primary_actions + 1))
@@ -433,6 +444,25 @@ if [[ "$APPLY_SETTINGS_ONLY" -eq 1 ]]; then
     WINEPREFIX="$CYDER_SHARED_PREFIX" /usr/bin/arch -x86_64 "$engine/bin/wineserver" -w || true
   fi
   exit 0
+fi
+
+if [[ "$INSTALL_WINETRICKS" -eq 1 ]]; then
+  cyder_set_stage winetricks
+  engine="$CYDER_ENGINES/$CYDER_ENGINE_NAME"
+  [[ -x "$engine/bin/wine" && -x "$engine/bin/wineserver" ]] || {
+    echo "Cyder environment is not ready; open Cyder.app to finish setup." >&2
+    exit 2
+  }
+  [[ -f "$CYDER_BOOTSTRAP_MARKER" ]] || {
+    echo "Cyder shared prefix is not ready; open Cyder.app to finish setup." >&2
+    exit 2
+  }
+  winetricks_sh="$CYDER_SCRIPTS/cyder-winetricks.sh"
+  [[ -x "$winetricks_sh" ]] || {
+    echo "Cyder Winetricks integration is missing: $winetricks_sh" >&2
+    exit 2
+  }
+  exec bash "$winetricks_sh" install "${WINETRICKS_VERBS[@]}"
 fi
 
 if [[ "$HEALTH_CHECK" -eq 1 || "$REBUILD_PREFIX" -eq 1 ]]; then

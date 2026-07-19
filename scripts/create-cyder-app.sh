@@ -122,7 +122,7 @@ fi
   exit 1
 }
 
-mkdir -p "$RES/ogom-scripts" "$RES/addons/libarchive"
+mkdir -p "$RES/ogom-scripts" "$RES/addons/libarchive" "$RES/licenses"
 cp "$SCRIPT_DIR/cyder_launcher.sh" "$RES/ogom-scripts/"
 cp "$SCRIPT_DIR/cyder-common.sh" "$RES/ogom-scripts/"
 cp "$SCRIPT_DIR/cyder-ensure-rosetta.sh" "$RES/ogom-scripts/"
@@ -138,6 +138,9 @@ cp "$SCRIPT_DIR/cyder-songti-replacements.reg" "$RES/ogom-scripts/"
 cp "$SCRIPT_DIR/install-cyder-font-replacements.sh" "$RES/ogom-scripts/"
 cp "$SCRIPT_DIR/cyder-apply-settings.sh" "$RES/ogom-scripts/"
 cp "$SCRIPT_DIR/cyder-edit-user-reg.sh" "$RES/ogom-scripts/"
+cp "$SCRIPT_DIR/cyder-winetricks.sh" "$RES/ogom-scripts/"
+cp "$OGOM/tools/winetricks/winetricks" "$RES/ogom-scripts/"
+cp "$OGOM/tools/winetricks/COPYING" "$RES/licenses/winetricks-COPYING"
 cp "$SCRIPT_DIR/cyder-profile.sh" "$RES/ogom-scripts/"
 cp "$SCRIPT_DIR/cyder_create_game_app.py" "$RES/ogom-scripts/"
 cp "$SCRIPT_DIR/cyder_common.py" "$RES/ogom-scripts/"
@@ -146,6 +149,8 @@ chmod +x "$RES/ogom-scripts/sign-wine.sh"
 chmod +x "$RES/ogom-scripts/install-cyder-font-replacements.sh"
 chmod +x "$RES/ogom-scripts/cyder-apply-settings.sh"
 chmod +x "$RES/ogom-scripts/cyder-edit-user-reg.sh"
+chmod +x "$RES/ogom-scripts/cyder-winetricks.sh"
+chmod +x "$RES/ogom-scripts/winetricks"
 chmod +x "$RES/ogom-scripts/cyder-profile.sh"
 chmod +x "$RES/ogom-scripts/cyder_create_game_app.py"
 
