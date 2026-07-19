@@ -5,6 +5,7 @@ install/
 tests/tmp/
 logs/
 dist/
+debug/
 
 # Legacy extracted trees at repo root (prefer build/)
 sources/
