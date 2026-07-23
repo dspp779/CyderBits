@@ -13,6 +13,14 @@ assert_eq "$label" "wine crossover 26.2.0 (wine 11.0)" "crossover label should i
 
 slug="$(cyder_engine_version_slug_from_label "$label")"
 assert_eq "$slug" "crossover-26.2.0-wine-11.0" "crossover slug should be filesystem-safe"
+cyder_engine_versions_equal "$label" "$slug" || {
+  echo "ASSERT failed: display label and filesystem slug should identify the same engine" >&2
+  exit 1
+}
+if cyder_engine_versions_equal "$label" "crossover-26.2.0-wine-12.0"; then
+  echo "ASSERT failed: different Wine versions must not compare equal" >&2
+  exit 1
+fi
 
 sik_label="wine sikarugir 10.0 (revision 6)"
 sik_slug="$(cyder_engine_version_slug_from_label "$sik_label")"

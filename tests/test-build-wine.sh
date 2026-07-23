@@ -33,6 +33,7 @@ assert_contains "$output" "--enable-win64" "dry-run should enable win64 host"
 assert_contains "$output" "--enable-archs=i386" "dry-run must build 32-bit PE for BlueCG (PE32)"
 assert_contains "$output" "x86_64" "dry-run archs should include x86_64 PE"
 assert_contains "$output" "--with-mingw=llvm-mingw" "dry-run should use llvm-mingw"
+assert_contains "$output" "--disable-tests" "runtime builds should skip Wine regression tests"
 assert_contains "$output" "install/wine-cx26-x86_64" "dry-run should install to CX26 prefix"
 assert_contains "$output" "make -j" "dry-run should show the compile step"
 assert_contains "$output" "make install" "dry-run should show the install step"
@@ -59,5 +60,6 @@ if [[ "$output_cx25" != *"crossover-sources-25.1.1.tar.gz"* && "$output_cx25" !=
   exit 1
 fi
 assert_contains "$output_cx25" "build/cx25" "CX25 prepare should target cx25 tree"
+
 
 echo "PASS test-build-wine"

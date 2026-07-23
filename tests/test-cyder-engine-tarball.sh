@@ -70,6 +70,14 @@ assert_contains "$(cat "$dest/version")" "crossover 26.2.0" "installed engine sh
 output="$(cyder_ensure_shared_engine "$CYDER_ENGINE_SRC" 2>&1)"
 assert_contains "$output" "Shared engine present" "second install should skip extract"
 
+# Bootstrap/rebuild resolution must trust matching sidecar files instead of
+# opening the large bundled archive again. Corrupting the fixture proves that
+# this fast path performs no tar stream decompression.
+printf 'intentionally not a tar archive\n' >"$ENGINE_TAR"
+output="$(cyder_resolve_shared_engine "$CYDER_ENGINE_SRC" 2>&1)"
+assert_contains "$output" "Shared engine current (sidecar)" \
+  "current bundled engine should resolve without reading its archive"
+
 ENGINE_VERSION_LABEL_V2="wine crossover 26.2.0 (wine 12.0)"
 ENGINE_VERSION_SLUG_V2="$(cyder_engine_version_slug_from_label "$ENGINE_VERSION_LABEL_V2")"
 STAGE_V2="$TMP/stage2/wine-x86_64"

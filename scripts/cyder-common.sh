@@ -83,6 +83,23 @@ cyder_engine_version_slug_from_label() {
   printf '%s\n' "$slug"
 }
 
+# Engine archives built by older/special packaging flows may store the
+# filesystem-safe slug in wine-x86_64/version while the app sidecar keeps the
+# human-readable label.  Treat those representations as the same version so a
+# successful extraction cannot leave document launches permanently reporting
+# that the environment is not ready.
+cyder_engine_versions_equal() {
+  local left right left_slug right_slug
+  left="$(cyder_engine_version_label_trim "${1:-}")"
+  right="$(cyder_engine_version_label_trim "${2:-}")"
+  [[ -n "$left" && -n "$right" ]] || return 1
+  [[ "$left" == "$right" ]] && return 0
+  left_slug="$(cyder_engine_version_slug_from_label "$left")"
+  right_slug="$(cyder_engine_version_slug_from_label "$right")"
+  [[ "$left_slug" == "$right" || "$left" == "$right_slug" || "$left_slug" == "$right_slug" ]]
+}
+
+
 cyder_read_engine_version_file() {
   local engine_root="$1"
   local f="$engine_root/version"
@@ -214,7 +231,7 @@ cyder_read_engine_version() {
   local resources="$1"
   local ver=""
   [[ -f "$resources/engine-version.txt" ]] || return 1
-  ver="$(tr -d '[:space:]' < "$resources/engine-version.txt")"
+  ver="$(cyder_engine_version_label_trim "$(cat "$resources/engine-version.txt")")"
   [[ -n "$ver" ]] || return 1
   printf '%s\n' "$ver"
 }
@@ -461,7 +478,8 @@ cyder_engine_needs_install() {
   if [[ ! -f "$marker" ]]; then
     return 0
   fi
-  if [[ -n "$bundled_version" && "$installed_version" != "$bundled_version" ]]; then
+  if [[ -n "$bundled_version" ]] &&
+     ! cyder_engine_versions_equal "$installed_version" "$bundled_version"; then
     return 0
   fi
   return 1
@@ -477,7 +495,35 @@ cyder_engine_is_ready_for_launch() {
   [[ -x "$engine/bin/wine" && -f "$CYDER_BOOTSTRAP_MARKER" ]] || return 1
   expected="$(cyder_bundled_engine_version "$CYDER_OGOM" 2>/dev/null || true)"
   installed="$(cyder_read_installed_engine_version "$engine" 2>/dev/null || true)"
-  [[ -z "$expected" || "$installed" == "$expected" ]]
+  [[ -z "$expected" ]] || cyder_engine_versions_equal "$installed" "$expected"
+}
+
+# Resolve the installed engine without opening the bundled archive when the
+# app's sidecar version file already proves that the installed copy is current.
+# Explicit/non-bundled engine sources still go through the archive-aware path.
+cyder_resolve_shared_engine() {
+  local engine_src="$1"
+  local engine="$CYDER_ENGINES/$CYDER_ENGINE_NAME"
+  local bundled_src="" expected="" installed=""
+  engine_src="$(cyder_abs_path "$engine_src")"
+  bundled_src="$(cyder_default_engine_src "$CYDER_OGOM" 2>/dev/null || true)"
+  if [[ -n "$bundled_src" ]]; then
+    bundled_src="$(cyder_abs_path "$bundled_src")"
+  fi
+  if [[ -n "$bundled_src" && "$engine_src" == "$bundled_src" && -x "$engine/bin/wine" ]]; then
+    expected="$(cyder_bundled_engine_version "$CYDER_OGOM" 2>/dev/null || true)"
+    installed="$(cyder_read_installed_engine_version "$engine" 2>/dev/null || true)"
+    if [[ -n "$expected" ]] && cyder_engine_versions_equal "$installed" "$expected"; then
+      cyder_migrate_legacy_layout || return $?
+      if [[ ! -f "$engine/.cyder-engine-signed" ]]; then
+        cyder_sign_installed_engine "$engine" || return $?
+      fi
+      echo "Shared engine current (sidecar): $engine" >&2
+      printf '%s\n' "$engine"
+      return 0
+    fi
+  fi
+  cyder_ensure_shared_engine "$engine_src"
 }
 
 cyder_run() {
@@ -515,7 +561,7 @@ cyder_resolve_wine_locale() {
 cyder_wine_locale_exports() {
   local loc
   loc="$(cyder_resolve_wine_locale)"
-  export LANG="$loc" LC_ALL="$loc"
+  export LANG="$loc" LC_ALL="$loc" LC_CTYPE="$loc"
 }
 
 cyder_resolve_exe_from_args() {
@@ -595,9 +641,15 @@ cyder_tarball_has_wine_root() {
 
 cyder_find_zstd() {
   local candidate
-  for candidate in "$(command -v zstd 2>/dev/null || true)"; do
+  local -a candidates=("${CYDER_ZSTD:-}")
+  [[ -n "${CYDER_OGOM:-}" ]] && candidates+=("$CYDER_OGOM/tools/zstd/zstd")
+  candidates+=(
+    "$CYDER_COMMON_DIR/../tools/zstd/zstd"
+    "$(command -v zstd 2>/dev/null || true)"
+  )
+  for candidate in "${candidates[@]}"; do
     if [[ -n "$candidate" && -x "$candidate" ]]; then
-      printf '%s\n' "$candidate"
+      printf '%s/%s\n' "$(cd "$(dirname "$candidate")" && pwd -P)" "$(basename "$candidate")"
       return 0
     fi
   done
@@ -607,7 +659,7 @@ cyder_find_zstd() {
 cyder_tar_extract() {
   local tarball="$1"
   local dest_dir="$2"
-  local err_file rc zstd_bin
+  local err_file rc zstd_bin pipe_status
   err_file="$(mktemp "${TMPDIR:-/tmp}/cyder-tar-err.XXXXXX")"
   if [[ "$tarball" == *.tar.xz ]]; then
     tar -xJf "$tarball" -C "$dest_dir" 2>"$err_file"
@@ -616,9 +668,10 @@ cyder_tar_extract() {
     cyder_log_engine "extract via zstd pipe: $zstd_bin"
     set +o pipefail
     "$zstd_bin" -d -c "$tarball" 2>"$err_file" | tar -xf - -C "$dest_dir" 2>>"$err_file"
-    rc=${PIPESTATUS[1]}
-    if [[ ${PIPESTATUS[0]} -ne 0 ]]; then
-      rc=${PIPESTATUS[0]}
+    pipe_status=("${PIPESTATUS[@]}")
+    rc=${pipe_status[1]}
+    if [[ ${pipe_status[0]} -ne 0 ]]; then
+      rc=${pipe_status[0]}
     fi
     set -o pipefail
   else
@@ -766,7 +819,8 @@ cyder_ensure_shared_engine() {
   bundled_version="$(cyder_bundled_engine_version_from_src "$engine_src" 2>/dev/null || true)"
   if [[ -f "$marker" ]]; then
     installed_version="$(cyder_read_installed_engine_version "$dest" 2>/dev/null || true)"
-    if [[ -z "$bundled_version" || "$installed_version" == "$bundled_version" ]]; then
+    if [[ -z "$bundled_version" ]] ||
+       cyder_engine_versions_equal "$installed_version" "$bundled_version"; then
       echo "Shared engine present: $dest" >&2
       if [[ ! -f "$dest/.cyder-engine-signed" ]]; then
         cyder_sign_installed_engine "$dest" || exit 1
@@ -778,10 +832,11 @@ cyder_ensure_shared_engine() {
     cyder_reset_shared_prefix
   else
     echo "Installing shared engine -> $dest" >&2
-    if [[ -n "$bundled_version" && -e "$CYDER_SHARED_PREFIX" &&
-          ( -z "$CYDER_MIGRATED_ENGINE_VERSION" ||
-            "$CYDER_MIGRATED_ENGINE_VERSION" != "$bundled_version" ) ]]; then
-      cyder_reset_shared_prefix
+    if [[ -n "$bundled_version" && -e "$CYDER_SHARED_PREFIX" ]]; then
+      if [[ -z "$CYDER_MIGRATED_ENGINE_VERSION" ]] ||
+         ! cyder_engine_versions_equal "$CYDER_MIGRATED_ENGINE_VERSION" "$bundled_version"; then
+        cyder_reset_shared_prefix
+      fi
     fi
   fi
 
@@ -1042,13 +1097,12 @@ cyder_rebuild_shared_prefix() {
     echo "Cannot rebuild prefix while a Wine process is running." >&2
     return 2
   }
-  local parent staging backup backup_root prefix_name active_prefix
+  local parent staging previous prefix_name active_prefix
   active_prefix="$CYDER_SHARED_PREFIX"
   parent="$(dirname "$active_prefix")"
   prefix_name="$(basename "$active_prefix")"
-  backup_root="$CYDER_SUPPORT/backups"
   staging="$parent/.rebuild-${prefix_name}-$$"
-  backup="$backup_root/${prefix_name}-$(date '+%Y%m%d-%H%M%S')-$$"
+  previous="$parent/.rebuild-previous-${prefix_name}-$$"
 
   # Refuse to operate on an unexpected symlink or an already-running rebuild.
   # This keeps a stale/attacker-controlled path from being moved into the
@@ -1061,11 +1115,11 @@ cyder_rebuild_shared_prefix() {
     echo "A prefix rebuild is already in progress: $staging" >&2
     return 2
   }
-  [[ ! -e "$backup" && ! -L "$backup" ]] || {
-    echo "Backup path already exists; refusing to overwrite: $backup" >&2
+  [[ ! -e "$previous" && ! -L "$previous" ]] || {
+    echo "Previous-prefix staging path already exists: $previous" >&2
     return 2
   }
-  mkdir -p "$parent" "$backup_root"
+  mkdir -p "$parent"
 
   local had_previous=0
   if [[ -e "$active_prefix" ]]; then
@@ -1075,8 +1129,8 @@ cyder_rebuild_shared_prefix() {
   cyder_rebuild_restore_previous() {
     local reason="$1"
     cyder_remove_path "$active_prefix"
-    if [[ "$had_previous" -eq 1 && -e "$backup" ]]; then
-      mv "$backup" "$active_prefix"
+    if [[ "$had_previous" -eq 1 && -e "$previous" ]]; then
+      mv "$previous" "$active_prefix"
       echo "Prefix rebuild rolled back ($reason); previous environment restored." >&2
     else
       echo "Prefix rebuild rolled back ($reason); no previous environment was available." >&2
@@ -1090,21 +1144,16 @@ cyder_rebuild_shared_prefix() {
     echo "Prefix rebuild failed while cloning Golden; no active data was changed." >&2
     return 1
   fi
-  if ! cyder_health_check_prefix "$wine_bin" "$staging"; then
-    cyder_remove_path "$staging"
-    echo "Prefix rebuild staging failed health check; active environment was not changed." >&2
-    return 1
-  fi
   if [[ "$had_previous" -eq 1 ]]; then
-    if ! mv "$active_prefix" "$backup"; then
-      echo "Prefix rebuild failed while creating backup: $backup" >&2
+    if ! mv "$active_prefix" "$previous"; then
+      echo "Prefix rebuild failed while staging the previous environment: $previous" >&2
       return 1
     fi
   fi
   if ! mv "$staging" "$active_prefix"; then
     echo "Prefix rebuild failed while publishing staging prefix: $active_prefix" >&2
-    if [[ "$had_previous" -eq 1 && -e "$backup" && ! -e "$active_prefix" ]]; then
-      mv "$backup" "$active_prefix" || true
+    if [[ "$had_previous" -eq 1 && -e "$previous" && ! -e "$active_prefix" ]]; then
+      mv "$previous" "$active_prefix" || true
     fi
     return 1
   fi
@@ -1113,6 +1162,9 @@ cyder_rebuild_shared_prefix() {
     cyder_rebuild_restore_previous "health check failed"
     return 1
   fi
+  # The previous environment exists only to make the publish transactional.
+  # A successful rebuild must not retain a full bottle-sized backup.
+  [[ "$had_previous" -eq 0 ]] || cyder_remove_path "$previous"
   unset -f cyder_rebuild_restore_previous
   echo "Prefix rebuild completed successfully: $active_prefix" >&2
 }
@@ -1280,9 +1332,11 @@ cyder_clone_golden_to_shared() {
     echo "Shared prefix destination already exists: $CYDER_SHARED_PREFIX" >&2
     return 1
   }
+  CYDER_BOOTSTRAP_HEALTH_CHECKED=0
   cyder_profile_clone_bottle "$golden" "$CYDER_SHARED_PREFIX" || return $?
   printf 'revision=%s\n' "$CYDER_TEMPLATE_REVISION" >"$CYDER_BOOTSTRAP_MARKER"
-  cyder_health_check_prefix "$wine_bin" "$CYDER_SHARED_PREFIX"
+  cyder_health_check_prefix "$wine_bin" "$CYDER_SHARED_PREFIX" || return $?
+  CYDER_BOOTSTRAP_HEALTH_CHECKED=1
 }
 
 cyder_ensure_font_replacements() {
@@ -1309,7 +1363,8 @@ cyder_ensure_font_replacements() {
 
 # Settings entered from the game-library UI are keyed by the stable EXE ID.
 # Keep the shell launch path in sync with the native AppKit path so Finder
-# associations and --launch-exe receive the same per-game settings.
+# Finder associations and the internal shell launch path receive the same
+# per-game settings.
 CYDER_GAME_ARGUMENTS=()
 CYDER_GAME_SETTINGS_FOUND=0
 
@@ -1457,6 +1512,7 @@ cyder_has_running_exes() {
 cyder_bootstrap_shared_prefix() {
   local wine_bin="$1"
   local engine_root="$2"
+  CYDER_BOOTSTRAP_HEALTH_CHECKED=0
   cyder_diagnostic_stage wineboot
   cyder_prepare_pristine_template "$wine_bin" "$engine_root" || return $?
   cyder_diagnostic_stage golden-setup
@@ -1471,14 +1527,15 @@ cyder_bootstrap_shared_prefix() {
     return 75
   }
   if [[ -e "$CYDER_SHARED_PREFIX" ]]; then
-    local old_shared="$CYDER_SUPPORT/backups/shared-bootstrap-$(date '+%Y%m%d-%H%M%S')-$$"
-    mkdir -p "$CYDER_SUPPORT/backups"
+    local old_shared="$(dirname "$CYDER_SHARED_PREFIX")/.bootstrap-previous-$(basename "$CYDER_SHARED_PREFIX")-$$"
     mv "$CYDER_SHARED_PREFIX" "$old_shared" || return $?
     if ! cyder_clone_golden_to_shared "$wine_bin"; then
       rm -rf "$CYDER_SHARED_PREFIX"
       mv "$old_shared" "$CYDER_SHARED_PREFIX" || true
       return 1
     fi
+    # Rollback storage is temporary; never accumulate rebuilt bottles.
+    cyder_remove_path "$old_shared"
   else
     cyder_clone_golden_to_shared "$wine_bin" || return $?
   fi
@@ -1495,6 +1552,9 @@ cyder_run_wine_exe() {
   fi
   local -a game_args=("$@")
   local game_args_text="${game_args[*]-}"
+  if [[ "${CYDER_REDACT_DYNAMIC_ARGS:-0}" == 1 ]]; then
+    game_args_text="<${#game_args[@]} dynamic arguments redacted>"
+  fi
   local wineserver="${wine_bin%/wine}/wineserver"
   # Keep the legacy direct path as the default.  Wine's ShellExecute-compatible
   # start.exe path is available for A/B testing with CYDER_WINE_START_MODE=start
@@ -1504,14 +1564,18 @@ cyder_run_wine_exe() {
   local pid_file="${CYDER_WINE_PID_FILE:-}"
   local session_id=""
   cyder_wine_locale_exports
-  local log_dir="$CYDER_SUPPORT/Logs"
-  mkdir -p "$log_dir"
-  local log_file="$log_dir/launch-$(date '+%Y%m%d-%H%M%S')-$$.log"
-  local latest_log="$log_dir/last-launch.log"
-  : >"$log_file"
-  rm -f "$latest_log"
-  ln -s "$(basename "$log_file")" "$latest_log"
-  find "$log_dir" -maxdepth 1 -type f -name 'launch-*.log' -mtime +30 -delete 2>/dev/null || true
+  local capture_log="${CYDER_CAPTURE_WINE_LOG:-0}"
+  local log_file="/dev/null"
+  rm -f "$CYDER_SUPPORT/Logs/last-launch.log"
+  if [[ "$capture_log" == 1 ]]; then
+    local log_dir="$CYDER_SUPPORT/Logs"
+    mkdir -p "$log_dir"
+    log_file="$log_dir/launch-$(date '+%Y%m%d-%H%M%S')-$$.log"
+    local latest_log="$log_dir/last-launch.log"
+    : >"$log_file"
+    ln -s "$(basename "$log_file")" "$latest_log"
+    find "$log_dir" -maxdepth 1 -type f -name 'launch-*.log' -mtime +30 -delete 2>/dev/null || true
+  fi
   if [[ "$detach" == 1 && -n "$pid_file" ]]; then
     mkdir -p "$(dirname "$pid_file")"
     rm -f "$pid_file" "${pid_file}.tmp"
@@ -1550,7 +1614,7 @@ cyder_run_wine_exe() {
     echo "WINEPREFIX=$prefix"
     echo "cwd=$(dirname "$exe")"
     echo
-  } >"$log_file"
+  } >>"$log_file"
   (
     export WINEPREFIX="$prefix" WINESERVER="$wineserver"
     if [[ "${CYDER_MSYNC:-0}" == 1 ]]; then
@@ -1580,7 +1644,8 @@ cyder_run_wine_exe() {
       # Native Cyder only needs the Wine PID long enough to activate the Wine
       # application.  The Wine process is intentionally asynchronous here;
       # Finder-launched apps have no controlling Terminal, so no nohup is
-      # required.  stdout/stderr remain redirected to the persistent log.
+      # required. stdout/stderr are discarded unless diagnostic capture was
+      # explicitly enabled with CYDER_CAPTURE_WINE_LOG=1.
       cyder_exec_game >>"$log_file" 2>&1 &
       wine_pid=$!
       printf '%s\n' "$wine_pid" >"${pid_file}.tmp"

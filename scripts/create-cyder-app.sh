@@ -8,7 +8,7 @@ unset HOMEBREW_PREFIX OGOM WINE_INSTALL ENTITLEMENTS_PLIST
 source "$SCRIPT_DIR/env-x86_64.sh"
 
 OUT_DIR="${OGOM}/dist"
-CYDER_APP_VERSION="${CYDER_APP_VERSION:-0.5.0}"
+CYDER_APP_VERSION="${CYDER_APP_VERSION:-0.6.0}"
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --engine-archive)
@@ -122,7 +122,7 @@ fi
   exit 1
 }
 
-mkdir -p "$RES/ogom-scripts" "$RES/addons/libarchive"
+mkdir -p "$RES/ogom-scripts" "$RES/addons/libarchive" "$RES/tools/zstd" "$RES/licenses"
 cp "$SCRIPT_DIR/cyder_launcher.sh" "$RES/ogom-scripts/"
 cp "$SCRIPT_DIR/cyder-common.sh" "$RES/ogom-scripts/"
 cp "$SCRIPT_DIR/cyder-ensure-rosetta.sh" "$RES/ogom-scripts/"
@@ -138,6 +138,15 @@ cp "$SCRIPT_DIR/cyder-songti-replacements.reg" "$RES/ogom-scripts/"
 cp "$SCRIPT_DIR/install-cyder-font-replacements.sh" "$RES/ogom-scripts/"
 cp "$SCRIPT_DIR/cyder-apply-settings.sh" "$RES/ogom-scripts/"
 cp "$SCRIPT_DIR/cyder-edit-user-reg.sh" "$RES/ogom-scripts/"
+cp "$SCRIPT_DIR/cyder-winetricks.sh" "$RES/ogom-scripts/"
+cp "$OGOM/tools/winetricks/winetricks" "$RES/ogom-scripts/"
+cp "$OGOM/tools/winetricks/COPYING" "$RES/licenses/winetricks-COPYING"
+[[ -x "$OGOM/tools/zstd/zstd" ]] || {
+  echo "Missing universal zstd at tools/zstd/zstd; run scripts/build-universal-zstd.sh" >&2
+  exit 1
+}
+cp "$OGOM/tools/zstd/zstd" "$RES/tools/zstd/zstd"
+cp "$OGOM/tools/zstd/LICENSE" "$RES/licenses/zstd-LICENSE"
 cp "$SCRIPT_DIR/cyder-profile.sh" "$RES/ogom-scripts/"
 cp "$SCRIPT_DIR/cyder_create_game_app.py" "$RES/ogom-scripts/"
 cp "$SCRIPT_DIR/cyder_common.py" "$RES/ogom-scripts/"
@@ -146,8 +155,11 @@ chmod +x "$RES/ogom-scripts/sign-wine.sh"
 chmod +x "$RES/ogom-scripts/install-cyder-font-replacements.sh"
 chmod +x "$RES/ogom-scripts/cyder-apply-settings.sh"
 chmod +x "$RES/ogom-scripts/cyder-edit-user-reg.sh"
+chmod +x "$RES/ogom-scripts/cyder-winetricks.sh"
+chmod +x "$RES/ogom-scripts/winetricks"
 chmod +x "$RES/ogom-scripts/cyder-profile.sh"
 chmod +x "$RES/ogom-scripts/cyder_create_game_app.py"
+chmod +x "$RES/tools/zstd/zstd"
 
 # shellcheck source=cyder-copy-engine-artifact.sh
 source "$SCRIPT_DIR/cyder-copy-engine-artifact.sh"
@@ -262,12 +274,15 @@ export CYDER_ENTITLEMENTS="$RES/entitlements.plist"
 export CYDER_APP="$(cd "$SELF/.." && pwd)"
 export CYDER_BUNDLE_ID="local.cyder.app"
 
-for raw in "$@"; do
-  [[ "$raw" == "--args" || "$raw" == -psn_* ]] && continue
+forwarded=("$@")
+for index in "${!forwarded[@]}"; do
+  raw="${forwarded[$index]}"
+  [[ "$raw" == -psn_* ]] && continue
   path="${raw#file://}"
   lower="$(printf '%s' "$path" | tr '[:upper:]' '[:lower:]')"
   if [[ "$lower" == *.exe ]]; then
-    exec "$RES/ogom-scripts/cyder_launcher.sh" --engine-src "$ENGINE_SRC" --launch-exe "$path"
+    exec "$RES/ogom-scripts/cyder_launcher.sh" --engine-src "$ENGINE_SRC" \
+      --launch-exe "$path" -- "${forwarded[@]:$((index + 1))}"
   fi
 done
 

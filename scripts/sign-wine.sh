@@ -61,4 +61,14 @@ while IFS= read -r -d '' path; do
   fi
 done < <(find "$TARGET_ROOT" -type f -print0)
 
-run "$CODESIGN_CMD" --verify --deep --strict --verbose=2 "$TARGET_ROOT/bin/wine"
+verify_target="$TARGET_ROOT/bin/wine"
+if ! "$FILE_CMD" -b "$verify_target" | grep -q 'Mach-O'; then
+  # CodeWeavers OEM runtimes use a Perl/shell `bin/wine` frontend and keep the
+  # signed native entry point in `bin/wineloader`.
+  verify_target="$TARGET_ROOT/bin/wineloader"
+fi
+[[ -f "$verify_target" ]] || {
+  echo "No Mach-O Wine entry point available for signature verification" >&2
+  exit 1
+}
+run "$CODESIGN_CMD" --verify --deep --strict --verbose=2 "$verify_target"

@@ -49,6 +49,7 @@ fi
 export LLVM_MINGW
 
 export GRAPHICS_INSTALL="${GRAPHICS_INSTALL:-$OGOM/install/graphics-cx${CX_VERSION}-x86_64}"
+export MEDIA_INSTALL="${MEDIA_INSTALL:-$OGOM/install/media-cx${CX_VERSION}-x86_64}"
 export MOLTENVK_SRC="${MOLTENVK_SRC:-$BUILD_DIR/cx${CX_VERSION}/sources/moltenvk}"
 export VKD3D_SRC="${VKD3D_SRC:-$BUILD_DIR/cx${CX_VERSION}/sources/vkd3d}"
 

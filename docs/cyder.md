@@ -49,6 +49,54 @@ bash scripts/cyder_launcher.sh /path/to/game.exe --dry-run
 bash scripts/cyder_launcher.sh --bootstrap-only --engine-src install/wine-x86_64
 ```
 
+### 當次動態命令列參數
+
+Cyder.app 不保留任何公開命令列選項。最符合 macOS 文件型 app 的方式，是把 EXE 交給
+LaunchServices，並把 `--args` 後的每一個值原樣轉送給 Windows 程式：
+
+```sh
+/usr/bin/open -n -a '/Applications/Cyder.app' '/path/to/game.exe' --args \
+  server.example.com 8484 LoginMode account-id one-time-token
+```
+
+若 `.exe` 的預設開啟程式已設為 Cyder，可省略 app：
+
+```sh
+/usr/bin/open -n '/path/to/game.exe' --args arg1 'arg 2'
+```
+
+`-n` 是動態參數契約的一部分：LaunchServices 只會把 argv 交給新建立的 app instance；
+省略 `-n` 可能只把 EXE 的 open event 送到既有 Cyder，而遺失這次參數。
+
+也可不經 LaunchServices，直接使用 `EXE [ARG ...]` 呼叫 app executable：
+
+```sh
+'/Applications/Cyder.app/Contents/MacOS/Cyder' '/path/to/game.exe' arg1 'arg 2'
+```
+
+每個遊戲 argv 都會保持原有邊界與順序，且只對這次啟動生效。只要這次啟動提供任何
+動態 argv，它就會取代該遊戲 profile 保存的靜態參數；一般 Finder 雙擊且沒有 argv 時
+仍使用保存的參數。Cyder 的 MSYNC、ESYNC、power mode、locale 等執行選項不使用 argv，
+必須以環境變數提供，例如：
+
+```sh
+/usr/bin/open -n -a '/Applications/Cyder.app' \
+  --env CYDER_MSYNC=1 --env LANG=zh_TW.UTF-8 --env LC_ALL=zh_TW.UTF-8 \
+  '/path/to/game.exe' --args arg1 'arg 2'
+```
+
+內附 shell launcher 仍有維護與 bootstrap 專用選項；那是 Cyder 內部介面，不是
+Cyder.app 的公開 argv 契約：
+
+```sh
+bash scripts/cyder_launcher.sh --launch-exe '/path/to/game.exe' -- arg1 'arg 2'
+```
+
+為了方便核對一次性 OTP、帳號與參數順序，Cyder 的 debug launch summary 預設完整記錄
+動態參數；argv 在程序執行期間也可能由系統 process inspection 看見。若要建立可公開的
+支援紀錄，可在啟動 Cyder 前設定 `CYDER_REDACT_DYNAMIC_ARGS=1`，此時 summary 只記錄
+動態參數數量。Wine／遊戲自己的 debug log 不受這個開關控制。
+
 （`python3 scripts/cyder_launcher.py` 仍可用，會轉呼叫上述 shell 腳本。）
 
 ## Shared bottle 與 bootstrap
@@ -106,6 +154,21 @@ Cyder 的 `設定…`（`⌘,`）、Dock 右鍵或執行檔選擇器的「進階
 
 遊戲庫以 EXE 的 canonical path 計算穩定 ID，個別選項存放於 `perProfile`；這不代表一定建立獨立 bottle。遊戲設定頁直接開放 MSync、ESync、Retina、DPI、字體、能源模式、環境變數與命令列參數，命令列參數以單行文字直接接在 EXE 後，空白分隔；含空白的單一參數可用引號保留。提供「測試」以套用目前草稿後開啟遊戲，或按「套用」保存供之後從遊戲庫、Finder／直接 EXE 開啟時使用。每個 EXE 的能源模式使用 `powerMode=standard|energySaving`；啟動契約環境變數為 `CYDER_POWER_MODE=normal|background`。
 
+### Winetricks（SharedPrefix）
+
+偏好設定 → 進階 → **Winetricks 元件…** 會顯示 Cyder 原生元件選擇器，將選取的元件安裝到目前 shared prefix，目標固定為：
+
+```text
+WINEPREFIX=~/Library/Application Support/Cyder/bottles/shared
+WINE=~/.cyder/runtime/Engines/wine-x86_64/bin/wine
+```
+
+Winetricks 會直接修改 shared prefix，因此安裝前必須先關閉所有遊戲；元件與 DLL override 可能影響所有使用 SharedPrefix 的遊戲。Cyder.app 會隨附固定版本的 Winetricks script 與 LGPL license，下載檔案則放在 `~/Library/Application Support/Cyder/downloads/winetricks/`。Cyder 會以 `--unattended` CLI 模式執行，使用者不需要操作 Winetricks TUI，也不需要另外安裝 `zenity` 或 `kdialog`。
+
+目前原生選擇器提供 Visual C++ Redistributable、.NET Framework、.NET Desktop Runtime 6–9，以及 `wmp9`、`quartz`、`devenum`、`vb6run` 等常見元件。若需要其他 Winetricks verb，仍可在開發環境直接呼叫 `cyder-winetricks.sh install VERB`，但這是進階手動操作。
+
+這是 SharedPrefix 的進階手動工具，不會自動替每個遊戲建立隔離 bottle；需要隔離元件時，應使用遊戲 Profile／CyderBits。
+
 當共用 prefix 沒有執行中的 wineserver，啟動 EXE 前會以快速路徑直接修改 `user.reg`，不會為了套用設定先啟動 Wine。若 prefix 已在執行，EXE 啟動流程會略過 registry 套用並直接開啟遊戲；設定仍保存在 `settings.json`，等 prefix 停止後的下一次啟動再套用。`wine reg` 不會用於一般 EXE 啟動，只保留給「偏好設定 → 進階 → 套用所有設定」。
 
 Wine 的 macOS RetinaMode、DPI 與字體 registry 是整個 Wine session／bottle 的狀態，不能透過 `AppDefaults` 真正隔離到單一 EXE。Cyder 允許同一共用 prefix 同時開啟多個遊戲，不再以 session guard 阻擋；但執行中無法切換這些 registry 設定，因此同時執行的遊戲會沿用目前 wineserver 已載入的值。MSync、ESync、能源模式、環境變數與命令列參數仍會依各次啟動傳入，但最終相容性仍受 Wine 共用 wineserver 限制。
@@ -124,7 +187,7 @@ Wine 的 macOS RetinaMode、DPI 與字體 registry 是整個 Wine session／bott
 
 正式啟動路徑不設定 `WINEDLLOVERRIDES`。DLL 相容性設定存放在 prefix Registry；目前僅為 `bluecg.exe` 設定 `HKCU\Software\Wine\AppDefaults\bluecg.exe\DllOverrides` 的 `ddraw=native,builtin`，不影響 BlueLauncher 或其他 EXE。
 
-Finder 啟動時，Cyder 會在呼叫 `/usr/bin/arch` 前監聽 CrossOver Wine 的 `WineAppWillActivateNotification`。收到與 `bottles/shared` 相同、且 `ActivatingAppPID` 已登記為 `regular/Foreground` 的通知後，macOS 14 以上會由 Cyder 先讓出焦點，再透過 cooperative activation 將所有 Wine 視窗帶到前方；macOS 12、13 則使用舊版 activation API 作為相容 fallback。送出一次 activation 後 Cyder 隨即退出；wrapper PID 不參與 activation，也不搜尋 process tree 或視窗 owner。若 Wine 未發出通知，隱藏 launcher最多等待 30 秒；Wine 仍在執行時只記錄 warning，不誤判為失敗。若 Wine 在顯示視窗前退出或被 signal 終止，Cyder 會顯示錯誤代碼、結束狀態與記錄內容。Wine stdout／stderr 會保存到每次 session 的獨立記錄，`Logs/last-launch.log` 指向最近一次啟動記錄。
+Finder 啟動時，Cyder 會在呼叫 `/usr/bin/arch` 前監聽 CrossOver Wine 的 `WineAppWillActivateNotification`。收到與 `bottles/shared` 相同、且 `ActivatingAppPID` 已登記為 `regular/Foreground` 的通知後，macOS 14 以上會由 Cyder 先讓出焦點，再透過 cooperative activation 將所有 Wine 視窗帶到前方；macOS 12、13 則使用舊版 activation API 作為相容 fallback。送出一次 activation 後 Cyder 隨即退出；wrapper PID 不參與 activation，也不搜尋 process tree 或視窗 owner。若 Wine 未發出通知，隱藏 launcher最多等待 30 秒；Wine 仍在執行時只記錄 warning，不誤判為失敗。若 Wine 在顯示視窗前退出或被 signal 終止，Cyder 會顯示錯誤代碼與結束狀態。一般啟動不保存 Wine stdout／stderr；需要追查 Wine 問題時可設定 `CYDER_CAPTURE_WINE_LOG=1`，此時 `Logs/last-launch.log` 會指向最近一次啟動記錄。
 
 命令列直接呼叫 `cyder_launcher.sh` 時仍以前景模式執行，方便腳本等待遊戲結束；只有 Universal Cyder 的 Finder EXE 入口會使用 Swift 直接啟動的分離模式。
 
@@ -158,7 +221,7 @@ BlueCG（魔力寶貝）可透過 Cyder 直接開 `BlueLauncher.exe`；遊戲目
 
 ## 錯誤記錄與診斷
 
-Cyder 每次啟動都會建立獨立 session，記錄目前階段、shell worker 輸出、Wine stdout／stderr 與結束原因：
+Cyder 每次啟動都會建立小型 session 記錄，保存目前階段、shell worker 輸出與結束原因；Wine stdout／stderr 預設不保存：
 
 ```text
 ~/Library/Application Support/Cyder/Logs/

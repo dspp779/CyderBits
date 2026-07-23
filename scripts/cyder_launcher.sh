@@ -63,12 +63,14 @@ Options:
   --stop-all          Stop all EXEs in the Cyder shared prefix and exit
   --has-running-exes  Exit 0 if the shared prefix has running EXEs, otherwise 1
   --apply-settings-only Apply saved settings without installing the environment
+  --install-winetricks VERB [...]  Install selected Winetricks components into the shared prefix
   --apply-settings-prefix PREFIX Apply saved settings to an existing bottle
   --session-acquire PREFIX OWNER_PID MSYNC ESYNC POWER Reserve a bottle session
   --session-update PREFIX SESSION_FILE NEW_PID Update a reserved session PID
   --session-release PREFIX SESSION_FILE Release a reserved session
   --templates-ready  Check pristine/golden template compatibility
-  --launch-exe PATH   Launch .exe (engine + bootstrap must already be ready)
+  --launch-exe PATH [-- ARG ...]
+                      Launch .exe; arguments after -- replace saved game arguments for this launch
   --profile-resolve PATH  Resolve PATH to its per-game bottle and exit
   --profile-create PATH [pristine|golden]  Create/resolve a per-game bottle and exit
   --profile-remove PATH  Remove a per-game bottle/profile and exit
@@ -85,6 +87,8 @@ ENSURE_ROSETTA_ONLY=0
 STOP_ALL=0
 HAS_RUNNING_EXES=0
 APPLY_SETTINGS_ONLY=0
+INSTALL_WINETRICKS=0
+WINETRICKS_VERBS=()
 LAUNCH_ONLY=0
 PROFILE_ACTION=""
 PROFILE_EXE=""
@@ -96,6 +100,8 @@ SESSION_ARGS=()
 TEMPLATES_READY=0
 ENGINE_SRC="$CYDER_ENGINE_SRC"
 EXE_ARGS=()
+FORWARDED_GAME_ARGUMENTS=()
+FORWARDED_GAME_ARGUMENTS_SET=0
 POSITIONAL_EXE=0
 
 cyder_write_machine_result() {
@@ -149,6 +155,13 @@ while [[ $# -gt 0 ]]; do
     --apply-settings-only)
       APPLY_SETTINGS_ONLY=1
       shift
+      ;;
+    --install-winetricks)
+      INSTALL_WINETRICKS=1
+      shift
+      [[ $# -gt 0 ]] || { echo "--install-winetricks requires at least one component" >&2; exit 1; }
+      WINETRICKS_VERBS=("$@")
+      break
       ;;
     --apply-settings-prefix)
       [[ $# -ge 2 ]] || { echo "--apply-settings-prefix requires PREFIX" >&2; exit 1; }
@@ -219,8 +232,13 @@ while [[ $# -gt 0 ]]; do
       ;;
     --)
       shift
-      EXE_ARGS+=("$@")
-      [[ $# -gt 0 ]] && POSITIONAL_EXE=1
+      if [[ "$LAUNCH_ONLY" -eq 1 ]]; then
+        FORWARDED_GAME_ARGUMENTS=("$@")
+        FORWARDED_GAME_ARGUMENTS_SET=1
+      else
+        EXE_ARGS+=("$@")
+        [[ $# -gt 0 ]] && POSITIONAL_EXE=1
+      fi
       break
       ;;
     -*)
@@ -245,6 +263,7 @@ primary_actions=0
 [[ -n "$SESSION_ACTION" ]] && primary_actions=$((primary_actions + 1))
 [[ "$APPLY_SETTINGS_PREFIX_SET" -eq 1 ]] && primary_actions=$((primary_actions + 1))
 [[ "$APPLY_SETTINGS_ONLY" -eq 1 ]] && primary_actions=$((primary_actions + 1))
+[[ "$INSTALL_WINETRICKS" -eq 1 ]] && primary_actions=$((primary_actions + 1))
 [[ "$LAUNCH_ONLY" -eq 1 ]] && primary_actions=$((primary_actions + 1))
 [[ "$STOP_ALL" -eq 1 ]] && primary_actions=$((primary_actions + 1))
 [[ "$HAS_RUNNING_EXES" -eq 1 ]] && primary_actions=$((primary_actions + 1))
@@ -435,10 +454,29 @@ if [[ "$APPLY_SETTINGS_ONLY" -eq 1 ]]; then
   exit 0
 fi
 
+if [[ "$INSTALL_WINETRICKS" -eq 1 ]]; then
+  cyder_set_stage winetricks
+  engine="$CYDER_ENGINES/$CYDER_ENGINE_NAME"
+  [[ -x "$engine/bin/wine" && -x "$engine/bin/wineserver" ]] || {
+    echo "Cyder environment is not ready; open Cyder.app to finish setup." >&2
+    exit 2
+  }
+  [[ -f "$CYDER_BOOTSTRAP_MARKER" ]] || {
+    echo "Cyder shared prefix is not ready; open Cyder.app to finish setup." >&2
+    exit 2
+  }
+  winetricks_sh="$CYDER_SCRIPTS/cyder-winetricks.sh"
+  [[ -x "$winetricks_sh" ]] || {
+    echo "Cyder Winetricks integration is missing: $winetricks_sh" >&2
+    exit 2
+  }
+  exec bash "$winetricks_sh" install "${WINETRICKS_VERBS[@]}"
+fi
+
 if [[ "$HEALTH_CHECK" -eq 1 || "$REBUILD_PREFIX" -eq 1 ]]; then
   cyder_set_stage engine-validation
   if [[ "$REBUILD_PREFIX" -eq 1 ]]; then
-    engine="$(cyder_ensure_shared_engine "$ENGINE_SRC")"
+    engine="$(cyder_resolve_shared_engine "$ENGINE_SRC")"
     wine="$engine/bin/wine"
     cyder_set_stage bootstrap
     cyder_rebuild_shared_prefix "$wine" "$engine"
@@ -466,7 +504,7 @@ fi
 
 if [[ "$BOOTSTRAP_ONLY" -eq 1 ]]; then
   cyder_set_stage engine-validation
-  engine="$(cyder_ensure_shared_engine "$ENGINE_SRC")"
+  engine="$(cyder_resolve_shared_engine "$ENGINE_SRC")"
   wine="$engine/bin/wine"
   echo "WINEPREFIX=$CYDER_SHARED_PREFIX"
   echo "BOOTSTRAP_MARKER=$CYDER_BOOTSTRAP_MARKER"
@@ -508,6 +546,7 @@ if [[ "$BOOTSTRAP_ONLY" -eq 1 ]]; then
     cp -f "$operation_log" "$log_dir/bootstrap-error.log"
     exit "$status"
   fi
+  cyder_write_machine_result healthChecked "${CYDER_BOOTSTRAP_HEALTH_CHECKED:-0}"
   exit 0
 fi
 
@@ -528,6 +567,9 @@ if [[ "$LAUNCH_ONLY" -eq 1 ]]; then
     settings_status=$?
     exit "$settings_status"
   }
+  if [[ "$FORWARDED_GAME_ARGUMENTS_SET" -eq 1 ]]; then
+    CYDER_GAME_ARGUMENTS=("${FORWARDED_GAME_ARGUMENTS[@]}")
+  fi
   cyder_set_stage wine-launch
   cyder_run_wine_exe "$wine" "$exe" "$CYDER_SHARED_PREFIX" "${CYDER_GAME_ARGUMENTS[@]}"
   exit 0

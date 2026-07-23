@@ -8,6 +8,7 @@
 
 | 版本 | 文件 | 重點 |
 |------|------|------|
+| 0.6.0 | [繁中](releases/v0.6.0.md) · [English](releases/v0.6.0.en.md) | Winetricks、啟動精簡、動態 argv、engine packaging／strip／zstd、version 比對修正 |
 | 0.5.0 | [繁中](releases/v0.5.0.md) · [English](releases/v0.5.0.en.md) | 省電模式、遊戲庫、每遊戲設定與新 App 圖示 |
 | 0.4.0 | [release note](releases/v0.4.0.md) | 初始化可靠性、Shared/Golden template 與設定相容性 |
 | 0.3.0 | [release note](releases/v0.3.0.md) | 錯誤診斷、session log、啟動可靠性與 Universal App |

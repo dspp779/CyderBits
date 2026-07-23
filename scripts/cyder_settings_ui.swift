@@ -1,12 +1,50 @@
 import Cocoa
 import Foundation
 
+private struct CyderWinetricksComponent {
+    let title: String
+    let verb: String
+}
+
+private let cyderWinetricksComponentGroups: [(String, [CyderWinetricksComponent])] = [
+    ("Microsoft Visual C++ Redistributable", [
+        CyderWinetricksComponent(title: "Visual C++ 2005", verb: "vcrun2005"),
+        CyderWinetricksComponent(title: "Visual C++ 2008", verb: "vcrun2008"),
+        CyderWinetricksComponent(title: "Visual C++ 2010", verb: "vcrun2010"),
+        CyderWinetricksComponent(title: "Visual C++ 2012", verb: "vcrun2012"),
+        CyderWinetricksComponent(title: "Visual C++ 2013", verb: "vcrun2013"),
+        CyderWinetricksComponent(title: "Visual C++ 2015", verb: "vcrun2015"),
+        CyderWinetricksComponent(title: "Visual C++ 2019", verb: "vcrun2019"),
+        CyderWinetricksComponent(title: "Visual C++ 2022", verb: "vcrun2022"),
+    ]),
+    (".NET Framework", [
+        CyderWinetricksComponent(title: ".NET Framework 2.0", verb: "dotnet20"),
+        CyderWinetricksComponent(title: ".NET Framework 3.5", verb: "dotnet35"),
+        CyderWinetricksComponent(title: ".NET Framework 4.0", verb: "dotnet40"),
+        CyderWinetricksComponent(title: ".NET Framework 4.5.2", verb: "dotnet452"),
+        CyderWinetricksComponent(title: ".NET Framework 4.8", verb: "dotnet48"),
+    ]),
+    (".NET Desktop Runtime", [
+        CyderWinetricksComponent(title: ".NET Desktop Runtime 6", verb: "dotnetdesktop6"),
+        CyderWinetricksComponent(title: ".NET Desktop Runtime 7", verb: "dotnetdesktop7"),
+        CyderWinetricksComponent(title: ".NET Desktop Runtime 8", verb: "dotnetdesktop8"),
+        CyderWinetricksComponent(title: ".NET Desktop Runtime 9", verb: "dotnetdesktop9"),
+    ]),
+    ("Legacy multimedia", [
+        CyderWinetricksComponent(title: "Windows Media Player 9", verb: "wmp9"),
+        CyderWinetricksComponent(title: "Quartz DirectShow", verb: "quartz"),
+        CyderWinetricksComponent(title: "DirectShow Devenum", verb: "devenum"),
+        CyderWinetricksComponent(title: "Visual Basic 6 Runtime", verb: "vb6run"),
+    ]),
+]
+
 final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate {
     var onImmediateSave: ((_ registrySetting: String) -> Bool)?
     var onApplyAll: ((_ shouldStopAll: Bool) -> Void)?
     var onRebuild: (() -> Void)?
     var onCreateProfile: ((URL) -> Void)?
     var onOpenGameLibrary: (() -> Void)?
+    var onOpenWinetricks: (([String]) -> Void)?
     var onSaveStarted: (() -> Void)?
     var onSaveFailed: (() -> Void)?
     var onClose: (() -> Void)?
@@ -116,6 +154,59 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
         onOpenGameLibrary?()
     }
 
+    @objc private func openWinetricks() {
+        let alert = NSAlert()
+        alert.messageText = "選擇要安裝的 Windows 元件"
+        alert.informativeText = "元件會安裝到 Cyder 的 shared prefix。請只選擇遊戲需要的版本；安裝前請先關閉所有遊戲。"
+        alert.alertStyle = .informational
+
+        let stack = NSStackView()
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = 8
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        var checkboxes: [(NSButton, String)] = []
+        for (groupTitle, components) in cyderWinetricksComponentGroups {
+            let group = NSTextField(labelWithString: groupTitle)
+            group.font = .boldSystemFont(ofSize: 12)
+            stack.addArrangedSubview(group)
+            for component in components {
+                let checkbox = NSButton(checkboxWithTitle: component.title, target: nil, action: nil)
+                checkbox.font = .systemFont(ofSize: 12)
+                stack.addArrangedSubview(checkbox)
+                checkboxes.append((checkbox, component.verb))
+            }
+            let spacer = NSView()
+            spacer.translatesAutoresizingMaskIntoConstraints = false
+            spacer.heightAnchor.constraint(equalToConstant: 4).isActive = true
+            stack.addArrangedSubview(spacer)
+        }
+
+        let scroll = NSScrollView(frame: NSRect(x: 0, y: 0, width: 430, height: 310))
+        scroll.hasVerticalScroller = true
+        scroll.autohidesScrollers = true
+        scroll.drawsBackground = false
+        scroll.documentView = stack
+        stack.widthAnchor.constraint(equalToConstant: 400).isActive = true
+        alert.accessoryView = scroll
+        alert.addButton(withTitle: "安裝")
+        alert.addButton(withTitle: "取消")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+
+        let verbs = checkboxes.compactMap { item in
+            item.0.state == .on ? item.1 : nil
+        }
+        guard !verbs.isEmpty else {
+            let empty = NSAlert()
+            empty.messageText = "尚未選擇元件"
+            empty.informativeText = "請至少選擇一個要安裝的 Windows 元件。"
+            empty.addButton(withTitle: "好")
+            empty.runModal()
+            return
+        }
+        onOpenWinetricks?(verbs)
+    }
+
     private func makeDisplayTab() -> NSTabViewItem {
         retina.target = self
         retina.action = #selector(retinaChanged)
@@ -150,6 +241,8 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
         rebuild.bezelStyle = .rounded
         let applyAll = NSButton(title: "套用所有設定", target: self, action: #selector(applyAllSettings))
         applyAll.bezelStyle = .rounded
+        let winetricks = NSButton(title: "Winetricks 元件…", target: self, action: #selector(openWinetricks))
+        winetricks.bezelStyle = .rounded
         return tab("進階", rows: [
             gameLibrary,
             note("加入 Windows 遊戲、直接啟動，或管理每個遊戲的獨立 Wine prefix 與設定。"),
@@ -157,6 +250,8 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
             note("重新建立執行 Windows 遊戲所需的環境。遊戲檔案不會刪除，但已安裝的 Windows 元件與自訂設定需要重新套用。"),
             applyAll,
             note("使用 Wine 完整寫入目前所有設定；一般調整會在點選控制項時立即快速儲存。"),
+            winetricks,
+            note("以原生選擇器安裝 VC++、.NET、WMP、Quartz、Devenum 等元件到 shared prefix。請先關閉所有遊戲。"),
         ])
     }
 

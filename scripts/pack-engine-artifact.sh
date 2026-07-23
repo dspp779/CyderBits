@@ -73,8 +73,9 @@ esac
   exit 1
 }
 if [[ "$FORMAT" == "zst" ]]; then
-  command -v zstd >/dev/null 2>&1 || {
-    echo "Missing zstd — install with: brew install zstd" >&2
+  ZSTD_BIN="$(cyder_find_zstd 2>/dev/null || true)"
+  [[ -x "$ZSTD_BIN" ]] || {
+    echo "Missing zstd — rebuild the bundled tool with scripts/build-universal-zstd.sh" >&2
     exit 1
   }
 else
@@ -113,7 +114,7 @@ rsync -a --delete "$WINE_INSTALL/" "$ENGINE_TREE/"
 find "$ENGINE_TREE" -name '.DS_Store' -delete 2>/dev/null || true
 cyder_write_engine_version_file "$ENGINE_TREE" "$ENGINE_VERSION_LABEL"
 bash "$SCRIPT_DIR/strip-wine-install.sh" "$ENGINE_TREE"
-bash "$SCRIPT_DIR/bundle-wine-dylibs.sh" "$ENGINE_TREE"
+VULKAN_SOURCE=existing bash "$SCRIPT_DIR/bundle-wine-dylibs.sh" "$ENGINE_TREE"
 bash "$SCRIPT_DIR/sign-wine.sh" --root "$ENGINE_TREE" --entitlements "$ENTITLEMENTS_PLIST"
 
 mkdir -p "$ARTIFACTS_DIR"
@@ -127,7 +128,7 @@ case "$FORMAT" in
     echo "==> Compressing with zstd (-22 --ultra)"
     (
       cd "$STAGING"
-      tar -cf - wine-x86_64 | zstd -22 --ultra -T0 -o "$ARCHIVE"
+      tar -cf - wine-x86_64 | "$ZSTD_BIN" -22 --ultra -T0 -o "$ARCHIVE"
     )
     ;;
   xz)
