@@ -18,6 +18,10 @@ assert_contains "$build_script" 'cp "$OGOM/tools/winetricks/winetricks" "$RES/og
   "Cyder.app must bundle the pinned Winetricks script"
 assert_contains "$build_script" 'cp "$OGOM/tools/winetricks/COPYING" "$RES/licenses/winetricks-COPYING"' \
   "Cyder.app must bundle the Winetricks license"
+assert_contains "$build_script" 'cp "$OGOM/tools/zstd/zstd" "$RES/tools/zstd/zstd"' \
+  "Cyder.app must bundle the universal zstd extractor"
+assert_contains "$build_script" 'cp "$OGOM/tools/zstd/LICENSE" "$RES/licenses/zstd-LICENSE"' \
+  "Cyder.app must bundle the zstd license"
 winetricks_launcher="$(cat "$ROOT/scripts/cyder-winetricks.sh")"
 assert_contains "$winetricks_launcher" 'exec /usr/bin/arch -x86_64 /bin/sh "$winetricks" --unattended "$@"' \
   "Cyder Winetricks integration should use unattended CLI mode"
@@ -37,6 +41,7 @@ assert_contains "$common_script" "printf 'signed\\n' >\"\$dest/.cyder-engine-sig
   "successful engine signing must leave a marker"
 
 assert test -x "$ROOT/tools/winetricks/winetricks"
+assert test -x "$ROOT/tools/zstd/zstd"
 assert_contains "$(head -20 "$ROOT/tools/winetricks/winetricks")" "WINETRICKS_VERSION=20260125" \
   "bundled Winetricks version should be pinned"
 

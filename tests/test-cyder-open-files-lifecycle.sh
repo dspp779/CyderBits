@@ -11,6 +11,8 @@ assert_contains "$source_text" "openGameInDetachedCyder" \
   "Finder requests received by a visible library must be delegated"
 assert_contains "$source_text" "createsNewApplicationInstance = true" \
   "delegated requests must not reuse the library process"
+assert_contains "$source_text" "Association launch: EXE will arrive separately in openFiles" \
+  "association launches should treat application argv exclusively as game arguments"
 assert_contains "$source_text" "documentLaunchRequested = true" \
   "open-file requests must switch the app out of settings mode"
 assert_contains "$source_text" "asyncAfter(deadline: .now() + 0.2)" \

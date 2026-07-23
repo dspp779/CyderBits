@@ -17,6 +17,10 @@ private enum CyderFailureAction: Equatable {
 
 final class CyderAppDelegate: NSObject, NSApplicationDelegate {
     private var pendingFiles: [String] = []
+    // nil means a regular Finder/library launch and therefore uses the saved
+    // per-game arguments. A non-nil value came from the new application's argv
+    // and replaces the saved arguments for this launch only.
+    private var pendingLaunchArguments: [String]?
     private var didFinishLaunch = false
     private var didRunLauncher = false
     private var documentLaunchRequested = false
@@ -244,7 +248,8 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         }
         pendingFiles.append(contentsOf: executableFiles)
         application.reply(toOpenOrPrint: .success)
-        if ProcessInfo.processInfo.environment["CYDER_OPEN_FILES_SELF_TEST"] == "1" {
+        if ProcessInfo.processInfo.environment["CYDER_OPEN_FILES_SELF_TEST"] == "1"
+            || ProcessInfo.processInfo.environment["CYDER_INVOCATION_SELF_TEST_OUTPUT"]?.isEmpty == false {
             return
         }
         scheduleRun()
@@ -274,31 +279,54 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             NSApp.terminate(nil)
             return
         }
-        var argumentIndex = 1
-        while argumentIndex < CommandLine.arguments.count {
-            let arg = CommandLine.arguments[argumentIndex]
-            if arg.hasPrefix("-psn_") || arg == "--args" {
-                argumentIndex += 1
-                continue
+        let environment = ProcessInfo.processInfo.environment
+        openLibraryOnLaunch = environment["CYDER_OPEN_GAME_LIBRARY"] == "1"
+        if let requestPath = environment["CYDER_TEST_SETTINGS_REQUEST"], !requestPath.isEmpty {
+            if let data = try? Data(contentsOf: URL(fileURLWithPath: requestPath)),
+               let settings = try? JSONDecoder().decode(CyderExecutableSettings.self, from: data) {
+                pendingGameSettings = settings
             }
-            if arg == "--game-library" {
-                openLibraryOnLaunch = true
-                argumentIndex += 1
-                continue
-            }
-            if arg == "--cyder-test-settings",
-               argumentIndex + 1 < CommandLine.arguments.count {
-                let requestPath = CommandLine.arguments[argumentIndex + 1]
-                if let data = try? Data(contentsOf: URL(fileURLWithPath: requestPath)),
-                   let settings = try? JSONDecoder().decode(CyderExecutableSettings.self, from: data) {
-                    pendingGameSettings = settings
+            try? FileManager.default.removeItem(atPath: requestPath)
+        }
+
+        // Public argv contract: `Cyder [game.exe] [game argument ...]`.
+        // Normally LaunchServices sends game.exe through openFiles and argv
+        // contains only values following `open ... --args`. Cyder owns no
+        // command-line options; even values beginning with '-' belong to the
+        // Windows executable. The legacy -psn token is system-generated.
+        var applicationArguments = CommandLine.arguments.dropFirst().filter {
+            !$0.hasPrefix("-psn_")
+        }
+        if let first = applicationArguments.first,
+           let executable = normalizeExePaths([first]).first {
+            // Also accept direct invocation: `Cyder game.exe ARG...`.
+            pendingFiles.append(executable)
+            documentLaunchRequested = true
+            applicationArguments.removeFirst()
+            pendingLaunchArguments = Array(applicationArguments)
+        } else if !applicationArguments.isEmpty {
+            // Association launch: EXE will arrive separately in openFiles.
+            pendingLaunchArguments = Array(applicationArguments)
+        }
+        if let outputPath = environment["CYDER_INVOCATION_SELF_TEST_OUTPUT"], !outputPath.isEmpty {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
+                guard let self else { return }
+                let result: [String: Any] = [
+                    "executables": normalizeExePaths(self.pendingFiles),
+                    "arguments": self.pendingLaunchArguments ?? [],
+                    "hasDynamicArguments": self.pendingLaunchArguments != nil
+                ]
+                if let data = try? PropertyListSerialization.data(
+                    fromPropertyList: result,
+                    format: .xml,
+                    options: 0
+                ) {
+                    try? data.write(to: URL(fileURLWithPath: outputPath), options: .atomic)
                 }
-                try? FileManager.default.removeItem(atPath: requestPath)
-                argumentIndex += 2
-                continue
+                CyderDiagnostics.shared.finish(outcome: "invocation-self-test")
+                NSApp.terminate(nil)
             }
-            pendingFiles.append(arg)
-            argumentIndex += 1
+            return
         }
         pendingFiles = normalizeExePaths(pendingFiles)
         if !pendingFiles.isEmpty { documentLaunchRequested = true }
@@ -399,14 +427,15 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func openGameInDetachedCyder(_ executable: URL, settings: CyderExecutableSettings? = nil) {
-        var arguments = [executable.path]
+        let arguments = [executable.path]
+        var launchEnvironment: [String: String] = [:]
         if let settings {
             do {
                 let requestDirectory = CyderPaths.support.appendingPathComponent("launch-requests", isDirectory: true)
                 try FileManager.default.createDirectory(at: requestDirectory, withIntermediateDirectories: true)
                 let request = requestDirectory.appendingPathComponent("test-\(UUID().uuidString).json")
                 try JSONEncoder.pretty.encode(settings).write(to: request, options: .atomic)
-                arguments += ["--cyder-test-settings", request.path]
+                launchEnvironment["CYDER_TEST_SETTINGS_REQUEST"] = request.path
             } catch {
                 showAlert("無法啟動測試", "無法建立暫存的遊戲設定：\(error.localizedDescription)")
                 return
@@ -416,6 +445,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         configuration.activates = false
         configuration.createsNewApplicationInstance = true
         configuration.arguments = arguments
+        configuration.environment = launchEnvironment
         NSWorkspace.shared.openApplication(
             at: Bundle.main.bundleURL,
             configuration: configuration,
@@ -812,7 +842,8 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             exe: exeURL.path,
             profileID: profileID,
             prefix: prefix,
-            gameSettings: gameSettings
+            gameSettings: gameSettings,
+            launchArguments: pendingLaunchArguments
         )
     }
 
@@ -874,7 +905,8 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         exe: String,
         profileID: String?,
         prefix: URL,
-        gameSettings: CyderExecutableSettings?
+        gameSettings: CyderExecutableSettings?,
+        launchArguments: [String]? = nil
     ) -> CyderLaunchOutcome {
         let support = CyderPaths.support
         let logDirectory = support.appendingPathComponent("Logs", isDirectory: true)
@@ -913,11 +945,18 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             prefix: prefix,
             gameSettings: gameSettings
         )
-        let gameArguments = CyderSettingsStore.shared.arguments(
+        let savedGameArguments = CyderSettingsStore.shared.arguments(
             profileID: profileID,
             legacyBasename: nil,
             override: gameSettings
         )
+        let gameArguments = launchArguments ?? savedGameArguments
+        let argumentSource = launchArguments == nil ? "saved" : "dynamic"
+        let redactDynamicArguments = launchArguments != nil
+            && ProcessInfo.processInfo.environment["CYDER_REDACT_DYNAMIC_ARGS"] == "1"
+        let diagnosticArguments = redactDynamicArguments
+            ? "<\(gameArguments.count) dynamic arguments redacted>"
+            : gameArguments.joined(separator: " ")
         let powerMode = environment["CYDER_POWER_MODE"] ?? "normal"
         let taskpolicy = findExecutable(named: "taskpolicy", environment: environment)
         let hasTaskpolicy = taskpolicy != nil
@@ -934,11 +973,11 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             }
             process.executableURL = taskpolicy
             process.arguments = ["-c", "background", "/usr/bin/arch", "-x86_64", wine.path, exe] + gameArguments
-            commandDescription = "\(taskpolicy.path) \(process.arguments?.joined(separator: " ") ?? "")"
+            commandDescription = "\(taskpolicy.path) -c background /usr/bin/arch -x86_64 \(wine.path) \(exe) \(diagnosticArguments)"
         } else {
             process.executableURL = URL(fileURLWithPath: "/usr/bin/arch")
             process.arguments = ["-x86_64", wine.path, exe] + gameArguments
-            commandDescription = "arch -x86_64 \(wine.path) \(exe) \(gameArguments.joined(separator: " "))"
+            commandDescription = "arch -x86_64 \(wine.path) \(exe) \(diagnosticArguments)"
         }
         process.currentDirectoryURL = URL(fileURLWithPath: exe).deletingLastPathComponent()
         process.environment = environment
@@ -964,6 +1003,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         CyderDiagnostics.shared.info(
             "game-launch effective-settings profile=\(profileID ?? "shared") "
                 + "source=\(gameSettings == nil ? "saved" : "test-or-override") "
+                + "argument_source=\(argumentSource) argument_count=\(gameArguments.count) "
                 + "msync=\(msync) esync=\(esync) power=\(powerMode) captureWineLog=\(captureWineLog)"
         )
 
@@ -1059,6 +1099,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         let locale = resolvedWineLocale(environment: environment)
         environment["LANG"] = locale
         environment["LC_ALL"] = locale
+        environment["LC_CTYPE"] = locale
         return environment
     }
 
@@ -1119,7 +1160,31 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         else {
             return true
         }
-        return installed != bundled
+        return !engineVersionsEqual(installed, bundled)
+    }
+
+    /// Packaging metadata historically used either a display label
+    /// (`wine crossover 26.2.0 (wine 11.0)`) or its filesystem-safe slug
+    /// (`crossover-26.2.0-wine-11.0`). Both identify the same engine.
+    private func engineVersionsEqual(_ lhs: String, _ rhs: String) -> Bool {
+        if lhs == rhs { return true }
+        return engineVersionSlug(lhs) == engineVersionSlug(rhs)
+    }
+
+    private func engineVersionSlug(_ raw: String) -> String {
+        let value = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        let prefix = "wine crossover "
+        if value.hasPrefix(prefix),
+           let wineMarker = value.range(of: " (wine ", options: .backwards),
+           value.hasSuffix(")") {
+            let crossover = value[value.index(value.startIndex, offsetBy: prefix.count)..<wineMarker.lowerBound]
+            let wineStart = wineMarker.upperBound
+            let wineEnd = value.index(before: value.endIndex)
+            let wine = value[wineStart..<wineEnd]
+            return "crossover-\(crossover)-wine-\(wine)"
+                .replacingOccurrences(of: " ", with: "-")
+        }
+        return value
     }
 
     private func onMainThread(_ work: () -> Void) {

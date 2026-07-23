@@ -17,6 +17,7 @@
 | `--enable-archs=i386,x86_64` | 同時建 32/64-bit PE（`syswow64` 等） |
 | `--with-mingw=llvm-mingw` | 使用專案內 llvm-mingw 交叉編譯 PE DLL |
 | `--prefix=...` | 安裝至 `install/wine-cx25-x86_64` 或 `wine-cx26-x86_64` |
+| `--disable-tests` | runtime build 預設；省下 regression-test 編譯時間，不影響 runtime DLL |
 | `--without-vulkan` | clean source build 的預設；DirectDraw 老遊戲不需 Vulkan |
 | `--with-vulkan` | 可選；搭配 `--vulkan-source homebrew\|crossover`，見 `scripts/build-graphics-stack.sh` |
 
@@ -212,6 +213,7 @@ macOS 上使用 **`winemac.drv`（Cocoa）**，不走 X11。下列選項在 Mac 
 ## 相關文件
 
 - [scripts.md](scripts.md) — `build-wine.sh`、`build-graphics-stack.sh` 腳本說明
+- [cyder-runtime-size-study.md](cyder-runtime-size-study.md) — PE DWARF、bottle 複製放大與實測瘦身
 - [bluecg.md](bluecg.md) — BlueCG 驗證與已知問題
 - [../patches/README.md](../patches/README.md) — W1 Vulkan 編譯 fallback 等選用 patch
 - [superpowers/specs/2026-07-03-bluecg-wine-build-design.md](superpowers/specs/2026-07-03-bluecg-wine-build-design.md) — 自建 Wine 總設計

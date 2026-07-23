@@ -83,6 +83,23 @@ cyder_engine_version_slug_from_label() {
   printf '%s\n' "$slug"
 }
 
+# Engine archives built by older/special packaging flows may store the
+# filesystem-safe slug in wine-x86_64/version while the app sidecar keeps the
+# human-readable label.  Treat those representations as the same version so a
+# successful extraction cannot leave document launches permanently reporting
+# that the environment is not ready.
+cyder_engine_versions_equal() {
+  local left right left_slug right_slug
+  left="$(cyder_engine_version_label_trim "${1:-}")"
+  right="$(cyder_engine_version_label_trim "${2:-}")"
+  [[ -n "$left" && -n "$right" ]] || return 1
+  [[ "$left" == "$right" ]] && return 0
+  left_slug="$(cyder_engine_version_slug_from_label "$left")"
+  right_slug="$(cyder_engine_version_slug_from_label "$right")"
+  [[ "$left_slug" == "$right" || "$left" == "$right_slug" || "$left_slug" == "$right_slug" ]]
+}
+
+
 cyder_read_engine_version_file() {
   local engine_root="$1"
   local f="$engine_root/version"
@@ -461,7 +478,8 @@ cyder_engine_needs_install() {
   if [[ ! -f "$marker" ]]; then
     return 0
   fi
-  if [[ -n "$bundled_version" && "$installed_version" != "$bundled_version" ]]; then
+  if [[ -n "$bundled_version" ]] &&
+     ! cyder_engine_versions_equal "$installed_version" "$bundled_version"; then
     return 0
   fi
   return 1
@@ -477,7 +495,7 @@ cyder_engine_is_ready_for_launch() {
   [[ -x "$engine/bin/wine" && -f "$CYDER_BOOTSTRAP_MARKER" ]] || return 1
   expected="$(cyder_bundled_engine_version "$CYDER_OGOM" 2>/dev/null || true)"
   installed="$(cyder_read_installed_engine_version "$engine" 2>/dev/null || true)"
-  [[ -z "$expected" || "$installed" == "$expected" ]]
+  [[ -z "$expected" ]] || cyder_engine_versions_equal "$installed" "$expected"
 }
 
 # Resolve the installed engine without opening the bundled archive when the
@@ -495,7 +513,7 @@ cyder_resolve_shared_engine() {
   if [[ -n "$bundled_src" && "$engine_src" == "$bundled_src" && -x "$engine/bin/wine" ]]; then
     expected="$(cyder_bundled_engine_version "$CYDER_OGOM" 2>/dev/null || true)"
     installed="$(cyder_read_installed_engine_version "$engine" 2>/dev/null || true)"
-    if [[ -n "$expected" && "$installed" == "$expected" ]]; then
+    if [[ -n "$expected" ]] && cyder_engine_versions_equal "$installed" "$expected"; then
       cyder_migrate_legacy_layout || return $?
       if [[ ! -f "$engine/.cyder-engine-signed" ]]; then
         cyder_sign_installed_engine "$engine" || return $?
@@ -543,7 +561,7 @@ cyder_resolve_wine_locale() {
 cyder_wine_locale_exports() {
   local loc
   loc="$(cyder_resolve_wine_locale)"
-  export LANG="$loc" LC_ALL="$loc"
+  export LANG="$loc" LC_ALL="$loc" LC_CTYPE="$loc"
 }
 
 cyder_resolve_exe_from_args() {
@@ -623,9 +641,15 @@ cyder_tarball_has_wine_root() {
 
 cyder_find_zstd() {
   local candidate
-  for candidate in "$(command -v zstd 2>/dev/null || true)"; do
+  local -a candidates=("${CYDER_ZSTD:-}")
+  [[ -n "${CYDER_OGOM:-}" ]] && candidates+=("$CYDER_OGOM/tools/zstd/zstd")
+  candidates+=(
+    "$CYDER_COMMON_DIR/../tools/zstd/zstd"
+    "$(command -v zstd 2>/dev/null || true)"
+  )
+  for candidate in "${candidates[@]}"; do
     if [[ -n "$candidate" && -x "$candidate" ]]; then
-      printf '%s\n' "$candidate"
+      printf '%s/%s\n' "$(cd "$(dirname "$candidate")" && pwd -P)" "$(basename "$candidate")"
       return 0
     fi
   done
@@ -635,7 +659,7 @@ cyder_find_zstd() {
 cyder_tar_extract() {
   local tarball="$1"
   local dest_dir="$2"
-  local err_file rc zstd_bin
+  local err_file rc zstd_bin pipe_status
   err_file="$(mktemp "${TMPDIR:-/tmp}/cyder-tar-err.XXXXXX")"
   if [[ "$tarball" == *.tar.xz ]]; then
     tar -xJf "$tarball" -C "$dest_dir" 2>"$err_file"
@@ -644,9 +668,10 @@ cyder_tar_extract() {
     cyder_log_engine "extract via zstd pipe: $zstd_bin"
     set +o pipefail
     "$zstd_bin" -d -c "$tarball" 2>"$err_file" | tar -xf - -C "$dest_dir" 2>>"$err_file"
-    rc=${PIPESTATUS[1]}
-    if [[ ${PIPESTATUS[0]} -ne 0 ]]; then
-      rc=${PIPESTATUS[0]}
+    pipe_status=("${PIPESTATUS[@]}")
+    rc=${pipe_status[1]}
+    if [[ ${pipe_status[0]} -ne 0 ]]; then
+      rc=${pipe_status[0]}
     fi
     set -o pipefail
   else
@@ -794,7 +819,8 @@ cyder_ensure_shared_engine() {
   bundled_version="$(cyder_bundled_engine_version_from_src "$engine_src" 2>/dev/null || true)"
   if [[ -f "$marker" ]]; then
     installed_version="$(cyder_read_installed_engine_version "$dest" 2>/dev/null || true)"
-    if [[ -z "$bundled_version" || "$installed_version" == "$bundled_version" ]]; then
+    if [[ -z "$bundled_version" ]] ||
+       cyder_engine_versions_equal "$installed_version" "$bundled_version"; then
       echo "Shared engine present: $dest" >&2
       if [[ ! -f "$dest/.cyder-engine-signed" ]]; then
         cyder_sign_installed_engine "$dest" || exit 1
@@ -806,10 +832,11 @@ cyder_ensure_shared_engine() {
     cyder_reset_shared_prefix
   else
     echo "Installing shared engine -> $dest" >&2
-    if [[ -n "$bundled_version" && -e "$CYDER_SHARED_PREFIX" &&
-          ( -z "$CYDER_MIGRATED_ENGINE_VERSION" ||
-            "$CYDER_MIGRATED_ENGINE_VERSION" != "$bundled_version" ) ]]; then
-      cyder_reset_shared_prefix
+    if [[ -n "$bundled_version" && -e "$CYDER_SHARED_PREFIX" ]]; then
+      if [[ -z "$CYDER_MIGRATED_ENGINE_VERSION" ]] ||
+         ! cyder_engine_versions_equal "$CYDER_MIGRATED_ENGINE_VERSION" "$bundled_version"; then
+        cyder_reset_shared_prefix
+      fi
     fi
   fi
 
@@ -1336,7 +1363,8 @@ cyder_ensure_font_replacements() {
 
 # Settings entered from the game-library UI are keyed by the stable EXE ID.
 # Keep the shell launch path in sync with the native AppKit path so Finder
-# associations and --launch-exe receive the same per-game settings.
+# Finder associations and the internal shell launch path receive the same
+# per-game settings.
 CYDER_GAME_ARGUMENTS=()
 CYDER_GAME_SETTINGS_FOUND=0
 
@@ -1524,6 +1552,9 @@ cyder_run_wine_exe() {
   fi
   local -a game_args=("$@")
   local game_args_text="${game_args[*]-}"
+  if [[ "${CYDER_REDACT_DYNAMIC_ARGS:-0}" == 1 ]]; then
+    game_args_text="<${#game_args[@]} dynamic arguments redacted>"
+  fi
   local wineserver="${wine_bin%/wine}/wineserver"
   # Keep the legacy direct path as the default.  Wine's ShellExecute-compatible
   # start.exe path is available for A/B testing with CYDER_WINE_START_MODE=start

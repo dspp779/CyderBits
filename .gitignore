@@ -40,4 +40,4 @@ libarchive-2.4.12-1-*.zip
 __pycache__/
 *.py[cod]
 
-.wine/
+.wine/.worktrees/

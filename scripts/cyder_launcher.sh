@@ -69,7 +69,8 @@ Options:
   --session-update PREFIX SESSION_FILE NEW_PID Update a reserved session PID
   --session-release PREFIX SESSION_FILE Release a reserved session
   --templates-ready  Check pristine/golden template compatibility
-  --launch-exe PATH   Launch .exe (engine + bootstrap must already be ready)
+  --launch-exe PATH [-- ARG ...]
+                      Launch .exe; arguments after -- replace saved game arguments for this launch
   --profile-resolve PATH  Resolve PATH to its per-game bottle and exit
   --profile-create PATH [pristine|golden]  Create/resolve a per-game bottle and exit
   --profile-remove PATH  Remove a per-game bottle/profile and exit
@@ -99,6 +100,8 @@ SESSION_ARGS=()
 TEMPLATES_READY=0
 ENGINE_SRC="$CYDER_ENGINE_SRC"
 EXE_ARGS=()
+FORWARDED_GAME_ARGUMENTS=()
+FORWARDED_GAME_ARGUMENTS_SET=0
 POSITIONAL_EXE=0
 
 cyder_write_machine_result() {
@@ -229,8 +232,13 @@ while [[ $# -gt 0 ]]; do
       ;;
     --)
       shift
-      EXE_ARGS+=("$@")
-      [[ $# -gt 0 ]] && POSITIONAL_EXE=1
+      if [[ "$LAUNCH_ONLY" -eq 1 ]]; then
+        FORWARDED_GAME_ARGUMENTS=("$@")
+        FORWARDED_GAME_ARGUMENTS_SET=1
+      else
+        EXE_ARGS+=("$@")
+        [[ $# -gt 0 ]] && POSITIONAL_EXE=1
+      fi
       break
       ;;
     -*)
@@ -559,6 +567,9 @@ if [[ "$LAUNCH_ONLY" -eq 1 ]]; then
     settings_status=$?
     exit "$settings_status"
   }
+  if [[ "$FORWARDED_GAME_ARGUMENTS_SET" -eq 1 ]]; then
+    CYDER_GAME_ARGUMENTS=("${FORWARDED_GAME_ARGUMENTS[@]}")
+  fi
   cyder_set_stage wine-launch
   cyder_run_wine_exe "$wine" "$exe" "$CYDER_SHARED_PREFIX" "${CYDER_GAME_ARGUMENTS[@]}"
   exit 0

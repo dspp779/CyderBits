@@ -10,12 +10,22 @@ WINE_ROOT="${1:-$WINE_INSTALL}"
 UNIX_LIB="$WINE_ROOT/lib/wine/x86_64-unix"
 BREW="$HOMEBREW_PREFIX"
 GRAPHICS_LIB="${GRAPHICS_INSTALL:-}/lib"
+MEDIA_LIB="${MEDIA_INSTALL:-}/lib"
 VULKAN_MODE="${VULKAN_MODE:-without}"
+VULKAN_SOURCE="${VULKAN_SOURCE:-existing}"
 
 [[ -d "$UNIX_LIB" ]] || { echo "Missing $UNIX_LIB" >&2; exit 1; }
 [[ -d "$BREW" ]] || { echo "Missing $BREW (needed as source of dylibs)" >&2; exit 1; }
 
-export GRAPHICS_LIB VULKAN_MODE
+case "$VULKAN_SOURCE" in
+  crossover | homebrew | existing) ;;
+  *)
+    echo "Unknown VULKAN_SOURCE: $VULKAN_SOURCE (expected crossover, homebrew, or existing)" >&2
+    exit 1
+    ;;
+esac
+
+export GRAPHICS_LIB MEDIA_LIB VULKAN_MODE VULKAN_SOURCE
 
 python3 - "$WINE_ROOT" "$BREW" "$UNIX_LIB" <<'PY'
 import os
@@ -26,7 +36,9 @@ wine_root = Path(sys.argv[1])
 brew = Path(sys.argv[2]).resolve()
 unix_lib = Path(sys.argv[3])
 graphics_lib = Path(os.environ.get("GRAPHICS_LIB", "")) if os.environ.get("GRAPHICS_LIB") else None
+media_lib = Path(os.environ.get("MEDIA_LIB", "")) if os.environ.get("MEDIA_LIB") else None
 vulkan_mode = os.environ.get("VULKAN_MODE", "without")
+vulkan_source = os.environ.get("VULKAN_SOURCE", "existing")
 
 abs_re = re.compile(r"^\t(.+?) \(compatibility")
 
@@ -42,6 +54,12 @@ def allowed_root(p: Path) -> bool:
     if graphics_lib and graphics_lib.is_dir():
         try:
             p.relative_to(graphics_lib.resolve())
+            return True
+        except ValueError:
+            pass
+    if media_lib and media_lib.is_dir():
+        try:
+            p.relative_to(media_lib.resolve())
             return True
         except ValueError:
             pass
@@ -71,12 +89,14 @@ for name in (
     "libfreetype.6.dylib",
     "libgnutls.30.dylib",
     "libpng16.16.dylib",
+    "libffi.8.dylib",
 ):
     for candidate in (
         brew / "lib" / name,
         brew / "opt" / "freetype" / "lib" / name,
         brew / "opt" / "gnutls" / "lib" / name,
         brew / "opt" / "libpng" / "lib" / name,
+        brew / "opt" / "libffi" / "lib" / name,
         unix_lib / name,
     ):
         if candidate.exists():
@@ -84,23 +104,63 @@ for name in (
             break
 
 if vulkan_mode == "with":
-    for candidate in (
-        brew / "opt" / "molten-vk" / "lib" / "libMoltenVK.dylib",
-        brew / "lib" / "libMoltenVK.dylib",
-        (graphics_lib / "libMoltenVK.dylib") if graphics_lib else None,
-        unix_lib / "libMoltenVK.dylib",
-    ):
+    candidates_by_source = {
+        # The CrossOver snapshot carries feature-advertising changes required
+        # by Wine's Vulkan D3D10/11 backend.  A Homebrew MoltenVK can load but
+        # may cap wined3d at feature level 9_3, so never let it silently replace
+        # an explicitly selected CrossOver build.
+        "crossover": (
+            (graphics_lib / "libMoltenVK.dylib") if graphics_lib else None,
+            unix_lib / "libMoltenVK.dylib",
+        ),
+        "homebrew": (
+            brew / "opt" / "molten-vk" / "lib" / "libMoltenVK.dylib",
+            brew / "lib" / "libMoltenVK.dylib",
+            unix_lib / "libMoltenVK.dylib",
+        ),
+        # Repacking an existing engine must preserve its tested renderer.
+        "existing": (
+            unix_lib / "libMoltenVK.dylib",
+            (graphics_lib / "libMoltenVK.dylib") if graphics_lib else None,
+            brew / "opt" / "molten-vk" / "lib" / "libMoltenVK.dylib",
+            brew / "lib" / "libMoltenVK.dylib",
+        ),
+    }
+    for candidate in candidates_by_source[vulkan_source]:
         if candidate and candidate.exists():
             seeds.append(candidate.resolve())
             break
 
-# follow any existing symlinks already in unix lib
+if media_lib and media_lib.is_dir():
+    for name in (
+        "libglib-2.0.0.dylib",
+        "libgobject-2.0.0.dylib",
+        "libintl.8.dylib",
+        "libgstreamer-1.0.0.dylib",
+        "libgstbase-1.0.0.dylib",
+        "libgstaudio-1.0.0.dylib",
+        "libgsttag-1.0.0.dylib",
+        "libgstvideo-1.0.0.dylib",
+    ):
+        candidate = media_lib / name
+        if candidate.exists():
+            seeds.append(candidate.resolve())
+
+# Follow existing dylibs and the dependencies of every Mach-O Unix module.
+# winegstreamer.so is the important non-dylib case: it introduces the bundled
+# GLib/GStreamer graph and therefore must be a dependency seed.
 for p in unix_lib.iterdir():
     if p.suffix == ".dylib":
         try:
             seeds.append(p.resolve())
         except FileNotFoundError:
             pass
+    for dep in otool_deps(p):
+        if dep.startswith("/usr/lib/") or dep.startswith("/System/") or dep.startswith("@"):
+            continue
+        candidate = Path(dep)
+        if candidate.exists() and allowed_root(candidate):
+            seeds.append(candidate.resolve())
 
 need = {}  # basename(install_id) -> resolved path
 queue = list(seeds)
@@ -118,8 +178,31 @@ while queue:
     seen_files.add(p)
     iid = install_id(p)
     base = Path(iid).name
-    # prefer real cellar file
-    need[base] = p
+    # Prefer the purpose-built media stack when basenames collide. GLib's
+    # proxy-libintl intentionally has the same install name as gettext's
+    # libintl, but exports the g_libintl_* symbols GLib was linked against.
+    def source_priority(path: Path) -> int:
+        resolved = path.resolve()
+        if media_lib and media_lib.is_dir():
+            try:
+                resolved.relative_to(media_lib.resolve())
+                return 30
+            except ValueError:
+                pass
+        if graphics_lib and graphics_lib.is_dir():
+            try:
+                resolved.relative_to(graphics_lib.resolve())
+                return 20
+            except ValueError:
+                pass
+        try:
+            resolved.relative_to(brew)
+            return 10
+        except ValueError:
+            return 0
+
+    if base not in need or source_priority(p) > source_priority(need[base]):
+        need[base] = p
     for d in otool_deps(p):
         if d.startswith("/usr/lib/") or d.startswith("/System/"):
             continue
@@ -138,20 +221,49 @@ print(f"Bundling {len(need)} dylibs into {unix_lib}")
 # Remove old symlinks/files we will replace
 for base in need:
     target = unix_lib / base
+    if need[base].resolve() == target.resolve():
+        continue
     if target.is_symlink() or target.exists():
         target.unlink()
 
 # Copy (clear quarantine / immutable flags so codesign and xattr work)
 for base, src in sorted(need.items()):
     dst = unix_lib / base
+    if src.resolve() == dst.resolve():
+        print(f"  keep {dst.name}")
+        continue
     shutil.copy2(src, dst)
     dst.chmod(0o755)
     subprocess.call(["chflags", "nouchg", str(dst)], stderr=subprocess.DEVNULL)
     subprocess.call(["xattr", "-c", str(dst)], stderr=subprocess.DEVNULL)
-    print(f"  copy {src.name} -> {dst.name}")
+    print(f"  copy {src} -> {dst.name}")
 
 # Rewrite install names
 bundled = {base: unix_lib / base for base in need}
+
+# GLib's proxy-libintl and Homebrew gettext deliberately share the install
+# name libintl.8.dylib but export different symbol namespaces. Keep the proxy
+# at the canonical name for GLib, and give gettext a private alias for GnuTLS
+# and other Homebrew consumers that reference _libintl_*.
+gettext_intl = None
+for candidate in (
+    brew / "opt" / "gettext" / "lib" / "libintl.8.dylib",
+    brew / "lib" / "libintl.8.dylib",
+):
+    if candidate.exists():
+        gettext_intl = candidate.resolve()
+        break
+if gettext_intl and media_lib and (media_lib / "libintl.8.dylib").exists():
+    alias = "libintl-gettext.8.dylib"
+    alias_dst = unix_lib / alias
+    shutil.copy2(gettext_intl, alias_dst)
+    alias_dst.chmod(0o755)
+    subprocess.call(["chflags", "nouchg", str(alias_dst)], stderr=subprocess.DEVNULL)
+    subprocess.call(["xattr", "-c", str(alias_dst)], stderr=subprocess.DEVNULL)
+    bundled[alias] = alias_dst
+    need[alias] = gettext_intl
+    print(f"  copy {gettext_intl} -> {alias}")
+
 # map old absolute prefixes to new basenames
 old_to_base = {}
 for base, src in need.items():
@@ -180,12 +292,52 @@ for base, dst in bundled.items():
                 ["install_name_tool", "-change", dep, f"@loader_path/{b}", str(dst)]
             )
 
+# Rewrite the consumers too, not just the copied dylibs. In particular,
+# winegstreamer.so was linked directly against MEDIA_INSTALL and otherwise
+# remains non-relocatable even though its dependencies were copied above.
+consumers = []
+for candidate in unix_lib.iterdir():
+    if candidate.is_file() and otool_deps(candidate):
+        consumers.append(candidate)
+for consumer in consumers:
+    for dep in otool_deps(consumer):
+        dep_base = Path(dep).name
+        if dep_base in bundled and not dep.startswith("@loader_path/"):
+            subprocess.check_call(
+                ["install_name_tool", "-change", dep, f"@loader_path/{dep_base}", str(consumer)]
+            )
+
+    if "libintl-gettext.8.dylib" in bundled:
+        try:
+            undefined = subprocess.check_output(["nm", "-u", str(consumer)], text=True,
+                                                stderr=subprocess.DEVNULL)
+        except subprocess.CalledProcessError:
+            undefined = ""
+        needs_gettext = any(
+            symbol.strip().startswith("_libintl_") for symbol in undefined.splitlines()
+        )
+        if needs_gettext:
+            for dep in otool_deps(consumer):
+                if Path(dep).name == "libintl.8.dylib":
+                    subprocess.check_call([
+                        "install_name_tool", "-change", dep,
+                        "@loader_path/libintl-gettext.8.dylib", str(consumer)
+                    ])
+
+    # Remove build-tree search paths. Missing paths are harmless to the loader,
+    # but leak the builder's machine and can mask an incomplete bundle.
+    load_commands = subprocess.check_output(["otool", "-l", str(consumer)], text=True)
+    rpaths = re.findall(r"\n\s+path (\S+) \(offset \d+\)", load_commands)
+    for rpath in rpaths:
+        if ".brew-x86" in rpath or (media_lib and str(media_lib.resolve()) in rpath):
+            subprocess.check_call(["install_name_tool", "-delete_rpath", rpath, str(consumer)])
+
 # Verify no remaining references into brew-x86
 bad = []
-for base, dst in bundled.items():
+for dst in consumers:
     for dep in otool_deps(dst):
-        if ".brew-x86" in dep or str(brew) in dep:
-            bad.append((base, dep))
+        if ".brew-x86" in dep or str(brew) in dep or (media_lib and str(media_lib.resolve()) in dep):
+            bad.append((dst.name, dep))
 
 if bad:
     print("ERROR: unresolved brew paths remain:", file=sys.stderr)

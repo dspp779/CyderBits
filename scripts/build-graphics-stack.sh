@@ -128,9 +128,15 @@ build_moltenvk_crossover() {
   dylib="$(moltenvk_dylib_path)"
   marker="$GRAPHICS_INSTALL/lib/libMoltenVK.dylib"
 
-  if [[ -f "$marker" && "$DRY_RUN" -eq 0 ]]; then
+  if [[ -f "$marker" && -f "$GRAPHICS_INSTALL/version" \
+      && "$(grep -F 'source crossover-foss' "$GRAPHICS_INSTALL/version" 2>/dev/null || true)" == "source crossover-foss" \
+      && "$DRY_RUN" -eq 0 ]]; then
     echo "MoltenVK already installed at $marker"
     return 0
+  fi
+
+  if [[ -f "$marker" && "$DRY_RUN" -eq 0 ]]; then
+    echo "Ignoring unverified MoltenVK at $marker (missing crossover-foss manifest)." >&2
   fi
 
   [[ -d "$MOLTENVK_SRC" ]] || {

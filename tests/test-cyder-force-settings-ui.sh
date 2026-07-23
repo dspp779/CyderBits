@@ -87,6 +87,8 @@ assert_contains "$app" "createsNewApplicationInstance = true" "detached launches
 assert_contains "$app" "gameLibraryController.window?.isVisible == true" "Finder opens should preserve an already visible library"
 assert_contains "$app" "if !documentLaunchRequested {" "detached game launches should not show the parent application's active-session warning"
 assert_contains "$app" "game-launch effective-settings" "launch diagnostics should record the effective game settings"
+assert_contains "$app" 'Public argv contract: `Cyder [game.exe] [game argument ...]`' "native launches should accept an EXE without Cyder-specific options"
+assert_contains "$app" 'let gameArguments = launchArguments ?? savedGameArguments' "dynamic arguments should replace saved profile arguments for one launch"
 wine_launch_region="$(sed -n '/private func runDirectWine/,/private func buildEnvironment/p' "$ROOT/scripts/cyder_app_main.swift")"
 if [[ "$wine_launch_region" == *"--session-acquire"* ]]; then
   echo "ASSERT failed: native game launches must not reject a second game's settings session" >&2

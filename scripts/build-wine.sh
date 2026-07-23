@@ -9,9 +9,10 @@ INSTALL_DEPS=0
 CONFIGURE_ONLY=0
 PREPARE_ONLY=0
 CX_VERSION="${CX_VERSION:-26}"
-JOBS="$(sysctl -n hw.ncpu)"
+JOBS="$(sysctl -n hw.ncpu 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)"
 VULKAN_MODE=without
 VULKAN_SOURCE=homebrew
+BUILD_TESTS=0
 
 run() {
   if [[ "$DRY_RUN" -eq 1 ]]; then
@@ -32,6 +33,7 @@ while [[ $# -gt 0 ]]; do
     --install-deps) INSTALL_DEPS=1 ;;
     --configure-only) CONFIGURE_ONLY=1 ;;
     --prepare-only) PREPARE_ONLY=1 ;;
+    --with-tests) BUILD_TESTS=1 ;;
     --cx)
       CX_VERSION="$2"
       shift
@@ -59,6 +61,7 @@ Build CrossOver Wine for macOS x86_64 (Rosetta).
 Options:
   --cx 25|26         CrossOver release (default: 26)
   --prepare-only     Extract archives from tools/archives/ and exit
+  --with-tests       Build Wine regression-test executables (off for runtime builds)
   --bootstrap-brew   Install project-local x86_64 Homebrew
   --install-deps     Install build dependencies via .brew-x86
   --with-vulkan      Enable Vulkan (Wine configure autodetects MoltenVK)
@@ -77,6 +80,7 @@ Vulkan examples:
   bash scripts/build-graphics-stack.sh --cx 26 --install-deps && \\
     bash scripts/build-graphics-stack.sh --cx 26
   bash scripts/build-wine.sh --with-vulkan --vulkan-source crossover
+  bash scripts/build-media-stack.sh --cx 26
 EOF
       exit 0
       ;;
@@ -115,6 +119,7 @@ source "$SCRIPT_DIR/env-x86_64.sh"
 PREPARE_ARGS=(--cx "$CX_VERSION")
 [[ "$DRY_RUN" -eq 1 ]] && PREPARE_ARGS+=(--dry-run)
 "$SCRIPT_DIR/prepare-build-deps.sh" "${PREPARE_ARGS[@]}"
+
 
 if [[ "$PREPARE_ONLY" -eq 1 ]]; then
   exit 0
@@ -257,7 +262,6 @@ require_x86_dep() {
 
 ensure_bzip2_pc
 require_x86_dep freetype2
-
 CONFIGURE_VULKAN_FLAG=()
 if [[ "$VULKAN_MODE" == "without" ]]; then
   CONFIGURE_VULKAN_FLAG=(--without-vulkan)
@@ -322,6 +326,9 @@ CONFIGURE_CMD=(
   --with-mingw=llvm-mingw
   --prefix="$WINE_INSTALL"
 )
+if [[ "$BUILD_TESTS" -eq 0 ]]; then
+  CONFIGURE_CMD+=(--disable-tests)
+fi
 if [[ ${#CONFIGURE_VULKAN_FLAG[@]} -gt 0 ]]; then
   CONFIGURE_CMD+=("${CONFIGURE_VULKAN_FLAG[@]}")
 fi
@@ -341,7 +348,7 @@ if [[ "$CONFIGURE_ONLY" -eq 0 ]]; then
   if [[ "$DRY_RUN" -eq 1 ]]; then
     echo "+ GRAPHICS_INSTALL=${GRAPHICS_INSTALL:-} VULKAN_MODE=$VULKAN_MODE $SCRIPT_DIR/bundle-wine-dylibs.sh"
   else
-    GRAPHICS_INSTALL="$GRAPHICS_INSTALL" VULKAN_MODE="$VULKAN_MODE" \
+    GRAPHICS_INSTALL="$GRAPHICS_INSTALL" MEDIA_INSTALL="$MEDIA_INSTALL" VULKAN_MODE="$VULKAN_MODE" \
       "$SCRIPT_DIR/bundle-wine-dylibs.sh" "$WINE_INSTALL"
   fi
 fi

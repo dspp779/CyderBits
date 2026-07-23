@@ -49,6 +49,54 @@ bash scripts/cyder_launcher.sh /path/to/game.exe --dry-run
 bash scripts/cyder_launcher.sh --bootstrap-only --engine-src install/wine-x86_64
 ```
 
+### 當次動態命令列參數
+
+Cyder.app 不保留任何公開命令列選項。最符合 macOS 文件型 app 的方式，是把 EXE 交給
+LaunchServices，並把 `--args` 後的每一個值原樣轉送給 Windows 程式：
+
+```sh
+/usr/bin/open -n -a '/Applications/Cyder.app' '/path/to/game.exe' --args \
+  server.example.com 8484 LoginMode account-id one-time-token
+```
+
+若 `.exe` 的預設開啟程式已設為 Cyder，可省略 app：
+
+```sh
+/usr/bin/open -n '/path/to/game.exe' --args arg1 'arg 2'
+```
+
+`-n` 是動態參數契約的一部分：LaunchServices 只會把 argv 交給新建立的 app instance；
+省略 `-n` 可能只把 EXE 的 open event 送到既有 Cyder，而遺失這次參數。
+
+也可不經 LaunchServices，直接使用 `EXE [ARG ...]` 呼叫 app executable：
+
+```sh
+'/Applications/Cyder.app/Contents/MacOS/Cyder' '/path/to/game.exe' arg1 'arg 2'
+```
+
+每個遊戲 argv 都會保持原有邊界與順序，且只對這次啟動生效。只要這次啟動提供任何
+動態 argv，它就會取代該遊戲 profile 保存的靜態參數；一般 Finder 雙擊且沒有 argv 時
+仍使用保存的參數。Cyder 的 MSYNC、ESYNC、power mode、locale 等執行選項不使用 argv，
+必須以環境變數提供，例如：
+
+```sh
+/usr/bin/open -n -a '/Applications/Cyder.app' \
+  --env CYDER_MSYNC=1 --env LANG=zh_TW.UTF-8 --env LC_ALL=zh_TW.UTF-8 \
+  '/path/to/game.exe' --args arg1 'arg 2'
+```
+
+內附 shell launcher 仍有維護與 bootstrap 專用選項；那是 Cyder 內部介面，不是
+Cyder.app 的公開 argv 契約：
+
+```sh
+bash scripts/cyder_launcher.sh --launch-exe '/path/to/game.exe' -- arg1 'arg 2'
+```
+
+為了方便核對一次性 OTP、帳號與參數順序，Cyder 的 debug launch summary 預設完整記錄
+動態參數；argv 在程序執行期間也可能由系統 process inspection 看見。若要建立可公開的
+支援紀錄，可在啟動 Cyder 前設定 `CYDER_REDACT_DYNAMIC_ARGS=1`，此時 summary 只記錄
+動態參數數量。Wine／遊戲自己的 debug log 不受這個開關控制。
+
 （`python3 scripts/cyder_launcher.py` 仍可用，會轉呼叫上述 shell 腳本。）
 
 ## Shared bottle 與 bootstrap
