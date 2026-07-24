@@ -428,6 +428,32 @@ private final class CyderFiveColumnGridLayout: NSCollectionViewLayout {
 
 /// A dedicated macOS window for per-game launch settings. It keeps advanced
 /// controls out of the library until people explicitly ask for them.
+/// Multiline text view with a simple empty-state placeholder (NSTextView has none).
+private final class CyderPlaceholderTextView: NSTextView {
+    var placeholderString: String = "" {
+        didSet { needsDisplay = true }
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        super.draw(dirtyRect)
+        guard string.isEmpty, !placeholderString.isEmpty else { return }
+        let attributes: [NSAttributedString.Key: Any] = [
+            .foregroundColor: NSColor.placeholderTextColor,
+            .font: font ?? NSFont.systemFont(ofSize: 12),
+        ]
+        let origin = NSPoint(
+            x: textContainerOrigin.x + 5,
+            y: textContainerOrigin.y
+        )
+        (placeholderString as NSString).draw(at: origin, withAttributes: attributes)
+    }
+
+    override func didChangeText() {
+        super.didChangeText()
+        needsDisplay = true
+    }
+}
+
 private final class CyderGameSettingsWindowController: NSWindowController, NSWindowDelegate {
     var onLaunch: ((URL, CyderExecutableSettings) -> Void)?
     var onRemoveProfile: ((URL, @escaping (Bool) -> Void) -> Void)?
@@ -447,8 +473,8 @@ private final class CyderGameSettingsWindowController: NSWindowController, NSWin
     private let power = NSPopUpButton()
     private let font = NSPopUpButton()
     private let smoothing = NSPopUpButton()
-    private let environment = NSTextView()
-    private let arguments = NSTextField()
+    private let environment = CyderPlaceholderTextView()
+    private let arguments = CyderPlaceholderTextView()
     private var settingViews: [NSView] = []
     private let cancelButton = NSButton()
     private let confirmButton = NSButton()
@@ -457,7 +483,7 @@ private final class CyderGameSettingsWindowController: NSWindowController, NSWin
         self.game = game
         self.independent = independent
         let window = NSPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 420, height: 470),
+            contentRect: NSRect(x: 0, y: 0, width: 520, height: 430),
             styleMask: [.titled, .closable, .fullSizeContentView],
             backing: .buffered,
             defer: false
@@ -511,7 +537,7 @@ private final class CyderGameSettingsWindowController: NSWindowController, NSWin
         environment.string = (rule?.environment ?? [:]).sorted { $0.key < $1.key }
             .map { "\($0.key)=\($0.value)" }
             .joined(separator: "\n")
-        arguments.stringValue = formatArguments(rule?.arguments ?? [])
+        arguments.string = formatArguments(rule?.arguments ?? [])
 
         let executableExists = FileManager.default.fileExists(atPath: game.executablePath)
         launchButton.isEnabled = executableExists
@@ -558,15 +584,16 @@ private final class CyderGameSettingsWindowController: NSWindowController, NSWin
                 ? "細明體（MingLiU，預設）" : "細明體（MingLiU）",
         ])
         smoothing.addItems(withTitles: ["關閉", "灰階", "ClearType RGB"])
-        environment.isRichText = false
-        environment.isSelectable = true
-        environment.isEditable = true
-        environment.drawsBackground = false
-        environment.font = .systemFont(ofSize: 12)
-        environment.textColor = .labelColor
+        for textView in [environment, arguments] {
+            textView.isRichText = false
+            textView.isSelectable = true
+            textView.isEditable = true
+            textView.drawsBackground = false
+            textView.font = .systemFont(ofSize: 12)
+            textView.textColor = .labelColor
+        }
+        environment.placeholderString = "KEY=value  KEY2=value2"
         arguments.placeholderString = "例如：--fullscreen --width 1920"
-        arguments.font = .systemFont(ofSize: 12)
-        arguments.widthAnchor.constraint(equalToConstant: 240).isActive = true
         msync.target = self
         msync.action = #selector(msyncChanged)
         esync.target = self
@@ -592,7 +619,7 @@ private final class CyderGameSettingsWindowController: NSWindowController, NSWin
         let stack = NSStackView()
         stack.orientation = .vertical
         stack.alignment = .leading
-        stack.spacing = 12
+        stack.spacing = 10
         stack.translatesAutoresizingMaskIntoConstraints = false
 
         let form: [NSView] = [
@@ -603,8 +630,16 @@ private final class CyderGameSettingsWindowController: NSWindowController, NSWin
             row("能源模式", power, information: "省電模式會降低程序優先級，可能減少耗電但造成遊戲卡頓。"),
             row("遊戲字體", font, information: "選擇 Wine 的字體替代方案；細明體需要系統已安裝對應字型。"),
             row("字體平滑", smoothing, information: "控制 Windows 字體平滑方式。"),
-            row("環境變數", multilineInput(environment), information: "每行輸入一個 KEY=value，會在啟動時傳給遊戲。"),
-            row("命令列參數", arguments, information: "直接接在遊戲執行指令後；以空白分隔參數，含空白的參數可用引號包住。"),
+            row(
+                "環境變數",
+                multilineInput(environment),
+                information: "寫 KEY=value。可同行以空白分隔多組，也可換行；換行會當成空白。值含空白請用引號，例如 NAME=\"hello world\"。"
+            ),
+            row(
+                "命令列參數",
+                multilineInput(arguments),
+                information: "直接接在遊戲執行指令後；以空白分隔參數，含空白的參數可用引號包住。可換行書寫，換行視同空白。"
+            ),
         ]
         settingViews = form
         form.forEach { stack.addArrangedSubview($0) }
@@ -673,8 +708,8 @@ private final class CyderGameSettingsWindowController: NSWindowController, NSWin
         scroll.drawsBackground = true
         scroll.backgroundColor = .textBackgroundColor
         scroll.translatesAutoresizingMaskIntoConstraints = false
-        scroll.widthAnchor.constraint(equalToConstant: 240).isActive = true
-        scroll.heightAnchor.constraint(equalToConstant: 56).isActive = true
+        scroll.widthAnchor.constraint(equalToConstant: 360).isActive = true
+        scroll.heightAnchor.constraint(equalToConstant: 40).isActive = true
         textView.minSize = NSSize(width: 0, height: 0)
         textView.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
         textView.isVerticallyResizable = true
@@ -688,7 +723,7 @@ private final class CyderGameSettingsWindowController: NSWindowController, NSWin
     private func setControlsEnabled(_ enabled: Bool) {
         [msync, esync, retina, dpi, power, font, smoothing].forEach { $0.isEnabled = enabled }
         environment.isEditable = enabled
-        arguments.isEnabled = enabled
+        arguments.isEditable = enabled
         settingViews.forEach { $0.alphaValue = enabled ? 1 : 0.52 }
     }
 
@@ -757,18 +792,94 @@ private final class CyderGameSettingsWindowController: NSWindowController, NSWin
         rule.powerMode = power.indexOfSelectedItem == 1 ? "energySaving" : "standard"
         rule.fontPreset = font.indexOfSelectedItem == 1 ? "mingliu" : "songti"
         rule.fontSmoothing = smoothingValues[max(0, smoothing.indexOfSelectedItem)]
-        rule.environment = environment.string
-            .components(separatedBy: CharacterSet.newlines)
-            .compactMap { entry -> (String, String)? in
-                let entry = entry.trimmingCharacters(in: .whitespaces)
-                guard let separator = entry.firstIndex(of: "=") else { return nil }
-                let key = String(entry[..<separator]).trimmingCharacters(in: .whitespaces)
-                let value = String(entry[entry.index(after: separator)...])
-                return key.isEmpty ? nil : (key, value)
-            }
-            .reduce(into: [String: String]()) { $0[$1.0] = $1.1 }
-        rule.arguments = parseArguments(arguments.stringValue)
+        rule.environment = parseEnvironment(environment.string)
+        // Newlines in the multiline field are treated as whitespace separators.
+        rule.arguments = parseArguments(
+            arguments.string
+                .replacingOccurrences(of: "\r\n", with: " ")
+                .replacingOccurrences(of: "\n", with: " ")
+                .replacingOccurrences(of: "\r", with: " ")
+        )
         return rule
+    }
+
+    /// Accepts `KEY=value` pairs separated by spaces and/or newlines.
+    /// Quoted values keep internal spaces: `NAME="hello world"`.
+    private func parseEnvironment(_ text: String) -> [String: String] {
+        let normalized = text
+            .replacingOccurrences(of: "\r\n", with: " ")
+            .replacingOccurrences(of: "\n", with: " ")
+            .replacingOccurrences(of: "\r", with: " ")
+        let characters = Array(normalized)
+        var result: [String: String] = [:]
+        var index = 0
+
+        func skipWhitespace() {
+            while index < characters.count && characters[index].isWhitespace {
+                index += 1
+            }
+        }
+
+        while index < characters.count {
+            skipWhitespace()
+            guard index < characters.count else { break }
+
+            let keyStart = index
+            let first = characters[index]
+            guard first.isLetter || first == "_" else {
+                while index < characters.count && !characters[index].isWhitespace {
+                    index += 1
+                }
+                continue
+            }
+            index += 1
+            while index < characters.count {
+                let character = characters[index]
+                if character.isLetter || character.isNumber || character == "_" {
+                    index += 1
+                } else {
+                    break
+                }
+            }
+            let key = String(characters[keyStart..<index])
+            guard index < characters.count, characters[index] == "=" else { continue }
+            index += 1
+
+            let value: String
+            if index < characters.count, characters[index] == "\"" {
+                index += 1
+                var buffer = ""
+                while index < characters.count {
+                    let character = characters[index]
+                    if character == "\\" {
+                        let next = index + 1
+                        if next < characters.count {
+                            buffer.append(characters[next])
+                            index = next + 1
+                        } else {
+                            index = next
+                        }
+                    } else if character == "\"" {
+                        index += 1
+                        break
+                    } else {
+                        buffer.append(character)
+                        index += 1
+                    }
+                }
+                value = buffer
+            } else {
+                let valueStart = index
+                while index < characters.count && !characters[index].isWhitespace {
+                    index += 1
+                }
+                value = String(characters[valueStart..<index])
+            }
+            if !key.isEmpty {
+                result[key] = value
+            }
+        }
+        return result
     }
 
     private func formatArguments(_ values: [String]) -> String {

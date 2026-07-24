@@ -61,13 +61,14 @@ if [[ "$test_launch_region" == *"stopModal"* ]]; then
   echo "ASSERT failed: testing a game should keep its launch-options window open" >&2
   exit 1
 fi
-assert_contains "$library_ui" "joined(separator: \"\\n\")" "environment and argument fields should use line-based direct input"
+assert_contains "$library_ui" "parseEnvironment" "environment field should tokenize KEY=value pairs"
 assert_contains "$library_ui" "private final class CyderInformationButton: NSButton" "information icons should use a dedicated interactive control"
 assert_contains "$library_ui" "override func mouseEntered(with event: NSEvent)" "information buttons should handle hover"
 assert_contains "$library_ui" "action = #selector(buttonPressed)" "information buttons should handle clicks"
-assert_contains "$library_ui" "private let arguments = NSTextField()" "command line parameters should use a single-line field"
+assert_contains "$library_ui" "private let arguments = CyderPlaceholderTextView()" "command line parameters should use a multiline field"
 assert_contains "$library_ui" "直接接在遊戲執行指令後" "command line parameters should follow the executable command"
 assert_contains "$library_ui" "private func parseArguments(_ text: String)" "command line parameters should be tokenized without a separator"
+assert_contains "$library_ui" 'placeholderString = "KEY=value' "environment field should show an input placeholder"
 if [[ "$ui" == *"ClearType BGR"* || "$library_ui" == *"ClearType BGR"* ]]; then
   echo "ASSERT failed: BGR font smoothing should not be exposed in settings UI" >&2
   exit 1
@@ -89,7 +90,8 @@ assert_contains "$app" "gameLibraryController.window?.isVisible == true" "Finder
 assert_contains "$app" "if !documentLaunchRequested {" "detached game launches should not show the parent application's active-session warning"
 assert_contains "$app" "game-launch effective-settings" "launch diagnostics should record the effective game settings"
 assert_contains "$app" 'Public argv contract: `Cyder [game.exe] [game argument ...]`' "native launches should accept an EXE without Cyder-specific options"
-assert_contains "$app" 'let gameArguments = launchArguments ?? savedGameArguments' "dynamic arguments should replace saved profile arguments for one launch"
+assert_contains "$app" 'let hasDynamicArguments = !(launchArguments ?? []).isEmpty' "dynamic arguments should replace saved profile arguments for one launch"
+assert_contains "$app" 'let gameArguments = hasDynamicArguments ? (launchArguments ?? []) : savedGameArguments' "empty post-exe argv should keep saved profile arguments"
 wine_launch_region="$(sed -n '/private func runDirectWine/,/private func buildEnvironment/p' "$ROOT/scripts/cyder_app_main.swift")"
 if [[ "$wine_launch_region" == *"--session-acquire"* ]]; then
   echo "ASSERT failed: native game launches must not reject a second game's settings session" >&2

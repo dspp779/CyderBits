@@ -74,12 +74,23 @@ if [[ "$app" == *'if arg == "--launch-exe"'* || "$app" == *'if arg == "--"'* ]];
   exit 1
 fi
 assert_contains "$app" 'Public argv contract: `Cyder [game.exe] [game argument ...]`' "native Cyder should expose an option-free argv contract"
-assert_contains "$app" 'pendingLaunchArguments = Array(applicationArguments)' "native Cyder should preserve dynamic argv"
+assert_contains "$app" 'pendingLaunchArguments = applicationArguments.isEmpty' \
+  "native Cyder should treat empty post-exe argv as no dynamic arguments"
 assert_contains "$app" 'CYDER_TEST_SETTINGS_REQUEST' "internal launch settings should use environment rather than argv"
 assert_contains "$app" 'CYDER_CAPTURE_WINE_LOG' "test launches should enable Wine log capture by default"
 assert_contains "$app" 'CYDER_LAUNCH_KIND' "test launches should mark launch kind for log headers"
 assert_contains "$app" 'Running command:' "Wine launch logs should include a CrossOver-style command header"
-assert_contains "$app" 'let gameArguments = launchArguments ?? savedGameArguments' "dynamic arguments should replace saved arguments"
+assert_contains "$app" 'let hasDynamicArguments = !(launchArguments ?? []).isEmpty' \
+  "empty dynamic argv must not wipe test/saved game arguments"
 assert_contains "$app" 'CYDER_REDACT_DYNAMIC_ARGS' "native diagnostics should offer opt-in dynamic argument redaction"
+
+# UI: command-line args field should be multiline like environment variables.
+library_ui="$(cat "$ROOT/scripts/cyder_game_library_ui.swift")"
+assert_contains "$library_ui" 'private let arguments = CyderPlaceholderTextView()' \
+  "game launch options should use a multiline arguments field"
+assert_contains "$library_ui" 'multilineInput(arguments)' \
+  "arguments field should reuse the environment multiline layout"
+assert_contains "$library_ui" 'private func parseEnvironment(_ text: String)' \
+  "environment field should accept space- or newline-separated KEY=value pairs"
 
 echo "PASS test-cyder-dynamic-arguments"

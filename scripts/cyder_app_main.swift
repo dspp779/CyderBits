@@ -303,7 +303,12 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             pendingFiles.append(executable)
             documentLaunchRequested = true
             applicationArguments.removeFirst()
-            pendingLaunchArguments = Array(applicationArguments)
+            // Empty means "no dynamic argv", not "wipe saved/test arguments".
+            // Test launches open Cyder with only the .exe path, so this must
+            // stay nil for CYDER_TEST_SETTINGS_REQUEST.arguments to apply.
+            pendingLaunchArguments = applicationArguments.isEmpty
+                ? nil
+                : Array(applicationArguments)
         } else if !applicationArguments.isEmpty {
             // Association launch: EXE will arrive separately in openFiles.
             pendingLaunchArguments = Array(applicationArguments)
@@ -957,9 +962,19 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             legacyBasename: nil,
             override: gameSettings
         )
-        let gameArguments = launchArguments ?? savedGameArguments
-        let argumentSource = launchArguments == nil ? "saved" : "dynamic"
-        let redactDynamicArguments = launchArguments != nil
+        // Only non-empty dynamic argv replaces saved / test-override arguments.
+        // An empty array (Cyder opened with only game.exe) must not wipe them.
+        let hasDynamicArguments = !(launchArguments ?? []).isEmpty
+        let gameArguments = hasDynamicArguments ? (launchArguments ?? []) : savedGameArguments
+        let argumentSource: String
+        if hasDynamicArguments {
+            argumentSource = "dynamic"
+        } else if gameSettings != nil {
+            argumentSource = "test-or-override"
+        } else {
+            argumentSource = "saved"
+        }
+        let redactDynamicArguments = hasDynamicArguments
             && ProcessInfo.processInfo.environment["CYDER_REDACT_DYNAMIC_ARGS"] == "1"
         let diagnosticArguments = redactDynamicArguments
             ? "<\(gameArguments.count) dynamic arguments redacted>"

@@ -166,7 +166,7 @@ Cyder 的 `設定…`（`⌘,`）、Dock 右鍵或執行檔選擇器的「進階
 
 設定儲存在 `~/Library/Application Support/Cyder/settings.json`。全域顯示與字體設定會在控制項變更時，以原生 `sed` 直接更新未執行中的 Wine prefix；遊戲庫的個別設定則在遊戲設定頁按「套用」後保存，並在之後開啟該 EXE 時載入。
 
-遊戲庫以 EXE 的 canonical path 計算穩定 ID，個別選項存放於 `perProfile`；這不代表一定建立獨立 bottle。遊戲設定頁直接開放 MSync、ESync、Retina、DPI、字體、能源模式、環境變數與命令列參數，命令列參數以單行文字直接接在 EXE 後，空白分隔；含空白的單一參數可用引號保留。提供「測試」以套用目前草稿後開啟遊戲，或按「套用」保存供之後從遊戲庫、Finder／直接 EXE 開啟時使用。每個 EXE 的能源模式使用 `powerMode=standard|energySaving`；啟動契約環境變數為 `CYDER_POWER_MODE=normal|background`。
+遊戲庫以 EXE 的 canonical path 計算穩定 ID，個別選項存放於 `perProfile`；這不代表一定建立獨立 bottle。遊戲設定頁直接開放 MSync、ESync、Retina、DPI、字體、能源模式、環境變數與命令列參數。環境變數寫 `KEY=value`，可以空白或換行分隔多組（換行視同空白），值含空白請用引號。命令列參數直接接在 EXE 後，以空白分隔，亦可換行書寫（換行視同空白）；含空白的單一參數可用引號保留。提供「測試」以套用目前草稿後開啟遊戲，或按「套用」保存供之後從遊戲庫、Finder／直接 EXE 開啟時使用。每個 EXE 的能源模式使用 `powerMode=standard|energySaving`；啟動契約環境變數為 `CYDER_POWER_MODE=normal|background`。
 
 ### Winetricks（SharedPrefix）
 
