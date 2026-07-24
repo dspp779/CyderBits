@@ -32,11 +32,11 @@ import os
 import subprocess, re, shutil, sys
 from pathlib import Path
 
-wine_root = Path(sys.argv[1])
+wine_root = Path(sys.argv[1]).resolve()
 brew = Path(sys.argv[2]).resolve()
-unix_lib = Path(sys.argv[3])
-graphics_lib = Path(os.environ.get("GRAPHICS_LIB", "")) if os.environ.get("GRAPHICS_LIB") else None
-media_lib = Path(os.environ.get("MEDIA_LIB", "")) if os.environ.get("MEDIA_LIB") else None
+unix_lib = Path(sys.argv[3]).resolve()
+graphics_lib = Path(os.environ.get("GRAPHICS_LIB", "")).resolve() if os.environ.get("GRAPHICS_LIB") else None
+media_lib = Path(os.environ.get("MEDIA_LIB", "")).resolve() if os.environ.get("MEDIA_LIB") else None
 vulkan_mode = os.environ.get("VULKAN_MODE", "without")
 vulkan_source = os.environ.get("VULKAN_SOURCE", "existing")
 
@@ -345,5 +345,74 @@ if bad:
         print(f"  {b} -> {d}", file=sys.stderr)
     sys.exit(1)
 
+# Drop orphaned third-party dylibs left from a previous (broader) seed graph —
+# e.g. media/gnutls deps that are no longer reachable after a rebuild/drop.
+for p in sorted(unix_lib.iterdir()):
+    if p.suffix != ".dylib":
+        continue
+    if p.name in bundled:
+        continue
+    print(f"  remove orphan {p.name}")
+    p.unlink()
+
+# Product floor gate: every remaining bundled .dylib must have Mach-O minos
+# ≤ MACOSX_DEPLOYMENT_TARGET (default 10.15). Bottles built for 14/15 fail here.
+def parse_version(v: str):
+    parts = []
+    for p in v.split("."):
+        try:
+            parts.append(int(p))
+        except ValueError:
+            parts.append(0)
+    while len(parts) < 3:
+        parts.append(0)
+    return tuple(parts[:3])
+
+
+def macho_minos(path: Path):
+    try:
+        out = subprocess.check_output(["otool", "-l", str(path)], text=True, stderr=subprocess.DEVNULL)
+    except subprocess.CalledProcessError:
+        return None
+    m = re.search(r"\bminos\s+(\d+(?:\.\d+)*)", out)
+    if m:
+        return m.group(1)
+    m = re.search(
+        r"LC_VERSION_MIN_MACOSX.*?^\s+version\s+(\d+(?:\.\d+)*)",
+        out,
+        re.M | re.S,
+    )
+    if m:
+        return m.group(1)
+    return None
+
+
+floor = os.environ.get("MACOSX_DEPLOYMENT_TARGET", "10.15")
+floor_v = parse_version(floor)
+high = []
+for p in sorted(unix_lib.glob("*.dylib")):
+    minos = macho_minos(p)
+    if minos is None:
+        print(f"WARNING: could not read minos for {p.name}", file=sys.stderr)
+        continue
+    if parse_version(minos) > floor_v:
+        high.append((p.name, minos))
+
+if high:
+    print(
+        f"ERROR: bundled dylib minos exceeds product floor {floor}:",
+        file=sys.stderr,
+    )
+    for name, minos in high:
+        print(f"  {name} minos={minos}", file=sys.stderr)
+    print(
+        "Rebuild runtime brew formulae via brew_x86_install_runtime / "
+        "build-media-stack.sh with MACOSX_DEPLOYMENT_TARGET, or drop the "
+        "offending package from the seed graph.",
+        file=sys.stderr,
+    )
+    sys.exit(1)
+
 print("OK: runtime dylibs are relocatable under", unix_lib)
+print(f"OK: all bundled dylibs have minos ≤ {floor}")
 PY

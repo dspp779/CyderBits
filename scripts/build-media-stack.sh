@@ -30,8 +30,14 @@ export CX_VERSION
 source "$SCRIPT_DIR/env-x86_64.sh"
 "$SCRIPT_DIR/prepare-build-deps.sh" --cx "$CX_VERSION"
 
+export MACOSX_DEPLOYMENT_TARGET="${MACOSX_DEPLOYMENT_TARGET:-10.15}"
+MIN_FLAG="-mmacosx-version-min=${MACOSX_DEPLOYMENT_TARGET}"
+
 if [[ "$INSTALL_DEPS" -eq 1 ]]; then
-  brew_x86 install meson ninja pcre2 libffi bison pkgconf
+  # meson/ninja/bison/pkgconf are build-only (bottles OK).
+  brew_x86 install meson ninja bison pkgconf
+  # pcre2/libffi are linked into the media dylibs that get bundled.
+  brew_x86_install_runtime pcre2 libffi
 fi
 
 MESON="$HOMEBREW_PREFIX/bin/meson"
@@ -63,7 +69,19 @@ fi
 
 BUILD_PATH="$HOMEBREW_PREFIX/opt/bison/bin:/usr/bin:/bin:/usr/sbin:/sbin:$MEDIA_INSTALL/bin:$HOMEBREW_PREFIX/bin"
 PC_PATH="$MEDIA_INSTALL/lib/pkgconfig:$HOMEBREW_PREFIX/lib/pkgconfig:$HOMEBREW_PREFIX/opt/libffi/lib/pkgconfig:$HOMEBREW_PREFIX/opt/pcre2/lib/pkgconfig"
-MESON_CMD=(arch -x86_64 env PATH="$BUILD_PATH" PYTHONPATH="$PYTHON_SITE" PKG_CONFIG="$HOMEBREW_PREFIX/bin/pkg-config" PKG_CONFIG_PATH="$PC_PATH" DYLD_LIBRARY_PATH="$MEDIA_INSTALL/lib" "$SYSTEM_PYTHON" "$MESON")
+MESON_CMD=(
+  arch -x86_64 env
+  PATH="$BUILD_PATH"
+  PYTHONPATH="$PYTHON_SITE"
+  PKG_CONFIG="$HOMEBREW_PREFIX/bin/pkg-config"
+  PKG_CONFIG_PATH="$PC_PATH"
+  DYLD_LIBRARY_PATH="$MEDIA_INSTALL/lib"
+  MACOSX_DEPLOYMENT_TARGET="$MACOSX_DEPLOYMENT_TARGET"
+  CFLAGS="${CFLAGS:+$CFLAGS }$MIN_FLAG"
+  CXXFLAGS="${CXXFLAGS:+$CXXFLAGS }$MIN_FLAG"
+  LDFLAGS="${LDFLAGS:+$LDFLAGS }$MIN_FLAG"
+  "$SYSTEM_PYTHON" "$MESON"
+)
 
 mkdir -p "$MEDIA_BUILD" "$MEDIA_INSTALL"
 
@@ -71,7 +89,9 @@ mkdir -p "$MEDIA_BUILD" "$MEDIA_INSTALL"
   --prefix="$MEDIA_INSTALL" --libdir=lib --buildtype=release \
   -Ddefault_library=shared -Dtests=false -Dinstalled_tests=false -Dnls=disabled \
   -Dman=false -Dgtk_doc=false -Dlibmount=disabled -Dselinux=disabled -Dxattr=false \
-  -Dbsymbolic_functions=false
+  -Dbsymbolic_functions=false \
+  -Dc_args="$MIN_FLAG" -Dcpp_args="$MIN_FLAG" \
+  -Dc_link_args="$MIN_FLAG" -Dcpp_link_args="$MIN_FLAG"
 "${MESON_CMD[@]}" compile -C "$MEDIA_BUILD/glib-build" -j "$JOBS"
 "${MESON_CMD[@]}" install -C "$MEDIA_BUILD/glib-build"
 
@@ -82,7 +102,9 @@ mkdir -p "$MEDIA_BUILD" "$MEDIA_INSTALL"
   -Ddevtools=disabled -Dges=disabled -Drtsp_server=disabled -Dpython=disabled \
   -Dtls=disabled -Dlibnice=disabled -Dtests=disabled -Dtools=disabled \
   -Dexamples=disabled -Dintrospection=disabled -Dnls=disabled -Dorc=disabled \
-  -Ddoc=disabled -Dgtk_doc=disabled
+  -Ddoc=disabled -Dgtk_doc=disabled \
+  -Dc_args="$MIN_FLAG" -Dcpp_args="$MIN_FLAG" \
+  -Dc_link_args="$MIN_FLAG" -Dcpp_link_args="$MIN_FLAG"
 "${MESON_CMD[@]}" compile -C "$MEDIA_BUILD/gstreamer-build" -j "$JOBS"
 "${MESON_CMD[@]}" install -C "$MEDIA_BUILD/gstreamer-build"
 

@@ -152,18 +152,29 @@ if [[ "$INSTALL_DEPS" -eq 1 ]]; then
     echo "Missing $HOMEBREW_PREFIX/bin/brew; run with --bootstrap-brew first" >&2
     exit 1
   fi
-  DEPS=(autoconf bison flex pkgconf freetype gettext gnutls zlib bzip2)
+  # Build tools may use bottles (host minos OK — not shipped in the engine).
+  BUILD_TOOL_DEPS=(autoconf bison flex pkgconf)
+  # Runtime libs are copied into lib/wine/x86_64-unix and must be ≤ product floor.
+  RUNTIME_DEPS=(zlib bzip2 libpng freetype gettext libffi gnutls)
   if [[ "$VULKAN_MODE" == "with" ]]; then
     case "$VULKAN_SOURCE" in
       homebrew)
-        DEPS+=(molten-vk vulkan-headers)
+        # molten-vk bottles are not used for the CrossOver renderer path; still
+        # build from source if someone explicitly selects Homebrew MoltenVK.
+        RUNTIME_DEPS+=(molten-vk)
+        BUILD_TOOL_DEPS+=(vulkan-headers)
         ;;
       crossover)
-        DEPS+=(cmake python3)
+        BUILD_TOOL_DEPS+=(cmake python3)
         ;;
     esac
   fi
-  run brew_x86 install "${DEPS[@]}"
+  run brew_x86 install "${BUILD_TOOL_DEPS[@]}"
+  if [[ "$DRY_RUN" -eq 1 ]]; then
+    echo "+ brew_x86_install_runtime ${RUNTIME_DEPS[*]}"
+  else
+    brew_x86_install_runtime "${RUNTIME_DEPS[@]}"
+  fi
   if [[ "$VULKAN_MODE" == "with" && "$VULKAN_SOURCE" == "crossover" ]]; then
     echo "CrossOver Vulkan: run build-graphics-stack.sh after deps (cmake/python3 installed)."
     echo "  bash scripts/build-graphics-stack.sh --cx $CX_VERSION"
@@ -203,7 +214,8 @@ require_moltenvk_crossover() {
     return 0
   fi
   echo "Missing $lib" >&2
-  echo "Build CrossOver MoltenVK first:" >&2
+  echo "Install CrossOver.app MoltenVK (preferred) or build from sources:" >&2
+  echo "  bash scripts/install-crossover-app-moltenvk.sh" >&2
   echo "  bash scripts/build-graphics-stack.sh --cx $CX_VERSION --install-deps" >&2
   echo "  bash scripts/build-graphics-stack.sh --cx $CX_VERSION" >&2
   exit 1
@@ -319,6 +331,7 @@ CONFIGURE_CMD=(
   PKG_CONFIG="$HOMEBREW_PREFIX/bin/pkg-config"
   PKG_CONFIG_PATH="$VULKAN_PKG_PC_PATH"
   LIBRARY_PATH="${LIBRARY_PATH:-}"
+  MACOSX_DEPLOYMENT_TARGET="${MACOSX_DEPLOYMENT_TARGET:-10.15}"
   ../configure
   -C
   --enable-win64
@@ -343,12 +356,17 @@ printf '\n'
 run "${CONFIGURE_CMD[@]}"
 
 if [[ "$CONFIGURE_ONLY" -eq 0 ]]; then
-  run arch -x86_64 env PATH="$BUILD_PATH" PKG_CONFIG_PATH="$VULKAN_PKG_PC_PATH" LIBRARY_PATH="${LIBRARY_PATH:-}" make -j"$JOBS"
-  run arch -x86_64 env PATH="$BUILD_PATH" PKG_CONFIG_PATH="$VULKAN_PKG_PC_PATH" LIBRARY_PATH="${LIBRARY_PATH:-}" make install
+  run arch -x86_64 env PATH="$BUILD_PATH" PKG_CONFIG_PATH="$VULKAN_PKG_PC_PATH" \
+    LIBRARY_PATH="${LIBRARY_PATH:-}" MACOSX_DEPLOYMENT_TARGET="${MACOSX_DEPLOYMENT_TARGET:-10.15}" \
+    make -j"$JOBS"
+  run arch -x86_64 env PATH="$BUILD_PATH" PKG_CONFIG_PATH="$VULKAN_PKG_PC_PATH" \
+    LIBRARY_PATH="${LIBRARY_PATH:-}" MACOSX_DEPLOYMENT_TARGET="${MACOSX_DEPLOYMENT_TARGET:-10.15}" \
+    make install
   if [[ "$DRY_RUN" -eq 1 ]]; then
     echo "+ GRAPHICS_INSTALL=${GRAPHICS_INSTALL:-} VULKAN_MODE=$VULKAN_MODE $SCRIPT_DIR/bundle-wine-dylibs.sh"
   else
-    GRAPHICS_INSTALL="$GRAPHICS_INSTALL" MEDIA_INSTALL="$MEDIA_INSTALL" VULKAN_MODE="$VULKAN_MODE" \
+    GRAPHICS_INSTALL="$GRAPHICS_INSTALL" MEDIA_INSTALL="$MEDIA_INSTALL" \
+      VULKAN_MODE="$VULKAN_MODE" VULKAN_SOURCE="$VULKAN_SOURCE" \
       "$SCRIPT_DIR/bundle-wine-dylibs.sh" "$WINE_INSTALL"
   fi
 fi

@@ -1,1 +1,1 @@
-dist/artifacts/a6-final/engine-wine-x86_64-CX26-2-0-W11-Cyder003.tar.xz
+dist/artifacts/cx26.3-a6/engine-wine-x86_64-CX26-3-0-W11-Cyder004.tar.xz

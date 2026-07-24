@@ -114,7 +114,10 @@ rsync -a --delete "$WINE_INSTALL/" "$ENGINE_TREE/"
 find "$ENGINE_TREE" -name '.DS_Store' -delete 2>/dev/null || true
 cyder_write_engine_version_file "$ENGINE_TREE" "$ENGINE_VERSION_LABEL"
 bash "$SCRIPT_DIR/strip-wine-install.sh" "$ENGINE_TREE"
-VULKAN_SOURCE=existing bash "$SCRIPT_DIR/bundle-wine-dylibs.sh" "$ENGINE_TREE"
+# Preserve MoltenVK already in the install tree (VULKAN_SOURCE=existing only
+# seeds it when VULKAN_MODE=with; default without would orphan-delete it).
+VULKAN_MODE="${VULKAN_MODE:-with}" VULKAN_SOURCE=existing \
+  bash "$SCRIPT_DIR/bundle-wine-dylibs.sh" "$ENGINE_TREE"
 bash "$SCRIPT_DIR/sign-wine.sh" --root "$ENGINE_TREE" --entitlements "$ENTITLEMENTS_PLIST"
 
 mkdir -p "$ARTIFACTS_DIR"

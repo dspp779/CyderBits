@@ -14,11 +14,13 @@ if [[ "$output" != *"Extracting llvm-mingw"* && "$output" != *"llvm-mingw alread
   echo "ASSERT failed: dry-run should prepare llvm-mingw" >&2
   exit 1
 fi
-if [[ "$output" != *"crossover-sources-26.2.0.tar.gz"* && "$output" != *"CX26 sources already present"* ]]; then
+if [[ "$output" != *"crossover-sources-26.3.0.tar.gz"* && "$output" != *"CX26 sources already present"* ]]; then
   echo "ASSERT failed: dry-run should prepare CX26 sources" >&2
   exit 1
 fi
 assert_contains "$output" "brew_x86 install" "dry-run should install deps via project brew_x86"
+assert_contains "$output" "brew_x86_install_runtime" \
+  "dry-run should rebuild runtime formulae from source for the product floor"
 assert_contains "$output" "PKG_CONFIG_PATH=" "dry-run configure must set PKG_CONFIG_PATH for keg-only deps"
 assert_contains "$output" "require pkg-config freetype2" "dry-run should check for x86_64 freetype2"
 assert_contains "$output" "ensure" "dry-run should ensure bzip2.pc exists"
