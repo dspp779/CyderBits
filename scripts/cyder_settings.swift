@@ -1,4 +1,46 @@
 import Foundation
+import CoreText
+
+/// True when the Mac already has a MingLiU / 細明體 family the user can select.
+func cyderSystemProvidesMingLiU() -> Bool {
+    let markers: Set<String> = [
+        "MingLiU", "PMingLiU", "MingLiU-ExtB", "MingLiU_HKSCS",
+        "細明體", "新細明體",
+    ]
+    if let postscript = CTFontManagerCopyAvailablePostScriptNames() as? [String] {
+        for name in postscript where markers.contains(name) {
+            return true
+        }
+    }
+    if let families = CTFontManagerCopyAvailableFontFamilyNames() as? [String] {
+        for name in families where markers.contains(name) {
+            return true
+        }
+    }
+    let fontDirs = [
+        "\(NSHomeDirectory())/Library/Fonts",
+        "/Library/Fonts",
+        "/System/Library/Fonts",
+        "/System/Library/Fonts/Supplemental",
+    ]
+    let fileMarkers = ["mingliu", "pmingliu", "細明體", "新細明體"]
+    let fm = FileManager.default
+    for dir in fontDirs {
+        guard let items = try? fm.contentsOfDirectory(atPath: dir) else { continue }
+        for item in items {
+            let lower = item.lowercased()
+            if fileMarkers.contains(where: { lower.contains($0.lowercased()) }) {
+                return true
+            }
+        }
+    }
+    return false
+}
+
+/// Prefer MingLiU when present; otherwise Songti TC (always available on macOS).
+func cyderDefaultFontPreset() -> String {
+    cyderSystemProvidesMingLiU() ? "mingliu" : "songti"
+}
 
 struct CyderExecutableSettings: Codable {
     var arguments: [String] = []
@@ -54,18 +96,20 @@ struct CyderSettings: Codable {
     // basename fallback; never infer a profile from a basename.
     var schemaVersion = 3
     var revision = 0
-    var msync = true
+    var msync = false
     var esync: Bool? = false
     var retinaMode = true
     var dpi = 192
-    var fontPreset = "songti"
+    var fontPreset = cyderDefaultFontPreset()
     var fontSmoothing = "cleartype-rgb"
     var perExecutable: [String: CyderExecutableSettings] = [:]
     var perProfile: [String: CyderExecutableSettings] = [:]
 
     static let defaults = CyderSettings()
 
-    init() {}
+    init() {
+        fontPreset = cyderDefaultFontPreset()
+    }
 
     init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
@@ -75,11 +119,11 @@ struct CyderSettings: Codable {
         ) }
         schemaVersion = 3
         revision = try values.decodeIfPresent(Int.self, forKey: .revision) ?? 0
-        msync = try values.decodeIfPresent(Bool.self, forKey: .msync) ?? true
+        msync = try values.decodeIfPresent(Bool.self, forKey: .msync) ?? false
         esync = try values.decodeIfPresent(Bool?.self, forKey: .esync) ?? false
         retinaMode = try values.decodeIfPresent(Bool.self, forKey: .retinaMode) ?? true
         dpi = try values.decodeIfPresent(Int.self, forKey: .dpi) ?? 192
-        fontPreset = try values.decodeIfPresent(String.self, forKey: .fontPreset) ?? "songti"
+        fontPreset = try values.decodeIfPresent(String.self, forKey: .fontPreset) ?? cyderDefaultFontPreset()
         fontSmoothing = try values.decodeIfPresent(String.self, forKey: .fontSmoothing) ?? "cleartype-rgb"
         perExecutable = try values.decodeIfPresent([String: CyderExecutableSettings].self, forKey: .perExecutable) ?? [:]
         let decodedProfiles = try values.decodeIfPresent([String: CyderExecutableSettings].self, forKey: .perProfile) ?? [:]

@@ -36,5 +36,9 @@ assert_contains "$source_text" 'result.machineResult["healthChecked"] == "1"' \
   "bootstrap should consume the machine-readable health result"
 assert_contains "$source_text" "if !bootstrapHealthChecked" \
   "a successful bootstrap health probe should not run twice"
+assert_contains "$source_text" "CYDER_PROGRESS_FILE" \
+  "bootstrap should expose a progress file for staged setup messages"
+assert_contains "$source_text" 'args.contains("--bootstrap-only")' \
+  "long setup operations should enable progress polling"
 
 echo "PASS test-cyder-open-files-lifecycle"

@@ -54,7 +54,8 @@ assert_contains "$library_ui" "NSApp.runModal(for: settingsWindow)" "game settin
 assert_contains "$library_ui" "cancelButton.title = \"取消\"" "game settings should provide a cancel action"
 assert_contains "$library_ui" "confirmButton.title = \"套用\"" "game settings should provide an apply action"
 assert_contains "$library_ui" 'title: "\(game.displayName) 的啟動選項"' "game settings title should identify the selected game"
-assert_contains "$library_ui" "使用目前選項啟動遊戲" "test action should explain that it launches with the current draft"
+assert_contains "$library_ui" "使用目前選項啟動" "test action should explain that it launches with the current draft"
+assert_contains "$library_ui" "last-launch.log" "test action should mention where launch logs are written"
 test_launch_region="$(sed -n '/@objc private func launchGame()/,/^    }/p' "$ROOT/scripts/cyder_game_library_ui.swift")"
 if [[ "$test_launch_region" == *"stopModal"* ]]; then
   echo "ASSERT failed: testing a game should keep its launch-options window open" >&2

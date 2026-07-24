@@ -76,6 +76,9 @@ fi
 assert_contains "$app" 'Public argv contract: `Cyder [game.exe] [game argument ...]`' "native Cyder should expose an option-free argv contract"
 assert_contains "$app" 'pendingLaunchArguments = Array(applicationArguments)' "native Cyder should preserve dynamic argv"
 assert_contains "$app" 'CYDER_TEST_SETTINGS_REQUEST' "internal launch settings should use environment rather than argv"
+assert_contains "$app" 'CYDER_CAPTURE_WINE_LOG' "test launches should enable Wine log capture by default"
+assert_contains "$app" 'CYDER_LAUNCH_KIND' "test launches should mark launch kind for log headers"
+assert_contains "$app" 'Running command:' "Wine launch logs should include a CrossOver-style command header"
 assert_contains "$app" 'let gameArguments = launchArguments ?? savedGameArguments' "dynamic arguments should replace saved arguments"
 assert_contains "$app" 'CYDER_REDACT_DYNAMIC_ARGS' "native diagnostics should offer opt-in dynamic argument redaction"
 

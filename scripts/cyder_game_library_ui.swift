@@ -438,7 +438,7 @@ private final class CyderGameSettingsWindowController: NSWindowController, NSWin
     private var independent: Bool
 
     private let launchButton = NSButton()
-    private let launchHint = NSTextField(labelWithString: "使用目前選項啟動遊戲")
+    private let launchHint = NSTextField(labelWithString: "使用目前選項啟動；測試會寫入 Logs/last-launch.log（含指令）")
     private let removeProfileButton = NSButton()
     private let msync = NSSwitch()
     private let esync = NSSwitch()
@@ -551,7 +551,12 @@ private final class CyderGameSettingsWindowController: NSWindowController, NSWin
 
         dpi.addItems(withTitles: dpiTitles)
         power.addItems(withTitles: ["標準", "省電"])
-        font.addItems(withTitles: ["宋體（Songti TC）", "細明體（MingLiU）"])
+        font.addItems(withTitles: [
+            cyderDefaultFontPreset() == "songti"
+                ? "宋體（Songti TC，預設）" : "宋體（Songti TC）",
+            cyderDefaultFontPreset() == "mingliu"
+                ? "細明體（MingLiU，預設）" : "細明體（MingLiU）",
+        ])
         smoothing.addItems(withTitles: ["關閉", "灰階", "ClearType RGB"])
         environment.isRichText = false
         environment.isSelectable = true
