@@ -11,6 +11,7 @@ if [[ "$output" != *"Prepare complete"* && "$output" != *"CX26 sources already p
   exit 1
 fi
 assert_contains "$output" "fetchDependencies" "dry-run should fetch MoltenVK deps"
+assert_contains "$output" "--spirv-cross-root" "dry-run should pass --spirv-cross-root into fetchDependencies"
 assert_contains "$output" "xcodebuild build" "dry-run should build MoltenVK via xcodebuild"
 assert_contains "$output" "ARCHS=x86_64" "dry-run should target x86_64 MoltenVK"
 assert_contains "$output" "install/graphics-cx26-x86_64" "dry-run should install to graphics prefix"

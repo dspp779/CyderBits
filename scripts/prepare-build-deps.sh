@@ -47,7 +47,7 @@ EOF
 cx_archive_for() {
   case "$1" in
     25) printf '%s\n' "$ARCHIVES_DIR/crossover-sources-25.1.1.tar.gz" ;;
-    26) printf '%s\n' "$ARCHIVES_DIR/crossover-sources-26.2.0.tar.gz" ;;
+    26) printf '%s\n' "$ARCHIVES_DIR/crossover-sources-26.3.0.tar.gz" ;;
     *)
       echo "Unknown CX version: $1 (expected 25 or 26)" >&2
       return 1

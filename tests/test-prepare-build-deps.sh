@@ -9,7 +9,7 @@ if [[ "$output" != *"llvm-mingw-20260616-ucrt-macos-universal.tar.xz"* && "$outp
   echo "ASSERT failed: prepare dry-run should extract or detect llvm-mingw" >&2
   exit 1
 fi
-if [[ "$output" != *"crossover-sources-26.2.0.tar.gz"* && "$output" != *"CX26 sources already present"* ]]; then
+if [[ "$output" != *"crossover-sources-26.3.0.tar.gz"* && "$output" != *"CX26 sources already present"* ]]; then
   echo "ASSERT failed: prepare dry-run should extract or detect CX26 sources" >&2
   exit 1
 fi
@@ -20,7 +20,7 @@ if [[ "$output_all" != *"crossover-sources-25.1.1.tar.gz"* && "$output_all" != *
   echo "ASSERT failed: prepare --all should include or detect CX25" >&2
   exit 1
 fi
-if [[ "$output_all" != *"crossover-sources-26.2.0.tar.gz"* && "$output_all" != *"CX26 sources already present"* ]]; then
+if [[ "$output_all" != *"crossover-sources-26.3.0.tar.gz"* && "$output_all" != *"CX26 sources already present"* ]]; then
   echo "ASSERT failed: prepare --all should include or detect CX26" >&2
   exit 1
 fi
