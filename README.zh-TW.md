@@ -6,7 +6,7 @@
 
 **在 Mac 上跑經典 Windows 遊戲 — 先支援 DirectDraw 與 GDI。**
 
-驗證路徑是傳統 2D Win32 圖形：**DirectDraw → Wine wined3d/OpenGL** 與 GDI。目前封裝的 `CX26.2.0-W11-Cyder003` engine 也包含 x86_64 **MoltenVK**，供 Wine Vulkan 使用；但 BlueCG 不走 Vulkan、DXVK、dxmt 或 D3DMetal。
+驗證路徑是傳統 2D Win32 圖形：**DirectDraw → Wine wined3d/OpenGL** 與 GDI。目前封裝的 `CX26.3.0-W11-Cyder004` engine 也包含 x86_64 **MoltenVK**（重新打包預設 `VULKAN_MODE=with` + `VULKAN_SOURCE=existing`），供 Wine Vulkan 使用；但 BlueCG 不走 Vulkan、DXVK、dxmt 或 D3DMetal。
 
 CyderBits 在 Apple Silicon 上自建 CrossOver 系 Wine，並提供兩個工具：**Cyder** — 一鍵啟動 `.exe` — 與 **CyderBits** — 把 `.exe` 包成可雙擊的 macOS `.app`。
 
@@ -51,8 +51,8 @@ bash scripts/run-bluecg.sh
 | Backend | 專案狀態 | 說明 |
 |---|---|---|
 | DirectDraw / GDI | **支援且已驗證** | BlueCG 使用 DirectDraw；預設路徑是 wined3d/OpenGL，GDI 是相容性 fallback。 |
-| wined3d / OpenGL | **目前預設** | BlueCG A6 engine 含已測試的 `winemac.drv` same-view backing 修復，可支援 Retina/DPI resize。 |
-| Vulkan / MoltenVK | **目前封裝 engine 已包含** | x86_64 Wine 內含 `libMoltenVK.dylib`；這不是 BlueCG 的繪圖路徑。重新建置仍可用 `--without-vulkan`。 |
+| wined3d / OpenGL | **目前預設** | BlueCG 驗證用 engine 含已測試的 `winemac.drv` same-view backing 修復，可支援 Retina/DPI resize。 |
+| Vulkan / MoltenVK | **目前封裝 engine 已包含** | x86_64 Wine 內含 `libMoltenVK.dylib`（macOS 10.15 minos）；這不是 BlueCG 的繪圖路徑。`pack-engine-artifact.sh` 預設保留 MoltenVK；從原始碼重建仍可用 `--without-vulkan`。 |
 | DXVK | **尚未整合** | 本 repo 沒有打包 DXVK runtime，也沒有遊戲驗證結果。 |
 | dxmt | **尚未整合** | 尚無 dxmt 建置、封裝或相容性結果。 |
 | D3DMetal | **不是產品 backend** | 只在歷史 source 實驗中被提及，尚未接入或驗證為 Cyder runtime 路徑。 |
@@ -71,8 +71,9 @@ bash scripts/sign-wine.sh
 
 ## 系統需求
 
-- macOS 12+（建議 13+）
-- Apple Silicon + Rosetta 2（Wine 為 **x86_64** build）
+- **Cyder.app：** macOS 10.15+（`LSMinimumSystemVersion`）；遊戲庫／設定 UI 需 **12+**（10.15–11.x 走 bash + osascript legacy UI）
+- **開發／建置：** 建議 macOS 12+（日常開發建議 13+）
+- Apple Silicon + Rosetta 2（Wine 為 **x86_64** build；Apple Silicon 自 macOS 11+ 起需 Rosetta）
 - 磁碟需數 GB（原始碼、`.brew-x86`、build 產物；多數在 `.gitignore`）
 
 ## 快速開始
@@ -145,6 +146,7 @@ bash tests/test-verify-bluecg.sh
 
 ## 文件
 
+- [Cyder 0.6.0 發布說明](docs/releases/v0.6.0.md) — CX26.3 engine、macOS 10.15 runtime、Winetricks、動態 argv
 - [docs/README.md](docs/README.md) — 索引
 - [docs/cyder.md](docs/cyder.md) — Cyder 啟動器
 - [docs/cyderbits.md](docs/cyderbits.md) — CyderBits 打包器

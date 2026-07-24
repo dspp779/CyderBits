@@ -6,7 +6,7 @@
 
 ## ogom 建置與目前發布 engine
 
-原始碼重新建置若未指定選項，`scripts/build-wine.sh` 仍以 `--without-vulkan` 作為 BlueCG 的最小建置路徑；但目前封裝給 Cyder 的 `CX26.2.0-W11-Cyder003` 已使用 Vulkan build，並在 artifact 內含 x86_64 `libMoltenVK.dylib`。兩者是不同層級：configure 預設不等於目前發布 artifact 的內容。
+原始碼重新建置若未指定選項，`scripts/build-wine.sh` 仍以 `--without-vulkan` 作為 BlueCG 的最小建置路徑；但目前封裝給 Cyder 的 `CX26.3.0-W11-Cyder004` 已使用 Vulkan build，並在 artifact 內含 x86_64 `libMoltenVK.dylib`（Mach-O `minos` ≤ 10.15）。`pack-engine-artifact.sh` 重新打包時預設 `VULKAN_MODE=with` + `VULKAN_SOURCE=existing`，保留 install tree 內已驗證的 MoltenVK。兩者是不同層級：configure 預設不等於目前發布 artifact 的內容。
 
 `scripts/build-wine.sh` 傳給 Wine `configure` 的旗標：
 
@@ -110,7 +110,7 @@ macOS 上使用 **`winemac.drv`（Cocoa）**，不走 X11。下列選項在 Mac 
 
 | 目標 | configure | 額外步驟 |
 |------|-----------|----------|
-| BlueCG / DirectDraw | `--without-vulkan` 可用；目前 A6 packaged engine 另含 MoltenVK | BlueCG 仍走 ddraw → wined3d/OpenGL；若 configure 缺 `SONAME_LIBVULKAN` 見 `patches/w1-win32u-vulkan-soname.patch` |
+| BlueCG / DirectDraw | `--without-vulkan` 可用；目前 Cyder 封裝 engine（`CX26.3.0-W11-Cyder004`）另含 MoltenVK | BlueCG 仍走 ddraw → wined3d/OpenGL；若 configure 缺 `SONAME_LIBVULKAN` 見 `patches/w1-win32u-vulkan-soname.patch` |
 | 實驗性 3D / DXVK 路線 | `--with-vulkan` | `build-wine.sh --vulkan-source homebrew` 或 `crossover` + `build-graphics-stack.sh` |
 
 ---

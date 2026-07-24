@@ -97,14 +97,14 @@ bash scripts/create-bluecg-app.sh --link-prefix
 
 ## 已知問題
 
-- **視窗縮放黑屏（已由 A6 final 解決）**：BlueCG 應使用 `CX26.2.0-W11-Cyder003` A6 engine；原版／A2／A4 的歷史差異與 fallback 見 [bluecg-winemac-resize-black-screen.md](bluecg-winemac-resize-black-screen.md)
+- **視窗縮放黑屏（已由 A6 final 解決）**：Cyder 現行 engine 為 `CX26.3.0-W11-Cyder004`（含 A6 same-view backing sync）；原版／A2／A4 的歷史差異與 fallback 見 [bluecg-winemac-resize-black-screen.md](bluecg-winemac-resize-black-screen.md)。首版 A6 驗收 artifact（`CX26.2.0-W11-Cyder003`）見 [bluecg-winemac-a6-engine.md](bluecg-winemac-a6-engine.md)
 - Sikarugir Wine 10 / CX24 在**無 RetinaMode** 下可平滑縮放；CX24 + 高 DPI 可滿版無黑邊
 - **無 A6 engine 時的迴避（GL 路徑）**：**進入遊戲世界前**調窗或 `Alt+Enter` 等比放到最大；進入後勿再改視窗大小（含 Alt+Enter）
 - **暫用（GDI registry）**：進入遊戲後仍可縮放不黑，但無線性過濾、縮放模糊；Retina + 高 DPI 僅改善靜態畫質，進遊戲前調準尺寸
 
 ## 已知雜訊（通常可忽略）
 
-- `libMoltenVK.dylib` 找不到：A6 packaged engine 應內含它，但 BlueCG 的 ddraw 仍走 wined3d/GL；若使用 `--without-vulkan` 的 clean build，此檔不存在不代表 BlueCG 不能執行
+- `libMoltenVK.dylib` 找不到：Cyder 封裝 engine 應內含它，但 BlueCG 的 ddraw 仍走 wined3d/GL；若使用 `--without-vulkan` 的 clean build，此檔不存在不代表 BlueCG 不能執行
 - `dmsynth`／MIDI underrun、`GL_INVALID_FRAMEBUFFER_OPERATION`；MIDI 目前只列為觀察到的雜訊，詳見 [BlueCG MIDI underrun](games/bluecg/audio/midi-underrun.md)
 - 全螢幕 / 縮放黑畫面（見上方連結；GL 路徑：進遊戲前調窗／Alt+Enter；GDI 路徑見追蹤文件）
 

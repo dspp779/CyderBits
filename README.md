@@ -6,7 +6,7 @@
 
 **Run legacy Windows games on Mac — DirectDraw & GDI first.**
 
-The validated path is classic 2D Win32 graphics: **DirectDraw → Wine wined3d/OpenGL** and GDI. The current packaged `CX26.2.0-W11-Cyder003` engine also contains an x86_64 **MoltenVK** runtime for Wine Vulkan, but BlueCG does not use Vulkan, DXVK, dxmt, or D3DMetal.
+The validated path is classic 2D Win32 graphics: **DirectDraw → Wine wined3d/OpenGL** and GDI. The current packaged `CX26.3.0-W11-Cyder004` engine also contains an x86_64 **MoltenVK** runtime for Wine Vulkan (repacking defaults to `VULKAN_MODE=with` + `VULKAN_SOURCE=existing`), but BlueCG does not use Vulkan, DXVK, dxmt, or D3DMetal.
 
 CyderBits builds CrossOver-based Wine on Apple Silicon and ships two tools: **Cyder** — a one-click `.exe` launcher — and **CyderBits** — a packager that wraps `.exe` files as double-clickable macOS `.app` bundles.
 
@@ -51,8 +51,8 @@ bash scripts/run-bluecg.sh
 | Backend | Project status | Notes |
 |---|---|---|
 | DirectDraw / GDI | **Supported and validated** | BlueCG uses DirectDraw; the default path is wined3d/OpenGL. GDI is a compatibility fallback. |
-| wined3d / OpenGL | **Active default** | BlueCG's A6 engine includes the tested `winemac.drv` same-view backing fix for Retina/DPI resize. |
-| Vulkan / MoltenVK | **Included in the current packaged engine** | `libMoltenVK.dylib` is bundled for x86_64 Wine Vulkan support; it is not the BlueCG rendering path. Fresh builds may use `--without-vulkan`. |
+| wined3d / OpenGL | **Active default** | BlueCG's validated engine includes the tested `winemac.drv` same-view backing fix for Retina/DPI resize. |
+| Vulkan / MoltenVK | **Included in the current packaged engine** | `libMoltenVK.dylib` is bundled for x86_64 Wine Vulkan support (macOS 10.15 minos); it is not the BlueCG rendering path. `pack-engine-artifact.sh` keeps MoltenVK by default; fresh source builds may use `--without-vulkan`. |
 | DXVK | **Not integrated** | No DXVK runtime or game validation is shipped by this repository. |
 | dxmt | **Not integrated** | No dxmt build, packaging, or compatibility result is maintained here. |
 | D3DMetal | **Not a product backend** | Only referenced by historical source experiments; it is not wired or validated as a Cyder runtime path. |
@@ -76,8 +76,9 @@ bash scripts/sign-wine.sh
 
 ## Requirements
 
-- macOS 12+ (13+ recommended)
-- Apple Silicon + Rosetta 2 (Wine is an **x86_64** build)
+- **Cyder.app:** macOS 10.15+ (`LSMinimumSystemVersion`); Game Library / settings UI on **12+** (10.15–11.x uses bash + osascript legacy UI)
+- **Development / build:** macOS 12+ recommended (13+ for day-to-day work)
+- Apple Silicon + Rosetta 2 (Wine is an **x86_64** build; Rosetta required on Apple Silicon from macOS 11+)
 - Several GB disk for Wine sources, `.brew-x86`, and build outputs (most paths are `.gitignore`d)
 
 ## Quick start
@@ -150,6 +151,7 @@ bash tests/test-verify-bluecg.sh
 
 ## Documentation
 
+- [Cyder 0.6.0 release notes](docs/releases/v0.6.0.en.md) — CX26.3 engine, macOS 10.15 runtime, Winetricks, dynamic argv
 - [docs/README.md](docs/README.md) — index
 - [docs/cyder.md](docs/cyder.md) — Cyder launcher
 - [docs/cyderbits.md](docs/cyderbits.md) — CyderBits packager
