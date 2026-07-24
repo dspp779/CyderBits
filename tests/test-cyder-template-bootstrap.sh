@@ -54,44 +54,31 @@ cyder_bootstrap_shared_prefix "$TMP/engine/bin/wine" "$TMP/engine"
 assert_eq "${CYDER_BOOTSTRAP_HEALTH_CHECKED:-0}" "1" \
   "new Shared prefix should report that bootstrap already ran its health probe"
 
-assert test -f "$support/templates/pristine/manifest.json"
-assert test -f "$support/templates/golden/manifest.json"
-assert test -f "$support/templates/golden/.cyder-mono-10.4.1"
-assert test -f "$support/templates/golden/.cyder-gecko-2.47.4"
-assert test -f "$support/templates/golden/.cyder-golden-baseline-v2"
-assert test ! -e "$support/templates/pristine/.golden-only"
+assert test ! -e "$support/templates/pristine/manifest.json"
+assert test ! -e "$support/templates/golden/manifest.json"
+assert test -f "$CYDER_SHARED_PREFIX/.cyder-mono-10.4.1"
+assert test -f "$CYDER_SHARED_PREFIX/.cyder-gecko-2.47.4"
+assert test -f "$CYDER_SHARED_PREFIX/.cyder-golden-baseline-v2"
 assert test -f "$CYDER_SHARED_PREFIX/.golden-only"
 assert test -f "$CYDER_BOOTSTRAP_MARKER"
-cyder_profile_template_ready pristine "$support" 2 'wine crossover test'
-cyder_profile_template_ready golden "$support" 2 'wine crossover test'
 
-# Shared state is disposable and must never flow back into Golden.
+# Replacing shared provisions a fresh baseline; mutations must not survive.
 : >"$CYDER_SHARED_PREFIX/user-mutation"
 rm -f "$CYDER_BOOTSTRAP_MARKER"
 cyder_bootstrap_shared_prefix "$TMP/engine/bin/wine" "$TMP/engine"
 assert_eq "${CYDER_BOOTSTRAP_HEALTH_CHECKED:-0}" "1" \
   "replacement Shared prefix should report its completed health probe"
 assert test ! -e "$CYDER_SHARED_PREFIX/user-mutation"
-assert test ! -e "$support/templates/golden/user-mutation"
 assert test -f "$CYDER_SHARED_PREFIX/.golden-only"
-if find "$support" -type d \( -path '*/backups/*' -o -name '.bootstrap-previous-*' \) -print -quit | grep -q .; then
+if find "$support" -type d \( -path '*/backups/*' -o -name '.bootstrap-previous-*' -o -name '.bootstrap-staging-*' \) -print -quit | grep -q .; then
   echo "ASSERT failed: successful bootstrap should not retain the previous shared bottle" >&2
   exit 1
 fi
 
-# An unsafe Golden destination aborts before a Shared prefix is published.
-support_fail="$TMP/support-fail"
-export CYDER_SUPPORT="$support_fail" CYDER_SHARED_PREFIX="$support_fail/bottles/shared"
-cyder_init_paths "$ROOT/scripts"
-mkdir -p "$support_fail/templates" "$TMP/external-golden"
-rm -rf "$support_fail/templates/golden"
-ln -s "$TMP/external-golden" "$support_fail/templates/golden"
-set +e
-cyder_bootstrap_shared_prefix "$TMP/engine/bin/wine" "$TMP/engine" >/dev/null 2>&1
-status=$?
-set -e
-[[ "$status" -ne 0 ]] || { echo "ASSERT failed: unsafe Golden publish succeeded" >&2; exit 1; }
-assert test ! -e "$CYDER_SHARED_PREFIX"
-assert test -d "$TMP/external-golden"
+# Engine upgrade path drops stale template bottles if present.
+mkdir -p "$support/templates/golden"
+: >"$support/templates/golden/manifest.json"
+cyder_remove_path "$support/templates"
+assert test ! -e "$support/templates"
 
 echo "PASS test-cyder-template-bootstrap"

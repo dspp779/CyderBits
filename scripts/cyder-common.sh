@@ -17,7 +17,32 @@ cyder_engine_artifacts_dir() {
 }
 
 cyder_crossover_version() {
-  printf '%s\n' "${CYDER_CROSSOVER_VERSION:-26.2.0}"
+  printf '%s\n' "${CYDER_CROSSOVER_VERSION:-26.3.0}"
+}
+
+# Prefer MingLiU when the Mac already has it; otherwise Songti TC.
+cyder_detect_default_font_preset() {
+  local dir item lower
+  if command -v fc-list >/dev/null 2>&1; then
+    if fc-list 2>/dev/null | grep -qiE 'MingLiU|PMingLiU|細明體|新細明體'; then
+      printf 'mingliu\n'
+      return 0
+    fi
+  fi
+  for dir in "$HOME/Library/Fonts" /Library/Fonts /System/Library/Fonts \
+    /System/Library/Fonts/Supplemental; do
+    [[ -d "$dir" ]] || continue
+    while IFS= read -r item; do
+      lower="$(printf '%s' "$item" | tr '[:upper:]' '[:lower:]')"
+      case "$lower" in
+        *mingliu* | *pmingliu* | *細明體* | *新細明體*)
+          printf 'mingliu\n'
+          return 0
+          ;;
+      esac
+    done < <(find "$dir" -maxdepth 2 -type f 2>/dev/null || true)
+  done
+  printf 'songti\n'
 }
 
 cyder_engine_version_label_trim() {
@@ -400,11 +425,11 @@ cyder_load_saved_settings() {
   case "${CYDER_FONT_SMOOTHING-}" in off|grayscale|cleartype-rgb|cleartype-bgr) keep_smoothing=1 ;; esac
   case "${CYDER_POWER_MODE-}" in normal|background) keep_power=1 ;; esac
 
-  export CYDER_MSYNC="${CYDER_MSYNC:-1}"
+  export CYDER_MSYNC="${CYDER_MSYNC:-0}"
   export CYDER_ESYNC="${CYDER_ESYNC:-0}"
   export CYDER_RETINA_MODE="${CYDER_RETINA_MODE:-1}"
   export CYDER_DPI="${CYDER_DPI:-192}"
-  export CYDER_FONT_PRESET="${CYDER_FONT_PRESET:-songti}"
+  export CYDER_FONT_PRESET="${CYDER_FONT_PRESET:-$(cyder_detect_default_font_preset)}"
   export CYDER_FONT_SMOOTHING="${CYDER_FONT_SMOOTHING:-cleartype-rgb}"
   export CYDER_POWER_MODE="${CYDER_POWER_MODE:-normal}"
   [[ -f "$settings" ]] || return 0
@@ -621,6 +646,49 @@ cyder_diagnostic_stage() {
   fi
 }
 
+# Optional legacy UI helpers (version compare, MoltenVK OS floor, osascript progress).
+if [[ -n "${CYDER_SCRIPTS:-}" && -f "$CYDER_SCRIPTS/cyder-legacy-ui.sh" ]]; then
+  # shellcheck source=cyder-legacy-ui.sh
+  source "$CYDER_SCRIPTS/cyder-legacy-ui.sh"
+elif [[ -f "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/cyder-legacy-ui.sh" ]]; then
+  # shellcheck source=cyder-legacy-ui.sh
+  source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/cyder-legacy-ui.sh"
+fi
+
+# UI-facing progress line for long bootstrap/provision work. Written atomically
+# so Cyder.app can poll CYDER_PROGRESS_FILE while the launcher runs.
+cyder_report_progress() {
+  local message="$1"
+  echo "$message" >&2
+  [[ -n "${CYDER_PROGRESS_FILE:-}" ]] || return 0
+  local dir tmp
+  dir="$(dirname "$CYDER_PROGRESS_FILE")"
+  mkdir -p "$dir"
+  tmp="$CYDER_PROGRESS_FILE.tmp.$$"
+  printf '%s\n' "$message" >"$tmp"
+  mv -f "$tmp" "$CYDER_PROGRESS_FILE"
+}
+
+# Lightweight post-provision check: confirm the bottle looks complete without
+# starting another Wine process (the GUI skips a second probe when
+# CYDER_BOOTSTRAP_HEALTH_CHECKED=1).
+cyder_verify_prefix_baseline_artifacts() {
+  local prefix="$1"
+  [[ -f "$prefix/system.reg" && -f "$prefix/user.reg" ]] || {
+    echo "prefix registry files are missing: $prefix" >&2
+    return 1
+  }
+  [[ -f "$prefix/drive_c/windows/system32/kernel32.dll" || \
+     -f "$prefix/drive_c/windows/syswow64/kernel32.dll" ]] || {
+    echo "prefix kernel32.dll is missing: $prefix" >&2
+    return 1
+  }
+  [[ -f "$prefix/.cyder-golden-baseline-v2" ]] || {
+    echo "prefix golden baseline marker is missing: $prefix" >&2
+    return 1
+  }
+}
+
 cyder_remove_path() {
   local path="$1"
   [[ -e "$path" || -L "$path" ]] || return 0
@@ -830,12 +898,22 @@ cyder_ensure_shared_engine() {
     fi
     echo "Upgrading shared engine ($installed_version -> $bundled_version) -> $dest" >&2
     cyder_reset_shared_prefix
+    # Stale pristine/golden templates belong to the previous engine; drop them
+    # until the 1.0.0 template mechanism returns.
+    if [[ -e "$CYDER_SUPPORT/templates" ]]; then
+      echo "Removing stale template bottles: $CYDER_SUPPORT/templates" >&2
+      cyder_remove_path "$CYDER_SUPPORT/templates"
+    fi
   else
     echo "Installing shared engine -> $dest" >&2
     if [[ -n "$bundled_version" && -e "$CYDER_SHARED_PREFIX" ]]; then
       if [[ -z "$CYDER_MIGRATED_ENGINE_VERSION" ]] ||
          ! cyder_engine_versions_equal "$CYDER_MIGRATED_ENGINE_VERSION" "$bundled_version"; then
         cyder_reset_shared_prefix
+        if [[ -e "$CYDER_SUPPORT/templates" ]]; then
+          echo "Removing stale template bottles: $CYDER_SUPPORT/templates" >&2
+          cyder_remove_path "$CYDER_SUPPORT/templates"
+        fi
       fi
     fi
   fi
@@ -1126,27 +1204,15 @@ cyder_rebuild_shared_prefix() {
     had_previous=1
   fi
 
-  cyder_rebuild_restore_previous() {
-    local reason="$1"
-    cyder_remove_path "$active_prefix"
-    if [[ "$had_previous" -eq 1 && -e "$previous" ]]; then
-      mv "$previous" "$active_prefix"
-      echo "Prefix rebuild rolled back ($reason); previous environment restored." >&2
-    else
-      echo "Prefix rebuild rolled back ($reason); no previous environment was available." >&2
-    fi
-  }
-
-  cyder_prepare_pristine_template "$wine_bin" "$engine_root" || return $?
-  cyder_prepare_golden_template "$wine_bin" "$engine_root" || return $?
-  cyder_profile_backend_load || return $?
-  if ! cyder_profile_clone_bottle "$CYDER_SUPPORT/templates/golden" "$staging"; then
-    echo "Prefix rebuild failed while cloning Golden; no active data was changed." >&2
+  if ! cyder_provision_prefix_baseline "$wine_bin" "$engine_root" "$staging"; then
+    cyder_remove_path "$staging"
+    echo "Prefix rebuild failed while provisioning; no active data was changed." >&2
     return 1
   fi
   if [[ "$had_previous" -eq 1 ]]; then
     if ! mv "$active_prefix" "$previous"; then
       echo "Prefix rebuild failed while staging the previous environment: $previous" >&2
+      cyder_remove_path "$staging"
       return 1
     fi
   fi
@@ -1155,17 +1221,13 @@ cyder_rebuild_shared_prefix() {
     if [[ "$had_previous" -eq 1 && -e "$previous" && ! -e "$active_prefix" ]]; then
       mv "$previous" "$active_prefix" || true
     fi
+    cyder_remove_path "$staging"
     return 1
   fi
-  printf 'revision=%s\n' "$CYDER_TEMPLATE_REVISION" >"$CYDER_BOOTSTRAP_MARKER"
-  if ! cyder_health_check_prefix "$wine_bin" "$active_prefix"; then
-    cyder_rebuild_restore_previous "health check failed"
-    return 1
-  fi
+  printf 'revision=%s\n' "${CYDER_TEMPLATE_REVISION:-1}" >"$CYDER_BOOTSTRAP_MARKER"
   # The previous environment exists only to make the publish transactional.
   # A successful rebuild must not retain a full bottle-sized backup.
   [[ "$had_previous" -eq 0 ]] || cyder_remove_path "$previous"
-  unset -f cyder_rebuild_restore_previous
   echo "Prefix rebuild completed successfully: $active_prefix" >&2
 }
 
@@ -1222,6 +1284,69 @@ cyder_template_engine_version() {
   printf '%s\n' "$version"
 }
 
+# Provision any Wine prefix with the current-engine baseline: wineboot, mono,
+# gecko, libarchive, and golden registry settings. Pre-1.0.0 shared/profile
+# bottles use this directly; template publish/clone is deferred until 1.0.0.
+cyder_provision_prefix_baseline() {
+  local wine_bin="$1" engine_root="$2" prefix="$3"
+  CYDER_BOOTSTRAP_HEALTH_CHECKED=0
+
+  cyder_report_progress "正在建立 Windows 環境…"
+  cyder_diagnostic_stage wineboot
+  cyder_init_bottle "$wine_bin" "$prefix" || return $?
+
+  cyder_report_progress "正在安裝 .NET（Wine Mono）…"
+  cyder_diagnostic_stage mono-setup
+  local component
+  for component in install-wine-mono.sh install-wine-gecko.sh; do
+    [[ -f "$CYDER_SCRIPTS/$component" ]] || {
+      echo "Baseline component installer is missing: $component" >&2
+      return 1
+    }
+    if [[ "$component" == install-wine-gecko.sh ]]; then
+      cyder_report_progress "正在安裝瀏覽器元件（Gecko）…"
+      cyder_diagnostic_stage gecko-setup
+    fi
+    (
+      export WINEPREFIX="$prefix" WINE_INSTALL="$engine_root" CYDER_DOWNLOADS="$CYDER_DOWNLOADS"
+      bash "$CYDER_SCRIPTS/$component"
+    ) || return $?
+  done
+
+  if [[ -f "$CYDER_SCRIPTS/install-libarchive-tar.sh" ]]; then
+    cyder_report_progress "正在安裝 tar 解壓工具…"
+    cyder_diagnostic_stage tar-setup
+    (
+      export WINEPREFIX="$prefix" WINE_INSTALL="$engine_root"
+      export OGOM="${CYDER_OGOM:-${OGOM:-}}"
+      export CYDER_LIBARCHIVE_SRC="${CYDER_LIBARCHIVE_SRC:-$(cyder_resolve_libarchive_src)}"
+      bash "$CYDER_SCRIPTS/install-libarchive-tar.sh" --prefix "$prefix"
+    ) || return $?
+  fi
+
+  if [[ -f "$CYDER_SCRIPTS/cyder-apply-golden-settings.sh" ]]; then
+    cyder_report_progress "正在套用預設設定…"
+    cyder_diagnostic_stage golden-setup
+    (
+      export WINEPREFIX="$prefix" WINE_INSTALL="$engine_root"
+      bash "$CYDER_SCRIPTS/cyder-apply-golden-settings.sh"
+    ) || return $?
+  fi
+
+  cyder_report_progress "正在確認環境…"
+  cyder_stop_prefix_wineserver "$wine_bin" "$prefix" || return $?
+  # Skip a full wine cmd probe here: wineboot + component installs already
+  # exercised the prefix. Artifact checks are enough; Cyder.app will not run a
+  # second probe when healthChecked=1 is returned from bootstrap.
+  if ! cyder_verify_prefix_baseline_artifacts "$prefix"; then
+    echo "Baseline provision artifact check failed: $prefix" >&2
+    return 1
+  fi
+  CYDER_BOOTSTRAP_HEALTH_CHECKED=1
+}
+
+# Deprecated until 1.0.0 template bottles return. Kept for tests/helpers only;
+# production bootstrap no longer publishes or clones these.
 cyder_prepare_pristine_template() {
   local wine_bin="$1" engine_root="$2"
   cyder_profile_backend_load || return $?
@@ -1252,6 +1377,7 @@ cyder_prepare_pristine_template() {
   rm -rf "$staging"
 }
 
+# Deprecated until 1.0.0. Prefer cyder_provision_prefix_baseline.
 cyder_prepare_golden_template() {
   local wine_bin="$1" engine_root="$2"
   cyder_profile_backend_load || return $?
@@ -1276,42 +1402,10 @@ cyder_prepare_golden_template() {
     return 1
   fi
 
-  local component status=0
-  for component in install-wine-mono.sh install-wine-gecko.sh; do
-    [[ -f "$CYDER_SCRIPTS/$component" ]] || {
-      echo "Golden component installer is missing: $component" >&2
-      status=1
-      break
-    }
-    (
-      export WINEPREFIX="$staging" WINE_INSTALL="$engine_root" CYDER_DOWNLOADS="$CYDER_DOWNLOADS"
-      bash "$CYDER_SCRIPTS/$component"
-    ) || { status=$?; break; }
-  done
-  if [[ "$status" -eq 0 && -f "$CYDER_SCRIPTS/install-libarchive-tar.sh" ]]; then
-    (
-      export WINEPREFIX="$staging" WINE_INSTALL="$engine_root"
-      export OGOM="${CYDER_OGOM:-${OGOM:-}}"
-      export CYDER_LIBARCHIVE_SRC="${CYDER_LIBARCHIVE_SRC:-$(cyder_resolve_libarchive_src)}"
-      bash "$CYDER_SCRIPTS/install-libarchive-tar.sh" --prefix "$staging"
-    ) || status=$?
-  fi
-  if [[ "$status" -eq 0 ]]; then
-    (
-      export WINEPREFIX="$staging" WINE_INSTALL="$engine_root"
-      bash "$CYDER_SCRIPTS/cyder-apply-golden-settings.sh"
-    ) || status=$?
-  fi
-  cyder_stop_prefix_wineserver "$wine_bin" "$staging" || status=$?
-  if [[ "$status" -ne 0 ]]; then
+  if ! cyder_provision_prefix_baseline "$wine_bin" "$engine_root" "$staging"; then
     echo "Golden staging failed and was retained for diagnostics: $staging" >&2
-    return "$status"
-  fi
-  if ! cyder_health_check_prefix "$wine_bin" "$staging"; then
-    echo "Golden staging health check failed and was retained: $staging" >&2
     return 1
   fi
-  cyder_stop_prefix_wineserver "$wine_bin" "$staging" || return $?
   if ! cyder_profile_publish_template "$staging" golden "$CYDER_SUPPORT" \
       "$revision" "$engine_version"; then
     echo "Failed to publish Golden template; staging retained: $staging" >&2
@@ -1320,6 +1414,7 @@ cyder_prepare_golden_template() {
   rm -rf "$staging"
 }
 
+# Deprecated until 1.0.0. Prefer cyder_provision_prefix_baseline into shared.
 cyder_clone_golden_to_shared() {
   local wine_bin="$1"
   cyder_profile_backend_load || return $?
@@ -1337,6 +1432,51 @@ cyder_clone_golden_to_shared() {
   printf 'revision=%s\n' "$CYDER_TEMPLATE_REVISION" >"$CYDER_BOOTSTRAP_MARKER"
   cyder_health_check_prefix "$wine_bin" "$CYDER_SHARED_PREFIX" || return $?
   CYDER_BOOTSTRAP_HEALTH_CHECKED=1
+}
+
+# Create or resolve a per-game bottle by provisioning a fresh baseline for the
+# current engine (no template clone). Metadata still records baseTemplate as
+# golden for schema compatibility until 1.0.0.
+cyder_create_profile_prefix() {
+  local wine_bin="$1" engine_root="$2" exe_path="$3"
+  local base_template="${4:-golden}"
+  cyder_profile_backend_load || return $?
+  [[ -f "$exe_path" ]] || { echo "EXE does not exist: $exe_path" >&2; return 1; }
+  [[ "$base_template" == pristine || "$base_template" == golden || "$base_template" == recommended ]] || {
+    echo "template must be pristine, golden, or recommended: $base_template" >&2
+    return 1
+  }
+  cyder_profile_init_layout "$CYDER_SUPPORT"
+  local id bottle profile canonical
+  id="$(cyder_profile_id_for_path "$exe_path")"
+  bottle="$CYDER_SUPPORT/bottles/$id"
+  profile="$CYDER_SUPPORT/profiles/$id"
+  canonical="$(cyder_profile_canonical_path "$exe_path")"
+  [[ ! -L "$profile" && ! -L "$bottle" ]] || {
+    echo "profile or bottle symlink is not allowed: $id" >&2
+    return 1
+  }
+  if [[ -f "$profile/profile.json" && -d "$bottle" ]]; then
+    cyder_profile_resolve "$exe_path" "$CYDER_SUPPORT" >/dev/null || return 1
+    printf '%s\n' "$bottle"
+    return 0
+  fi
+  [[ ! -e "$bottle" && ! -e "$profile" ]] || {
+    echo "incomplete profile already exists: $id" >&2
+    return 1
+  }
+  if ! cyder_provision_prefix_baseline "$wine_bin" "$engine_root" "$bottle"; then
+    cyder_remove_path "$bottle"
+    echo "Profile bottle provision failed: $bottle" >&2
+    return 1
+  fi
+  if ! mkdir "$profile" || ! cyder_profile_write_metadata "$profile" "$id" "$canonical" "$base_template"; then
+    cyder_remove_path "$bottle"
+    cyder_remove_path "$profile"
+    echo "profile metadata publish failed; profile rolled back" >&2
+    return 1
+  fi
+  printf '%s\n' "$bottle"
 }
 
 cyder_ensure_font_replacements() {
@@ -1513,10 +1653,6 @@ cyder_bootstrap_shared_prefix() {
   local wine_bin="$1"
   local engine_root="$2"
   CYDER_BOOTSTRAP_HEALTH_CHECKED=0
-  cyder_diagnostic_stage wineboot
-  cyder_prepare_pristine_template "$wine_bin" "$engine_root" || return $?
-  cyder_diagnostic_stage golden-setup
-  cyder_prepare_golden_template "$wine_bin" "$engine_root" || return $?
   if [[ -f "$CYDER_BOOTSTRAP_MARKER" \
         && -f "$CYDER_SHARED_PREFIX/system.reg" \
         && -f "$CYDER_SHARED_PREFIX/.cyder-golden-baseline-v2" ]]; then
@@ -1527,17 +1663,33 @@ cyder_bootstrap_shared_prefix() {
     return 75
   }
   if [[ -e "$CYDER_SHARED_PREFIX" ]]; then
-    local old_shared="$(dirname "$CYDER_SHARED_PREFIX")/.bootstrap-previous-$(basename "$CYDER_SHARED_PREFIX")-$$"
-    mv "$CYDER_SHARED_PREFIX" "$old_shared" || return $?
-    if ! cyder_clone_golden_to_shared "$wine_bin"; then
-      rm -rf "$CYDER_SHARED_PREFIX"
+    local parent old_shared staging
+    parent="$(dirname "$CYDER_SHARED_PREFIX")"
+    old_shared="$parent/.bootstrap-previous-$(basename "$CYDER_SHARED_PREFIX")-$$"
+    staging="$parent/.bootstrap-staging-$(basename "$CYDER_SHARED_PREFIX")-$$"
+    [[ ! -e "$staging" && ! -L "$staging" && ! -e "$old_shared" && ! -L "$old_shared" ]] || {
+      echo "Bootstrap staging path already exists." >&2
+      return 1
+    }
+    if ! cyder_provision_prefix_baseline "$wine_bin" "$engine_root" "$staging"; then
+      cyder_remove_path "$staging"
+      return 1
+    fi
+    if ! mv "$CYDER_SHARED_PREFIX" "$old_shared"; then
+      cyder_remove_path "$staging"
+      return 1
+    fi
+    if ! mv "$staging" "$CYDER_SHARED_PREFIX"; then
+      cyder_remove_path "$staging"
       mv "$old_shared" "$CYDER_SHARED_PREFIX" || true
       return 1
     fi
+    printf 'revision=%s\n' "${CYDER_TEMPLATE_REVISION:-1}" >"$CYDER_BOOTSTRAP_MARKER"
     # Rollback storage is temporary; never accumulate rebuilt bottles.
     cyder_remove_path "$old_shared"
   else
-    cyder_clone_golden_to_shared "$wine_bin" || return $?
+    cyder_provision_prefix_baseline "$wine_bin" "$engine_root" "$CYDER_SHARED_PREFIX" || return $?
+    printf 'revision=%s\n' "${CYDER_TEMPLATE_REVISION:-1}" >"$CYDER_BOOTSTRAP_MARKER"
   fi
 }
 
@@ -1554,6 +1706,9 @@ cyder_run_wine_exe() {
   local game_args_text="${game_args[*]-}"
   if [[ "${CYDER_REDACT_DYNAMIC_ARGS:-0}" == 1 ]]; then
     game_args_text="<${#game_args[@]} dynamic arguments redacted>"
+  fi
+  if declare -F cyder_apply_moltenvk_os_floor >/dev/null 2>&1; then
+    cyder_apply_moltenvk_os_floor
   fi
   local wineserver="${wine_bin%/wine}/wineserver"
   # Keep the legacy direct path as the default.  Wine's ShellExecute-compatible
@@ -1596,23 +1751,47 @@ cyder_run_wine_exe() {
   {
     local taskpolicy_bin=""
     taskpolicy_bin="$(cyder_find_taskpolicy || true)"
+    local cmd_line=""
     if [[ "$start_mode" == "start" ]]; then
       if [[ "${CYDER_POWER_MODE:-normal}" == background && -n "$taskpolicy_bin" ]]; then
-        echo "cmd=$taskpolicy_bin -c background /usr/bin/arch -x86_64 $wine_bin start /wait /unix $exe $game_args_text"
+        cmd_line="$taskpolicy_bin -c background /usr/bin/arch -x86_64 $wine_bin start /wait /unix $exe $game_args_text"
       else
-        echo "cmd=arch -x86_64 $wine_bin start /wait /unix $exe $game_args_text"
+        cmd_line="/usr/bin/arch -x86_64 $wine_bin start /wait /unix $exe $game_args_text"
       fi
     else
       if [[ "${CYDER_POWER_MODE:-normal}" == background && -n "$taskpolicy_bin" ]]; then
-        echo "cmd=$taskpolicy_bin -c background /usr/bin/arch -x86_64 $wine_bin $exe $game_args_text"
+        cmd_line="$taskpolicy_bin -c background /usr/bin/arch -x86_64 $wine_bin $exe $game_args_text"
       else
-        echo "cmd=arch -x86_64 $wine_bin $exe $game_args_text"
+        cmd_line="/usr/bin/arch -x86_64 $wine_bin $exe $game_args_text"
       fi
     fi
-    echo "power_mode=${CYDER_POWER_MODE:-normal}"
-    echo "taskpolicy_available=$([[ -n "$taskpolicy_bin" ]] && echo true || echo false)"
-    echo "WINEPREFIX=$prefix"
-    echo "cwd=$(dirname "$exe")"
+    # CrossOver-style preamble so Logs/last-launch.log shows the exact command
+    # and sync flags before Wine stdout/stderr.
+    echo "***** $(date '+%Y-%m-%dT%H:%M:%SZ')"
+    echo "Running command: \"$exe\""
+    echo "Launch kind: ${CYDER_LAUNCH_KIND:-cli}"
+    echo "Prefix: $prefix"
+    if [[ "${CYDER_MSYNC:-0}" == 1 ]]; then
+      echo "MSync: Enabled"
+    else
+      echo "MSync: Disabled"
+    fi
+    if [[ "${CYDER_ESYNC:-0}" == 1 ]]; then
+      echo "ESync: Enabled"
+    else
+      echo "ESync: Disabled"
+    fi
+    echo "Power mode: ${CYDER_POWER_MODE:-normal}"
+    echo "cwd: $(dirname "$exe")"
+    echo
+    echo "Command:"
+    echo "$cmd_line"
+    echo
+    echo "Effective Wine environment:"
+    echo "  WINEPREFIX=$prefix"
+    echo "  CYDER_MSYNC=${CYDER_MSYNC:-0}"
+    echo "  CYDER_ESYNC=${CYDER_ESYNC:-0}"
+    echo "  taskpolicy_available=$([[ -n "$taskpolicy_bin" ]] && echo true || echo false)"
     echo
   } >>"$log_file"
   (

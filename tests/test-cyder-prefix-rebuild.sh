@@ -19,29 +19,27 @@ export CYDER_SUPPORT CYDER_SHARED_PREFIX CYDER_TEMPLATE_REVISION CYDER_BOOTSTRAP
 # These stubs exercise the lifecycle transaction without requiring a Wine
 # engine or downloading bootstrap components.
 cyder_has_running_prefix() { return 1; }
-cyder_prepare_pristine_template() { :; }
-cyder_prepare_golden_template() {
-  mkdir -p "$CYDER_SUPPORT/templates/golden"
-  printf 'new-prefix\n' >"$CYDER_SUPPORT/templates/golden/system.reg"
-}
-cyder_profile_backend_load() { :; }
-cyder_profile_clone_bottle() {
-  [[ "${CYDER_REBUILD_TEST_CLONE_FAIL:-0}" != 1 ]] || return 1
-  mkdir -p "$2"
-  cp -R "$1"/. "$2"/
-}
-CYDER_REBUILD_HEALTH_CALLS=0
-cyder_health_check_prefix() {
-  CYDER_REBUILD_HEALTH_CALLS=$((CYDER_REBUILD_HEALTH_CALLS + 1))
-  [[ "${CYDER_REBUILD_TEST_HEALTH_FAIL:-0}" != 1 ]]
+CYDER_REBUILD_PROVISION_CALLS=0
+cyder_provision_prefix_baseline() {
+  local wine_bin="$1" engine_root="$2" prefix="$3"
+  CYDER_REBUILD_PROVISION_CALLS=$((CYDER_REBUILD_PROVISION_CALLS + 1))
+  [[ "${CYDER_REBUILD_TEST_PROVISION_FAIL:-0}" != 1 ]] || return 1
+  mkdir -p "$prefix/drive_c/windows/system32"
+  printf 'new-prefix\n' >"$prefix/system.reg"
+  : >"$prefix/user.reg"
+  : >"$prefix/drive_c/windows/system32/kernel32.dll"
+  : >"$prefix/.cyder-golden-baseline-v2"
+  [[ "${CYDER_REBUILD_TEST_HEALTH_FAIL:-0}" != 1 ]] || return 1
+  CYDER_BOOTSTRAP_HEALTH_CHECKED=1
 }
 
 # A successful rebuild keeps no full copy of the previous shared bottle.
 cyder_rebuild_shared_prefix /tmp/fake-wine /tmp/fake-engine
-assert_eq "$CYDER_REBUILD_HEALTH_CALLS" "1" \
-  "successful rebuild should run only the final active-prefix Wine probe"
+assert_eq "$CYDER_REBUILD_PROVISION_CALLS" "1" \
+  "successful rebuild should provision once into staging"
 assert_contains "$(cat "$CYDER_SHARED_PREFIX/system.reg")" "new-prefix" \
-  "successful rebuild should publish Golden"
+  "successful rebuild should publish the provisioned baseline"
+assert test -f "$CYDER_BOOTSTRAP_MARKER"
 if find "$TMP" -type d \( -path '*/backups/*' -o -name '.rebuild-previous-*' \) -print -quit | grep -q .; then
   echo "ASSERT failed: successful rebuild should not retain the previous bottle" >&2
   exit 1
@@ -51,31 +49,25 @@ printf 'old-prefix\n' >"$CYDER_SHARED_PREFIX/system.reg"
 
 CYDER_REBUILD_TEST_HEALTH_FAIL=1
 export CYDER_REBUILD_TEST_HEALTH_FAIL
+CYDER_REBUILD_PROVISION_CALLS=0
 if cyder_rebuild_shared_prefix /tmp/fake-wine /tmp/fake-engine; then
-  echo "ASSERT failed: health-check failure should fail rebuild" >&2
+  echo "ASSERT failed: provision health failure should fail rebuild" >&2
   exit 1
 fi
 assert_contains "$(cat "$CYDER_SHARED_PREFIX/system.reg")" "old-prefix" \
-  "health-check failure should restore previous prefix"
-[[ ! -f "$CYDER_SHARED_PREFIX/.new-prefix" ]] || {
-  echo "ASSERT failed: failed replacement must not remain active" >&2
-  exit 1
-}
+  "provision failure should leave the previous prefix untouched"
 if find "$TMP/bottles" -maxdepth 1 -name '.rebuild-*' -print -quit | grep -q .; then
-  echo "ASSERT failed: failed replacement should not leave staging after publish" >&2
-  exit 1
-fi
-if find "$CYDER_SUPPORT/backups" -mindepth 1 -maxdepth 1 -print -quit 2>/dev/null | grep -q .; then
-  echo "ASSERT failed: rollback should move backup back into place" >&2
+  echo "ASSERT failed: failed provision should not leave staging behind" >&2
   exit 1
 fi
 
 rm -rf "$CYDER_SHARED_PREFIX"
 unset CYDER_REBUILD_TEST_HEALTH_FAIL
-CYDER_REBUILD_TEST_CLONE_FAIL=1
-export CYDER_REBUILD_TEST_CLONE_FAIL
+CYDER_REBUILD_TEST_PROVISION_FAIL=1
+export CYDER_REBUILD_TEST_PROVISION_FAIL
+CYDER_REBUILD_PROVISION_CALLS=0
 if cyder_rebuild_shared_prefix /tmp/fake-wine /tmp/fake-engine; then
-  echo "ASSERT failed: Golden clone failure should fail rebuild" >&2
+  echo "ASSERT failed: provision failure should fail rebuild" >&2
   exit 1
 fi
 [[ ! -e "$CYDER_SHARED_PREFIX" ]] || {
