@@ -46,6 +46,27 @@ Development and smoke tests target **[BlueCG](https://www.bluecg.net/forum.php?m
 bash scripts/run-bluecg.sh
 ```
 
+## 🎮 Tested Games Compatibility
+
+Below is a summary of tested games on Cyder / CyderBits. For detailed configurations, launch parameters, and workarounds, see the **[📋 Game Compatibility Matrix](docs/games/compatibility-matrix.md)**.
+
+| Category | Game | Status | Key Notes / Workarounds |
+|:---:|:---|:---:|:---|
+| **Single-player** | Age of Empires II (3.8) | ⚠️ Playable | Micro-stutters every 5 seconds (known Wine/macOS issue) |
+| **Single-player** | Richman 4 (大富翁4) | 🟡 Needs ddraw | Black screen by default; requires `cnc-ddraw` to render properly |
+| **Single-player** | Pikachu Volleyball | 🟡 Special condition | Disable MSync recommended; CrossOver requires "Save Log" enabled |
+| **Single-player** | Mega Man X3 / X4 | ⚠️ Non-fatal error | Shows DirectX init error on boot; dismiss prompt to play normally |
+| **Single-player** | Mega Man X5 | ⚠️ Display issue | Playable, but window stays aligned/scaled to top-left |
+| **Single-player** | Metal Slug | 🟢 Playable | Disable Retina mode |
+| **Single-player** | Diablo II | 🟢 Playable | Disable Retina mode |
+| **Single-player** | Warcraft III | 🟢 Playable | Add `-nativefullscr` launch argument for native resolution |
+| **Single-player** | Little Fighter 2 (1.9c) | 🟢 Playable | Works directly out of the box |
+| **Single-player** | Little Fighter 2 (2.0a) | 🟡 Winetricks deps | Requires `vcrun2005`, `wmp9`, `quartz`, `devenum`, `vb6run` via winetricks |
+| **Online** | BlueCG (水藍魔力) | 🟢 Playable | Project baseline validation (DirectDraw / GDI) |
+| **Online** | MapleStory (新楓之谷) | 🟢 Playable | Uses MapleStory Launcher engine & [CitrusGate](https://github.com/dspp779/CitrusGate) for OTP |
+| **Online** | MapleStory Classic | 🟢 Playable | Uses [CitrusGate](https://github.com/dspp779/CitrusGate) for OTP handling |
+| **Online** | Crazy Arcade (爆爆王) | 🟢 Playable | Playable (TW official server sunsetting on 2026/08/13) |
+
 ## Graphics backend status
 
 | Backend | Project status | Notes |

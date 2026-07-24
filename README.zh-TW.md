@@ -46,6 +46,27 @@ open dist/CyderBits.app
 bash scripts/run-bluecg.sh
 ```
 
+## 🎮 已測試遊戲相容性
+
+目前已測試過並確認可運行的遊戲清單如下，完整測試細節、啟動參數與 Workaround 請參閱 **[📋 遊戲相容性矩陣 (Compatibility Matrix)](docs/games/compatibility-matrix.md)**。
+
+| 類別 | 遊戲名稱 | 測試狀態 | 關鍵設定 / 備註 |
+|:---:|:---|:---:|:---|
+| **單機** | 世紀帝國 2 (3.8) | ⚠️ 可玩 | 每 5 秒會頓一下 (已知 Wine/macOS 問題) |
+| **單機** | 大富翁 4 | 🟡 需 ddraw | 原版黑畫面，需搭配 `cnc-ddraw` 顯示才正常 |
+| **單機** | 皮卡丘打排球 | 🟡 特殊條件 | 建議關閉 MSync；CrossOver 需開啟儲存 log 檔 |
+| **單機** | 洛克人 X3 / X4 | ⚠️ 提示可玩 | 啟動會跳 DirectX 初始化錯誤，按掉後可正常遊玩 |
+| **單機** | 洛克人 X5 | ⚠️ 畫面縮放 | 可正常遊玩，畫面縮在左上角 |
+| **單機** | 越南大戰 | 🟢 可玩 | 停用 Retina Mode 即可正常遊玩 |
+| **單機** | 暗黑破壞神 2 | 🟢 可玩 | 停用 Retina Mode 即可正常遊玩 |
+| **單機** | 魔獸爭霸 3 | 🟢 可玩 | 搭配啟動參數 `-nativefullscr` 開啟最高解析度 |
+| **單機** | 小朋友齊打交 2 (1.9c) | 🟢 可玩 | 可直接執行遊玩 |
+| **單機** | 小朋友齊打交 2 (2.0a) | 🟡 需依賴庫 | 需透過 `winetricks` 安裝 `vcrun2005`, `wmp9`, `quartz`, `devenum`, `vb6run` |
+| **線上** | 水藍魔力 (BlueCG) | 🟢 可玩 | 專案驗證基準 (DirectDraw / GDI) |
+| **線上** | 新楓之谷 | 🟢 可玩 | 需 MapleStory Launcher 引擎 & 搭配 [CitrusGate](https://github.com/dspp779/CitrusGate) 傳送 OTP |
+| **線上** | 新楓之谷 經典版 | 🟢 可玩 | 需搭配 [CitrusGate](https://github.com/dspp779/CitrusGate) 傳送 OTP |
+| **線上** | 爆爆王 | 🟢 可玩 | 可正常遊玩 (台灣官方預計於 2026/08/13 結束營運) |
+
 ## 圖形 backend 狀態
 
 | Backend | 專案狀態 | 說明 |
