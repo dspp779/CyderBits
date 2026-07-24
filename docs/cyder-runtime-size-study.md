@@ -1,15 +1,30 @@
 # Cyder Runtime 與 Bottle 體積研究
 
-更新：2026-07-21
+更新：2026-07-24 (最新實測 CX26.3.0-W11-Cyder004 瘦身成果)
 
-## 結論
+## 📌 最新實測數據 (CX26.3.0-W11-Cyder004)
+
+經過 `scripts/strip-wine-install.sh` 剝除 PE 模組 debug symbols、清理開發標頭檔與優化打包流程後，最新版 Wine 引擎 (Cyder004) 與 App 打包體積達到顯著瘦身：
+
+| 項目 | 原始未 Strip 引擎 | 最新實測 (Cyder004) | 節省 / 效益 |
+|---|---:|---:|---:|
+| **引擎打包壓縮檔 (`.tar.xz`)** | 約 162 MB ~ 252 MB | **約 55 MB** | 壓縮檔體積減少約 66% ~ 78% |
+| **打包後 App (`.app` 包裝檔)** | - | **約 61 MB** | 產出超輕量 macOS 可攜 `.app` |
+| **解壓後 Runtime 實體目錄** | 約 1,031.8 MB (~1.1 GB) | **約 423.3 MB** | 實體目錄縮減約 61.5% |
+
+- **最新引擎 Artifact 路徑**：`dist/artifacts/cx26.3-a6/engine-wine-x86_64-CX26-3-0-W11-Cyder004.tar.xz`
+- **主要瘦身機制**：利用 `llvm-strip --strip-debug` 剝除 PE 檔中的 DWARF 偵錯資訊（如 `.debug_info`, `.debug_loc`），不影響 `.text` / `.rsrc` 或 DLL 匯出介面，在確保 Wine 相容性完全不變的前提下消除巨幅體積膨脹。
+
+---
+
+## 歷史研究與結論
 
 主要差異不是 CrossOver 有一組神祕的 `configure` 瘦身參數，而是 Cyder 的 release staging
 沒有剝除 PE DLL/EXE 內的 DWARF debug sections。Wine 建立 prefix 時又會把這些 PE modules
 複製到 `drive_c/windows/system32` 與 `syswow64`，所以同一份 debug data 同時膨脹 engine
 與 bottle。
 
-本機實測（`du -sk`，MiB 為約值）：
+本機早期階段實測（`du -sk`，MiB 為約值）：
 
 | 項目 | 原始 | Release strip 後 | 節省 |
 |---|---:|---:|---:|

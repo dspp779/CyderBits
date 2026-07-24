@@ -77,7 +77,7 @@
 
 **CyderBits 背景：** `Cyder.app` 已純 shell；`CyderBits.app` 仍 `python3 cyder_create_game_app.py`，產出的 game `.app` 亦內嵌 Python 讀 `meta.json`。Bash 化後對齊 Cyder 模式，僅 PE icon 抽取保留小型 `extract-exe-icon.py`（`winemenubuilder -t` / `sips` 直接讀 exe 不可行）。
 
-**Engine 瘦身背景：** CX26 install tree 解壓約 1.1 GB，但目前完整 tar.xz 約 162 MB；大型 PE 含高度可壓縮的 DWARF debug sections。Sikarugir 加上 Frameworks 後同樣超過 1 GB，因此不再作尺寸／allowlist 基準。新方向是 CrossOver configure profiles、Wine `install-lib`、split/strip debug symbols，以及同時量測壓縮與安裝大小；**須保留 `mscoree.dll`**（BlueLauncher .NET）。
+**Engine 瘦身背景：** 原始無瘦身 CX26 install tree 解壓約 1.1 GB（未 strip 前 tar.xz 約 162 MB）。經由 PE DWARF debug symbols 剝除 (`scripts/strip-wine-install.sh`) 與 release 處理後，最新版引擎 (Cyder004) 打包壓縮檔 (`.tar.xz`) 已降至約 **55 MB**，解壓後的 runtime 降至約 **423.3 MB**，打包後的 `.app` 僅約 **61 MB**。Sikarugir 加上 Frameworks 後超過 1 GB，因此不再作尺寸／allowlist 基準。瘦身策略採 CrossOver configure profiles、`llvm-strip` 偵錯符號剝除及 media stack 精簡；**須保留 `mscoree.dll`**（BlueLauncher .NET）。詳細實測數據見 [cyder-runtime-size-study.md](cyder-runtime-size-study.md)。
 
 ## 其他
 

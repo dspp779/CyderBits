@@ -24,6 +24,9 @@
 
 Sikarugir 仍可作遊戲相容性或圖形行為對照，但不再是瘦身 golden image。
 
+> **最新實測結果 (2026-07-24 / Cyder004)**：
+> PE debug sections strip (`scripts/strip-wine-install.sh`) 已落地並納入打包流程，最新引擎 artifact `engine-wine-x86_64-CX26-3-0-W11-Cyder004.tar.xz` 壓縮包僅約 **55 MB**，解壓後的 runtime 目錄縮減至約 **423.3 MB**，最終產出的 App 打包僅約 **61 MB**。詳見 [cyder-runtime-size-study.md](../../cyder-runtime-size-study.md)。
+
 ## 2. 現況量測
 
 ### 2.1 本機 CX26 引擎（2026-07-15）
