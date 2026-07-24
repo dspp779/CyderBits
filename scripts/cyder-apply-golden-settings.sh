@@ -1,31 +1,50 @@
 #!/usr/bin/env bash
-# Apply Cyder's immutable baseline to a Golden staging prefix.
+# Apply Cyder's immutable baseline to a prefix with a single regedit import.
+# Avoids one Wine startup per registry value (previously ~15+ reg add calls).
 set -Eeuo pipefail
 
 WINE_INSTALL="${WINE_INSTALL:?WINE_INSTALL not set}"
 WINEPREFIX="${WINEPREFIX:?WINEPREFIX not set}"
+[[ -d "$WINEPREFIX" ]] || { echo "WINEPREFIX missing: $WINEPREFIX" >&2; exit 1; }
+
 WINE=(/usr/bin/arch -x86_64 "$WINE_INSTALL/bin/wine")
+tmpdir="$(mktemp -d "${TMPDIR:-/tmp}/cyder-golden-reg.XXXXXX")"
+trap 'rm -rf "$tmpdir"' EXIT
+regfile="$tmpdir/golden-baseline.reg"
 
-reg_add() {
-  "${WINE[@]}" reg add "$@" /f
-}
+# REGEDIT4 import: one Wine process applies the whole baseline.
+cat >"$regfile" <<'EOF'
+REGEDIT4
 
-# Global default: Songti TC with RGB subpixel smoothing.
-reg_add 'HKCU\Software\Wine\Mac Driver' /v RetinaMode /t REG_SZ /d n
-reg_add 'HKCU\Control Panel\Desktop' /v LogPixels /t REG_DWORD /d 96
-reg_add 'HKCU\Control Panel\Desktop' /v FontSmoothing /t REG_SZ /d 2
-reg_add 'HKCU\Control Panel\Desktop' /v FontSmoothingType /t REG_DWORD /d 2
-reg_add 'HKCU\Control Panel\Desktop' /v FontSmoothingGamma /t REG_DWORD /d 1400
-reg_add 'HKCU\Control Panel\Desktop' /v FontSmoothingOrientation /t REG_DWORD /d 1
+[HKEY_CURRENT_USER\Software\Wine\Mac Driver]
+"RetinaMode"="n"
 
-for name in MingLiU PMingLiU 細明體 新細明體 SimSun NSimSun 'MS Shell Dlg' 'MS Shell Dlg 2' 'Microsoft Sans Serif'; do
-  reg_add 'HKCU\Software\Wine\Fonts\Replacements' /v "$name" /t REG_SZ /d 'Songti TC'
-done
-reg_add 'HKCU\Software\Wine\Fonts\Replacements' /v @PMingLiU /t REG_SZ /d '@Songti TC'
-reg_add 'HKCU\Software\Wine\Fonts\Replacements' /v @細明體 /t REG_SZ /d '@Songti TC'
+[HKEY_CURRENT_USER\Control Panel\Desktop]
+"LogPixels"=dword:00000060
+"FontSmoothing"="2"
+"FontSmoothingType"=dword:00000002
+"FontSmoothingGamma"=dword:00000578
+"FontSmoothingOrientation"=dword:00000001
 
-# Cyder baseline for DirectDraw. Wine's n,b notation is native,builtin.
-reg_add 'HKCU\Software\Wine\DllOverrides' /v ddraw /t REG_SZ /d native,builtin
+[HKEY_CURRENT_USER\Software\Wine\Fonts\Replacements]
+"MingLiU"="Songti TC"
+"PMingLiU"="Songti TC"
+"細明體"="Songti TC"
+"新細明體"="Songti TC"
+"SimSun"="Songti TC"
+"NSimSun"="Songti TC"
+"MS Shell Dlg"="Songti TC"
+"MS Shell Dlg 2"="Songti TC"
+"Microsoft Sans Serif"="Songti TC"
+"@PMingLiU"="@Songti TC"
+"@細明體"="@Songti TC"
+
+[HKEY_CURRENT_USER\Software\Wine\DllOverrides]
+"ddraw"="native,builtin"
+EOF
+
+echo "regedit /s $regfile" >&2
+"${WINE[@]}" regedit /s "$regfile"
 
 printf 'schema=2\nretina=0\ndpi=96\nfont=songti\nsmoothing=cleartype-rgb\nddraw=native,builtin\n' \
   >"$WINEPREFIX/.cyder-golden-baseline-v2"

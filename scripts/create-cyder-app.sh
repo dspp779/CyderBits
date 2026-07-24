@@ -9,6 +9,13 @@ source "$SCRIPT_DIR/env-x86_64.sh"
 
 OUT_DIR="${OGOM}/dist"
 CYDER_APP_VERSION="${CYDER_APP_VERSION:-0.6.0}"
+# Release identity by default; export SIGN_IDENTITY=- for an unsigned local build.
+SIGN_IDENTITY="${SIGN_IDENTITY:-Developer ID Application: Chun Ho Kwok (3U9565WWM2)}"
+if [[ "$SIGN_IDENTITY" == "-" ]]; then
+  TIMESTAMP_FLAG="--timestamp=none"
+else
+  TIMESTAMP_FLAG="--timestamp"
+fi
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --engine-archive)
@@ -126,6 +133,9 @@ mkdir -p "$RES/ogom-scripts" "$RES/addons/libarchive" "$RES/tools/zstd" "$RES/li
 cp "$SCRIPT_DIR/cyder_launcher.sh" "$RES/ogom-scripts/"
 cp "$SCRIPT_DIR/cyder-common.sh" "$RES/ogom-scripts/"
 cp "$SCRIPT_DIR/cyder-ensure-rosetta.sh" "$RES/ogom-scripts/"
+cp "$SCRIPT_DIR/cyder-legacy-ui.sh" "$RES/ogom-scripts/"
+cp "$SCRIPT_DIR/cyder-legacy-ui.applescript" "$RES/ogom-scripts/"
+cp "$SCRIPT_DIR/cyder-legacy-progress.applescript" "$RES/ogom-scripts/"
 cp "$SCRIPT_DIR/env-x86_64.sh" "$RES/ogom-scripts/"
 cp "$SCRIPT_DIR/sign-wine.sh" "$RES/ogom-scripts/"
 cp "$SCRIPT_DIR/install-wine-mono.sh" "$RES/ogom-scripts/"
@@ -151,6 +161,7 @@ cp "$SCRIPT_DIR/cyder-profile.sh" "$RES/ogom-scripts/"
 cp "$SCRIPT_DIR/cyder_create_game_app.py" "$RES/ogom-scripts/"
 cp "$SCRIPT_DIR/cyder_common.py" "$RES/ogom-scripts/"
 chmod +x "$RES/ogom-scripts/cyder_launcher.sh"
+chmod +x "$RES/ogom-scripts/cyder-legacy-ui.sh"
 chmod +x "$RES/ogom-scripts/sign-wine.sh"
 chmod +x "$RES/ogom-scripts/install-cyder-font-replacements.sh"
 chmod +x "$RES/ogom-scripts/cyder-apply-settings.sh"
@@ -194,18 +205,15 @@ fi
 # MacOSX.sdk module metadata out of sync while the versioned SDK is usable.
 SWIFT_SDK="$(cd "$SWIFT_SDK" && pwd -P)"
 echo "==> Swift SDK: $SWIFT_SDK"
-NATIVE_CYDER=0
 if swiftc "$SWIFT_OPTIMIZATION" -sdk "$SWIFT_SDK" -module-cache-path "$SWIFT_MODULE_CACHE" -target arm64-apple-macosx12.0 -o "$SWIFT_BUILD_DIR/Cyder-arm64" "${SWIFT_SOURCES[@]}" \
   && swiftc "$SWIFT_OPTIMIZATION" -sdk "$SWIFT_SDK" -module-cache-path "$SWIFT_MODULE_CACHE" -target x86_64-apple-macosx12.0 -o "$SWIFT_BUILD_DIR/Cyder-x86_64" "${SWIFT_SOURCES[@]}" \
   && lipo -create "$SWIFT_BUILD_DIR/Cyder-arm64" "$SWIFT_BUILD_DIR/Cyder-x86_64" -output "$MACOS/CyderSwift"; then
-  cp "$MACOS/CyderSwift" "$MACOS/Cyder"
-  chmod +x "$MACOS/Cyder" "$MACOS/CyderSwift"
-  NATIVE_CYDER=1
+  chmod +x "$MACOS/CyderSwift"
   rm -rf "$SWIFT_BUILD_DIR"
-  echo "==> Compiled universal native Cyder launcher"
+  echo "==> Compiled universal native CyderSwift (macOS 12+ UI)"
 else
   rm -rf "$SWIFT_BUILD_DIR"
-  echo "==> Warning: universal Swift build failed; using bash launcher (double-click .exe may not pass path)" >&2
+  echo "==> Warning: universal Swift build failed; CyderSwift falls back to shell launcher" >&2
   cat > "$MACOS/CyderSwift" <<LAUNCHER
 #!/bin/bash
 set -euo pipefail
@@ -242,55 +250,10 @@ LAUNCHER
   chmod +x "$MACOS/CyderSwift"
 fi
 
-if [[ "$NATIVE_CYDER" -eq 0 ]]; then
-cat > "$MACOS/Cyder" <<'LAUNCHER'
-#!/usr/bin/env bash
-set -euo pipefail
-
-SELF="$(cd "$(dirname "$0")" && pwd)"
-RES="$(cd "$SELF/../Resources" && pwd)"
-
-ENGINE_ARCHIVE="$(tr -d '[:space:]' < "$RES/engine-archive.txt" 2>/dev/null || true)"
-if [[ -n "$ENGINE_ARCHIVE" && -f "$RES/$ENGINE_ARCHIVE" ]]; then
-  ENGINE_SRC="$RES/$ENGINE_ARCHIVE"
-else
-  ENGINE_VER="$(tr -d '[:space:]' < "$RES/engine-version.txt" 2>/dev/null || true)"
-  if [[ -n "$ENGINE_VER" && -f "$RES/engine-$ENGINE_VER.tar.zst" ]]; then
-    ENGINE_SRC="$RES/engine-$ENGINE_VER.tar.zst"
-  elif [[ -n "$ENGINE_VER" && -f "$RES/engine-wine-x86_64-$ENGINE_VER.tar.xz" ]]; then
-    ENGINE_SRC="$RES/engine-wine-x86_64-$ENGINE_VER.tar.xz"
-  else
-    ENGINE_SRC="$RES/engine-payload"
-  fi
-fi
-
-export CYDER_ENGINE_SRC="$ENGINE_SRC"
-export CYDER_SCRIPTS="$RES/ogom-scripts"
-export CYDER_LIBARCHIVE_SRC="$RES/addons/libarchive"
-export OGOM="$RES"
-export WINE_INSTALL="$ENGINE_SRC"
-export ENTITLEMENTS_PLIST="$RES/entitlements.plist"
-export CYDER_ENTITLEMENTS="$RES/entitlements.plist"
-export CYDER_APP="$(cd "$SELF/.." && pwd)"
-export CYDER_BUNDLE_ID="local.cyder.app"
-
-forwarded=("$@")
-for index in "${!forwarded[@]}"; do
-  raw="${forwarded[$index]}"
-  [[ "$raw" == -psn_* ]] && continue
-  path="${raw#file://}"
-  lower="$(printf '%s' "$path" | tr '[:upper:]' '[:lower:]')"
-  if [[ "$lower" == *.exe ]]; then
-    exec "$RES/ogom-scripts/cyder_launcher.sh" --engine-src "$ENGINE_SRC" \
-      --launch-exe "$path" -- "${forwarded[@]:$((index + 1))}"
-  fi
-done
-
-# No document was opened: launch the AppKit settings UI only when needed.
-exec "$SELF/CyderSwift"
-LAUNCHER
+# Always ship a bash entrypoint so macOS < 12 can fall back to osascript UI
+# (Swift CyderSwift requires 12.0). On 12+ the wrapper exec's CyderSwift.
+cp "$SCRIPT_DIR/cyder-macos-wrapper.sh" "$MACOS/Cyder"
 chmod +x "$MACOS/Cyder"
-fi
 
 cat > "$CONTENTS/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
@@ -316,7 +279,7 @@ cat > "$CONTENTS/Info.plist" <<PLIST
   <key>CFBundleVersion</key>
   <string>$CYDER_APP_VERSION</string>
   <key>LSMinimumSystemVersion</key>
-  <string>12.0</string>
+  <string>10.15</string>
   <key>NSHighResolutionCapable</key>
   <true/>
   <key>CFBundleDocumentTypes</key>
@@ -346,7 +309,32 @@ PLIST
 # that attribute into the nested runtime payload; the app itself is signed
 # immediately afterwards and may still receive quarantine when downloaded.
 xattr -cr "$APP" 2>/dev/null || true
-codesign --force --deep --sign - "$APP" 2>/dev/null || true
+
+sign_macho() {
+  local path="$1"
+  [[ -f "$path" ]] || return 0
+  file -b "$path" | grep -q 'Mach-O' || return 0
+  codesign --force --options runtime "$TIMESTAMP_FLAG" \
+    --entitlements "$OGOM/config/entitlements.plist" \
+    --sign "$SIGN_IDENTITY" \
+    "$path"
+}
+
+# Sign nested helpers before the main executable / bundle (inside-out).
+sign_macho "$APP/Contents/Resources/tools/zstd/zstd"
+sign_macho "$APP/Contents/MacOS/CyderSwift"
+sign_macho "$APP/Contents/MacOS/Cyder"
+while IFS= read -r -d '' path; do
+  case "$path" in
+    */MacOS/Cyder | */MacOS/CyderSwift | */tools/zstd/zstd) continue ;;
+  esac
+  sign_macho "$path"
+done < <(find "$APP/Contents" -type f -print0)
+
+codesign --force --options runtime "$TIMESTAMP_FLAG" \
+  --entitlements "$OGOM/config/entitlements.plist" \
+  --sign "$SIGN_IDENTITY" \
+  "$APP"
 
 echo ""
 echo "Created $APP"

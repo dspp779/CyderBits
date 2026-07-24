@@ -146,8 +146,38 @@ build_moltenvk_crossover() {
 
   require_xcode
 
+  # fetchDependencies derives SPIRV-Cross's git URL from the nearest git
+  # remote. Inside this monorepo that becomes origin/.../SPIRV-Cross.git and
+  # fails. CrossOver FOSS tarballs already vendor External/SPIRV-Cross (often
+  # without .git). Copy it out before fetchDependencies runs — it does
+  # `rm -rf SPIRV-Cross` then symlinks SPIRV_CROSS_ROOT.
+  local spirv_cross_vendored="$MOLTENVK_SRC/External/SPIRV-Cross"
+  local spirv_cross_rev spirv_cross_cache
+  spirv_cross_rev="$(
+    tr -d '[:space:]' <"$MOLTENVK_SRC/ExternalRevisions/SPIRV-Cross_repo_revision"
+  )"
+  spirv_cross_cache="$BUILD_DIR/moltenvk-deps/SPIRV-Cross-$spirv_cross_rev"
+  if [[ ! -f "$spirv_cross_cache/spirv_cross.hpp" && ! -f "$spirv_cross_cache/spirv_cross_c.cpp" \
+      && ! -d "$spirv_cross_cache/include" ]]; then
+    if [[ -f "$spirv_cross_vendored/spirv_cross.hpp" || -f "$spirv_cross_vendored/spirv_cross_c.cpp" \
+        || -d "$spirv_cross_vendored/include" ]]; then
+      echo "Caching CX-vendored SPIRV-Cross -> $spirv_cross_cache"
+      run rm -rf "$spirv_cross_cache"
+      run mkdir -p "$(dirname "$spirv_cross_cache")"
+      run cp -a "$spirv_cross_vendored" "$spirv_cross_cache"
+    else
+      echo "Caching KhronosGroup/SPIRV-Cross @$spirv_cross_rev (fallback)..."
+      run rm -rf "$spirv_cross_cache"
+      run mkdir -p "$(dirname "$spirv_cross_cache")"
+      run git clone https://github.com/KhronosGroup/SPIRV-Cross.git "$spirv_cross_cache"
+      run git -C "$spirv_cross_cache" checkout --detach "$spirv_cross_rev"
+    fi
+  else
+    echo "Using cached SPIRV-Cross at $spirv_cross_cache"
+  fi
+
   echo "Fetching MoltenVK external dependencies (may need network)..."
-  run bash -c "cd '$MOLTENVK_SRC' && ./fetchDependencies --macos"
+  run bash -c "cd '$MOLTENVK_SRC' && ./fetchDependencies --macos --spirv-cross-root '$spirv_cross_cache'"
 
   echo "Building MoltenVK (arch=$ARCHS) from CrossOver snapshot..."
   run arch -x86_64 env \

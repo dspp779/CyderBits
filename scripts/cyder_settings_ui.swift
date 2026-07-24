@@ -221,7 +221,12 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
     }
 
     private func makeFontsTab() -> NSTabViewItem {
-        font.addItems(withTitles: ["宋體（Songti TC，預設）", "細明體（MingLiU）"])
+        font.addItems(withTitles: [
+            cyderDefaultFontPreset() == "songti"
+                ? "宋體（Songti TC，預設）" : "宋體（Songti TC）",
+            cyderDefaultFontPreset() == "mingliu"
+                ? "細明體（MingLiU，預設）" : "細明體（MingLiU）",
+        ])
         font.target = self
         font.action = #selector(fontChanged)
         smoothing.addItems(withTitles: ["關閉", "灰階", "ClearType RGB"])

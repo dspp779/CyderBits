@@ -41,3 +41,8 @@ __pycache__/
 *.py[cod]
 
 .wine/.worktrees/
+
+# Local Developer ID / notary credentials (never commit)
+auth/
+
+.env

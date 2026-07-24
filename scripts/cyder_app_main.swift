@@ -436,6 +436,10 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
                 let request = requestDirectory.appendingPathComponent("test-\(UUID().uuidString).json")
                 try JSONEncoder.pretty.encode(settings).write(to: request, options: .atomic)
                 launchEnvironment["CYDER_TEST_SETTINGS_REQUEST"] = request.path
+                // Test launches always capture Wine output so the command line and
+                // effective sync/env settings are inspectable under Logs/.
+                launchEnvironment["CYDER_CAPTURE_WINE_LOG"] = "1"
+                launchEnvironment["CYDER_LAUNCH_KIND"] = "test"
             } catch {
                 showAlert("無法啟動測試", "無法建立暫存的遊戲設定：\(error.localizedDescription)")
                 return
@@ -621,13 +625,11 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         let needsEngine = unsafeEnginePath
             || !FileManager.default.isExecutableFile(atPath: engineWine.path)
             || engineNeedsInstall(context: context, engineWine: engineWine)
-        let pristineManifest = CyderPaths.support
-            .appendingPathComponent("templates/pristine/manifest.json").path
-        let goldenManifest = CyderPaths.support
-            .appendingPathComponent("templates/golden/manifest.json").path
+        let sharedSystemReg = CyderPaths.sharedBottle.appendingPathComponent("system.reg").path
+        let sharedBaseline = CyderPaths.sharedBottle.appendingPathComponent(".cyder-golden-baseline-v2").path
         let needsBootstrap = !FileManager.default.fileExists(atPath: CyderPaths.bootstrapMarker.path)
-            || !FileManager.default.fileExists(atPath: pristineManifest)
-            || !FileManager.default.fileExists(atPath: goldenManifest)
+            || !FileManager.default.fileExists(atPath: sharedSystemReg)
+            || !FileManager.default.fileExists(atPath: sharedBaseline)
         return (needsEngine, needsBootstrap)
     }
 
@@ -924,7 +926,12 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         }
 
         CyderDiagnostics.shared.enter(.wineSpawn, detail: CyderDiagnostics.shared.redact(exe))
+        // Test launches (override settings from the library "測試" button) always
+        // capture a CrossOver-style preamble + Wine stdout/stderr. Opt-in via
+        // CYDER_CAPTURE_WINE_LOG=1 for Finder / library play launches.
         let captureWineLog = ProcessInfo.processInfo.environment["CYDER_CAPTURE_WINE_LOG"] == "1"
+            || gameSettings != nil
+            || ProcessInfo.processInfo.environment["CYDER_LAUNCH_KIND"] == "test"
         let launchLog = captureWineLog
             ? CyderDiagnostics.shared.makeOperationLog("wine-launch")
             : URL(fileURLWithPath: "/dev/null")
@@ -977,7 +984,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         } else {
             process.executableURL = URL(fileURLWithPath: "/usr/bin/arch")
             process.arguments = ["-x86_64", wine.path, exe] + gameArguments
-            commandDescription = "arch -x86_64 \(wine.path) \(exe) \(diagnosticArguments)"
+            commandDescription = "/usr/bin/arch -x86_64 \(wine.path) \(exe) \(diagnosticArguments)"
         }
         process.currentDirectoryURL = URL(fileURLWithPath: exe).deletingLastPathComponent()
         process.environment = environment
@@ -991,20 +998,59 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
                 logURL: CyderDiagnostics.shared.sessionLogURL
             ))
         }
-        let command = CyderDiagnostics.shared.redact(
-            "cmd=\(commandDescription)\nprofile_id=\(profileID ?? "shared")\npower_mode=\(powerMode)\ntaskpolicy_available=\(hasTaskpolicy)\nWINEPREFIX=\(prefixPath)\ncwd=\((exe as NSString).deletingLastPathComponent)\n\n"
-        )
-        try? handle.write(contentsOf: Data(command.utf8))
+        let msyncEnabled = environment["CYDER_MSYNC"] == "1" || environment["WINEMSYNC"] == "1"
+        let esyncEnabled = environment["CYDER_ESYNC"] == "1" || environment["WINEESYNC"] == "1"
+        let launchKind = ProcessInfo.processInfo.environment["CYDER_LAUNCH_KIND"]
+            ?? (gameSettings == nil ? "play" : "test")
+        let extraEnvironment = (gameSettings?.environment ?? [:])
+            .sorted { $0.key < $1.key }
+            .map { "  \($0.key)=\($0.value)" }
+            .joined(separator: "\n")
+        let timestamp = ISO8601DateFormatter().string(from: Date())
+        // CrossOver-style preamble: command first, then bottle/sync/env, then Wine output.
+        let preamble = """
+        ***** \(timestamp)
+        Running command: "\(exe)"
+        Launch kind: \(launchKind)
+        Profile: \(profileID ?? "shared")
+        Prefix: \(prefixPath)
+        MSync: \(msyncEnabled ? "Enabled" : "Disabled")
+        ESync: \(esyncEnabled ? "Enabled" : "Disabled")
+        Power mode: \(powerMode)
+        Argument source: \(argumentSource)
+        Extra environment variables: \(extraEnvironment.isEmpty ? "(null)" : "\n\(extraEnvironment)")
+        cwd: \((exe as NSString).deletingLastPathComponent)
+
+        Command:
+        \(commandDescription)
+
+        Effective Wine environment:
+          WINEPREFIX=\(environment["WINEPREFIX"] ?? "<unset>")
+          WINEMSYNC=\(environment["WINEMSYNC"] ?? "<unset>")
+          WINEESYNC=\(environment["WINEESYNC"] ?? "<unset>")
+          LANG=\(environment["LANG"] ?? "<unset>")
+          LC_ALL=\(environment["LC_ALL"] ?? "<unset>")
+          LC_CTYPE=\(environment["LC_CTYPE"] ?? "<unset>")
+          CYDER_MSYNC=\(environment["CYDER_MSYNC"] ?? "<unset>")
+          CYDER_ESYNC=\(environment["CYDER_ESYNC"] ?? "<unset>")
+          CYDER_DPI=\(environment["CYDER_DPI"] ?? "<unset>")
+          CYDER_RETINA_MODE=\(environment["CYDER_RETINA_MODE"] ?? "<unset>")
+          CYDER_FONT_PRESET=\(environment["CYDER_FONT_PRESET"] ?? "<unset>")
+          taskpolicy_available=\(hasTaskpolicy)
+
+        """
+        try? handle.write(contentsOf: Data(CyderDiagnostics.shared.redact(preamble).utf8))
         process.standardOutput = handle
         process.standardError = handle
 
-        let msync = environment["CYDER_MSYNC"] == "1" ? "1" : "0"
-        let esync = environment["CYDER_ESYNC"] == "1" ? "1" : "0"
+        let msync = msyncEnabled ? "1" : "0"
+        let esync = esyncEnabled ? "1" : "0"
         CyderDiagnostics.shared.info(
             "game-launch effective-settings profile=\(profileID ?? "shared") "
                 + "source=\(gameSettings == nil ? "saved" : "test-or-override") "
                 + "argument_source=\(argumentSource) argument_count=\(gameArguments.count) "
-                + "msync=\(msync) esync=\(esync) power=\(powerMode) captureWineLog=\(captureWineLog)"
+                + "msync=\(msync) esync=\(esync) power=\(powerMode) captureWineLog=\(captureWineLog) "
+                + "log=\(CyderDiagnostics.shared.redact(launchLog.path))"
         )
 
         do {
@@ -1369,6 +1415,16 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             try? FileManager.default.removeItem(at: resultURL)
             environment["CYDER_RESULT_FILE"] = resultURL.path
         }
+        let trackProgress = args.contains("--bootstrap-only")
+            || args.contains("--rebuild-prefix")
+            || args.contains("--profile-create")
+        let progressURL = operationLog
+            .deletingPathExtension()
+            .appendingPathExtension("progress.txt")
+        if trackProgress {
+            try? FileManager.default.removeItem(at: progressURL)
+            environment["CYDER_PROGRESS_FILE"] = progressURL.path
+        }
         environment["CYDER_DIAGNOSTIC_SESSION_ID"] = CyderDiagnostics.shared.sessionID
         environment["CYDER_DIAGNOSTIC_STAGE"] = stage.rawValue
         environment["CYDER_DIAGNOSTIC_LOG"] = operationLog.path
@@ -1379,10 +1435,36 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         try? handle.write(contentsOf: Data(command.utf8))
         process.standardOutput = handle
         process.standardError = handle
+
+        var progressTimer: DispatchSourceTimer?
+        var lastProgress = ""
+        if trackProgress {
+            let timer = DispatchSource.makeTimerSource(queue: DispatchQueue.global(qos: .utility))
+            timer.schedule(deadline: .now() + 0.2, repeating: 0.25)
+            timer.setEventHandler { [weak self] in
+                guard let self else { return }
+                guard let data = try? Data(contentsOf: progressURL),
+                      let text = String(data: data, encoding: .utf8)?
+                        .trimmingCharacters(in: .whitespacesAndNewlines),
+                      !text.isEmpty,
+                      text != lastProgress
+                else {
+                    return
+                }
+                lastProgress = text
+                self.showSetup(text)
+            }
+            progressTimer = timer
+            timer.resume()
+        }
+
         do {
             try process.run()
             process.waitUntilExit()
+            progressTimer?.cancel()
+            progressTimer = nil
             try? handle.close()
+            try? FileManager.default.removeItem(at: progressURL)
             let tail = CyderDiagnostics.shared.tail(of: operationLog)
             var machineResult: [String: String] = [:]
             if expectsMachineResult,
@@ -1405,7 +1487,9 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
                 machineResult: machineResult
             )
         } catch {
+            progressTimer?.cancel()
             try? handle.close()
+            try? FileManager.default.removeItem(at: progressURL)
             let message = "Failed to run launcher: \(error)"
             CyderDiagnostics.shared.warning(message)
             return CyderProcessResult(

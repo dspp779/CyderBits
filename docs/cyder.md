@@ -21,6 +21,18 @@ open dist/Cyder.app
 - 內含 Universal Swift launcher（arm64 + x86_64）、shell worker（`cyder_launcher.sh`）與 bootstrap helper（mono、tar、locale、hi-res）
 - 在 `Info.plist` 宣告可開啟 `.exe`（`LSHandlerRank: Alternate`；不強制設為預設）
 
+### 系統版本
+
+| 層級 | 最低版本 | 說明 |
+|------|----------|------|
+| **Cyder.app（plist）** | **10.15** | 與目前 CX26 Wine engine 對齊 |
+| **Swift 設定／遊戲庫 UI** | **12.0** | `CyderSwift`；10.15–11.x 自動改走 bash + osascript 進度列（Retina 強制關閉） |
+| **Wine engine（現行 artifact）** | **10.15** | `bin/wine`、`ntdll.so`、bundled runtime `.dylib`（含 `libMoltenVK.dylib`）皆為 minos ≤ 10.15 |
+| **Apple Silicon** | **11.0** | 需要 Rosetta 2 |
+
+關掉 MoltenVK **不能**讓現行 engine 跑在 10.15 以下：Wine 本體也是 10.15。若未來以更低 `MACOSX_DEPLOYMENT_TARGET` 重建 Wine，runtime 會在 &lt;10.15 停用 `winevulkan`／MoltenVK，非 Vulkan 遊戲仍可嘗試啟動；理論下限接近 Wine configure 的 ~10.7（僅 Intel），實務仍受其他 dylib 與 Rosetta 限制。
+
+Engine 內嵌的 Homebrew runtime 庫（freetype／png／gnutls 鏈等）與 media stack（glib／gstreamer）皆以 `MACOSX_DEPLOYMENT_TARGET=10.15` **從原始碼**建置；不使用目前僅支援 macOS 14+ 的 brew bottles。`scripts/env-x86_64.sh` 的 `brew_x86_install_runtime` 會以 compiler wrapper 強制 `-mmacosx-version-min=10.15`；`bundle-wine-dylibs.sh` 會在打包後檢查 Mach-O `minos`，超過 10.15 即失敗。
 ## 開啟 .exe
 
 單獨開啟 `Cyder.app`、確認設定後，會以進度列依序顯示：**正在儲存設定…** → **正在準備遊戲執行元件…** → **正在準備遊戲環境…** → **正在套用新設定…**。之後從 Finder 開啟 `.exe` 會直接啟動，不顯示設定或準備視窗。
@@ -120,11 +132,13 @@ Cyder 目前使用一個預設 Wine bottle，所有 `.exe` 共用同一套 Windo
 首次啟動（或 marker 不存在）時，`cyder_launcher.sh` 會依序：
 
 1. 從 app 內 `engine-<version>.tar.zst` 解壓引擎至 `Engines/`（若尚未安裝或版本不同）
-2. 若 `bottles/shared/system.reg` 不存在 → `wineboot -u` 建立 bottle
-3. 安裝 **wine-mono**、**syswow64/tar.exe**（含 libarchive DLL）
-4. 寫入 **Mac 高解析度** registry（RetinaMode + LogPixels=192）
+2. 對 `bottles/shared` 執行 `wineboot -u` 建立／重建 bottle（engine 升級時會先清空 shared，並刪除舊的 `templates/`）
+3. 安裝 **wine-mono**、**wine-gecko**、**syswow64/tar.exe**（含 libarchive DLL）
+4. 寫入 **Mac 高解析度** registry（RetinaMode + LogPixels=192）與其他 Golden baseline 設定
 5. 套用進階設定，並為遊戲畫面主程式 `bluecg.exe` 寫入專屬的 `ddraw=n,b` DLL override
 6. 寫入 `.cyder-bootstrap-v1`；之後啟動跳過上述步驟
+
+> 說明：0.6.x 暫時不維護 `templates/pristine`／`templates/golden`；shared 與 per-game profile 都對目前 engine 直接 provision。正式可版本化的 template bottles 留到 1.0.0。
 
 執行時環境：
 

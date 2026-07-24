@@ -110,6 +110,12 @@ assert_eq "$(run_wine_args direct)" "$TMP/foreground-test.exe" \
 assert_eq "$(run_wine_args start)" "start /wait /unix $TMP/foreground-test.exe" \
   "start mode should invoke start /wait /unix"
 assert test -L "$TMP/run-support/Logs/last-launch.log"
+assert_contains "$(cat "$TMP/run-support/Logs/last-launch.log")" "Command:" \
+  "captured launches should include an explicit Command header"
+assert_contains "$(cat "$TMP/run-support/Logs/last-launch.log")" "Running command:" \
+  "captured launches should include a CrossOver-style Running command header"
+assert_contains "$(cat "$TMP/run-support/Logs/last-launch.log")" "MSync:" \
+  "captured launches should record MSync state"
 launch_log_count="$(find "$TMP/run-support/Logs" -maxdepth 1 -type f -name 'launch-*.log' | wc -l | tr -d ' ')"
 if [[ "$launch_log_count" -lt 2 ]]; then
   echo "ASSERT failed: timestamped Wine logs should not overwrite the previous launch" >&2
@@ -178,51 +184,81 @@ fi
 kill "$detached_pid" 2>/dev/null || true
 wait "$detached_pid" 2>/dev/null || true
 
-# Per-game profile routing uses the complete EXE path and requires a ready
-# versioned template manifest.
+# Per-game profile routing provisions a fresh bottle for the installed engine.
 profile_support="$TMP/profile-support"
-mkdir -p "$profile_support/templates/pristine"
-mkdir -p "$TMP/runtime/Engines/wine-x86_64/bin"
-cp "$TMP/fake-bin/wine" "$TMP/runtime/Engines/wine-x86_64/bin/wine"
+mkdir -p "$TMP/runtime/Engines/wine-x86_64/bin" "$TMP/profile-scripts"
+cat >"$TMP/runtime/Engines/wine-x86_64/bin/wine" <<'SH'
+#!/usr/bin/env bash
+if [[ "${1:-}" == --version ]]; then
+  printf 'wine-9.0\n'
+elif [[ "${1:-}" == wineboot ]]; then
+  mkdir -p "$WINEPREFIX/drive_c/windows/system32"
+  : >"$WINEPREFIX/system.reg"
+  : >"$WINEPREFIX/user.reg"
+  : >"$WINEPREFIX/drive_c/windows/system32/kernel32.dll"
+fi
+SH
 chmod +x "$TMP/runtime/Engines/wine-x86_64/bin/wine"
-cat >"$profile_support/templates/pristine/manifest.json" <<'JSON'
-{"schemaVersion":2,"templateId":"pristine","revision":2,"recipeId":null,"engineVersion":"test-engine"}
-JSON
+cat >"$TMP/profile-scripts/install-wine-mono.sh" <<'SH'
+#!/usr/bin/env bash
+: >"$WINEPREFIX/.cyder-mono-10.4.1"
+SH
+cat >"$TMP/profile-scripts/install-wine-gecko.sh" <<'SH'
+#!/usr/bin/env bash
+: >"$WINEPREFIX/.cyder-gecko-2.47.4"
+SH
+cat >"$TMP/profile-scripts/cyder-apply-golden-settings.sh" <<'SH'
+#!/usr/bin/env bash
+: >"$WINEPREFIX/.cyder-golden-baseline-v2"
+SH
+cp "$ROOT/scripts/cyder-profile.sh" "$TMP/profile-scripts/"
+cat >"$TMP/profile-scripts/resolve-wine-locale.sh" <<'SH'
+#!/usr/bin/env bash
+printf 'zh_TW.UTF-8\n'
+SH
+chmod +x "$TMP/profile-scripts/"*
 profile_exe="$TMP/profile game.exe"
 touch "$profile_exe"
-profile_bottle="$(CYDER_SUPPORT="$profile_support" CYDER_ENGINE_VERSION_LABEL=test-engine \
-  bash "$ROOT/scripts/cyder_launcher.sh" --profile-create "$profile_exe" pristine)"
+profile_bottle="$(CYDER_SUPPORT="$profile_support" CYDER_SCRIPTS="$TMP/profile-scripts" \
+  CYDER_ENGINE_VERSION_LABEL=test-engine PATH="$TMP/bin:$PATH" \
+  bash "$ROOT/scripts/cyder_launcher.sh" --profile-create "$profile_exe" golden)"
 assert test -d "$profile_bottle"
-resolved_bottle="$(CYDER_SUPPORT="$profile_support" CYDER_ENGINE_VERSION_LABEL=test-engine \
+assert test -f "$profile_bottle/.cyder-golden-baseline-v2"
+resolved_bottle="$(CYDER_SUPPORT="$profile_support" CYDER_SCRIPTS="$TMP/profile-scripts" \
+  CYDER_ENGINE_VERSION_LABEL=test-engine PATH="$TMP/bin:$PATH" \
   bash "$ROOT/scripts/cyder_launcher.sh" --profile-resolve "$profile_exe")"
 assert_eq "$resolved_bottle" "$profile_bottle" "profile resolve should return created bottle"
 metadata_path="$(find "$profile_support/profiles" -name profile.json -print -quit)"
 profile_exe_canonical="$(cd "$(dirname "$profile_exe")" && printf '%s/%s' "$(pwd -P)" "$(basename "$profile_exe")")"
 assert_eq "$(/usr/bin/plutil -extract sourcePath raw -o - "$metadata_path")" "$profile_exe_canonical" \
   "profile metadata should use full EXE path"
+assert_eq "$(/usr/bin/plutil -extract baseTemplate raw -o - "$metadata_path")" "golden" \
+  "profile metadata should record golden baseline"
 if CYDER_SUPPORT="$profile_support" bash "$ROOT/scripts/cyder_launcher.sh" \
   --profile-resolve "$profile_exe" --dry-run >/dev/null 2>&1; then
   echo "profile and dry-run actions unexpectedly combined" >&2
   exit 1
 fi
 
-if CYDER_SUPPORT="$profile_support" CYDER_ENGINE_VERSION_LABEL=other-engine \
-  bash "$ROOT/scripts/cyder_launcher.sh" --profile-create "$profile_exe" pristine >/dev/null 2>&1; then
-  echo "engine version mismatch unexpectedly accepted" >&2
-  exit 1
-fi
-mkdir -p "$profile_support/templates/golden"
-cp "$profile_support/templates/pristine/manifest.json" "$profile_support/templates/golden/manifest.json"
-sed -i '' 's/"pristine"/"golden"/' "$profile_support/templates/golden/manifest.json" 2>/dev/null || \
-  sed -i 's/"pristine"/"golden"/' "$profile_support/templates/golden/manifest.json"
-CYDER_SUPPORT="$profile_support" CYDER_ENGINE_VERSION_LABEL=test-engine PATH="$TMP/bin:$PATH" \
+# Idempotent create resolves the existing bottle without requiring templates.
+same_bottle="$(CYDER_SUPPORT="$profile_support" CYDER_SCRIPTS="$TMP/profile-scripts" \
+  CYDER_ENGINE_VERSION_LABEL=other-engine PATH="$TMP/bin:$PATH" \
+  bash "$ROOT/scripts/cyder_launcher.sh" --profile-create "$profile_exe" golden)"
+assert_eq "$same_bottle" "$profile_bottle" "repeat profile-create should resolve existing bottle"
+
+mkdir -p "$profile_support/bottles/shared/drive_c/windows/system32"
+: >"$profile_support/bottles/shared/.cyder-bootstrap-v1"
+: >"$profile_support/bottles/shared/system.reg"
+: >"$profile_support/bottles/shared/.cyder-golden-baseline-v2"
+CYDER_SUPPORT="$profile_support" PATH="$TMP/bin:$PATH" \
   bash "$ROOT/scripts/cyder_launcher.sh" --templates-ready
 set +e
-CYDER_SUPPORT="$profile_support" CYDER_ENGINE_VERSION_LABEL=other-engine PATH="$TMP/bin:$PATH" \
+rm -f "$profile_support/bottles/shared/.cyder-bootstrap-v1"
+CYDER_SUPPORT="$profile_support" PATH="$TMP/bin:$PATH" \
   bash "$ROOT/scripts/cyder_launcher.sh" --templates-ready >/dev/null 2>&1
-templates_mismatch_status=$?
+templates_missing_status=$?
 set -e
-assert_eq "$templates_mismatch_status" "1" "template engine mismatch should be a negative readiness result"
+assert_eq "$templates_missing_status" "1" "missing shared bootstrap should be a negative readiness result"
 
 # Native bridge session API validates bottle scope and supports reservation
 # lifecycle through the same session registry used by Wine launches.

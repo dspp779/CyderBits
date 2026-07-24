@@ -68,11 +68,11 @@ Options:
   --session-acquire PREFIX OWNER_PID MSYNC ESYNC POWER Reserve a bottle session
   --session-update PREFIX SESSION_FILE NEW_PID Update a reserved session PID
   --session-release PREFIX SESSION_FILE Release a reserved session
-  --templates-ready  Check pristine/golden template compatibility
+  --templates-ready  Check that the shared prefix is bootstrapped for the current engine
   --launch-exe PATH [-- ARG ...]
                       Launch .exe; arguments after -- replace saved game arguments for this launch
   --profile-resolve PATH  Resolve PATH to its per-game bottle and exit
-  --profile-create PATH [pristine|golden]  Create/resolve a per-game bottle and exit
+  --profile-create PATH [pristine|golden]  Provision a fresh per-game bottle and exit
   --profile-remove PATH  Remove a per-game bottle/profile and exit
   -h, --help          Show this help
 EOF
@@ -294,50 +294,30 @@ if [[ -n "$PROFILE_ACTION" ]]; then
     fi
     bash "$profile_script" remove "$PROFILE_EXE" "$CYDER_SUPPORT"
   else
-    template_dir="$CYDER_SUPPORT/templates/$PROFILE_TEMPLATE"
-    [[ -d "$template_dir" && -f "$template_dir/manifest.json" ]] || {
-      echo "Profile template is not ready: $template_dir (manifest.json required)" >&2
-      exit 2
-    }
+    # Pre-1.0.0: provision a fresh bottle for the installed engine. Template
+    # clone is deferred until the versioned template mechanism returns.
     profile_wine="$CYDER_ENGINES/$CYDER_ENGINE_NAME/bin/wine"
+    profile_engine="$CYDER_ENGINES/$CYDER_ENGINE_NAME"
     [[ -x "$profile_wine" ]] || {
       echo "Profile creation requires an installed Wine engine: $profile_wine" >&2
       exit 2
     }
-    profile_engine_version="$(cyder_template_engine_version "$profile_wine")"
-    [[ -n "$profile_engine_version" && "$profile_engine_version" != unknown ]] || {
-      echo "Profile creation requires a detectable Wine engine version" >&2
-      exit 2
-    }
-    profile_revision="${CYDER_TEMPLATE_REVISION:-1}"
-    [[ "$profile_revision" =~ ^[1-9][0-9]*$ ]] || {
-      echo "Invalid CYDER_TEMPLATE_REVISION: $profile_revision" >&2
-      exit 2
-    }
-    if ! bash "$profile_script" template-ready "$PROFILE_TEMPLATE" "$CYDER_SUPPORT" \
-        "$profile_revision" "$profile_engine_version" >/dev/null; then
-      echo "Profile template is not ready for revision $profile_revision and engine $profile_engine_version" >&2
-      exit 2
-    fi
-    bash "$profile_script" create "$PROFILE_EXE" "$template_dir" "$CYDER_SUPPORT"
+    cyder_create_profile_prefix "$profile_wine" "$profile_engine" "$PROFILE_EXE" "$PROFILE_TEMPLATE"
   fi
   exit $?
 fi
 
 if [[ "$TEMPLATES_READY" -eq 1 ]]; then
   CYDER_DIAGNOSTIC_EXPECTED_EXIT=1
-  profile_script="$CYDER_SCRIPTS/cyder-profile.sh"
   engine="$CYDER_ENGINES/$CYDER_ENGINE_NAME/bin/wine"
-  revision="${CYDER_TEMPLATE_REVISION:-1}"
-  if [[ ! -x "$profile_script" || ! -x "$engine" || ! "$revision" =~ ^[1-9][0-9]*$ ]]; then
+  if [[ ! -x "$engine" ]]; then
     exit 1
   fi
-  engine_version="$(cyder_template_engine_version "$engine")"
-  [[ -n "$engine_version" && "$engine_version" != unknown ]] || exit 1
-  for template_name in pristine golden; do
-    bash "$profile_script" template-ready "$template_name" "$CYDER_SUPPORT" \
-      "$revision" "$engine_version" >/dev/null 2>&1 || exit 1
-  done
+  # Compatibility flag: historically meant pristine/golden manifests. Until
+  # 1.0.0 template bottles return, ready means shared is bootstrapped.
+  [[ -f "$CYDER_BOOTSTRAP_MARKER" \
+     && -f "$CYDER_SHARED_PREFIX/system.reg" \
+     && -f "$CYDER_SHARED_PREFIX/.cyder-golden-baseline-v2" ]] || exit 1
   exit 0
 fi
 

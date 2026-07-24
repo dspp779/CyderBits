@@ -11,6 +11,18 @@ FILE_CMD="${FILE_CMD:-file}"
 CODESIGN_CMD="${CODESIGN_CMD:-codesign}"
 XATTR_CMD="${XATTR_CMD:-xattr}"
 
+# Default stays ad-hoc: this script also re-signs the installed engine on end-user
+# machines (cyder_sign_installed_engine), where no Developer ID cert exists.
+# Release builds export SIGN_IDENTITY="Developer ID Application: ..." instead.
+SIGN_IDENTITY="${SIGN_IDENTITY:--}"
+# Ad-hoc signatures cannot carry a secure timestamp; Developer ID ones must
+# (notarization rejects unstamped signatures).
+if [[ "$SIGN_IDENTITY" == "-" ]]; then
+  TIMESTAMP_FLAG="--timestamp=none"
+else
+  TIMESTAMP_FLAG="--timestamp"
+fi
+
 run() {
   if [[ "$DRY_RUN" -eq 1 ]]; then
     printf '+'
@@ -54,7 +66,7 @@ done < <(find "$TARGET_ROOT" -type f -print0)
 # Sign only regular Mach-O files (skip symlinks to Homebrew dylibs).
 while IFS= read -r -d '' path; do
   if "$FILE_CMD" -b "$path" | grep -q 'Mach-O'; then
-    run "$CODESIGN_CMD" --force --sign - \
+    run "$CODESIGN_CMD" --force --sign "$SIGN_IDENTITY" "$TIMESTAMP_FLAG" \
       --entitlements "$ENTITLEMENTS" \
       --options runtime \
       "$path"
