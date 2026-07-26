@@ -359,12 +359,16 @@ cyder_init_paths() {
   CYDER_SUPPORT="${CYDER_SUPPORT:-$HOME/Library/Application Support/Cyder}"
   CYDER_RUNTIME_ROOT="${CYDER_RUNTIME_ROOT:-$HOME/.cyder/runtime}"
   CYDER_ENGINES="${CYDER_ENGINES:-$CYDER_RUNTIME_ROOT/Engines}"
-  CYDER_ENGINE_NAME="wine-x86_64"
-  CYDER_SHARED_PREFIX="${CYDER_SHARED_PREFIX:-$CYDER_SUPPORT/bottles/shared}"
+  # Flavors (e.g. MapleStory OEM) may override engine / bottle names so they
+  # do not collide with the regular Cyder wine-x86_64 + bottles/shared layout.
+  CYDER_ENGINE_NAME="${CYDER_ENGINE_NAME:-wine-x86_64}"
+  CYDER_BOTTLE_NAME="${CYDER_BOTTLE_NAME:-shared}"
+  CYDER_PREFIX="${CYDER_PREFIX:-${CYDER_SHARED_PREFIX:-$CYDER_SUPPORT/bottles/$CYDER_BOTTLE_NAME}}"
+  CYDER_SHARED_PREFIX="$CYDER_PREFIX"
   CYDER_LEGACY_ENGINES="${CYDER_LEGACY_ENGINES:-$CYDER_SUPPORT/Engines}"
   CYDER_LEGACY_SHARED_PREFIX="${CYDER_LEGACY_SHARED_PREFIX:-$CYDER_SUPPORT/SharedPrefix}"
-  CYDER_BOOTSTRAP_MARKER="$CYDER_SHARED_PREFIX/.cyder-bootstrap-v1"
-  CYDER_FONT_MARKER="$CYDER_SHARED_PREFIX/.cyder-font-songti-v1"
+  CYDER_BOOTSTRAP_MARKER="$CYDER_PREFIX/.cyder-bootstrap-v1"
+  CYDER_FONT_MARKER="$CYDER_PREFIX/.cyder-font-songti-v1"
   CYDER_DOWNLOADS="$CYDER_SUPPORT/downloads"
   CYDER_BUNDLE_ID="${CYDER_BUNDLE_ID:-local.cyder.app}"
   CYDER_TEMPLATE_REVISION="${CYDER_TEMPLATE_REVISION:-2}"
@@ -587,6 +591,107 @@ cyder_wine_locale_exports() {
   local loc
   loc="$(cyder_resolve_wine_locale)"
   export LANG="$loc" LC_ALL="$loc" LC_CTYPE="$loc"
+}
+
+# CrossOver / MapleStory OEM engines ship a Perl wine frontend that refuses to
+# run wineboot until $WINEPREFIX/cxbottle.conf exists. Retail Wine builds have
+# no share/crossover/bottle_data template, so this is a no-op for them.
+cyder_crossover_bottle_data_conf() {
+  local wine_bin="$1"
+  local engine_root conf
+  [[ -n "$wine_bin" && -e "$wine_bin" ]] || return 1
+  engine_root="$(cd "$(dirname "$wine_bin")/.." && pwd)"
+  conf="$engine_root/share/crossover/bottle_data/cxbottle.conf"
+  [[ -f "$conf" ]] || return 1
+  printf '%s\n' "$conf"
+}
+
+# Seed a private-bottle cxbottle.conf before the first wineboot. OEM cxbottle
+# --create is disabled; copying the engine template and injecting WineArch /
+# Template matches the CrossOver baseline. MapleStory adds its own audio and
+# CP950-compatible locale settings below.
+cyder_seed_crossover_bottle_conf() {
+  local wine_bin="$1"
+  local bottle="$2"
+  local base_conf dest
+  base_conf="$(cyder_crossover_bottle_data_conf "$wine_bin" 2>/dev/null)" || return 0
+  [[ -n "$base_conf" ]] || return 0
+  dest="$bottle/cxbottle.conf"
+  if [[ -r "$dest" ]]; then
+    return 0
+  fi
+  mkdir -p "$bottle"
+  cp "$base_conf" "$dest" || {
+    echo "Failed to seed cxbottle.conf from $base_conf" >&2
+    return 1
+  }
+  if ! grep -qE '^[[:space:]]*"WineArch"[[:space:]]*=' "$dest"; then
+    /usr/bin/sed -i '' '/^\[Bottle\]$/a\
+"WineArch" = "win64"
+' "$dest"
+  fi
+  if ! grep -qE '^[[:space:]]*"Template"[[:space:]]*=' "$dest"; then
+    /usr/bin/sed -i '' '/^\[Bottle\]$/a\
+"Template" = "win10_64"
+' "$dest"
+  fi
+  local is_maplestory=0
+  if [[ "${CYDER_OEM_FLAVOR:-}" == maplestory ||
+        "${CYDER_ENGINE_NAME:-}" == maplestory*oem* ||
+        "${CYDER_BOTTLE_NAME:-}" == maplestory* ]]; then
+    is_maplestory=1
+  fi
+  if (( is_maplestory )) && ! grep -qE '^[[:space:]]*"RAW_AUDIO_PARSE"[[:space:]]*=' "$dest"; then
+    /usr/bin/sed -i '' '/^\[EnvironmentVariables\]$/a\
+"RAW_AUDIO_PARSE" = "1"
+' "$dest"
+  fi
+  if (( is_maplestory )); then
+    local locale_key
+    for locale_key in LANG LC_ALL LC_CTYPE; do
+      if ! grep -qE "^[[:space:]]*\"${locale_key}\"[[:space:]]*=" "$dest"; then
+        /usr/bin/sed -i '' "/^\[EnvironmentVariables\]\$/a\\
+\"${locale_key}\" = \"zh_TW.UTF-8\"
+" "$dest"
+      fi
+    done
+  fi
+  echo "Seeded CrossOver bottle metadata: $dest" >&2
+}
+
+cyder_wine_is_perl_script() {
+  local path="$1" first_line=""
+  [[ -f "$path" ]] || return 1
+  IFS= read -r first_line <"$path" || true
+  [[ "$first_line" == *perl* ]]
+}
+
+cyder_wine_is_crossover_frontend() {
+  local wine_bin="$1" resolved target engine_root launcher_wine
+  [[ -n "$wine_bin" ]] || return 1
+  resolved="$wine_bin"
+  while [[ -L "$resolved" ]]; do
+    target="$(readlink "$resolved")" || break
+    if [[ "$target" == /* ]]; then
+      resolved="$target"
+    else
+      resolved="$(cd "$(dirname "$resolved")" && pwd)/$target"
+    fi
+  done
+  cyder_wine_is_perl_script "$resolved" && return 0
+  engine_root="$(cd "$(dirname "$resolved")/.." 2>/dev/null && pwd)" || return 1
+  launcher_wine="$engine_root/MapleStory Launcher/wine"
+  cyder_wine_is_perl_script "$launcher_wine" && return 0
+  return 1
+}
+
+cyder_wine_frontend_args() {
+  local wine_bin="$1"
+  if [[ -n "${CYDER_WINE_FRONTEND_ARGS:-}" ]]; then
+    printf '%s\n' "$CYDER_WINE_FRONTEND_ARGS"
+  elif cyder_wine_is_crossover_frontend "$wine_bin"; then
+    printf '%s\n' '--wait-children --enable-alt-loader macdrv'
+  fi
 }
 
 cyder_resolve_exe_from_args() {
@@ -966,11 +1071,17 @@ cyder_init_bottle() {
   export CYDER_OPERATION_ERROR_KIND CYDER_OPERATION_ERROR_CODE
   local wineserver="${wine_bin%/wine}/wineserver"
   if [[ -f "$bottle/system.reg" ]]; then
+    # A prior failed OEM wineboot / older Cyder build can leave a usable
+    # system.reg without cxbottle.conf. Seed (or keep) metadata in place so
+    # "rebuild" / relaunch does not require manually deleting the bottle.
+    cyder_seed_crossover_bottle_conf "$wine_bin" "$bottle" || return $?
     echo "Bottle exists: $bottle" >&2
     return 0
   fi
   echo "Creating bottle: $bottle" >&2
   mkdir -p "$bottle"
+  # MapleStory OEM / CrossOver Perl wine requires cxbottle.conf before wineboot.
+  cyder_seed_crossover_bottle_conf "$wine_bin" "$bottle" || return $?
   local log_dir="$CYDER_SUPPORT/Logs/operations"
   local log_file="$log_dir/wineboot-$(date '+%Y%m%d-%H%M%S')-$$.log"
   mkdir -p "$log_dir"
@@ -1014,12 +1125,22 @@ cyder_init_bottle() {
   local timeout="${CYDER_WINEBOOT_TIMEOUT:-120}"
   [[ "$timeout" =~ ^[0-9]+$ ]] || timeout=120
   (( timeout > 0 )) || timeout=1
+  local crossover_bottle=0
+  if [[ -r "$bottle/cxbottle.conf" ]]; then
+    crossover_bottle=1
+  fi
   # Run wineboot asynchronously so a hung Wine process cannot leave Cyder's
   # first-launch preparation dialog open forever. The timeout is deliberately
   # implemented with Bash primitives; macOS does not ship GNU timeout.
   (
     cyder_wine_locale_exports
     export WINEPREFIX="$bottle" WINESERVER="$wineserver"
+    # Point CX_BOTTLE at this prefix (including rebuild staging dirs). An outer
+    # CX_BOTTLE aimed at an empty shared/ would make OEM wine look for conf
+    # there and fail before wineboot.
+    if (( crossover_bottle )); then
+      export CX_BOTTLE="$bottle" WINEARCH="${WINEARCH:-win64}"
+    fi
     # Build the base prefix deterministically. Wine may otherwise discover
     # cached Mono/Gecko installers and modify "pristine" during wineboot.
     # Golden installs the pinned, checksummed versions explicitly afterwards.
@@ -1195,60 +1316,33 @@ cyder_rebuild_shared_prefix() {
     echo "Cannot rebuild prefix while a Wine process is running." >&2
     return 2
   }
-  local parent staging previous prefix_name active_prefix
+  local parent active_prefix
   active_prefix="$CYDER_SHARED_PREFIX"
   parent="$(dirname "$active_prefix")"
-  prefix_name="$(basename "$active_prefix")"
-  staging="$parent/.rebuild-${prefix_name}-$$"
-  previous="$parent/.rebuild-previous-${prefix_name}-$$"
-
-  # Refuse to operate on an unexpected symlink or an already-running rebuild.
-  # This keeps a stale/attacker-controlled path from being moved into the
-  # active bottle location.
+  # Rebuild deliberately deletes the active bottle before provisioning. This
+  # prevents stale CrossOver metadata or registry state from surviving.
   [[ ! -L "$active_prefix" ]] || {
     echo "Cannot rebuild a symlinked shared prefix: $active_prefix" >&2
     return 2
   }
-  [[ ! -e "$staging" && ! -L "$staging" ]] || {
-    echo "A prefix rebuild is already in progress: $staging" >&2
-    return 2
-  }
-  [[ ! -e "$previous" && ! -L "$previous" ]] || {
-    echo "Previous-prefix staging path already exists: $previous" >&2
-    return 2
-  }
   mkdir -p "$parent"
+  # Ensure no wineserver holds files open under the bottle we are about to remove.
+  cyder_stop_prefix_wineserver "$wine_bin" "$active_prefix" || true
 
-  local had_previous=0
-  if [[ -e "$active_prefix" ]]; then
-    had_previous=1
-  fi
-
-  if ! cyder_provision_prefix_baseline "$wine_bin" "$engine_root" "$staging"; then
-    cyder_remove_path "$staging"
-    echo "Prefix rebuild failed while provisioning; no active data was changed." >&2
-    return 1
-  fi
-  if [[ "$had_previous" -eq 1 ]]; then
-    if ! mv "$active_prefix" "$previous"; then
-      echo "Prefix rebuild failed while staging the previous environment: $previous" >&2
-      cyder_remove_path "$staging"
+  if [[ -e "$active_prefix" || -L "$active_prefix" ]]; then
+    if ! cyder_remove_path "$active_prefix"; then
+      echo "Prefix rebuild failed while deleting the active bottle: $active_prefix" >&2
       return 1
     fi
   fi
-  if ! mv "$staging" "$active_prefix"; then
-    echo "Prefix rebuild failed while publishing staging prefix: $active_prefix" >&2
-    if [[ "$had_previous" -eq 1 && -e "$previous" && ! -e "$active_prefix" ]]; then
-      mv "$previous" "$active_prefix" || true
-    fi
-    cyder_remove_path "$staging"
+  echo "Rebuilding bottle from scratch: $active_prefix" >&2
+  if ! cyder_provision_prefix_baseline "$wine_bin" "$engine_root" "$active_prefix"; then
+    cyder_remove_path "$active_prefix"
+    echo "Prefix rebuild failed while provisioning; no bottle remains." >&2
     return 1
   fi
   printf 'revision=%s\n' "${CYDER_TEMPLATE_REVISION:-1}" >"$CYDER_BOOTSTRAP_MARKER"
-  # The previous environment exists only to make the publish transactional.
-  # A successful rebuild must not retain a full bottle-sized backup.
-  [[ "$had_previous" -eq 0 ]] || cyder_remove_path "$previous"
-  echo "Prefix rebuild completed successfully: $active_prefix" >&2
+  echo "Prefix rebuild completed: $active_prefix" >&2
 }
 
 cyder_ensure_shared_prefix() {
@@ -1669,13 +1763,25 @@ cyder_has_running_exes() {
   return 1
 }
 
+# True when the shared bottle is fully ready for the current engine. CrossOver /
+# MapleStory OEM engines also require a readable cxbottle.conf; a half-built
+# bottle without it is treated as not ready so bootstrap/rebuild can replace it.
+cyder_shared_prefix_is_ready() {
+  local wine_bin="${1:-}"
+  [[ -f "$CYDER_BOOTSTRAP_MARKER" ]] || return 1
+  [[ -f "$CYDER_SHARED_PREFIX/system.reg" ]] || return 1
+  [[ -f "$CYDER_SHARED_PREFIX/.cyder-golden-baseline-v2" ]] || return 1
+  if [[ -n "$wine_bin" ]] && cyder_crossover_bottle_data_conf "$wine_bin" >/dev/null 2>&1; then
+    [[ -r "$CYDER_SHARED_PREFIX/cxbottle.conf" ]] || return 1
+  fi
+  return 0
+}
+
 cyder_bootstrap_shared_prefix() {
   local wine_bin="$1"
   local engine_root="$2"
   CYDER_BOOTSTRAP_HEALTH_CHECKED=0
-  if [[ -f "$CYDER_BOOTSTRAP_MARKER" \
-        && -f "$CYDER_SHARED_PREFIX/system.reg" \
-        && -f "$CYDER_SHARED_PREFIX/.cyder-golden-baseline-v2" ]]; then
+  if cyder_shared_prefix_is_ready "$wine_bin"; then
     return 0
   fi
   cyder_has_running_prefix "$CYDER_SHARED_PREFIX" && {
@@ -1691,6 +1797,8 @@ cyder_bootstrap_shared_prefix() {
       echo "Bootstrap staging path already exists." >&2
       return 1
     }
+    # Incomplete bottle (e.g. missing OEM cxbottle.conf): replace entirely.
+    echo "Replacing incomplete bottle with a fresh prefix: $CYDER_SHARED_PREFIX" >&2
     if ! cyder_provision_prefix_baseline "$wine_bin" "$engine_root" "$staging"; then
       cyder_remove_path "$staging"
       return 1
@@ -1875,17 +1983,21 @@ cyder_run_wine_exe() {
 cyder_exec_wine() {
   local wine_bin="$1"
   shift
+  local frontend_args_text
+  frontend_args_text="$(cyder_wine_frontend_args "$wine_bin")"
+  local -a frontend_args=()
+  [[ -z "$frontend_args_text" ]] || read -r -a frontend_args <<<"$frontend_args_text"
   local mode="${CYDER_POWER_MODE:-normal}"
   local taskpolicy_bin=""
   taskpolicy_bin="$(cyder_find_taskpolicy || true)"
   if [[ "$mode" == background && -n "$taskpolicy_bin" ]]; then
-    "$taskpolicy_bin" -c background /usr/bin/arch -x86_64 "$wine_bin" "$@"
+    "$taskpolicy_bin" -c background /usr/bin/arch -x86_64 "$wine_bin" "${frontend_args[@]}" "$@"
   else
     if [[ "$mode" != normal && -z "$taskpolicy_bin" ]]; then
       echo "error: taskpolicy is unavailable; select Standard energy mode" >&2
       return 127
     fi
-    /usr/bin/arch -x86_64 "$wine_bin" "$@"
+    /usr/bin/arch -x86_64 "$wine_bin" "${frontend_args[@]}" "$@"
   fi
 }
 

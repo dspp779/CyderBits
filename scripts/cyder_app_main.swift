@@ -632,9 +632,21 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             || engineNeedsInstall(context: context, engineWine: engineWine)
         let sharedSystemReg = CyderPaths.sharedBottle.appendingPathComponent("system.reg").path
         let sharedBaseline = CyderPaths.sharedBottle.appendingPathComponent(".cyder-golden-baseline-v2").path
-        let needsBootstrap = !FileManager.default.fileExists(atPath: CyderPaths.bootstrapMarker.path)
+        var needsBootstrap = !FileManager.default.fileExists(atPath: CyderPaths.bootstrapMarker.path)
             || !FileManager.default.fileExists(atPath: sharedSystemReg)
             || !FileManager.default.fileExists(atPath: sharedBaseline)
+        // CrossOver / MapleStory OEM engines need cxbottle.conf; a half-built
+        // bottle without it must go through a full replace, not an in-place patch.
+        if !needsBootstrap {
+            let engineBottleTemplate = CyderPaths.engine
+                .appendingPathComponent("share/crossover/bottle_data/cxbottle.conf").path
+            if FileManager.default.fileExists(atPath: engineBottleTemplate) {
+                let bottleConf = CyderPaths.sharedBottle.appendingPathComponent("cxbottle.conf").path
+                if !FileManager.default.isReadableFile(atPath: bottleConf) {
+                    needsBootstrap = true
+                }
+            }
+        }
         return (needsEngine, needsBootstrap)
     }
 
@@ -673,11 +685,34 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             )
             templatesReady = probe.succeeded
         }
-        let bootstrapNeeded = state.needsEngine
+        var bootstrapNeeded = state.needsEngine
             || state.needsBootstrap
             || environmentState(context: context).needsBootstrap
             || !templatesReady && !state.needsEngine
         var bootstrapHealthChecked = false
+        if bootstrapNeeded,
+           let helper = ProcessInfo.processInfo.environment["CYDER_OEM_BOOTSTRAP_HELPER"],
+           !helper.isEmpty {
+            CyderDiagnostics.shared.enter(.bootstrap)
+            showSetup("正在準備 MapleStory 遊戲環境…")
+            let result = runLauncher(
+                context: context,
+                args: [helper, "--prepare-only"],
+                stage: .bootstrap,
+                operation: "oem-prepare",
+                expectsMachineResult: true
+            )
+            if !result.succeeded {
+                return failure(
+                    code: "CYD-BTS-001",
+                    stage: .bootstrap,
+                    summary: "準備遊戲環境時發生問題。",
+                    result: result
+                )
+            }
+            bootstrapHealthChecked = result.machineResult["healthChecked"] == "1"
+            bootstrapNeeded = environmentState(context: context).needsBootstrap
+        }
         if bootstrapNeeded {
             CyderDiagnostics.shared.enter(.bootstrap)
             showSetup("正在準備遊戲環境…")
@@ -979,6 +1014,8 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         let diagnosticArguments = redactDynamicArguments
             ? "<\(gameArguments.count) dynamic arguments redacted>"
             : gameArguments.joined(separator: " ")
+        let frontendArguments = wineFrontendArguments(wine: wine)
+        let wineCommandArguments = frontendArguments + [exe] + gameArguments
         let powerMode = environment["CYDER_POWER_MODE"] ?? "normal"
         let taskpolicy = findExecutable(named: "taskpolicy", environment: environment)
         let hasTaskpolicy = taskpolicy != nil
@@ -994,12 +1031,12 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
                 ))
             }
             process.executableURL = taskpolicy
-            process.arguments = ["-c", "background", "/usr/bin/arch", "-x86_64", wine.path, exe] + gameArguments
-            commandDescription = "\(taskpolicy.path) -c background /usr/bin/arch -x86_64 \(wine.path) \(exe) \(diagnosticArguments)"
+            process.arguments = ["-c", "background", "/usr/bin/arch", "-x86_64", wine.path] + wineCommandArguments
+            commandDescription = "\(taskpolicy.path) -c background /usr/bin/arch -x86_64 \(wine.path) \(frontendArguments.joined(separator: " ")) \(exe) \(diagnosticArguments)"
         } else {
             process.executableURL = URL(fileURLWithPath: "/usr/bin/arch")
-            process.arguments = ["-x86_64", wine.path, exe] + gameArguments
-            commandDescription = "/usr/bin/arch -x86_64 \(wine.path) \(exe) \(diagnosticArguments)"
+            process.arguments = ["-x86_64", wine.path] + wineCommandArguments
+            commandDescription = "/usr/bin/arch -x86_64 \(wine.path) \(frontendArguments.joined(separator: " ")) \(exe) \(diagnosticArguments)"
         }
         process.currentDirectoryURL = URL(fileURLWithPath: exe).deletingLastPathComponent()
         process.environment = environment
@@ -1132,6 +1169,9 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         gameSettings: CyderExecutableSettings?
     ) -> [String: String] {
         var environment = ProcessInfo.processInfo.environment
+        let processLocale = ["LC_ALL", "LANG", "LC_CTYPE"]
+            .compactMap { environment[$0] }
+            .first { !$0.isEmpty }
         for (key, value) in CyderSettingsStore.shared.environment(
             profileID: profileID,
             legacyBasename: nil,
@@ -1145,6 +1185,19 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         environment["WINESERVER"] = engineRoot.appendingPathComponent("bin/wineserver").path
         environment["PATH"] = engineRoot.appendingPathComponent("bin").path
             + ":" + (environment["PATH"] ?? "/usr/bin:/bin")
+        let crossoverBottle = prefix.appendingPathComponent("cxbottle.conf").path
+        let crossoverTemplate = engineRoot
+            .appendingPathComponent("share/crossover/bottle_data/cxbottle.conf").path
+        let engineName = environment["CYDER_ENGINE_NAME"] ?? ""
+        let isMapleStoryOEM = environment["CYDER_OEM_FLAVOR"] == "maplestory"
+            || engineName.range(of: "maplestory.*oem", options: .regularExpression) != nil
+        let isCrossover = FileManager.default.fileExists(atPath: crossoverBottle)
+            || FileManager.default.fileExists(atPath: crossoverTemplate)
+            || isMapleStoryOEM
+        if isCrossover {
+            environment["CX_BOTTLE"] = prefix.path
+            environment["WINEARCH"] = "win64"
+        }
 
         if environment["CYDER_MSYNC"] == "1" {
             environment["WINEMSYNC"] = "1"
@@ -1157,11 +1210,25 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             environment.removeValue(forKey: "WINEESYNC")
         }
 
-        let locale = resolvedWineLocale(environment: environment)
+        let locale = processLocale ?? resolvedWineLocale(environment: environment)
         environment["LANG"] = locale
         environment["LC_ALL"] = locale
         environment["LC_CTYPE"] = locale
         return environment
+    }
+
+    private func wineFrontendArguments(wine: URL) -> [String] {
+        if let override = ProcessInfo.processInfo.environment["CYDER_WINE_FRONTEND_ARGS"],
+           !override.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return override.split(whereSeparator: \.isWhitespace).map(String.init)
+        }
+        guard let contents = try? String(contentsOf: wine, encoding: .utf8),
+              let firstLine = contents.split(separator: "\n", maxSplits: 1).first,
+              firstLine.contains("perl")
+        else {
+            return []
+        }
+        return ["--wait-children", "--enable-alt-loader", "macdrv"]
     }
 
     @objc private func wineAppWillActivate(_ notification: Notification) {
