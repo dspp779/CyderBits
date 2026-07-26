@@ -23,9 +23,10 @@ if [[ "${CYDER_VERIFY_ENGINE_SHA256:-0}" == 1 ]]; then
   }
 fi
 
-export CYDER_APP_VERSION="${CYDER_APP_VERSION:-0.6.0-maplestory-oem25}"
+export CYDER_APP_VERSION="${CYDER_APP_VERSION:-0.7.0-maplestory-oem25}"
 export CYDER_BUNDLED_ENGINE_VERSION="${CYDER_BUNDLED_ENGINE_VERSION:-MapleStory OEM CrossOver 25.0.1.38865}"
-export SIGN_IDENTITY="${SIGN_IDENTITY:--}"
+# Match create-cyder-app.sh: Developer ID by default; SIGN_IDENTITY=- for ad-hoc.
+export SIGN_IDENTITY="${SIGN_IDENTITY:-Developer ID Application: Chun Ho Kwok (3U9565WWM2)}"
 
 bash "$SCRIPT_DIR/create-cyder-app.sh" --engine-archive "$ARCHIVE" "$OUT_DIR"
 
@@ -55,15 +56,24 @@ sign_macho() {
     --sign "$SIGN_IDENTITY" "$path"
 }
 
+# Shell helpers in MacOS/ must be signed before the bundle (nested code).
+for helper in CyderOEMBootstrap Cyder; do
+  [[ -f "$MACOS/$helper" ]] || continue
+  codesign --force --options runtime "$timestamp_flag" \
+    --sign "$SIGN_IDENTITY" "$MACOS/$helper"
+done
+sign_macho "$APP/Contents/Resources/tools/zstd/zstd"
+sign_macho "$APP/Contents/Resources/tools/cabextract/cabextract"
 sign_macho "$MACOS/CyderSwift"
 while IFS= read -r -d '' path; do
   case "$path" in
-    */MacOS/CyderSwift) continue ;;
+    */MacOS/Cyder | */MacOS/CyderSwift | */MacOS/CyderOEMBootstrap | */tools/zstd/zstd | */tools/cabextract/cabextract) continue ;;
   esac
   sign_macho "$path"
 done < <(find "$APP/Contents" -type f -print0)
 codesign --force --options runtime "$timestamp_flag" \
   --entitlements "$ROOT/config/entitlements.plist" \
   --sign "$SIGN_IDENTITY" "$APP"
+codesign --verify --deep --strict --verbose=2 "$APP"
 
 echo "Created $APP"

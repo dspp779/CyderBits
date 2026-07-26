@@ -8,7 +8,7 @@ unset HOMEBREW_PREFIX OGOM WINE_INSTALL ENTITLEMENTS_PLIST
 source "$SCRIPT_DIR/env-x86_64.sh"
 
 OUT_DIR="${OGOM}/dist"
-CYDER_APP_VERSION="${CYDER_APP_VERSION:-0.6.0}"
+CYDER_APP_VERSION="${CYDER_APP_VERSION:-0.7.0}"
 # Release identity by default; export SIGN_IDENTITY=- for an unsigned local build.
 SIGN_IDENTITY="${SIGN_IDENTITY:-Developer ID Application: Chun Ho Kwok (3U9565WWM2)}"
 if [[ "$SIGN_IDENTITY" == "-" ]]; then
@@ -78,11 +78,13 @@ elif [[ -f "$OUT_DIR/Cyder_001.app/Contents/Resources/AppIcon.icns" ]]; then
   PRESERVED_ICON="$OUT_DIR/Cyder_001.app/Contents/Resources/AppIcon.icns"
 fi
 
+APPICON_ZIP="$OGOM/logo/AppIcons.zip"
+APPICON_DIR="$OGOM/logo/AppIcons/Assets.xcassets/AppIcon.appiconset"
 LOGO_PNG="$OGOM/logo/cyder-logo.png"
-[[ -f "$LOGO_PNG" ]] || {
-  echo "Missing app logo at logo/cyder-logo.png" >&2
-  exit 1
-}
+if [[ ! -d "$APPICON_DIR" && -f "$APPICON_ZIP" ]]; then
+  echo "==> Extracting ${APPICON_ZIP#$OGOM/}"
+  unzip -qo "$APPICON_ZIP" -d "$OGOM/logo"
+fi
 
 echo "==> Creating $APP"
 rm -rf "$APP"
@@ -90,13 +92,39 @@ mkdir -p "$MACOS" "$RES"
 
 cp "$ENTITLEMENTS_PLIST" "$RES/entitlements.plist"
 
-echo "==> Building AppIcon.icns from ${LOGO_PNG#$OGOM/}"
 ICON_WORK="$(mktemp -d "${TMPDIR:-/tmp}/cyder-icon.XXXXXX")"
 ICONSET="$ICON_WORK/AppIcon.iconset"
 mkdir -p "$ICONSET"
-while IFS=' ' read -r px name; do
-  sips -z "$px" "$px" "$LOGO_PNG" --out "$ICONSET/$name" >/dev/null
-done <<'SIZES'
+if [[ -d "$APPICON_DIR" ]]; then
+  echo "==> Building AppIcon.icns from logo/AppIcons appiconset"
+  # Map Xcode appiconset PNGs onto iconutil's required iconset names.
+  while IFS=' ' read -r src name; do
+    [[ -f "$APPICON_DIR/$src" ]] || {
+      echo "Missing app icon source: $APPICON_DIR/$src" >&2
+      exit 1
+    }
+    cp "$APPICON_DIR/$src" "$ICONSET/$name"
+  done <<'MAP'
+16.png icon_16x16.png
+32.png icon_16x16@2x.png
+32.png icon_32x32.png
+64.png icon_32x32@2x.png
+128.png icon_128x128.png
+256.png icon_128x128@2x.png
+256.png icon_256x256.png
+512.png icon_256x256@2x.png
+512.png icon_512x512.png
+1024.png icon_512x512@2x.png
+MAP
+else
+  [[ -f "$LOGO_PNG" ]] || {
+    echo "Missing app logo at logo/cyder-logo.png (and no logo/AppIcons appiconset)" >&2
+    exit 1
+  }
+  echo "==> Building AppIcon.icns from ${LOGO_PNG#$OGOM/}"
+  while IFS=' ' read -r px name; do
+    sips -z "$px" "$px" "$LOGO_PNG" --out "$ICONSET/$name" >/dev/null
+  done <<'SIZES'
 16 icon_16x16.png
 32 icon_16x16@2x.png
 32 icon_32x32.png
@@ -108,6 +136,7 @@ done <<'SIZES'
 512 icon_512x512.png
 1024 icon_512x512@2x.png
 SIZES
+fi
 if ! iconutil -c icns "$ICONSET" -o "$RES/AppIcon.icns"; then
   echo "==> iconutil failed; building the ICNS container directly" >&2
   if perl "$SCRIPT_DIR/create-icns.pl" "$ICONSET" "$RES/AppIcon.icns"; then
