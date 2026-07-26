@@ -724,6 +724,26 @@ cyder_find_zstd() {
   return 1
 }
 
+cyder_find_cabextract() {
+  local candidate
+  local -a candidates=("${CYDER_CABEXTRACT:-}")
+  [[ -n "${CYDER_OGOM:-}" ]] && candidates+=("$CYDER_OGOM/tools/cabextract/cabextract")
+  candidates+=(
+    "$CYDER_COMMON_DIR/../tools/cabextract/cabextract"
+    "/opt/homebrew/bin/cabextract"
+    "/usr/local/bin/cabextract"
+    "$(command -v cabextract 2>/dev/null || true)"
+  )
+  for candidate in "${candidates[@]}"; do
+    if [[ -n "$candidate" && -x "$candidate" && -f "$candidate" ]]; then
+      printf '%s/%s\n' "$(cd "$(dirname "$candidate")" && pwd -P)" "$(basename "$candidate")"
+      return 0
+    fi
+  done
+  return 1
+}
+
+
 cyder_tar_extract() {
   local tarball="$1"
   local dest_dir="$2"

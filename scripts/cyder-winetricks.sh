@@ -53,6 +53,21 @@ export W_CACHE="$cache"
 export CYDER_WINETRICKS="$winetricks"
 unset WINEARCH WINEDLLOVERRIDES
 
+extra_bin=""
+if cabextract_bin="$(cyder_find_cabextract 2>/dev/null || true)" && [[ -n "$cabextract_bin" ]]; then
+  extra_bin="$(dirname "$cabextract_bin")"
+fi
+if zstd_bin="$(cyder_find_zstd 2>/dev/null || true)" && [[ -n "$zstd_bin" ]]; then
+  if [[ -n "$extra_bin" ]]; then
+    extra_bin="$extra_bin:$(dirname "$zstd_bin")"
+  else
+    extra_bin="$(dirname "$zstd_bin")"
+  fi
+fi
+
+export PATH="${extra_bin:+$extra_bin:}/opt/homebrew/bin:/usr/local/bin:$PATH"
+
+
 [[ "${1:-}" == install ]] || {
   echo "Winetricks is controlled by Cyder's native component picker." >&2
   echo "Usage: $(basename "$0") install VERB [...]" >&2
@@ -66,7 +81,7 @@ shift
 
 for verb in "$@"; do
   case "$verb" in
-    vcrun2005|vcrun2008|vcrun2010|vcrun2012|vcrun2013|vcrun2015|vcrun2019|vcrun2022|dotnet20|dotnet35|dotnet40|dotnet452|dotnet48|dotnetdesktop6|dotnetdesktop7|dotnetdesktop8|dotnetdesktop9|wmp9|quartz|devenum|vb6run)
+    vcrun2005|vcrun2008|vcrun2010|vcrun2012|vcrun2013|vcrun2015|vcrun2019|vcrun2022|dotnet20|dotnet35|dotnet40|dotnet452|dotnet48|dotnetdesktop6|dotnetdesktop7|dotnetdesktop8|dotnetdesktop9|wmp9|quartz|devenum|vb6run|steam)
       ;;
     *)
       echo "Unsupported Winetricks component: $verb" >&2

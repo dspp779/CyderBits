@@ -36,6 +36,9 @@ private let cyderWinetricksComponentGroups: [(String, [CyderWinetricksComponent]
         CyderWinetricksComponent(title: "DirectShow Devenum", verb: "devenum"),
         CyderWinetricksComponent(title: "Visual Basic 6 Runtime", verb: "vb6run"),
     ]),
+    ("Apps", [
+        CyderWinetricksComponent(title: "Steam", verb: "steam"),
+    ]),
 ]
 
 final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate {

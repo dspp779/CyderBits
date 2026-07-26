@@ -129,7 +129,7 @@ fi
   exit 1
 }
 
-mkdir -p "$RES/ogom-scripts" "$RES/addons/libarchive" "$RES/tools/zstd" "$RES/licenses"
+mkdir -p "$RES/ogom-scripts" "$RES/addons/libarchive" "$RES/tools/zstd" "$RES/tools/cabextract" "$RES/licenses"
 cp "$SCRIPT_DIR/cyder_launcher.sh" "$RES/ogom-scripts/"
 cp "$SCRIPT_DIR/cyder-common.sh" "$RES/ogom-scripts/"
 cp "$SCRIPT_DIR/cyder-ensure-rosetta.sh" "$RES/ogom-scripts/"
@@ -157,6 +157,14 @@ cp "$OGOM/tools/winetricks/COPYING" "$RES/licenses/winetricks-COPYING"
 }
 cp "$OGOM/tools/zstd/zstd" "$RES/tools/zstd/zstd"
 cp "$OGOM/tools/zstd/LICENSE" "$RES/licenses/zstd-LICENSE"
+[[ -x "$OGOM/tools/cabextract/cabextract" ]] || {
+  echo "Missing universal cabextract at tools/cabextract/cabextract; run scripts/build-universal-cabextract.sh" >&2
+  exit 1
+}
+cp "$OGOM/tools/cabextract/cabextract" "$RES/tools/cabextract/cabextract"
+if [[ -f "$OGOM/tools/cabextract/COPYING" ]]; then
+  cp "$OGOM/tools/cabextract/COPYING" "$RES/licenses/cabextract-COPYING"
+fi
 cp "$SCRIPT_DIR/cyder-profile.sh" "$RES/ogom-scripts/"
 cp "$SCRIPT_DIR/cyder_create_game_app.py" "$RES/ogom-scripts/"
 cp "$SCRIPT_DIR/cyder_common.py" "$RES/ogom-scripts/"
@@ -171,6 +179,8 @@ chmod +x "$RES/ogom-scripts/winetricks"
 chmod +x "$RES/ogom-scripts/cyder-profile.sh"
 chmod +x "$RES/ogom-scripts/cyder_create_game_app.py"
 chmod +x "$RES/tools/zstd/zstd"
+chmod +x "$RES/tools/cabextract/cabextract"
+
 
 # shellcheck source=cyder-copy-engine-artifact.sh
 source "$SCRIPT_DIR/cyder-copy-engine-artifact.sh"
@@ -322,14 +332,16 @@ sign_macho() {
 
 # Sign nested helpers before the main executable / bundle (inside-out).
 sign_macho "$APP/Contents/Resources/tools/zstd/zstd"
+sign_macho "$APP/Contents/Resources/tools/cabextract/cabextract"
 sign_macho "$APP/Contents/MacOS/CyderSwift"
 sign_macho "$APP/Contents/MacOS/Cyder"
 while IFS= read -r -d '' path; do
   case "$path" in
-    */MacOS/Cyder | */MacOS/CyderSwift | */tools/zstd/zstd) continue ;;
+    */MacOS/Cyder | */MacOS/CyderSwift | */tools/zstd/zstd | */tools/cabextract/cabextract) continue ;;
   esac
   sign_macho "$path"
 done < <(find "$APP/Contents" -type f -print0)
+
 
 codesign --force --options runtime "$TIMESTAMP_FLAG" \
   --entitlements "$OGOM/config/entitlements.plist" \
