@@ -8,6 +8,7 @@
 
 | 版本 | 文件 | 重點 |
 |------|------|------|
+| 0.7.0 | [繁中](releases/v0.7.0.md) · [English](releases/v0.7.0.en.md) | CrossOver bottle 隔離、cabextract、新 App 圖示、MapleStory OEM flavor |
 | 0.6.0 | [繁中](releases/v0.6.0.md) · [English](releases/v0.6.0.en.md) | CX26.3 Cyder004、10.15 runtime dylib、Winetricks、直接 provision、legacy UI、動態 argv、簽署路徑 |
 | 0.5.0 | [繁中](releases/v0.5.0.md) · [English](releases/v0.5.0.en.md) | 省電模式、遊戲庫、每遊戲設定與新 App 圖示 |
 | 0.4.0 | [release note](releases/v0.4.0.md) | 初始化可靠性、Shared/Golden template 與設定相容性 |

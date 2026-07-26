@@ -167,6 +167,7 @@ bash tests/test-verify-bluecg.sh
 
 ## 文件
 
+- [Cyder 0.7.0 發布說明](docs/releases/v0.7.0.md) — CrossOver bottle 隔離、cabextract、新圖示、MapleStory OEM flavor
 - [Cyder 0.6.0 發布說明](docs/releases/v0.6.0.md) — CX26.3 engine、macOS 10.15 runtime、Winetricks、動態 argv
 - [docs/README.md](docs/README.md) — 索引
 - [docs/cyder.md](docs/cyder.md) — Cyder 啟動器

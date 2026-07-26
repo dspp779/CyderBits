@@ -172,6 +172,7 @@ bash tests/test-verify-bluecg.sh
 
 ## Documentation
 
+- [Cyder 0.7.0 release notes](docs/releases/v0.7.0.en.md) — CrossOver bottle isolation, cabextract, new icon, MapleStory OEM flavor
 - [Cyder 0.6.0 release notes](docs/releases/v0.6.0.en.md) — CX26.3 engine, macOS 10.15 runtime, Winetricks, dynamic argv
 - [docs/README.md](docs/README.md) — index
 - [docs/cyder.md](docs/cyder.md) — Cyder launcher
