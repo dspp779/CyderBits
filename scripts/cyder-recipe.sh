@@ -1,18 +1,20 @@
 #!/usr/bin/env bash
 # Validate and apply declarative game recipes without executing recipe data.
-# This is intentionally a small offline framework: settings are staged as
-# bottle-local desired state; external component installers are rejected until
-# their source, license and checksum metadata are supplied.
+# Settings are staged as bottle-local desired state. Only explicitly supported,
+# pinned offline payloads such as cnc-ddraw may be provisioned; unknown external
+# components remain rejected.
 set -euo pipefail
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 usage() {
-  echo "usage: $(basename "$0") {validate|plan|apply} RECIPE.json [recipe-id] [bottle]" >&2
+  echo "usage: $(basename "$0") {validate|plan|apply} RECIPE.json [recipe-id] [bottle] [exe]" >&2
 }
 
 command_name="${1:-}"
 recipe_file="${2:-}"
 recipe_id="${3:-}"
 bottle="${4:-}"
+executable="${5:-}"
 [[ -n "$command_name" && -n "$recipe_file" ]] || { usage; exit 2; }
 case "$command_name" in validate|plan|apply) ;; *) usage; exit 2 ;; esac
 [[ -f "$recipe_file" ]] || { echo "CYD-REC-001: recipe not found: $recipe_file" >&2; exit 1; }
@@ -22,8 +24,16 @@ command -v ruby >/dev/null 2>&1 || {
   exit 1
 }
 
-ruby -rjson - "$command_name" "$recipe_file" "$recipe_id" "$bottle" <<'RUBY'
-command_name, path, wanted_id, bottle = ARGV
+if [[ -d "$SCRIPT_DIR/../Components/cnc-ddraw/7.1.0.0" ]]; then
+  CYDER_CNC_DDRAW_PAYLOAD="${CYDER_CNC_DDRAW_PAYLOAD:-$SCRIPT_DIR/../Components/cnc-ddraw/7.1.0.0}"
+else
+  CYDER_CNC_DDRAW_PAYLOAD="${CYDER_CNC_DDRAW_PAYLOAD:-$SCRIPT_DIR/../vendor/cnc-ddraw/7.1.0.0}"
+fi
+export CYDER_CNC_DDRAW_PAYLOAD
+export CYDER_CNC_DDRAW_INSTALLER="${CYDER_CNC_DDRAW_INSTALLER:-$SCRIPT_DIR/cyder-cnc-ddraw.sh}"
+
+ruby -rjson -ropen3 - "$command_name" "$recipe_file" "$recipe_id" "$bottle" "$executable" <<'RUBY'
+command_name, path, wanted_id, bottle, executable = ARGV
 begin
   root = JSON.parse(File.read(path))
 rescue JSON::ParserError => e
@@ -97,8 +107,18 @@ abort "CYD-REC-004: target bottle must be an existing directory: #{bottle}" unle
 unless recipe['components'].empty?
   abort "CYD-REC-003: recipe #{wanted_id} declares components (#{recipe['components'].join(', ')}); installers are not available offline, so nothing was applied"
 end
+cnc_installed = false
+cnc_unchanged = false
 if recipe['settings']['renderer'] == 'cnc-ddraw'
-  abort "CYD-REC-003: recipe #{wanted_id} requires a pinned cnc-ddraw payload; source, license and checksum are not available offline, so nothing was applied"
+  abort "CYD-REC-004: recipe #{wanted_id} requires an explicit executable path" if executable.empty?
+  installer = ENV.fetch('CYDER_CNC_DDRAW_INSTALLER')
+  payload = ENV.fetch('CYDER_CNC_DDRAW_PAYLOAD')
+  stdout, stderr, status = Open3.capture3(installer, 'install', payload, executable, bottle)
+  $stdout.write(stdout)
+  $stderr.write(stderr)
+  abort "CYD-REC-003: cnc-ddraw provisioning failed" unless status.success?
+  cnc_installed = true
+  cnc_unchanged = stdout.include?('unchanged=true')
 end
 
 settings_path = File.join(bottle, '.cyder-recipe-settings.json')
@@ -125,6 +145,12 @@ begin
   atomic_json(settings_path, settings_payload)
   atomic_json(applied_path, applied_payload)
 rescue StandardError => e
+  if cnc_installed && !cnc_unchanged
+    system(
+      ENV.fetch('CYDER_CNC_DDRAW_INSTALLER'), 'uninstall', executable, bottle,
+      out: File::NULL, err: File::NULL
+    )
+  end
   abort "CYD-REC-005: recipe settings were not marked applied: #{e.message}"
 end
 puts "applied=#{wanted_id}@#{recipe['revision']} bottle=#{bottle}"

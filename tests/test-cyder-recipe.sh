@@ -33,16 +33,19 @@ assert_contains "$(cat "$TMP/lf2-error")" "CYD-REC-003" \
 }
 
 mkdir -p "$TMP/richman"
-if "$ROOT/scripts/cyder-recipe.sh" apply "$RECIPE" richman-4 "$TMP/richman" >/dev/null 2>"$TMP/richman-error"; then
-  echo "ASSERT failed: cnc-ddraw without pinned payload must not apply" >&2
-  exit 1
-fi
-assert_contains "$(cat "$TMP/richman-error")" "cnc-ddraw" \
-  "cnc-ddraw source guard should be explicit"
-[[ ! -e "$TMP/richman/.cyder-recipe-applied.json" ]] || {
-  echo "ASSERT failed: cnc-ddraw guard must not update applied revision" >&2
-  exit 1
-}
+mkdir -p "$TMP/richman-game"
+printf 'test executable\n' >"$TMP/richman-game/rich4.exe"
+richman_output="$(
+  "$ROOT/scripts/cyder-recipe.sh" apply "$RECIPE" richman-4 \
+    "$TMP/richman" "$TMP/richman-game/rich4.exe"
+)"
+assert_contains "$richman_output" "installed=cnc-ddraw@7.1.0.0" \
+  "cnc-ddraw recipe should provision the pinned offline payload"
+assert_contains "$richman_output" "applied=richman-4@1" \
+  "recipe should be marked applied only after provisioning succeeds"
+assert test -f "$TMP/richman-game/ddraw.dll"
+assert test -f "$TMP/richman-game/ddraw.ini"
+assert test -d "$TMP/richman-game/Shaders"
 
 cat >"$TMP/invalid.json" <<'JSON'
 [{"id":"bad","revision":0,"displayName":"Bad","baseTemplate":"recommended","settings":{"dpi":999},"environment":{},"arguments":[],"components":[]}]

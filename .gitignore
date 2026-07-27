@@ -28,6 +28,10 @@ downloads/
 ddraw.dll
 mingliu.ttc
 
+# Pinned, checksum-verified offline component bundled by Cyder.app.
+!vendor/cnc-ddraw/
+!vendor/cnc-ddraw/**
+
 # GnuWin libarchive extract at repo root (tracked copy lives in tools/libarchive/)
 libarchive-2.4.12-1-bin/
 libarchive-2.4.12-1-dep/

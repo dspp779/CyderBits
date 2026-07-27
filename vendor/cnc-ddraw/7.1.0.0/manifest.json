@@ -1,0 +1,21 @@
+{
+  "id": "cnc-ddraw",
+  "version": "7.1.0.0",
+  "source": "https://github.com/FunkyFr3sh/cnc-ddraw/releases/tag/v7.1.0.0",
+  "archive": "cnc-ddraw.zip",
+  "archiveSha256": "0b13ab89a64c9918189b1dadd449ef6ed3cb3b7b19cabd96d8adbd95505bb908",
+  "license": "MIT",
+  "licenseFile": "LICENSE",
+  "licenseSha256": "a705144535bbfccc05e8310c4f8ab5f0b6f0ec2c9371b76ca5a522cf90e031f5",
+  "install": {
+    "destination": "executable_directory",
+    "include": [
+      "ddraw.dll",
+      "ddraw.ini",
+      "Shaders/"
+    ],
+    "exclude": [
+      "cnc-ddraw config.exe"
+    ]
+  }
+}
