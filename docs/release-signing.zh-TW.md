@@ -139,6 +139,37 @@ spctl -a -vv dist/Cyder.app
 預期輸出包含 `accepted` 與 `source=Notarized Developer ID` —
 看到這行,代表使用者下載解壓後可以直接打開,不會被 Gatekeeper 擋下。
 
+## MapleStory OEM flavor 公證
+
+OEM 版 (`Cyder-maplestory-oem25.app`) 與正式版使用相同的 Developer ID 簽章與 `cyder-notary` 設定，但建置腳本不同：
+
+```bash
+bash scripts/create-cyder-maplestory-oem-app.sh
+```
+
+產出為 `dist/Cyder-maplestory-oem25.app`（預設版本字串 `0.8.0-maplestory-oem25`）。公證步驟與正式版相同，僅替換 App 名稱：
+
+```bash
+codesign --verify --deep --strict --verbose=2 dist/Cyder-maplestory-oem25.app
+
+ditto -c -k --keepParent dist/Cyder-maplestory-oem25.app dist/Cyder-maplestory-oem25-notarize.zip
+xcrun notarytool submit dist/Cyder-maplestory-oem25-notarize.zip \
+  --keychain-profile cyder-notary --wait
+
+xcrun stapler staple dist/Cyder-maplestory-oem25.app
+xcrun stapler validate dist/Cyder-maplestory-oem25.app
+
+ditto -c -k --keepParent dist/Cyder-maplestory-oem25.app dist/Cyder-maplestory-oem25-0.8.0.zip
+```
+
+**0.8.0 起 engine 內建 DXVK，但不含 Apple GPTK** — 公證前請確認打包後的 engine 沒有 `lib64/apple_gptk` 或評估 DMG 內容被打進 App；GPTK 僅能由使用者本機 CrossOver 或偏好設定從官方評估卷安裝。兩套 App（正式版與 OEM）皆需各自送公證並 staple 後再壓 zip 發佈。
+
+OEM 最終檢查：
+
+```bash
+spctl -a -vv dist/Cyder-maplestory-oem25.app
+```
+
 ## 疑難排解
 
 | 狀況 | 處理方式 |

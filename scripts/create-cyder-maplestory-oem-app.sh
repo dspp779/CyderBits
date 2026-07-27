@@ -23,7 +23,7 @@ if [[ "${CYDER_VERIFY_ENGINE_SHA256:-0}" == 1 ]]; then
   }
 fi
 
-export CYDER_APP_VERSION="${CYDER_APP_VERSION:-0.7.0-maplestory-oem25}"
+export CYDER_APP_VERSION="${CYDER_APP_VERSION:-0.8.0-maplestory-oem25}"
 export CYDER_BUNDLED_ENGINE_VERSION="${CYDER_BUNDLED_ENGINE_VERSION:-MapleStory OEM CrossOver 25.0.1.38865}"
 # Match create-cyder-app.sh: Developer ID by default; SIGN_IDENTITY=- for ad-hoc.
 export SIGN_IDENTITY="${SIGN_IDENTITY:-Developer ID Application: Chun Ho Kwok (3U9565WWM2)}"

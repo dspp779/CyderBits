@@ -8,6 +8,7 @@
 
 | 版本 | 文件 | 重點 |
 |------|------|------|
+| 0.8.0 | [繁中](releases/v0.8.0.md) · [English](releases/v0.8.0.en.md) | 圖形後端偏好（WineD3D/DXVK/D3DMetal）、共用 DXVK、GPTK 本機安裝 |
 | 0.7.0 | [繁中](releases/v0.7.0.md) · [English](releases/v0.7.0.en.md) | CrossOver bottle 隔離、cabextract、新 App 圖示、MapleStory OEM flavor |
 | 0.6.0 | [繁中](releases/v0.6.0.md) · [English](releases/v0.6.0.en.md) | CX26.3 Cyder004、10.15 runtime dylib、Winetricks、直接 provision、legacy UI、動態 argv、簽署路徑 |
 | 0.5.0 | [繁中](releases/v0.5.0.md) · [English](releases/v0.5.0.en.md) | 省電模式、遊戲庫、每遊戲設定與新 App 圖示 |
@@ -19,6 +20,7 @@
 | 文件 | 對象 | 內容 |
 |------|------|------|
 | [cyder.md](cyder.md) | 一般使用者 | Cyder 啟動器：開 `.exe`、SharedPrefix、bootstrap |
+| [cyder-graphics-backends.zh-TW.md](cyder-graphics-backends.zh-TW.md) | 一般使用者 | 圖形後端（WineD3D/DXVK/D3DMetal）、GPTK 安裝、DXVK 限幀 vs VSync |
 | [cyder-compatdb.zh-TW.md](cyder-compatdb.zh-TW.md) | 開發 / 發布 | CompatDB 架構、Engine 重包判斷、YAML 規則新增與本機測試 |
 | [cyderbits.md](cyderbits.md) | 一般使用者 | CyderBits 打包器：建立 game `.app`、選項與疑難排解 |
 | [bluecg.md](bluecg.md) | 開發 / 驗證 | BlueCG 自建 Wine、執行、高解析度與已知問題 |

@@ -5,6 +5,7 @@
 ## 總覽
 
 - 📋 **[遊戲相容性矩陣 (Compatibility Matrix)](compatibility-matrix.md)** — 彙整所有已測試單機與線上遊戲之相容性狀態、設定參數與已知 workaround。
+- 🎮 **[圖形後端偏好](../cyder-graphics-backends.zh-TW.md)** — Cyder 0.8.0+ 全域／每遊戲 WineD3D、DXVK、D3DMetal 選項與 GPTK 需求。
 
 ## 遊戲
 
