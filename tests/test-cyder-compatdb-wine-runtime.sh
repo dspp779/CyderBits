@@ -12,12 +12,17 @@ source_archive="$ROOT/tools/archives/crossover-sources-26.3.0.tar.gz"
 if [[ ! -f "$source_archive" ]]; then
   source_archive="$(git -C "$ROOT" rev-parse --git-common-dir)/../tools/archives/crossover-sources-26.3.0.tar.gz"
 fi
+oem_wine_source="${CYDER_OEM_WINE_SOURCE:-$ROOT/build/maplestory-oem25/sources/wine}"
+if [[ ! -d "$oem_wine_source" ]]; then
+  oem_wine_source="$(git -C "$ROOT" rev-parse --git-common-dir)/../build/maplestory-oem25/sources/wine"
+fi
 
 assert test -f "$runtime_patch"
 assert test -f "$oem_runtime_patch"
 assert test -f "$fixture"
 assert test -f "$graphics_env_fixture"
 assert test -f "$source_archive"
+assert test -d "$oem_wine_source"
 
 patch_text="$(cat "$runtime_patch")"
 assert_contains "$patch_text" 'cyder_compat_apply_process_rules' \
@@ -67,6 +72,15 @@ assert_contains "$oem_patch_text" 'cyder_compat_apply_process_rules' \
   "OEM25 should use its compatible CompatDB process hook"
 assert_contains "$oem_patch_text" 'CYDER_GPTK_ROOT' \
   "OEM25 should support the same GPTK root selection"
+oem_compat_patch="$(awk '
+  /^diff -ruN a\/dlls\/ntdll\/unix\/cyder_compat\.c b\// { capture = 1 }
+  capture { print }
+  capture && /^diff -ruN a\/dlls\/ntdll\/unix\/cyder_compat\.h b\// { exit }
+' <<<"$oem_patch_text")"
+assert_contains "$oem_compat_patch" 'void cyder_compat_cleanup_process_rules' \
+  "OEM25 CompatDB source must include the process-rules cleanup implementation"
+assert_contains "$oem_compat_patch" 'free( result->image_path );' \
+  "OEM25 CompatDB source must include the complete cleanup body"
 oem_process_patch="$(awk '
   /^diff -ruN a\/dlls\/ntdll\/unix\/process\.c b\// { capture = 1 }
   capture { print }
@@ -108,5 +122,22 @@ tar -xzf "$source_archive" -C "$tmp" \
   cd "$tmp/sources/wine"
   /usr/bin/patch --forward --batch --dry-run -s -p1 < "$runtime_patch"
 )
+
+mkdir -p "$tmp/oem-wine/dlls/ntdll/unix" "$tmp/oem-wine/dlls/wined3d"
+cp "$oem_wine_source/dlls/ntdll/Makefile.in" "$tmp/oem-wine/dlls/ntdll/"
+cp "$oem_wine_source/dlls/ntdll/unix/process.c" "$tmp/oem-wine/dlls/ntdll/unix/"
+cp "$oem_wine_source/dlls/ntdll/unix/loader.c" "$tmp/oem-wine/dlls/ntdll/unix/"
+cp "$oem_wine_source/dlls/ntdll/unix/unix_private.h" "$tmp/oem-wine/dlls/ntdll/unix/"
+cp "$oem_wine_source/dlls/wined3d/wined3d_main.c" "$tmp/oem-wine/dlls/wined3d/"
+(
+  cd "$tmp/oem-wine"
+  /usr/bin/patch --forward --batch --dry-run -s -p1 < "$oem_runtime_patch"
+  /usr/bin/patch --forward --batch -s -p1 < "$oem_runtime_patch"
+)
+oem_cyder_compat="$(cat "$tmp/oem-wine/dlls/ntdll/unix/cyder_compat.c")"
+assert_contains "$oem_cyder_compat" 'void cyder_compat_cleanup_process_rules' \
+  "patched OEM25 CompatDB source must include the cleanup function"
+assert_contains "$oem_cyder_compat" 'memset( result, 0, sizeof(*result) );' \
+  "patched OEM25 CompatDB source must include the complete cleanup body"
 
 echo "PASS test-cyder-compatdb-wine-runtime"

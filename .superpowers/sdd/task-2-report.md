@@ -57,3 +57,18 @@ FIXED
 - `bash tests/test-cyder-compatdb-wine-runtime.sh` — PASS.
 - `bash tests/test-cyder-compatdb-data.sh` — PASS.
 - OEM25 source tree lacks `config.status` and generated Makefiles, so compiling the NTDLL object was not available.
+
+## Task 2 Blocker Follow-up (2026-07-28)
+
+### Status
+
+FIXED
+
+### Delivered
+
+- Restored the complete tail of the OEM25-added `dlls/ntdll/unix/cyder_compat.c`, including `cyder_compat_apply_current_process_dll_rules()` and `cyder_compat_cleanup_process_rules()`, and corrected its added-file hunk length to 1,619 lines.
+- Extended the Wine runtime test to dry-run and apply the OEM25 patch to a clean, minimal copy of the OEM Wine sources, then assert that the resulting `cyder_compat.c` contains the cleanup function and its full cleanup body.
+
+### Verification
+
+- `bash tests/test-cyder-compatdb-wine-runtime.sh` — PASS.
