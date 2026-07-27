@@ -13,13 +13,19 @@ SOURCE="$WORK/sources/dxvk"
 STAGE="$WORK/dxvk-stage"
 JOBS="${JOBS:-$(sysctl -n hw.ncpu 2>/dev/null || echo 4)}"
 DRY_RUN=0
+COPY_ONLY=0
+ALSO_ENGINES=()
 
 usage() {
   cat <<EOF
-Usage: $(basename "$0") [--engine PATH] [--work-dir PATH] [--dry-run]
+Usage: $(basename "$0") [--engine PATH] [--also-engine PATH] [--work-dir PATH] [--copy-only] [--dry-run]
 
 Build the D3D11/DXGI subset of CrossOver 25.0.1's DXVK snapshot for win64
-and win32, then install it below ENGINE/lib/dxvk/.
+and win32, then install it below ENGINE/lib/dxvk/. Repeat --also-engine to
+install the same staged payload into additional engines without rebuilding.
+
+With --copy-only, skip the build and copy ENGINE/lib/dxvk/ into each
+--also-engine destination (requires an existing primary engine payload).
 
 Environment:
   DXVK_SOURCE_ARCHIVE   CrossOver source archive
@@ -32,7 +38,9 @@ EOF
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --engine) ENGINE="$2"; shift 2 ;;
+    --also-engine) ALSO_ENGINES+=("$2"); shift 2 ;;
     --work-dir) WORK="$2"; SOURCE="$WORK/sources/dxvk"; STAGE="$WORK/dxvk-stage"; shift 2 ;;
+    --copy-only) COPY_ONLY=1; shift ;;
     --dry-run) DRY_RUN=1; shift ;;
     -h | --help) usage; exit 0 ;;
     *) echo "Unknown argument: $1" >&2; usage >&2; exit 1 ;;
@@ -49,6 +57,41 @@ run() {
   fi
 }
 
+install_dxvk_into_engine() {
+  local dest_engine="$1"
+  [[ "$dest_engine" == /* ]] || { echo "Engine path must be absolute: $dest_engine" >&2; return 1; }
+  run mkdir -p "$dest_engine/lib/dxvk/x86_64-windows" "$dest_engine/lib/dxvk/i386-windows"
+  for machine in x86_64-windows i386-windows; do
+    for module in d3d11 dxgi; do
+      run cp "$STAGE/$machine/bin/$module.dll" "$dest_engine/lib/dxvk/$machine/$module.dll"
+    done
+  done
+  run cp "$SOURCE/LICENSE" "$dest_engine/lib/dxvk/LICENSE"
+  run cp "$SOURCE/dxvk.conf" "$dest_engine/lib/dxvk/dxvk.conf"
+}
+
+copy_dxvk_from_engine() {
+  local src_engine="$1" dest_engine="$2"
+  [[ "$src_engine" == /* && "$dest_engine" == /* ]] ||
+    { echo "Engine paths must be absolute: $src_engine $dest_engine" >&2; return 1; }
+  [[ -f "$src_engine/lib/dxvk/x86_64-windows/d3d11.dll" ]] ||
+    { echo "Missing DXVK payload in source engine: $src_engine/lib/dxvk" >&2; return 1; }
+  run mkdir -p "$dest_engine/lib/dxvk"
+  run cp -R "$src_engine/lib/dxvk/." "$dest_engine/lib/dxvk/"
+}
+
+if (( COPY_ONLY )); then
+  if ((${#ALSO_ENGINES[@]} == 0)); then
+    echo "--copy-only requires at least one --also-engine destination" >&2
+    exit 1
+  fi
+  for also in "${ALSO_ENGINES[@]}"; do
+    copy_dxvk_from_engine "$ENGINE" "$also"
+  done
+  echo "DXVK copied from $ENGINE/lib/dxvk into ${#ALSO_ENGINES[@]} additional engine(s)"
+  exit 0
+fi
+
 find_glslang() {
   local candidate
   for candidate in \
@@ -62,19 +105,23 @@ find_glslang() {
   return 1
 }
 
-[[ -f "$ARCHIVE" ]] || { echo "Missing DXVK source archive: $ARCHIVE" >&2; exit 1; }
-[[ -x "$TOOLCHAIN/bin/x86_64-w64-mingw32-clang" ]] ||
-  { echo "Missing llvm-mingw toolchain: $TOOLCHAIN" >&2; exit 1; }
-[[ -x "$ROOT/.brew-x86/bin/meson" && -x "$ROOT/.brew-x86/bin/ninja" ]] ||
-  { echo "Missing project-local meson/ninja under .brew-x86/bin" >&2; exit 1; }
-GLSLANG="$(find_glslang)" || {
-  echo "Missing glslangValidator; set GLSLANG_VALIDATOR to an executable." >&2
-  exit 1
-}
+if (( ! DRY_RUN )); then
+  [[ -f "$ARCHIVE" ]] || { echo "Missing DXVK source archive: $ARCHIVE" >&2; exit 1; }
+  [[ -x "$TOOLCHAIN/bin/x86_64-w64-mingw32-clang" ]] ||
+    { echo "Missing llvm-mingw toolchain: $TOOLCHAIN" >&2; exit 1; }
+  [[ -x "$ROOT/.brew-x86/bin/meson" && -x "$ROOT/.brew-x86/bin/ninja" ]] ||
+    { echo "Missing project-local meson/ninja under .brew-x86/bin" >&2; exit 1; }
+  GLSLANG="$(find_glslang)" || {
+    echo "Missing glslangValidator; set GLSLANG_VALIDATOR to an executable." >&2
+    exit 1
+  }
 
-if [[ ! -f "$SOURCE/meson.build" ]]; then
-  run mkdir -p "$WORK"
-  run tar -xzf "$ARCHIVE" -C "$WORK" sources/dxvk
+  if [[ ! -f "$SOURCE/meson.build" ]]; then
+    run mkdir -p "$WORK"
+    run tar -xzf "$ARCHIVE" -C "$WORK" sources/dxvk
+  fi
+else
+  GLSLANG="${GLSLANG_VALIDATOR:-$ROOT/.brew-x86/bin/glslangValidator}"
 fi
 
 make_cross_file() {
@@ -135,13 +182,12 @@ build_arch() {
 build_arch 64 x86_64-w64-mingw32 x86_64 x86_64 x86_64-windows
 build_arch 32 i686-w64-mingw32 x86 i686 i386-windows
 
-run mkdir -p "$ENGINE/lib/dxvk/x86_64-windows" "$ENGINE/lib/dxvk/i386-windows"
-for machine in x86_64-windows i386-windows; do
-  for module in d3d11 dxgi; do
-    run cp "$STAGE/$machine/bin/$module.dll" "$ENGINE/lib/dxvk/$machine/$module.dll"
-  done
+install_dxvk_into_engine "$ENGINE"
+for also in "${ALSO_ENGINES[@]}"; do
+  install_dxvk_into_engine "$also"
 done
-run cp "$SOURCE/LICENSE" "$ENGINE/lib/dxvk/LICENSE"
-run cp "$SOURCE/dxvk.conf" "$ENGINE/lib/dxvk/dxvk.conf"
 
 echo "DXVK D3D11/DXGI installed in $ENGINE/lib/dxvk"
+if ((${#ALSO_ENGINES[@]})); then
+  echo "DXVK also installed in ${#ALSO_ENGINES[@]} additional engine(s)"
+fi
