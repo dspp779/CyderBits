@@ -1,5 +1,6 @@
 // Cyder.app entry — phased setup UI, then launch Windows EXE directly with Wine.
 import Cocoa
+import CryptoKit
 import Foundation
 import UniformTypeIdentifiers
 
@@ -1001,6 +1002,11 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         // An empty array (Cyder opened with only game.exe) must not wipe them.
         let hasDynamicArguments = !(launchArguments ?? []).isEmpty
         let gameArguments = hasDynamicArguments ? (launchArguments ?? []) : savedGameArguments
+        let compatibleGameArguments = steamCompatibilityArguments(
+            exe: exe,
+            arguments: gameArguments,
+            environment: environment
+        )
         let argumentSource: String
         if hasDynamicArguments {
             argumentSource = "dynamic"
@@ -1013,9 +1019,9 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             && ProcessInfo.processInfo.environment["CYDER_REDACT_DYNAMIC_ARGS"] == "1"
         let diagnosticArguments = redactDynamicArguments
             ? "<\(gameArguments.count) dynamic arguments redacted>"
-            : gameArguments.joined(separator: " ")
+            : compatibleGameArguments.joined(separator: " ")
         let frontendArguments = wineFrontendArguments(wine: wine)
-        let wineCommandArguments = frontendArguments + [exe] + gameArguments
+        let wineCommandArguments = frontendArguments + [exe] + compatibleGameArguments
         let powerMode = environment["CYDER_POWER_MODE"] ?? "normal"
         let taskpolicy = findExecutable(named: "taskpolicy", environment: environment)
         let hasTaskpolicy = taskpolicy != nil
@@ -1160,6 +1166,27 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         return .success
     }
 
+    private func steamCompatibilityArguments(
+        exe: String,
+        arguments: [String],
+        environment: [String: String]
+    ) -> [String] {
+        guard environment["CYDER_STEAM_COMPAT"] != "0",
+              URL(fileURLWithPath: exe).lastPathComponent.lowercased() == "steam.exe" else {
+            return arguments
+        }
+
+        // Steam's CEF DOM may remain interactive even when Wine's child-window
+        // compositor never presents its surface on macOS. The system compositor
+        // bypasses that path; Chromium's Windows sandbox is not available in Wine.
+        var result = arguments
+        for required in ["-system-composer", "-no-cef-sandbox"]
+            where !result.contains(required) {
+            result.append(required)
+        }
+        return result
+    }
+
     private func wineEnvironment(
         wine: URL,
         support: URL,
@@ -1183,6 +1210,12 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         let engineRoot = wine.deletingLastPathComponent().deletingLastPathComponent()
         environment["WINEPREFIX"] = prefix.path
         environment["WINESERVER"] = engineRoot.appendingPathComponent("bin/wineserver").path
+        environment["CYDER_GRAPHICS_BACKENDS_ROOT"] = engineRoot.path
+        let d3dShared = engineRoot
+            .appendingPathComponent("lib64/apple_gptk/external/libd3dshared.dylib")
+        if FileManager.default.fileExists(atPath: d3dShared.path) {
+            environment["CX_APPLEGPTK_LIBD3DSHARED_PATH"] = d3dShared.path
+        }
         environment["PATH"] = engineRoot.appendingPathComponent("bin").path
             + ":" + (environment["PATH"] ?? "/usr/bin:/bin")
         let crossoverBottle = prefix.appendingPathComponent("cxbottle.conf").path
@@ -1214,7 +1247,155 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         environment["LANG"] = locale
         environment["LC_ALL"] = locale
         environment["LC_CTYPE"] = locale
+        configureCompatDBEnvironment(&environment, prefix: prefix)
         return environment
+    }
+
+    private func configureCompatDBEnvironment(
+        _ environment: inout [String: String],
+        prefix: URL
+    ) {
+        guard environment["CYDER_COMPATDB"] != "0" else {
+            environment.removeValue(forKey: "CYDER_COMPATDB_PATH")
+            return
+        }
+        let allowUnsigned = environment["CYDER_COMPATDB_ALLOW_UNSIGNED"] == "1"
+        let bundled = Bundle.main.resourceURL?
+            .appendingPathComponent("CompatDB", isDirectory: true)
+            .appendingPathComponent("compatdb.cdb")
+        if environment["CYDER_COMPATDB_ALLOW_UNSIGNED"] == "1",
+           let explicit = environment["CYDER_COMPATDB_PATH"],
+           let expected = environment["CYDER_COMPATDB_SHA256"],
+           isCompatDBDigest(expected),
+           compatDBSHA256(URL(fileURLWithPath: explicit)) == expected {
+            return
+        }
+        environment.removeValue(forKey: "CYDER_COMPATDB_PATH")
+
+        let pin = prefix
+            .appendingPathComponent(".cyder-runtime", isDirectory: true)
+            .appendingPathComponent("compatdb.path")
+        if wineServerIsRunning(prefix: prefix),
+           let pinned = validatedCompatDBPin(
+               pin,
+               bundled: bundled,
+               allowUnsigned: allowUnsigned
+           ) {
+            environment["CYDER_COMPATDB_PATH"] = pinned.path
+            return
+        }
+
+        let runtimeRoot: URL
+        if let override = environment["CYDER_RUNTIME_ROOT"], !override.isEmpty {
+            runtimeRoot = URL(fileURLWithPath: override, isDirectory: true)
+        } else {
+            runtimeRoot = FileManager.default.homeDirectoryForCurrentUser
+                .appendingPathComponent(".cyder/runtime", isDirectory: true)
+        }
+        let compatRoot = runtimeRoot.appendingPathComponent("CompatDB", isDirectory: true)
+        let current = compatRoot.appendingPathComponent("current")
+        var selected: URL?
+        var selectedKind = "bundled"
+        var selectedDigest = ""
+        if allowUnsigned,
+           let value = try? String(contentsOf: current, encoding: .utf8)
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+           isCompatDBDigest(value) {
+            let updated = compatRoot
+                .appendingPathComponent(value, isDirectory: true)
+                .appendingPathComponent("compatdb.cdb")
+            if compatDBSHA256(updated) == value {
+                selected = updated
+                selectedKind = "unsigned"
+                selectedDigest = value
+            }
+        }
+
+        if selected == nil,
+           let bundled,
+           FileManager.default.fileExists(atPath: bundled.path) {
+            selected = bundled
+        }
+        guard let selected else { return }
+        environment["CYDER_COMPATDB_PATH"] = selected.path
+
+        if FileManager.default.fileExists(atPath: prefix.path) {
+            let directory = pin.deletingLastPathComponent()
+            try? FileManager.default.createDirectory(
+                at: directory,
+                withIntermediateDirectories: true
+            )
+            let contents = """
+            kind=\(selectedKind)
+            sha256=\(selectedDigest)
+            path=\(selected.path)
+
+            """
+            try? contents.write(to: pin, atomically: true, encoding: .utf8)
+        }
+    }
+
+    private func isCompatDBDigest(_ value: String) -> Bool {
+        value.count == 64 && value.unicodeScalars.allSatisfy {
+            ($0.value >= 48 && $0.value <= 57) || ($0.value >= 97 && $0.value <= 102)
+        }
+    }
+
+    private func validatedCompatDBPin(
+        _ pin: URL,
+        bundled: URL?,
+        allowUnsigned: Bool
+    ) -> URL? {
+        guard let contents = try? String(contentsOf: pin, encoding: .utf8) else {
+            return nil
+        }
+        var fields: [String: String] = [:]
+        for line in contents.split(separator: "\n") {
+            let pair = line.split(separator: "=", maxSplits: 1).map(String.init)
+            if pair.count == 2 { fields[pair[0]] = pair[1] }
+        }
+        guard let kind = fields["kind"],
+              let path = fields["path"],
+              !path.contains("\n") else {
+            return nil
+        }
+        let candidate = URL(fileURLWithPath: path)
+        if kind == "bundled",
+           let bundled,
+           candidate.standardizedFileURL.path == bundled.standardizedFileURL.path,
+           FileManager.default.fileExists(atPath: candidate.path) {
+            return candidate
+        }
+        guard kind == "unsigned",
+              allowUnsigned,
+              let digest = fields["sha256"],
+              isCompatDBDigest(digest),
+              compatDBSHA256(candidate) == digest else {
+            return nil
+        }
+        return candidate
+    }
+
+    private func compatDBSHA256(_ file: URL) -> String? {
+        guard let data = try? Data(contentsOf: file, options: .mappedIfSafe) else {
+            return nil
+        }
+        return SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+    }
+
+    private func wineServerIsRunning(prefix: URL) -> Bool {
+        guard let attributes = try? FileManager.default.attributesOfItem(atPath: prefix.path),
+              let device = (attributes[.systemNumber] as? NSNumber)?.uint64Value,
+              let inode = (attributes[.systemFileNumber] as? NSNumber)?.uint64Value else {
+            return false
+        }
+        let socket = "/tmp/.wine-\(getuid())/server-"
+            + String(device, radix: 16) + "-" + String(inode, radix: 16) + "/socket"
+        guard let socketAttributes = try? FileManager.default.attributesOfItem(atPath: socket)
+        else {
+            return false
+        }
+        return socketAttributes[.type] as? FileAttributeType == .typeSocket
     }
 
     private func wineFrontendArguments(wine: URL) -> [String] {

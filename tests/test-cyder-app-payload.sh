@@ -30,6 +30,20 @@ assert_contains "$build_script" 'cp "$OGOM/tools/zstd/zstd" "$RES/tools/zstd/zst
   "Cyder.app must bundle the universal zstd extractor"
 assert_contains "$build_script" 'cp "$OGOM/tools/zstd/LICENSE" "$RES/licenses/zstd-LICENSE"' \
   "Cyder.app must bundle the zstd license"
+assert_contains "$build_script" 'python3 "$OGOM/scripts/cyder-compatdb.py" compile' \
+  "Cyder.app packaging must compile fresh CompatDB data from YAML"
+assert_contains "$build_script" 'python3 "$OGOM/scripts/cyder-compatdb.py" inspect' \
+  "Cyder.app packaging must inspect the generated runtime CompatDB"
+assert_contains "$build_script" '"$SCRIPT_DIR/cyder-cnc-ddraw.sh" verify' \
+  "Cyder.app packaging must verify the pinned cnc-ddraw payload"
+assert_contains "$build_script" 'vendor/cnc-ddraw/7.1.0.0/cnc-ddraw.zip' \
+  "Cyder.app must bundle the pinned offline cnc-ddraw archive"
+assert_contains "$build_script" '"$RES/licenses/cnc-ddraw-LICENSE"' \
+  "Cyder.app must expose the bundled cnc-ddraw MIT license"
+assert_contains "$build_script" 'cp "$SCRIPT_DIR/cyder-recipe.sh" "$RES/ogom-scripts/"' \
+  "Cyder.app must bundle the declarative recipe runner"
+assert_contains "$build_script" 'cp "$SCRIPT_DIR/install-dxvk-prefix.sh" "$RES/ogom-scripts/"' \
+  "Cyder.app must bundle the DXVK prefix provisioner"
 winetricks_launcher="$(cat "$ROOT/scripts/cyder-winetricks.sh")"
 assert_contains "$winetricks_launcher" 'exec /usr/bin/arch -x86_64 /bin/sh "$winetricks" --unattended "$@"' \
   "Cyder Winetricks integration should use unattended CLI mode"

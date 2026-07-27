@@ -158,7 +158,14 @@ fi
   exit 1
 }
 
-mkdir -p "$RES/ogom-scripts" "$RES/addons/libarchive" "$RES/tools/zstd" "$RES/tools/cabextract" "$RES/licenses"
+mkdir -p "$RES/ogom-scripts" "$RES/addons/libarchive" "$RES/tools/zstd" "$RES/tools/cabextract" "$RES/licenses" "$RES/CompatDB" "$RES/Components/cnc-ddraw/7.1.0.0"
+[[ -f "$OGOM/scripts/cyder-compatdb.py" ]] || {
+  echo "Missing CompatDB compiler: scripts/cyder-compatdb.py" >&2
+  exit 1
+}
+python3 "$OGOM/scripts/cyder-compatdb.py" compile \
+  "$OGOM/compatdb/rules" -o "$RES/CompatDB/compatdb.cdb"
+python3 "$OGOM/scripts/cyder-compatdb.py" inspect "$RES/CompatDB/compatdb.cdb" >/dev/null
 cp "$SCRIPT_DIR/cyder_launcher.sh" "$RES/ogom-scripts/"
 cp "$SCRIPT_DIR/cyder-common.sh" "$RES/ogom-scripts/"
 cp "$SCRIPT_DIR/cyder-ensure-rosetta.sh" "$RES/ogom-scripts/"
@@ -178,8 +185,21 @@ cp "$SCRIPT_DIR/install-cyder-font-replacements.sh" "$RES/ogom-scripts/"
 cp "$SCRIPT_DIR/cyder-apply-settings.sh" "$RES/ogom-scripts/"
 cp "$SCRIPT_DIR/cyder-edit-user-reg.sh" "$RES/ogom-scripts/"
 cp "$SCRIPT_DIR/cyder-winetricks.sh" "$RES/ogom-scripts/"
+cp "$SCRIPT_DIR/cyder-recipe.sh" "$RES/ogom-scripts/"
+cp "$SCRIPT_DIR/cyder-cnc-ddraw.sh" "$RES/ogom-scripts/"
+cp "$SCRIPT_DIR/install-dxvk-prefix.sh" "$RES/ogom-scripts/"
 cp "$OGOM/tools/winetricks/winetricks" "$RES/ogom-scripts/"
 cp "$OGOM/tools/winetricks/COPYING" "$RES/licenses/winetricks-COPYING"
+"$SCRIPT_DIR/cyder-cnc-ddraw.sh" verify \
+  "$OGOM/vendor/cnc-ddraw/7.1.0.0" >/dev/null
+cp "$OGOM/vendor/cnc-ddraw/7.1.0.0/cnc-ddraw.zip" \
+  "$RES/Components/cnc-ddraw/7.1.0.0/"
+cp "$OGOM/vendor/cnc-ddraw/7.1.0.0/manifest.json" \
+  "$RES/Components/cnc-ddraw/7.1.0.0/"
+cp "$OGOM/vendor/cnc-ddraw/7.1.0.0/LICENSE" \
+  "$RES/Components/cnc-ddraw/7.1.0.0/"
+cp "$OGOM/vendor/cnc-ddraw/7.1.0.0/LICENSE" \
+  "$RES/licenses/cnc-ddraw-LICENSE"
 [[ -x "$OGOM/tools/zstd/zstd" ]] || {
   echo "Missing universal zstd at tools/zstd/zstd; run scripts/build-universal-zstd.sh" >&2
   exit 1
@@ -204,6 +224,9 @@ chmod +x "$RES/ogom-scripts/install-cyder-font-replacements.sh"
 chmod +x "$RES/ogom-scripts/cyder-apply-settings.sh"
 chmod +x "$RES/ogom-scripts/cyder-edit-user-reg.sh"
 chmod +x "$RES/ogom-scripts/cyder-winetricks.sh"
+chmod +x "$RES/ogom-scripts/cyder-recipe.sh"
+chmod +x "$RES/ogom-scripts/cyder-cnc-ddraw.sh"
+chmod +x "$RES/ogom-scripts/install-dxvk-prefix.sh"
 chmod +x "$RES/ogom-scripts/winetricks"
 chmod +x "$RES/ogom-scripts/cyder-profile.sh"
 chmod +x "$RES/ogom-scripts/cyder_create_game_app.py"

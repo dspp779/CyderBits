@@ -551,7 +551,11 @@ if [[ "$LAUNCH_ONLY" -eq 1 ]]; then
     CYDER_GAME_ARGUMENTS=("${FORWARDED_GAME_ARGUMENTS[@]}")
   fi
   cyder_set_stage wine-launch
-  cyder_run_wine_exe "$wine" "$exe" "$CYDER_SHARED_PREFIX" "${CYDER_GAME_ARGUMENTS[@]}"
+  if (( ${#CYDER_GAME_ARGUMENTS[@]} > 0 )); then
+    cyder_run_wine_exe "$wine" "$exe" "$CYDER_SHARED_PREFIX" "${CYDER_GAME_ARGUMENTS[@]}"
+  else
+    cyder_run_wine_exe "$wine" "$exe" "$CYDER_SHARED_PREFIX"
+  fi
   exit 0
 fi
 
@@ -596,4 +600,8 @@ cyder_prepare_game_launch_settings "$wine" "$engine" "$CYDER_SHARED_PREFIX" "$ex
   exit "$settings_status"
 }
 cyder_set_stage wine-launch
-cyder_run_wine_exe "$wine" "$exe" "$CYDER_SHARED_PREFIX" "${CYDER_GAME_ARGUMENTS[@]}"
+if (( ${#CYDER_GAME_ARGUMENTS[@]} > 0 )); then
+  cyder_run_wine_exe "$wine" "$exe" "$CYDER_SHARED_PREFIX" "${CYDER_GAME_ARGUMENTS[@]}"
+else
+  cyder_run_wine_exe "$wine" "$exe" "$CYDER_SHARED_PREFIX"
+fi

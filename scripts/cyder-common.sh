@@ -373,6 +373,147 @@ cyder_init_paths() {
   CYDER_BUNDLE_ID="${CYDER_BUNDLE_ID:-local.cyder.app}"
   CYDER_TEMPLATE_REVISION="${CYDER_TEMPLATE_REVISION:-2}"
   export CYDER_TEMPLATE_REVISION
+  cyder_configure_compatdb
+}
+
+cyder_resolve_compatdb_path() {
+  [[ "${CYDER_COMPATDB:-1}" != 0 ]] || return 1
+
+  if [[ -n "${CYDER_COMPATDB_PATH:-}" ]]; then
+    local expected="${CYDER_COMPATDB_SHA256:-}"
+    local actual=""
+    if [[ "${CYDER_COMPATDB_ALLOW_UNSIGNED:-0}" == 1 &&
+          "$expected" =~ ^[0-9a-f]{64}$ &&
+          -f "$CYDER_COMPATDB_PATH" ]]; then
+      actual="$(/usr/bin/shasum -a 256 "$CYDER_COMPATDB_PATH" 2>/dev/null | awk '{print $1}')"
+    fi
+    if [[ -n "$actual" && "$actual" == "$expected" ]]; then
+      printf '%s\n' "$CYDER_COMPATDB_PATH"
+      return 0
+    fi
+  fi
+
+  local current_file="$CYDER_RUNTIME_ROOT/CompatDB/current"
+  local version=""
+  if [[ "${CYDER_COMPATDB_ALLOW_UNSIGNED:-0}" == 1 && -f "$current_file" ]]; then
+    IFS= read -r version <"$current_file" || true
+    if [[ "$version" =~ ^[0-9a-f]{64}$ ]]; then
+      local updated="$CYDER_RUNTIME_ROOT/CompatDB/$version/compatdb.cdb"
+      local actual=""
+      if [[ -f "$updated" ]]; then
+        actual="$(/usr/bin/shasum -a 256 "$updated" 2>/dev/null | awk '{print $1}')"
+      fi
+      if [[ "$actual" == "$version" ]]; then
+        printf '%s\n' "$updated"
+        return 0
+      fi
+    fi
+  fi
+
+  local candidate
+  for candidate in \
+    "$CYDER_OGOM/CompatDB/compatdb.cdb" \
+    "$CYDER_OGOM/compatdb/compiled/compatdb.cdb"; do
+    if [[ -f "$candidate" ]]; then
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+  done
+  return 1
+}
+
+cyder_compatdb_is_bundled() {
+  local path="$1" candidate
+  for candidate in \
+    "$CYDER_OGOM/CompatDB/compatdb.cdb" \
+    "$CYDER_OGOM/compatdb/compiled/compatdb.cdb"; do
+    [[ "$path" == "$candidate" && -f "$candidate" ]] && return 0
+  done
+  return 1
+}
+
+cyder_read_compatdb_pin() {
+  local pin="$1" kind path digest actual=""
+  [[ -f "$pin" && ! -L "$pin" ]] || return 1
+  kind="$(sed -n 's/^kind=//p' "$pin" | head -1)"
+  path="$(sed -n 's/^path=//p' "$pin" | head -1)"
+  digest="$(sed -n 's/^sha256=//p' "$pin" | head -1)"
+  [[ -n "$path" && -f "$path" ]] || return 1
+
+  if [[ "$kind" == bundled ]] && cyder_compatdb_is_bundled "$path"; then
+    printf '%s\n' "$path"
+    return 0
+  fi
+  if [[ "$kind" == unsigned &&
+        "${CYDER_COMPATDB_ALLOW_UNSIGNED:-0}" == 1 &&
+        "$digest" =~ ^[0-9a-f]{64}$ ]]; then
+    actual="$(/usr/bin/shasum -a 256 "$path" 2>/dev/null | awk '{print $1}')"
+    if [[ "$actual" == "$digest" ]]; then
+      printf '%s\n' "$path"
+      return 0
+    fi
+  fi
+  return 1
+}
+
+cyder_write_compatdb_pin() {
+  local pin="$1" path="$2" kind=unsigned digest=""
+  [[ "$path" != *$'\n'* ]] || return 1
+  if cyder_compatdb_is_bundled "$path"; then
+    kind=bundled
+  else
+    [[ "${CYDER_COMPATDB_ALLOW_UNSIGNED:-0}" == 1 ]] || return 1
+    digest="$(/usr/bin/shasum -a 256 "$path" 2>/dev/null | awk '{print $1}')"
+    [[ "$digest" =~ ^[0-9a-f]{64}$ ]] || return 1
+  fi
+  printf 'kind=%s\nsha256=%s\npath=%s\n' "$kind" "$digest" "$path" >"$pin"
+}
+
+cyder_export_compatdb_selection() {
+  local path="$1" digest=""
+  export CYDER_COMPATDB_PATH="$path"
+  if cyder_compatdb_is_bundled "$path"; then
+    unset CYDER_COMPATDB_SHA256
+  else
+    digest="$(/usr/bin/shasum -a 256 "$path" 2>/dev/null | awk '{print $1}')"
+    if [[ "$digest" =~ ^[0-9a-f]{64}$ ]]; then
+      export CYDER_COMPATDB_SHA256="$digest"
+    else
+      unset CYDER_COMPATDB_SHA256
+    fi
+  fi
+}
+
+cyder_configure_compatdb() {
+  local prefix="${1:-$CYDER_PREFIX}"
+  local compatdb="" pin_dir="$prefix/.cyder-runtime" pin="$prefix/.cyder-runtime/compatdb.path"
+
+  if cyder_has_running_prefix "$prefix"; then
+    compatdb="$(cyder_read_compatdb_pin "$pin" 2>/dev/null || true)"
+    if [[ -n "$compatdb" ]]; then
+      cyder_export_compatdb_selection "$compatdb"
+      return 0
+    fi
+    compatdb=""
+  fi
+
+  compatdb="$(cyder_resolve_compatdb_path 2>/dev/null || true)"
+  if [[ -n "$compatdb" ]]; then
+    cyder_export_compatdb_selection "$compatdb"
+    if [[ -d "$prefix" && ! -L "$prefix" && ! -L "$pin_dir" ]]; then
+      local tmp
+      mkdir -p "$pin_dir"
+      tmp="$pin.tmp.$$"
+      if cyder_write_compatdb_pin "$tmp" "$compatdb"; then
+        mv -f "$tmp" "$pin"
+      else
+        rm -f "$tmp"
+      fi
+    fi
+  else
+    unset CYDER_COMPATDB_PATH
+    unset CYDER_COMPATDB_SHA256
+  fi
 }
 
 cyder_validate_runtime_path() {
@@ -1409,6 +1550,15 @@ cyder_provision_prefix_baseline() {
   cyder_diagnostic_stage wineboot
   cyder_init_bottle "$wine_bin" "$prefix" || return $?
 
+  if [[ -f "$CYDER_SCRIPTS/install-dxvk-prefix.sh" ]]; then
+    cyder_report_progress "正在準備 DXVK 圖形元件…"
+    cyder_diagnostic_stage dxvk-setup
+    (
+      export WINEPREFIX="$prefix" WINE_INSTALL="$engine_root"
+      bash "$CYDER_SCRIPTS/install-dxvk-prefix.sh"
+    ) || return $?
+  fi
+
   cyder_report_progress "正在安裝 .NET（Wine Mono）…"
   cyder_diagnostic_stage mono-setup
   local component
@@ -1622,6 +1772,33 @@ cyder_ensure_font_replacements() {
 CYDER_GAME_ARGUMENTS=()
 CYDER_GAME_SETTINGS_FOUND=0
 
+cyder_apply_steam_compatibility_arguments() {
+  local exe="$1"
+  shift
+  CYDER_STEAM_ARGUMENTS=("$@")
+
+  [[ "${CYDER_STEAM_COMPAT:-1}" != 0 ]] || return 0
+  [[ "$(basename "$exe" | tr '[:upper:]' '[:lower:]')" == "steam.exe" ]] || return 0
+
+  # Modern Steam renders its CEF UI in child HWNDs.  On macOS/Wine the DOM can
+  # remain interactive while Chromium's compositor surface is never presented,
+  # producing an all-black window.  Steam's system compositor avoids that
+  # off-screen presentation path.  Keep the sandbox switch because Wine cannot
+  # provide Chromium's native Windows sandbox.
+  local required existing
+  for required in -system-composer -no-cef-sandbox; do
+    existing=0
+    local argument
+    for argument in "${CYDER_STEAM_ARGUMENTS[@]}"; do
+      if [[ "$argument" == "$required" ]]; then
+        existing=1
+        break
+      fi
+    done
+    [[ "$existing" -eq 1 ]] || CYDER_STEAM_ARGUMENTS+=("$required")
+  done
+}
+
 cyder_load_game_settings() {
   local exe="$1"
   local profile_script="$CYDER_SCRIPTS/cyder-profile.sh"
@@ -1830,7 +2007,20 @@ cyder_run_wine_exe() {
   else
     shift 2
   fi
+  # cyder_init_paths may run before a new bottle exists. Re-select and pin the
+  # database immediately before launch, when the final prefix is available.
+  cyder_configure_compatdb "$prefix"
   local -a game_args=("$@")
+  CYDER_STEAM_ARGUMENTS=()
+  if (( ${#game_args[@]} > 0 )); then
+    cyder_apply_steam_compatibility_arguments "$exe" "${game_args[@]}"
+  else
+    cyder_apply_steam_compatibility_arguments "$exe"
+  fi
+  game_args=()
+  if (( ${#CYDER_STEAM_ARGUMENTS[@]} > 0 )); then
+    game_args=("${CYDER_STEAM_ARGUMENTS[@]}")
+  fi
   local game_args_text="${game_args[*]-}"
   if [[ "${CYDER_REDACT_DYNAMIC_ARGS:-0}" == 1 ]]; then
     game_args_text="<${#game_args[@]} dynamic arguments redacted>"
@@ -1924,6 +2114,10 @@ cyder_run_wine_exe() {
   } >>"$log_file"
   (
     export WINEPREFIX="$prefix" WINESERVER="$wineserver"
+    export CYDER_GRAPHICS_BACKENDS_ROOT="$(cd "$(dirname "$wine_bin")/.." && pwd)"
+    if [[ -f "$CYDER_GRAPHICS_BACKENDS_ROOT/lib64/apple_gptk/external/libd3dshared.dylib" ]]; then
+      export CX_APPLEGPTK_LIBD3DSHARED_PATH="$CYDER_GRAPHICS_BACKENDS_ROOT/lib64/apple_gptk/external/libd3dshared.dylib"
+    fi
     if [[ "${CYDER_MSYNC:-0}" == 1 ]]; then
       export WINEMSYNC=1
       unset WINEESYNC
@@ -1991,13 +2185,21 @@ cyder_exec_wine() {
   local taskpolicy_bin=""
   taskpolicy_bin="$(cyder_find_taskpolicy || true)"
   if [[ "$mode" == background && -n "$taskpolicy_bin" ]]; then
-    "$taskpolicy_bin" -c background /usr/bin/arch -x86_64 "$wine_bin" "${frontend_args[@]}" "$@"
+    if (( ${#frontend_args[@]} > 0 )); then
+      "$taskpolicy_bin" -c background /usr/bin/arch -x86_64 "$wine_bin" "${frontend_args[@]}" "$@"
+    else
+      "$taskpolicy_bin" -c background /usr/bin/arch -x86_64 "$wine_bin" "$@"
+    fi
   else
     if [[ "$mode" != normal && -z "$taskpolicy_bin" ]]; then
       echo "error: taskpolicy is unavailable; select Standard energy mode" >&2
       return 127
     fi
-    /usr/bin/arch -x86_64 "$wine_bin" "${frontend_args[@]}" "$@"
+    if (( ${#frontend_args[@]} > 0 )); then
+      /usr/bin/arch -x86_64 "$wine_bin" "${frontend_args[@]}" "$@"
+    else
+      /usr/bin/arch -x86_64 "$wine_bin" "$@"
+    fi
   fi
 }
 
