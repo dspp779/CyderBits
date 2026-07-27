@@ -13,6 +13,7 @@
 | 遊戲相容性總表 | 彙整單機／線上遊戲測試紀錄 | [相容性矩陣](compatibility-matrix.md) |
 | BlueCG／水藍魔力 | A6 same-view backing sync 已通過 Retina+DPI resize 驗收；MIDI underrun 仍列為待釐清雜訊 | [BlueCG](bluecg/README.md) |
 | 皮卡丘打排球 | MSync、ESync 與含空白的 Wine runtime 路徑均列為相容性問題；目前以無同步、無空白實體 runtime 作為 workaround | [皮卡丘排球](pikachu-volleyball/README.md) |
+| Steam | 自動套用 system compositor 與 CEF sandbox 相容參數；Windows 遊戲仍需逐款驗證 | [Steam](steam/README.md) |
 
 ## 建議文件結構
 
