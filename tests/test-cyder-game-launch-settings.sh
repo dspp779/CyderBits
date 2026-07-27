@@ -116,22 +116,30 @@ assert_eq "$force_status" "99" \
   "explicit Apply All Settings should remain the only Wine registry-client path"
 
 # Native launches receive graphics settings from CyderSettingsStore. The Wine
-# environment must locate GPTK through CyderGptk, never through a fabricated
-# engine-local apple_gptk tree.
+# environment must locate GPTK through CyderGptk.applyLaunchEnvironment(), never
+# through a fabricated engine-local apple_gptk tree.
 app_source="$(<"$ROOT/scripts/cyder_app_main.swift")"
-assert_contains "$app_source" "CyderGptk.preferredSource()" \
-  "native Wine environment should resolve the preferred GPTK source"
-assert_contains "$app_source" 'environment["CYDER_GPTK_ROOT"]' \
-  "native Wine environment should expose the selected GPTK root"
-assert_contains "$app_source" 'environment["DYLD_FRAMEWORK_PATH"]' \
-  "native Wine environment should expose GPTK frameworks"
-assert_contains "$app_source" 'environment["CYDER_GRAPHICS_BACKENDS_ROOT"] = engineRoot.path' \
-  "native Wine environment should retain the engine graphics backends root"
-assert_contains "$app_source" 'gptk-source=\(gptkSource)' \
-  "native Wine environment diagnostics should report the GPTK source"
+assert_contains "$app_source" "CyderGptk.applyLaunchEnvironment(to: &environment)" \
+  "native Wine environment should resolve GPTK through CyderGptk"
 if [[ "$app_source" == *"lib64/apple_gptk"* ]]; then
   echo "ASSERT failed: native Wine environment must not invent an engine-local GPTK path" >&2
   exit 1
 fi
+
+# Runtime harness: d3dmetal + fake GPTK root must emit CYDER_GPTK_ROOT,
+# CX_APPLEGPTK_LIBD3DSHARED_PATH, and DYLD_FRAMEWORK_PATH containing external/.
+# CX_ACTIVE_GRAPHICS_BACKEND is set by Wine apply_graphics_backend() to match
+# CYDER_GRAPHICS_BACKEND (dxvk→dxvk, d3dmetal→d3dmetal); see harness comments.
+WINE_ENV_BIN="$TMP/cyder-wine-environment-harness"
+swiftc -O -module-cache-path "$TMP/module-cache" \
+  "$ROOT/scripts/cyder_paths.swift" \
+  "$ROOT/scripts/cyder_settings.swift" \
+  "$ROOT/scripts/cyder_gptk.swift" \
+  "$ROOT/tests/fixtures/cyder_settings_diagnostics_stub.swift" \
+  "$ROOT/tests/fixtures/cyder_wine_environment_harness.swift" \
+  -o "$WINE_ENV_BIN"
+wine_env_result="$("$WINE_ENV_BIN" "$TMP")"
+assert_contains "$wine_env_result" "PASS cyder-wine-environment-harness" \
+  "wine launch environment harness should validate d3dmetal GPTK wiring"
 
 echo "PASS test-cyder-game-launch-settings"
