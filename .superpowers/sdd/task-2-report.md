@@ -39,3 +39,21 @@ FIXED
 - `bash tests/test-cyder-compatdb-wine-runtime.sh` — PASS.
 - `bash tests/test-cyder-compatdb-data.sh` — PASS.
 - `patch --dry-run -p1 < patches/cyder-compatdb-runtime-oem25.patch` in `build/maplestory-oem25/sources/wine` — PASS.
+
+## P1 Follow-up (2026-07-28)
+
+### Status
+
+FIXED
+
+### Delivered
+
+- Removed the duplicate OEM25 `process.c` insertions for `cyder_compat.h`, `struct cyder_compat_result compat`, and `cyder_compat_apply_process_rules()`. The OEM25 hook now captures/applies CompatDB exactly once while retaining the shared capture-then-force graphics backend and `CYDER_GPTK_ROOT` runtime behavior.
+- Added a runtime regression assertion that scopes to the OEM25 `process.c` patch section and requires each hook insertion exactly once.
+
+### Verification
+
+- `patch --dry-run --batch -p1 < patches/cyder-compatdb-runtime-oem25.patch` in `build/maplestory-oem25/sources/wine` — PASS.
+- `bash tests/test-cyder-compatdb-wine-runtime.sh` — PASS.
+- `bash tests/test-cyder-compatdb-data.sh` — PASS.
+- OEM25 source tree lacks `config.status` and generated Makefiles, so compiling the NTDLL object was not available.

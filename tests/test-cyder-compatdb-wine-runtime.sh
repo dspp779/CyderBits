@@ -67,6 +67,17 @@ assert_contains "$oem_patch_text" 'cyder_compat_apply_process_rules' \
   "OEM25 should use its compatible CompatDB process hook"
 assert_contains "$oem_patch_text" 'CYDER_GPTK_ROOT' \
   "OEM25 should support the same GPTK root selection"
+oem_process_patch="$(awk '
+  /^diff -ruN a\/dlls\/ntdll\/unix\/process\.c b\// { capture = 1 }
+  capture { print }
+  capture && /^diff -ruN a\/dlls\/ntdll\/unix\/unix_private\.h b\// { exit }
+' <<<"$oem_patch_text")"
+assert_eq "$(grep -c '^+#include "cyder_compat.h"$' <<<"$oem_process_patch")" "1" \
+  "OEM25 should include the CompatDB process hook once"
+assert_eq "$(grep -c '^+    struct cyder_compat_result compat = {0};$' <<<"$oem_process_patch")" "1" \
+  "OEM25 should allocate one CompatDB process result"
+assert_eq "$(grep -c '^+    if (cyder_compat_apply_process_rules( &path, params, &compat )) params = &compat.params;$' <<<"$oem_process_patch")" "1" \
+  "OEM25 should apply CompatDB process rules once"
 if [[ "$patch_text" == *'steamwebhelper.exe'* ]]; then
   echo "ASSERT failed: Wine runtime must not hard-code a Steam executable" >&2
   exit 1

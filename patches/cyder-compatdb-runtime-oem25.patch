@@ -1669,32 +1669,27 @@ diff -ruN a/dlls/ntdll/unix/loader.c b/dlls/ntdll/unix/loader.c
 diff -ruN a/dlls/ntdll/unix/process.c b/dlls/ntdll/unix/process.c
 --- a/dlls/ntdll/unix/process.c	2026-07-28 01:31:04
 +++ b/dlls/ntdll/unix/process.c	2026-07-28 01:31:09
-@@ -81,6 +81,10 @@
+@@ -81,6 +81,8 @@
  #include "wine/server.h"
  #include "wine/debug.h"
  
 +#include "cyder_compat.h"
 +
-+#include "cyder_compat.h"
-+
  WINE_DEFAULT_DEBUG_CHANNEL(process);
  
  
-@@ -1184,6 +1188,8 @@
+@@ -1184,6 +1186,7 @@
  {
      unsigned int status;
      BOOL success = FALSE;
 +    struct cyder_compat_result compat = {0};
-+    struct cyder_compat_result compat = {0};
      HANDLE file_handle, process_info = 0, process_handle = 0, thread_handle = 0;
      struct object_attributes *objattr;
      data_size_t attr_len;
-@@ -1247,6 +1253,10 @@
+@@ -1247,6 +1250,8 @@
      }
      if (!process_attr) process_attr = &empty_attr;
  
-+    if (cyder_compat_apply_process_rules( &path, params, &compat )) params = &compat.params;
-+
 +    if (cyder_compat_apply_process_rules( &path, params, &compat )) params = &compat.params;
 +
      TRACE( "%s image %s cmdline %s parent %p machine %x\n", debugstr_us( &path ),
