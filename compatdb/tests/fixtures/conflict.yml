@@ -1,0 +1,52 @@
+schema_version: 1
+
+rules:
+  - id: test.conflict.angle
+    description: Conflict fixture using ANGLE.
+    priority: 50
+    enabled: true
+    stability: experimental
+    applies_to:
+      platform: macos
+      engine_api: 1
+    match:
+      executable:
+        path_suffix: '\conflict.exe'
+    actions:
+      append_args:
+        args: ['--use-gl=angle']
+        deduplicate: option
+    tests:
+      matches:
+        - name: same executable
+          executable: 'C:\Fixture\conflict.exe'
+          command_line: [conflict.exe]
+      excludes:
+        - name: unrelated executable
+          executable: 'C:\Fixture\other.exe'
+          command_line: [other.exe]
+
+  - id: test.conflict.swiftshader
+    description: Conflict fixture using SwiftShader.
+    priority: 50
+    enabled: true
+    stability: experimental
+    applies_to:
+      platform: macos
+      engine_api: 1
+    match:
+      executable:
+        path_suffix: '\conflict.exe'
+    actions:
+      append_args:
+        args: ['--use-gl=swiftshader']
+        deduplicate: option
+    tests:
+      matches:
+        - name: same executable
+          executable: 'C:\Fixture\conflict.exe'
+          command_line: [conflict.exe]
+      excludes:
+        - name: unrelated executable
+          executable: 'C:\Fixture\other.exe'
+          command_line: [other.exe]

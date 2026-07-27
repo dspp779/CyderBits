@@ -1,0 +1,36 @@
+schema_version: 1
+
+rules:
+  - id: test.graphics-conflict.wined3d
+    description: First conflicting graphics backend.
+    priority: 50
+    enabled: true
+    stability: experimental
+    applies_to: {platform: macos, engine_api: 1}
+    match:
+      executable: {path_suffix: '\conflict.exe'}
+    actions:
+      graphics_backend: wined3d
+    tests:
+      matches:
+        - name: WineD3D rule matches
+          executable: 'C:\Fixture\conflict.exe'
+          command_line: [conflict.exe]
+      excludes: []
+
+  - id: test.graphics-conflict.dxvk
+    description: Second conflicting graphics backend.
+    priority: 50
+    enabled: true
+    stability: experimental
+    applies_to: {platform: macos, engine_api: 1}
+    match:
+      executable: {path_suffix: '\conflict.exe'}
+    actions:
+      graphics_backend: dxvk
+    tests:
+      matches:
+        - name: DXVK rule matches
+          executable: 'C:\Fixture\conflict.exe'
+          command_line: [conflict.exe]
+      excludes: []

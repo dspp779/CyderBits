@@ -1,0 +1,36 @@
+schema_version: 1
+
+rules:
+  - id: test.env-conflict.set
+    description: First conflicting environment action.
+    priority: 50
+    enabled: true
+    stability: experimental
+    applies_to: {platform: macos, engine_api: 1}
+    match:
+      executable: {path_suffix: '\conflict.exe'}
+    actions:
+      set_env: {TEST_MODE: enabled}
+    tests:
+      matches:
+        - name: set rule matches
+          executable: 'C:\Fixture\conflict.exe'
+          command_line: [conflict.exe]
+      excludes: []
+
+  - id: test.env-conflict.unset
+    description: Second conflicting environment action.
+    priority: 50
+    enabled: true
+    stability: experimental
+    applies_to: {platform: macos, engine_api: 1}
+    match:
+      executable: {path_suffix: '\conflict.exe'}
+    actions:
+      unset_env: [TEST_MODE]
+    tests:
+      matches:
+        - name: unset rule matches
+          executable: 'C:\Fixture\conflict.exe'
+          command_line: [conflict.exe]
+      excludes: []

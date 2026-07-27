@@ -1,0 +1,82 @@
+schema_version: 1
+
+rules:
+  - id: launcher.steam.webhelper.cef-gpu
+    description: Force Steam CEF GPU work into the WebHelper process on Wine/macOS.
+    priority: 100
+    enabled: true
+    stability: stable
+
+    applies_to:
+      platform: macos
+      engine_api: 1
+
+    match:
+      executable:
+        path_suffix: '\steamwebhelper.exe'
+      command_line:
+        excludes:
+          - token: '--type=crashpad-handler'
+
+    actions:
+      append_args:
+        args:
+          - '--no-sandbox'
+          - '--in-process-gpu'
+          - '--disable-gpu'
+        deduplicate: option
+
+    tests:
+      matches:
+        - name: renderer receives compatibility arguments
+          executable: 'C:\Program Files (x86)\Steam\bin\cef\steamwebhelper.exe'
+          command_line:
+            - steamwebhelper.exe
+            - '--type=renderer'
+      excludes:
+        - name: crashpad handler remains untouched
+          executable: 'C:\Program Files (x86)\Steam\bin\cef\steamwebhelper.exe'
+          command_line:
+            - steamwebhelper.exe
+            - '--type=crashpad-handler'
+        - name: unrelated executable remains untouched
+          executable: 'C:\Games\Example\game.exe'
+          command_line:
+            - game.exe
+
+  # These arguments are already used by the Cyder launcher and native app.
+  # Keep this rule disabled until direct-Wine and packaged-app regression tests
+  # prove that moving ownership into CompatDB preserves every launch path.
+  - id: launcher.steam.client.macos-compositor
+    description: Supply the existing Cyder macOS compositor arguments to Steam.
+    priority: 90
+    enabled: false
+    stability: experimental
+
+    applies_to:
+      platform: macos
+      engine_api: 1
+
+    match:
+      executable:
+        path_suffix: '\steam.exe'
+
+    actions:
+      append_args:
+        args:
+          - '-system-composer'
+          - '-no-cef-sandbox'
+        deduplicate: option
+
+    tests:
+      matches:
+        - name: Steam client receives macOS compositor arguments
+          executable: 'C:\Program Files (x86)\Steam\steam.exe'
+          command_line:
+            - steam.exe
+            - -silent
+      excludes:
+        - name: another client named game is not Steam
+          executable: 'C:\Games\Example\game.exe'
+          command_line:
+            - game.exe

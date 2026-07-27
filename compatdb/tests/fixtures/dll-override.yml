@@ -1,0 +1,26 @@
+schema_version: 1
+
+rules:
+  - id: test.richman4.cnc-ddraw
+    description: Use the provisioned cnc-ddraw DLL for Richman 4.
+    priority: 100
+    enabled: true
+    stability: experimental
+    applies_to:
+      platform: macos
+      engine_api: 1
+    match:
+      executable:
+        path_suffix: '\rich4.exe'
+    actions:
+      dll_overrides:
+        DDRAW.dll: native,builtin
+    tests:
+      matches:
+        - name: Richman 4 uses cnc-ddraw
+          executable: 'C:\Games\Richman 4\Rich4.exe'
+          command_line: [Rich4.exe]
+      excludes:
+        - name: another game remains unchanged
+          executable: 'C:\Games\Other\game.exe'
+          command_line: [game.exe]

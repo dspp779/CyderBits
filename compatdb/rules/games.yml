@@ -1,0 +1,32 @@
+schema_version: 1
+
+rules:
+  - id: game.richman-4.cnc-ddraw
+    description: Load the provisioned cnc-ddraw renderer for Richman 4.
+    priority: 100
+    enabled: true
+    stability: experimental
+
+    applies_to:
+      platform: macos
+      engine_api: 1
+
+    match:
+      executable:
+        path_suffix: '\rich4.exe'
+
+    actions:
+      dll_overrides:
+        ddraw: native,builtin
+
+    tests:
+      matches:
+        - name: Richman 4 uses its provisioned native DirectDraw renderer
+          executable: 'C:\Games\Richman 4\rich4.exe'
+          command_line:
+            - rich4.exe
+      excludes:
+        - name: another DirectDraw game remains unchanged
+          executable: 'C:\Games\Other\game.exe'
+          command_line:
+            - game.exe

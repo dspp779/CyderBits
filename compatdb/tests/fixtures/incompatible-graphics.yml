@@ -1,0 +1,20 @@
+schema_version: 1
+
+rules:
+  - id: test.incompatible-graphics
+    description: A WineD3D renderer cannot configure DXVK.
+    priority: 10
+    enabled: true
+    stability: experimental
+    applies_to: {platform: macos, engine_api: 1}
+    match:
+      executable: {path_suffix: '\bad-graphics.exe'}
+    actions:
+      graphics_backend: dxvk
+      wined3d_renderer: opengl
+    tests:
+      matches:
+        - name: incompatible graphics rule
+          executable: 'C:\Fixture\bad-graphics.exe'
+          command_line: [bad-graphics.exe]
+      excludes: []

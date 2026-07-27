@@ -1,0 +1,109 @@
+schema_version: 1
+
+rules:
+  - id: test.all-actions
+    description: Exercise every CompatDB v1 action in one matched process.
+    priority: 200
+    enabled: true
+    stability: experimental
+    applies_to:
+      platform: macos
+      engine_api: 1
+    match:
+      executable:
+        path_suffix: '\action-source.exe'
+    actions:
+      append_args:
+        args: ['--compat-action']
+        deduplicate: option
+      set_env:
+        TEST_SET: from-compatdb
+      unset_env:
+        - TEST_REMOVE
+      dll_overrides:
+        version: builtin,native
+      graphics_backend: wined3d
+      wined3d_renderer: gdi
+    tests:
+      matches:
+        - name: action executable receives composable actions
+          executable: 'C:\Fixture\action-source.exe'
+          command_line: [action-source.exe, base]
+      excludes:
+        - name: unrelated executable remains unchanged
+          executable: 'C:\Fixture\other.exe'
+          command_line: [other.exe, base]
+
+  - id: test.lower-priority-actions
+    description: Verify that lower-priority keyed actions do not replace winners.
+    priority: 100
+    enabled: true
+    stability: experimental
+    applies_to:
+      platform: macos
+      engine_api: 1
+    match:
+      executable:
+        path_suffix: '\action-source.exe'
+    actions:
+      set_env:
+        TEST_SET: from-lower-priority
+      dll_overrides:
+        version: native
+      graphics_backend: dxvk
+    tests:
+      matches:
+        - name: lower-priority rule also matches
+          executable: 'C:\Fixture\action-source.exe'
+          command_line: [action-source.exe, base]
+      excludes:
+        - name: unrelated executable remains unchanged
+          executable: 'C:\Fixture\other.exe'
+          command_line: [other.exe, base]
+
+  - id: test.executable-replacement
+    description: Exercise the exclusive executable replacement action.
+    priority: 200
+    enabled: true
+    stability: experimental
+    applies_to:
+      platform: macos
+      engine_api: 1
+    match:
+      executable:
+        path_suffix: '\replace-source.exe'
+    actions:
+      replace_executable:
+        path_suffix: '\replace-target.exe'
+    tests:
+      matches:
+        - name: source executable is redirected
+          executable: 'C:\Fixture\replace-source.exe'
+          command_line: [replace-source.exe, base]
+      excludes:
+        - name: replacement target does not recursively match
+          executable: 'C:\Fixture\replace-target.exe'
+          command_line: [replace-target.exe, base]
+
+  - id: test.backend-discovery
+    description: Exercise capability-gated backend DLL discovery.
+    priority: 200
+    enabled: true
+    stability: experimental
+    applies_to:
+      platform: macos
+      engine_api: 1
+    match:
+      executable:
+        path_suffix: '\backend-source.exe'
+    actions:
+      graphics_backend: dxvk
+    tests:
+      matches:
+        - name: backend executable requests DXVK
+          executable: 'C:\Fixture\backend-source.exe'
+          command_line: [backend-source.exe, base]
+      excludes:
+        - name: unrelated executable remains unchanged
+          executable: 'C:\Fixture\other.exe'
+          command_line: [other.exe, base]

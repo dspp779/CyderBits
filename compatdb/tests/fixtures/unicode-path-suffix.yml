@@ -1,0 +1,27 @@
+schema_version: 1
+
+rules:
+  - id: test.unicode-path
+    description: Unicode executable suffix is intentionally unsupported in CDB v1.
+    priority: 1
+    enabled: true
+    stability: experimental
+    applies_to:
+      platform: macos
+      engine_api: 1
+    match:
+      executable:
+        path_suffix: '\遊戲.exe'
+    actions:
+      append_args:
+        args: ['--fixture']
+        deduplicate: option
+    tests:
+      matches:
+        - name: Unicode path
+          executable: 'C:\Games\遊戲.exe'
+          command_line: ['遊戲.exe']
+      excludes:
+        - name: unrelated path
+          executable: 'C:\Games\other.exe'
+          command_line: [other.exe]

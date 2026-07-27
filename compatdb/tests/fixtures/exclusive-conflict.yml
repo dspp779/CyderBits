@@ -1,0 +1,36 @@
+schema_version: 1
+
+rules:
+  - id: test.exclusive-conflict.opengl
+    description: First conflicting exclusive action.
+    priority: 50
+    enabled: true
+    stability: experimental
+    applies_to: {platform: macos, engine_api: 1}
+    match:
+      executable: {path_suffix: '\conflict.exe'}
+    actions:
+      replace_executable: {path_suffix: '\first.exe'}
+    tests:
+      matches:
+        - name: first rule matches
+          executable: 'C:\Fixture\conflict.exe'
+          command_line: [conflict.exe]
+      excludes: []
+
+  - id: test.exclusive-conflict.vulkan
+    description: Second conflicting exclusive action.
+    priority: 50
+    enabled: true
+    stability: experimental
+    applies_to: {platform: macos, engine_api: 1}
+    match:
+      executable: {path_suffix: '\conflict.exe'}
+    actions:
+      replace_executable: {path_suffix: '\second.exe'}
+    tests:
+      matches:
+        - name: second rule matches
+          executable: 'C:\Fixture\conflict.exe'
+          command_line: [conflict.exe]
+      excludes: []

@@ -1,0 +1,44 @@
+schema_version: 1
+
+rules:
+  - id: test.dll-conflict.native
+    description: First conflicting DLL action.
+    priority: 100
+    enabled: true
+    stability: experimental
+    applies_to:
+      platform: macos
+      engine_api: 1
+    match:
+      executable:
+        path_suffix: '\game.exe'
+    actions:
+      dll_overrides:
+        ddraw: native,builtin
+    tests:
+      matches:
+        - name: first rule matches
+          executable: 'C:\Games\game.exe'
+          command_line: [game.exe]
+      excludes: []
+
+  - id: test.dll-conflict.builtin
+    description: Second conflicting DLL action.
+    priority: 100
+    enabled: true
+    stability: experimental
+    applies_to:
+      platform: macos
+      engine_api: 1
+    match:
+      executable:
+        path_suffix: '\game.exe'
+    actions:
+      dll_overrides:
+        ddraw.dll: builtin
+    tests:
+      matches:
+        - name: second rule matches
+          executable: 'C:\Games\game.exe'
+          command_line: [game.exe]
+      excludes: []
