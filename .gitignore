@@ -50,3 +50,5 @@ __pycache__/
 auth/
 
 .env
+.worktrees/
+.superpowers/
