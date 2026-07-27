@@ -59,6 +59,11 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
     private let dpi = NSPopUpButton()
     private let font = NSPopUpButton()
     private let smoothing = NSPopUpButton()
+    private let graphicsBackend = NSPopUpButton()
+    private let dxvkFrameRate = NSPopUpButton()
+    private let graphicsHelp = NSTextField(wrappingLabelWithString: "")
+    private let d3dmetalStatus = NSTextField(labelWithString: "")
+    private let removeGptkButton = NSButton()
     private let executableList = NSPopUpButton()
     private let executableRecommendation = NSPopUpButton()
     private let executableName = NSTextField(labelWithString: "尚未選擇 EXE")
@@ -114,6 +119,7 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
         tabs.addTabViewItem(makeGeneralTab())
         tabs.addTabViewItem(makeDisplayTab())
         tabs.addTabViewItem(makeFontsTab())
+        tabs.addTabViewItem(makeGraphicsTab())
         tabs.addTabViewItem(makeAdvancedTab())
 
         status.font = .systemFont(ofSize: 11)
@@ -242,6 +248,43 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
         ])
     }
 
+    private func makeGraphicsTab() -> NSTabViewItem {
+        graphicsBackend.addItems(withTitles: ["預設（跟隨 CompatDB）", "WineD3D", "DXVK", "D3DMetal"])
+        graphicsBackend.target = self
+        graphicsBackend.action = #selector(graphicsBackendChanged)
+        if !supportsD3DMetal {
+            let item = graphicsBackend.item(at: 3)
+            item?.isEnabled = false
+            item?.toolTip = "需要 macOS 14+"
+        }
+        dxvkFrameRate.addItems(withTitles: ["60", "不限制"])
+        dxvkFrameRate.target = self
+        dxvkFrameRate.action = #selector(dxvkFrameRateChanged)
+        graphicsHelp.textColor = .secondaryLabelColor
+        graphicsHelp.font = .systemFont(ofSize: 12)
+        graphicsHelp.maximumNumberOfLines = 3
+        graphicsHelp.widthAnchor.constraint(equalToConstant: 460).isActive = true
+        d3dmetalStatus.textColor = .secondaryLabelColor
+        d3dmetalStatus.font = .systemFont(ofSize: 12)
+        let install = NSButton(title: "安裝 Apple GPTK…", target: self, action: #selector(installGptk))
+        install.bezelStyle = .rounded
+        removeGptkButton.title = "移除已安裝 GPTK"
+        removeGptkButton.bezelStyle = .rounded
+        removeGptkButton.target = self
+        removeGptkButton.action = #selector(removeGptk)
+        let buttons = NSStackView(views: [install, removeGptkButton])
+        buttons.orientation = .horizontal
+        buttons.spacing = 8
+        return tab("圖形", rows: [
+            row("圖形轉譯", graphicsBackend),
+            graphicsHelp,
+            row("限制幀率", dxvkFrameRate),
+            d3dmetalStatus,
+            buttons,
+            note("D3DMetal 使用本機 CrossOver 或使用者自行從 Apple Evaluation DMG 安裝的 GPTK；Cyder 不會隨 App 散布 GPTK。"),
+        ])
+    }
+
     private func makeAdvancedTab() -> NSTabViewItem {
         let gameLibrary = NSButton(title: "打開遊戲庫…", target: self, action: #selector(openGameLibrary))
         gameLibrary.bezelStyle = .rounded
@@ -325,6 +368,9 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
         font.selectItem(at: value.fontPreset == "mingliu" ? 1 : 0)
         let smoothingValues = ["off", "grayscale", "cleartype-rgb"]
         smoothing.selectItem(at: smoothingValues.firstIndex(of: value.fontSmoothing) ?? 2)
+        graphicsBackend.selectItem(at: graphicsBackendIndex(value.graphicsBackend))
+        dxvkFrameRate.selectItem(at: value.dxvkFrameRate == .unlimited ? 1 : 0)
+        refreshGraphicsControls()
         profileDrafts = value.perProfile
         profileRecords = Dictionary(uniqueKeysWithValues: profileStore.listRecords().map { ($0.profileId, $0) })
         deletedProfiles.removeAll()
@@ -377,6 +423,50 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
         saveImmediately(registrySetting: "smoothing")
     }
 
+    @objc private func graphicsBackendChanged() {
+        refreshGraphicsControls()
+        saveImmediately()
+    }
+
+    @objc private func dxvkFrameRateChanged() {
+        saveImmediately()
+    }
+
+    @objc private func installGptk() {
+        let candidates = CyderGptk.scanEvaluationVolumes()
+        guard !candidates.isEmpty else {
+            showGptkAlert(
+                title: "找不到 Apple GPTK 安裝來源",
+                message: "請先開啟 Evaluation environment for Windows games DMG 並同意授權，然後再試一次。"
+            )
+            return
+        }
+        let selector = NSPopUpButton()
+        selector.addItems(withTitles: candidates.map(\.displayName))
+        let alert = NSAlert()
+        alert.messageText = "安裝 Apple GPTK"
+        alert.informativeText = "請選擇已掛載並已同意授權的 Evaluation environment for Windows games 卷宗。"
+        alert.accessoryView = selector
+        alert.addButton(withTitle: "安裝")
+        alert.addButton(withTitle: "取消")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        do {
+            try CyderGptk.install(from: candidates[max(0, selector.indexOfSelectedItem)])
+            refreshGraphicsControls()
+        } catch {
+            showGptkAlert(title: "無法安裝 Apple GPTK", message: error.localizedDescription)
+        }
+    }
+
+    @objc private func removeGptk() {
+        do {
+            try CyderGptk.removeRuntimeInstall()
+            refreshGraphicsControls()
+        } catch {
+            showGptkAlert(title: "無法移除已安裝 GPTK", message: error.localizedDescription)
+        }
+    }
+
     @objc private func msyncChanged() {
         if msync.state == .on { esync.state = .off }
         markDirty()
@@ -398,6 +488,8 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
                 $0.dpi = dpiValues[max(0, dpi.indexOfSelectedItem)]
                 $0.fontPreset = font.indexOfSelectedItem == 1 ? "mingliu" : "songti"
                 $0.fontSmoothing = smoothingValues[max(0, smoothing.indexOfSelectedItem)]
+                $0.graphicsBackend = graphicsBackendValue
+                $0.dxvkFrameRate = dxvkFrameRate.indexOfSelectedItem == 1 ? .unlimited : .sixty
                 for profileID in deletedProfiles {
                     $0.perProfile.removeValue(forKey: profileID)
                 }
@@ -430,6 +522,60 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
             }
         }
         saveImmediately(registrySetting: "font")
+    }
+
+    private var supportsD3DMetal: Bool {
+        ProcessInfo.processInfo.operatingSystemVersion.majorVersion >= 14
+    }
+
+    private var graphicsBackendValue: CyderGraphicsBackend {
+        switch graphicsBackend.indexOfSelectedItem {
+        case 1: return .wined3d
+        case 2: return .dxvk
+        case 3: return .d3dmetal
+        default: return .default
+        }
+    }
+
+    private func graphicsBackendIndex(_ value: CyderGraphicsBackend) -> Int {
+        switch value {
+        case .default: return 0
+        case .wined3d: return 1
+        case .dxvk: return 2
+        case .d3dmetal: return supportsD3DMetal ? 3 : 0
+        }
+    }
+
+    private func refreshGraphicsControls() {
+        let backend = graphicsBackendValue
+        dxvkFrameRate.isHidden = backend != .dxvk
+        (dxvkFrameRate.superview as? NSStackView)?.isHidden = backend != .dxvk
+        graphicsHelp.stringValue = switch backend {
+        case .default: "跟隨 CompatDB 與引擎預設；建議多數遊戲使用。"
+        case .wined3d: "使用 Wine 內建 Direct3D；相容性較廣，但效能通常較差。"
+        case .dxvk: "使用 DXVK 將 Direct3D 轉為 Vulkan，再由 MoltenVK 轉為 Metal。"
+        case .d3dmetal: "使用 Apple D3DMetal／GPTK；需要 macOS 14+ 與可用的 GPTK。"
+        }
+        switch CyderGptk.preferredSource() {
+        case .crossOver:
+            d3dmetalStatus.stringValue = "D3DMetal 可用：CrossOver"
+        case .runtime:
+            d3dmetalStatus.stringValue = "D3DMetal 可用：已安裝評估版"
+        case nil:
+            d3dmetalStatus.stringValue = supportsD3DMetal
+                ? "D3DMetal 不可用：找不到 CrossOver 或已安裝的評估版 GPTK"
+                : "D3DMetal 不可用：需要 macOS 14+"
+        }
+        removeGptkButton.isHidden = !FileManager.default.fileExists(atPath: CyderPaths.appleGptkRuntime.path)
+    }
+
+    private func showGptkAlert(title: String, message: String) {
+        let alert = NSAlert()
+        alert.messageText = title
+        alert.informativeText = message
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "知道了")
+        alert.runModal()
     }
 
     @objc private func chooseExecutable() {
@@ -694,6 +840,9 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
         dpi.selectItem(at: 4)
         font.selectItem(at: 0)
         smoothing.selectItem(at: 2)
+        graphicsBackend.selectItem(at: 0)
+        dxvkFrameRate.selectItem(at: 0)
+        refreshGraphicsControls()
         saveImmediately(registrySetting: "all")
     }
 
@@ -750,7 +899,9 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
             let stored = value.perProfile[profileID]
             if stored?.msync != rule.msync
                 || stored?.esync != rule.esync
-                || stored?.powerMode != rule.powerMode {
+                || stored?.powerMode != rule.powerMode
+                || stored?.graphicsBackend != rule.graphicsBackend
+                || stored?.dxvkFrameRate != rule.dxvkFrameRate {
                 return true
             }
         }

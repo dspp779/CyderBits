@@ -471,6 +471,8 @@ private final class CyderGameSettingsWindowController: NSWindowController, NSWin
     private let retina = NSSwitch()
     private let dpi = NSPopUpButton()
     private let power = NSPopUpButton()
+    private let graphicsBackend = NSPopUpButton()
+    private let dxvkFrameRate = NSPopUpButton()
     private let font = NSPopUpButton()
     private let smoothing = NSPopUpButton()
     private let environment = CyderPlaceholderTextView()
@@ -525,6 +527,8 @@ private final class CyderGameSettingsWindowController: NSWindowController, NSWin
         let retinaValue = rule?.retinaMode ?? global.retinaMode
         let dpiValue = rule?.dpi ?? global.dpi
         let powerValue = rule?.powerMode ?? "standard"
+        let graphicsBackendValue = rule?.graphicsBackend
+        let dxvkFrameRateValue = rule?.dxvkFrameRate
         let fontValue = rule?.fontPreset ?? global.fontPreset
         let smoothingValue = rule?.fontSmoothing ?? global.fontSmoothing
         msync.state = msyncValue ? .on : .off
@@ -532,6 +536,9 @@ private final class CyderGameSettingsWindowController: NSWindowController, NSWin
         retina.state = retinaValue ? .on : .off
         dpi.selectItem(at: dpiValues.firstIndex(of: dpiValue) ?? 4)
         power.selectItem(at: powerValue == "energySaving" ? 1 : 0)
+        graphicsBackend.selectItem(at: graphicsBackendIndex(graphicsBackendValue))
+        dxvkFrameRate.selectItem(at: dxvkFrameRateValue == .unlimited ? 2 : dxvkFrameRateValue == .sixty ? 1 : 0)
+        refreshGraphicsControls()
         font.selectItem(at: fontValue == "mingliu" ? 1 : 0)
         smoothing.selectItem(at: smoothingValues.firstIndex(of: smoothingValue) ?? 2)
         environment.string = (rule?.environment ?? [:]).sorted { $0.key < $1.key }
@@ -577,6 +584,17 @@ private final class CyderGameSettingsWindowController: NSWindowController, NSWin
 
         dpi.addItems(withTitles: dpiTitles)
         power.addItems(withTitles: ["標準", "省電"])
+        graphicsBackend.addItems(withTitles: ["跟隨全域", "預設（跟隨 CompatDB）", "WineD3D", "DXVK", "D3DMetal"])
+        if !supportsD3DMetal {
+            let item = graphicsBackend.item(at: 4)
+            item?.isEnabled = false
+            item?.toolTip = "需要 macOS 14+"
+        }
+        graphicsBackend.target = self
+        graphicsBackend.action = #selector(graphicsBackendChanged)
+        dxvkFrameRate.addItems(withTitles: ["跟隨全域", "60", "不限制"])
+        dxvkFrameRate.target = self
+        dxvkFrameRate.action = #selector(dxvkFrameRateChanged)
         font.addItems(withTitles: [
             cyderDefaultFontPreset() == "songti"
                 ? "宋體（Songti TC，預設）" : "宋體（Songti TC）",
@@ -628,6 +646,8 @@ private final class CyderGameSettingsWindowController: NSWindowController, NSWin
             row("Retina Mode", retina, information: "啟用 macOS Retina 高解析度模式；部分遊戲可能需要關閉。"),
             row("縮放比例 / DPI", dpi, information: "設定 Windows 顯示縮放比例；老遊戲視窗可能需要較低 DPI。"),
             row("能源模式", power, information: "省電模式會降低程序優先級，可能減少耗電但造成遊戲卡頓。"),
+            row("圖形轉譯", graphicsBackend, information: "選「跟隨全域」會使用 Cyder 偏好設定的圖形後端。"),
+            row("限制幀率", dxvkFrameRate, information: "僅 DXVK 使用；「跟隨全域」會使用 Cyder 偏好設定。"),
             row("遊戲字體", font, information: "選擇 Wine 的字體替代方案；細明體需要系統已安裝對應字型。"),
             row("字體平滑", smoothing, information: "控制 Windows 字體平滑方式。"),
             row(
@@ -721,7 +741,7 @@ private final class CyderGameSettingsWindowController: NSWindowController, NSWin
     }
 
     private func setControlsEnabled(_ enabled: Bool) {
-        [msync, esync, retina, dpi, power, font, smoothing].forEach { $0.isEnabled = enabled }
+        [msync, esync, retina, dpi, power, graphicsBackend, dxvkFrameRate, font, smoothing].forEach { $0.isEnabled = enabled }
         environment.isEditable = enabled
         arguments.isEditable = enabled
         settingViews.forEach { $0.alphaValue = enabled ? 1 : 0.52 }
@@ -769,6 +789,12 @@ private final class CyderGameSettingsWindowController: NSWindowController, NSWin
         dpi.selectItem(at: dpiValues.firstIndex(of: retina.state == .on ? 192 : 96) ?? 0)
     }
 
+    @objc private func graphicsBackendChanged() {
+        refreshGraphicsControls()
+    }
+
+    @objc private func dxvkFrameRateChanged() {}
+
     @objc private func cancelSettings() {
         stopModal(.cancel)
     }
@@ -790,6 +816,8 @@ private final class CyderGameSettingsWindowController: NSWindowController, NSWin
         rule.retinaMode = retina.state == .on
         rule.dpi = dpiValues[max(0, dpi.indexOfSelectedItem)]
         rule.powerMode = power.indexOfSelectedItem == 1 ? "energySaving" : "standard"
+        rule.graphicsBackend = graphicsBackendOverride
+        rule.dxvkFrameRate = dxvkFrameRateOverride
         rule.fontPreset = font.indexOfSelectedItem == 1 ? "mingliu" : "songti"
         rule.fontSmoothing = smoothingValues[max(0, smoothing.indexOfSelectedItem)]
         rule.environment = parseEnvironment(environment.string)
@@ -969,6 +997,44 @@ private final class CyderGameSettingsWindowController: NSWindowController, NSWin
     private var dpiValues: [Int] { [96, 120, 144, 168, 192, 240] }
     private var dpiTitles: [String] { ["100%（96 DPI）", "125%（120 DPI）", "150%（144 DPI）", "175%（168 DPI）", "200%（192 DPI）", "250%（240 DPI）"] }
     private var smoothingValues: [String] { ["off", "grayscale", "cleartype-rgb"] }
+
+    private var supportsD3DMetal: Bool {
+        ProcessInfo.processInfo.operatingSystemVersion.majorVersion >= 14
+    }
+
+    private var graphicsBackendOverride: CyderGraphicsBackend? {
+        switch graphicsBackend.indexOfSelectedItem {
+        case 1: return .default
+        case 2: return .wined3d
+        case 3: return .dxvk
+        case 4: return .d3dmetal
+        default: return nil
+        }
+    }
+
+    private var dxvkFrameRateOverride: CyderDxvkFrameRate? {
+        switch dxvkFrameRate.indexOfSelectedItem {
+        case 1: return .sixty
+        case 2: return .unlimited
+        default: return nil
+        }
+    }
+
+    private func graphicsBackendIndex(_ value: CyderGraphicsBackend?) -> Int {
+        guard let value else { return 0 }
+        switch value {
+        case .default: return 1
+        case .wined3d: return 2
+        case .dxvk: return 3
+        case .d3dmetal: return supportsD3DMetal ? 4 : 0
+        }
+    }
+
+    private func refreshGraphicsControls() {
+        let resolvedBackend = graphicsBackendOverride ?? settingsStore.value.graphicsBackend
+        dxvkFrameRate.isHidden = resolvedBackend != .dxvk
+        (dxvkFrameRate.superview as? NSStackView)?.isHidden = resolvedBackend != .dxvk
+    }
 
     private func defaultRule() -> CyderExecutableSettings {
         let value = settingsStore.value
