@@ -25,6 +25,10 @@ assert_contains "$output" "PKG_CONFIG_PATH=" "dry-run configure must set PKG_CON
 assert_contains "$output" "require pkg-config freetype2" "dry-run should check for x86_64 freetype2"
 assert_contains "$output" "ensure" "dry-run should ensure bzip2.pc exists"
 assert_contains "$output" "build/cx26/sources/wine" "dry-run should use CX26 source tree"
+assert_contains "$output" "remove obsolete patch if applied: $ROOT/patches/cyder-steam-webhelper-compat.patch" \
+  "build should remove the earlier executable-specific Steam patch"
+assert_contains "$output" "$ROOT/patches/cyder-compatdb-runtime.patch" \
+  "build should apply the generic CompatDB runtime patch"
 # Tarball trees skip make_*; git checkouts regenerate.
 if [[ -e "$ROOT/build/cx26/sources/wine/.git" ]]; then
   assert_contains "$output" "./tools/make_requests" "dry-run should rebuild Wine generated files"

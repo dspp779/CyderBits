@@ -1,0 +1,53 @@
+--- a/dlls/kernelbase/process.c
++++ b/dlls/kernelbase/process.c
+@@ -551,6 +551,50 @@ BOOL WINAPI DECLSPEC_HOTPATCH CreateProcessInternalW( HANDLE token, const WCHAR
+         app_name = name;
+     }
+ 
++    /*
++     * Cyder Steam compatibility.
++     *
++     * Steam's public -cef-* switches no longer forward --in-process-gpu to
++     * the 64-bit steamwebhelper. Without it, Chromium's separate GPU process
++     * creates an invalid Skia output surface on Wine/macOS and repeatedly
++     * crashes. CrossOver's compatibility database appends the same Chromium
++     * switches while creating steamwebhelper.
++     *
++     * Keep this at process creation rather than on Steam.exe's command line:
++     * the latter is not equivalent. CYDER_STEAM_WEBHELPER_COMPAT=0 is an
++     * escape hatch for A/B testing and future Steam versions.
++     */
++    if (app_name)
++    {
++        static const WCHAR webhelperW[] = L"steamwebhelper.exe";
++        static const WCHAR compat_argsW[] = L" --no-sandbox --in-process-gpu --disable-gpu";
++        WCHAR disabled[2];
++        const WCHAR *basename = app_name;
++        const WCHAR *slash;
++
++        if ((slash = wcsrchr( basename, '\\' ))) basename = slash + 1;
++        if ((slash = wcsrchr( basename, '/' ))) basename = slash + 1;
++
++        if (wcsicmp( basename, webhelperW ) == 0 &&
++            !(GetEnvironmentVariableW( L"CYDER_STEAM_WEBHELPER_COMPAT",
++                                        disabled, ARRAY_SIZE(disabled) ) == 1 &&
++              disabled[0] == '0') &&
++            !wcsstr( tidy_cmdline, L"--in-process-gpu" ))
++        {
++            SIZE_T len = lstrlenW( tidy_cmdline ) + ARRAY_SIZE(compat_argsW);
++            WCHAR *compat_cmdline;
++
++            if (!(compat_cmdline = RtlAllocateHeap( GetProcessHeap(), 0, len * sizeof(WCHAR) )))
++            {
++                status = STATUS_NO_MEMORY;
++                goto done;
++            }
++            swprintf( compat_cmdline, len, L"%s%s", tidy_cmdline, compat_argsW );
++            if (tidy_cmdline != cmd_line) RtlFreeHeap( GetProcessHeap(), 0, tidy_cmdline );
++            tidy_cmdline = compat_cmdline;
++        }
++    }
++
+     /* CW Hack 24938 */
+     if (cmd_line && wcsstr(cmd_line, L"EpicGamesLauncher.exe"))
+     {

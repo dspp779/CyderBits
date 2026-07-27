@@ -311,6 +311,44 @@ run mkdir -p "$OGOM/install" "$WINE_SRC/build64"
 mkdir -p "$OGOM/install" "$WINE_SRC/build64"
 
 cd "$WINE_SRC"
+
+apply_cyder_patch() {
+  local patch_file="$1"
+  if [[ "$DRY_RUN" -eq 1 ]]; then
+    echo "+ patch -d $WINE_SRC -p1 < $patch_file"
+    return 0
+  fi
+  if patch --forward --batch --dry-run -s -d "$WINE_SRC" -p1 < "$patch_file"; then
+    patch --forward --batch -s -d "$WINE_SRC" -p1 < "$patch_file"
+    echo "Applied $(basename "$patch_file")"
+  elif patch --reverse --batch --dry-run -s -d "$WINE_SRC" -p1 < "$patch_file"; then
+    echo "Already applied: $(basename "$patch_file")"
+  else
+    echo "Cannot apply required Wine patch: $patch_file" >&2
+    exit 1
+  fi
+}
+
+remove_obsolete_cyder_patch() {
+  local patch_file="$1"
+  if [[ "$DRY_RUN" -eq 1 ]]; then
+    echo "+ remove obsolete patch if applied: $patch_file"
+    return 0
+  fi
+  if patch --reverse --batch --dry-run -s -d "$WINE_SRC" -p1 < "$patch_file"; then
+    patch --reverse --batch -s -d "$WINE_SRC" -p1 < "$patch_file"
+    echo "Removed obsolete $(basename "$patch_file")"
+  elif patch --forward --batch --dry-run -s -d "$WINE_SRC" -p1 < "$patch_file"; then
+    return 0
+  else
+    echo "Cannot determine obsolete Wine patch state: $patch_file" >&2
+    exit 1
+  fi
+}
+
+remove_obsolete_cyder_patch "$OGOM/patches/cyder-steam-webhelper-compat.patch"
+apply_cyder_patch "$OGOM/patches/cyder-compatdb-runtime.patch"
+
 # CrossOver tarball is not a git checkout; make_makefiles requires `git ls-files`.
 # Regenerators are only needed when hacking the wine tree as a git worktree.
 if [[ -e "$WINE_SRC/.git" || -n "${GIT_DIR:-}" ]]; then
