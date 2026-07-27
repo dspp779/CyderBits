@@ -5,14 +5,18 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "$ROOT/tests/assert.sh"
 
 runtime_patch="$ROOT/patches/cyder-compatdb-runtime.patch"
+oem_runtime_patch="$ROOT/patches/cyder-compatdb-runtime-oem25.patch"
 fixture="$ROOT/compatdb/tests/golden/bundled-v1.cdb"
+graphics_env_fixture="$ROOT/tests/fixtures/cyder-compatdb-graphics-env.py"
 source_archive="$ROOT/tools/archives/crossover-sources-26.3.0.tar.gz"
 if [[ ! -f "$source_archive" ]]; then
   source_archive="$(git -C "$ROOT" rev-parse --git-common-dir)/../tools/archives/crossover-sources-26.3.0.tar.gz"
 fi
 
 assert test -f "$runtime_patch"
+assert test -f "$oem_runtime_patch"
 assert test -f "$fixture"
+assert test -f "$graphics_env_fixture"
 assert test -f "$source_archive"
 
 patch_text="$(cat "$runtime_patch")"
@@ -58,6 +62,11 @@ assert_contains "$patch_text" 'getenv( "CYDER_GRAPHICS_BACKEND" )' \
   "the environment should force a graphics backend after CompatDB rules"
 assert_contains "$patch_text" 'apply_graphics_backend( &slice, &applied )' \
   "the forced graphics backend should use the normal backend activation path"
+oem_patch_text="$(cat "$oem_runtime_patch")"
+assert_contains "$oem_patch_text" 'cyder_compat_apply_process_rules' \
+  "OEM25 should use its compatible CompatDB process hook"
+assert_contains "$oem_patch_text" 'CYDER_GPTK_ROOT' \
+  "OEM25 should support the same GPTK root selection"
 if [[ "$patch_text" == *'steamwebhelper.exe'* ]]; then
   echo "ASSERT failed: Wine runtime must not hard-code a Steam executable" >&2
   exit 1
@@ -65,6 +74,14 @@ fi
 
 magic="$(LC_ALL=C od -An -N8 -c "$fixture" | tr -d ' \n')"
 assert_eq "$magic" 'CYDRCDB\0' "runtime fixture should use the CDB v1 magic"
+
+forced_backend="$(python3 "$graphics_env_fixture" \
+  '{"CYDER_GRAPHICS_BACKEND":"dxvk"}' d3dmetal)"
+assert_eq "$forced_backend" "dxvk" \
+  "the App-selected backend must win over a CompatDB child environment rule"
+rule_backend="$(python3 "$graphics_env_fixture" '{}' d3dmetal)"
+assert_eq "$rule_backend" "d3dmetal" \
+  "CompatDB should select its backend when the App did not select one"
 
 tmp="$(mktemp -d "${TMPDIR:-/tmp}/cyder-compatdb-runtime.XXXXXX")"
 trap 'rm -rf "$tmp"' EXIT

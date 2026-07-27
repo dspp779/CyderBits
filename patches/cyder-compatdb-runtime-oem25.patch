@@ -1,5 +1,6 @@
---- a/dlls/ntdll/Makefile.in
-+++ b/dlls/ntdll/Makefile.in
+diff -ruN a/dlls/ntdll/Makefile.in b/dlls/ntdll/Makefile.in
+--- a/dlls/ntdll/Makefile.in	2026-07-28 01:31:04
++++ b/dlls/ntdll/Makefile.in	2026-07-28 01:31:09
 @@ -47,6 +47,7 @@
  	threadpool.c \
  	time.c \
@@ -7,9 +8,10 @@
 +	unix/cyder_compat.c \
  	unix/debug.c \
  	unix/env.c \
- 	unix/file.c \
---- /dev/null
-+++ b/dlls/ntdll/unix/cyder_compat.c
+ 	unix/esync.c \
+diff -ruN a/dlls/ntdll/unix/cyder_compat.c b/dlls/ntdll/unix/cyder_compat.c
+--- a/dlls/ntdll/unix/cyder_compat.c	1970-01-01 08:00:00
++++ b/dlls/ntdll/unix/cyder_compat.c	2026-07-28 01:31:09
 @@ -0,0 +1,1592 @@
 +/*
 + * Cyder compatibility database process hook
@@ -1603,35 +1605,9 @@
 +    const char *path = getenv( "CYDER_COMPATDB_PATH" );
 +    const char *forced_graphics_backend = getenv( "CYDER_GRAPHICS_BACKEND" );
 +    struct cyder_compat_result result;
-+    struct cyder_cdb db;
-+
-+    if (disabled && !strcmp( disabled, "0" )) return;
-+    if (!image_path || !image_path->Buffer || !command_line || !command_line->Buffer) return;
-+    if (!load_cdb( path, &db )) return;
-+    if (!validate_cdb_structure( &db ) || !validate_unique_rule_ids( &db ))
-+    {
-+        WARN( "ignoring structurally invalid database %s\n", debugstr_a(path) );
-+        free_cdb( &db );
-+        return;
-+    }
-+
-+    memset( &result, 0, sizeof(result) );
-+    result.params.CommandLine = *command_line;
-+    TRACE( "loading process-local DLL rules from CDB v1 with %u rules\n", db.rule_count );
-+    if (!parse_and_apply_rules( &db, image_path, &result, TRUE, forced_graphics_backend ))
-+        WARN( "ignoring remaining process-local DLL rules after runtime failure\n" );
-+    free_cdb( &db );
-+}
-+
-+void cyder_compat_cleanup_process_rules( struct cyder_compat_result *result )
-+{
-+    free( result->command_line );
-+    free( result->environment );
-+    free( result->image_path );
-+    memset( result, 0, sizeof(*result) );
-+}
---- /dev/null
-+++ b/dlls/ntdll/unix/cyder_compat.h
+diff -ruN a/dlls/ntdll/unix/cyder_compat.h b/dlls/ntdll/unix/cyder_compat.h
+--- a/dlls/ntdll/unix/cyder_compat.h	1970-01-01 08:00:00
++++ b/dlls/ntdll/unix/cyder_compat.h	2026-07-28 01:31:09
 @@ -0,0 +1,31 @@
 +/*
 + * Cyder compatibility database process hook
@@ -1664,62 +1640,19 @@
 +extern void cyder_compat_cleanup_process_rules( struct cyder_compat_result *result );
 +
 +#endif
---- a/dlls/ntdll/unix/process.c
-+++ b/dlls/ntdll/unix/process.c
-@@ -81,6 +81,8 @@
- #include "wine/server.h"
- #include "wine/debug.h"
- 
-+#include "cyder_compat.h"
-+
- WINE_DEFAULT_DEBUG_CHANNEL(process);
- 
- 
-@@ -1181,6 +1183,7 @@
- {
-     unsigned int status;
-     BOOL success = FALSE;
-+    struct cyder_compat_result compat = {0};
-     HANDLE file_handle, process_info = 0, process_handle = 0, thread_handle = 0;
-     struct object_attributes *objattr;
-     data_size_t attr_len;
-@@ -1245,6 +1248,8 @@
-     }
-     if (!process_attr) process_attr = &empty_attr;
- 
-+    if (cyder_compat_apply_process_rules( &path, params, &compat )) params = &compat.params;
-+
-     TRACE( "%s image %s cmdline %s parent %p machine %x\n", debugstr_us( &path ),
-            debugstr_us( &params->ImagePathName ), debugstr_us( &params->CommandLine ), parent, machine );
- 
-@@ -1259,6 +1264,7 @@
-             memset( info, 0, sizeof(*info) );
-             free( unix_name );
-             free( nt_name.Buffer );
-+            cyder_compat_cleanup_process_rules( &compat );
-             return STATUS_SUCCESS;
-         }
-         goto done;
-@@ -1448,6 +1454,7 @@
-     free( winedebug );
-     free( unix_name );
-     free( nt_name.Buffer );
-+    cyder_compat_cleanup_process_rules( &compat );
-     return status;
- }
- 
---- a/dlls/ntdll/unix/loader.c
-+++ b/dlls/ntdll/unix/loader.c
-@@ -94,6 +94,8 @@
- #include "wine/list.h"
+diff -ruN a/dlls/ntdll/unix/loader.c b/dlls/ntdll/unix/loader.c
+--- a/dlls/ntdll/unix/loader.c	2026-07-28 01:31:04
++++ b/dlls/ntdll/unix/loader.c	2026-07-28 01:31:09
+@@ -96,6 +96,8 @@
  #include "ntsyscalls.h"
  #include "wine/debug.h"
-+
-+#include "cyder_compat.h"
  
++#include "cyder_compat.h"
++
  WINE_DEFAULT_DEBUG_CHANNEL(module);
- WINE_DECLARE_DEBUG_CHANNEL(syscall);
-@@ -2236,6 +2238,13 @@
+ 
+ #ifdef __i386__
+@@ -2266,6 +2268,13 @@
      load_ntdll();
      load_wow64_ntdll( main_image_info.Machine );
      load_apiset_dll();
@@ -1733,9 +1666,52 @@
  
  #if defined(__APPLE__) && defined(__x86_64__)
      /* This is necessary because we poke PEB into pthread TLS at offset 0x60. It is normally in use by
---- a/dlls/ntdll/unix/unix_private.h
-+++ b/dlls/ntdll/unix/unix_private.h
-@@ -559,6 +559,8 @@
+diff -ruN a/dlls/ntdll/unix/process.c b/dlls/ntdll/unix/process.c
+--- a/dlls/ntdll/unix/process.c	2026-07-28 01:31:04
++++ b/dlls/ntdll/unix/process.c	2026-07-28 01:31:09
+@@ -81,6 +81,10 @@
+ #include "wine/server.h"
+ #include "wine/debug.h"
+ 
++#include "cyder_compat.h"
++
++#include "cyder_compat.h"
++
+ WINE_DEFAULT_DEBUG_CHANNEL(process);
+ 
+ 
+@@ -1184,6 +1188,8 @@
+ {
+     unsigned int status;
+     BOOL success = FALSE;
++    struct cyder_compat_result compat = {0};
++    struct cyder_compat_result compat = {0};
+     HANDLE file_handle, process_info = 0, process_handle = 0, thread_handle = 0;
+     struct object_attributes *objattr;
+     data_size_t attr_len;
+@@ -1247,6 +1253,10 @@
+     }
+     if (!process_attr) process_attr = &empty_attr;
+ 
++    if (cyder_compat_apply_process_rules( &path, params, &compat )) params = &compat.params;
++
++    if (cyder_compat_apply_process_rules( &path, params, &compat )) params = &compat.params;
++
+     TRACE( "%s image %s cmdline %s parent %p machine %x\n", debugstr_us( &path ),
+            debugstr_us( &params->ImagePathName ), debugstr_us( &params->CommandLine ), parent, machine );
+ 
+@@ -1449,6 +1459,7 @@
+     free( startup_info );
+     free( winedebug );
+     free( redir.Buffer );
++    cyder_compat_cleanup_process_rules( &compat );
+     return status;
+ }
+ 
+diff -ruN a/dlls/ntdll/unix/unix_private.h b/dlls/ntdll/unix/unix_private.h
+--- a/dlls/ntdll/unix/unix_private.h	2026-07-28 01:31:04
++++ b/dlls/ntdll/unix/unix_private.h	2026-07-28 01:31:09
+@@ -545,6 +545,8 @@
  };
  
  extern void set_load_order_app_name( const WCHAR *app_name );
@@ -1744,13 +1720,13 @@
  extern enum loadorder get_load_order( const UNICODE_STRING *nt_name );
  
  static inline WCHAR ntdll_towupper( WCHAR ch )
---- a/dlls/wined3d/wined3d_main.c
-+++ b/dlls/wined3d/wined3d_main.c
-@@ -494,6 +494,30 @@
- 
+diff -ruN a/dlls/wined3d/wined3d_main.c b/dlls/wined3d/wined3d_main.c
+--- a/dlls/wined3d/wined3d_main.c	2026-07-28 01:31:05
++++ b/dlls/wined3d/wined3d_main.c	2026-07-28 01:31:09
+@@ -495,6 +495,30 @@
      if (appkey) RegCloseKey( appkey );
      if (hkey) RegCloseKey( hkey );
-+
+ 
 +    /* Cyder CompatDB process-local graphics backend override. */
 +    if ((env = getenv( "CYDER_WINED3D_RENDERER" )))
 +    {
@@ -1774,6 +1750,7 @@
 +            wined3d_settings.renderer = WINED3D_RENDERER_NO3D;
 +        }
 +    }
- 
++
      if (!getenv( "VKD3D_DEBUG" ))
      {
+         if (TRACE_ON(vkd3d)) putenv( "VKD3D_DEBUG=trace" );
