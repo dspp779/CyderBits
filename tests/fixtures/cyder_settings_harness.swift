@@ -6,7 +6,9 @@ struct CyderSettingsHarness {
         let path = URL(fileURLWithPath: CommandLine.arguments[1])
         let store = CyderSettingsStore(url: path)
         let profileID = "profile-0123456789abcdef01234567"
-        precondition(store.value.schemaVersion == 3)
+        precondition(store.value.schemaVersion == 4)
+        precondition(store.value.graphicsBackend == .default)
+        precondition(store.value.dxvkFrameRate == .sixty)
         precondition(store.environment["CYDER_DPI"] == "480")
         let profileEnvironment = store.environment(profileID: profileID, legacyBasename: "game.exe")
         precondition(profileEnvironment["PROFILE_VALUE"] == "yes")
@@ -48,8 +50,44 @@ struct CyderSettingsHarness {
         let environment = profile["environment"] as! [String: Any]
         precondition(environment["NOT VALID"] == nil)
         let reloaded = CyderSettingsStore(url: path)
-        precondition(reloaded.value.schemaVersion == 3)
+        precondition(reloaded.value.schemaVersion == 4)
         precondition(reloaded.value.revision == 1)
+
+        var globalDxvk = CyderSettings()
+        globalDxvk.graphicsBackend = .dxvk
+        globalDxvk.dxvkFrameRate = .sixty
+        var resolved = CyderSettings.resolveGraphics(global: globalDxvk, profile: nil)
+        precondition(resolved.backend == .dxvk)
+        precondition(resolved.dxvkFrameRate == .sixty)
+
+        let profileUnlimited = CyderExecutableSettings(dxvkFrameRate: .unlimited)
+        resolved = CyderSettings.resolveGraphics(global: globalDxvk, profile: profileUnlimited)
+        precondition(resolved.backend == .dxvk)
+        precondition(resolved.dxvkFrameRate == .unlimited)
+
+        var globalWined3d = CyderSettings()
+        globalWined3d.graphicsBackend = .wined3d
+        let profileDefault = CyderExecutableSettings(graphicsBackend: .default)
+        resolved = CyderSettings.resolveGraphics(global: globalWined3d, profile: profileDefault)
+        precondition(resolved.backend == .default)
+        precondition(resolved.dxvkFrameRate == .sixty)
+
+        try store.update { settings in
+            settings.graphicsBackend = .dxvk
+            settings.dxvkFrameRate = .sixty
+        }
+        let dxvkEnv = store.environment(profileID: nil, legacyBasename: nil)
+        precondition(dxvkEnv["CYDER_GRAPHICS_BACKEND"] == "dxvk")
+        precondition(dxvkEnv["DXVK_FRAME_RATE"] == "60")
+
+        try store.update { settings in
+            settings.graphicsBackend = .default
+            settings.dxvkFrameRate = .sixty
+        }
+        let defaultEnv = store.environment(profileID: nil, legacyBasename: nil)
+        precondition(defaultEnv["CYDER_GRAPHICS_BACKEND"] == nil)
+        precondition(defaultEnv["DXVK_FRAME_RATE"] == nil)
+
         print("PASS cyder-settings-harness")
     }
 }

@@ -1,4 +1,11 @@
 #!/usr/bin/env bash
+# Schema 4 coverage (see cyder_settings_harness.swift):
+# - decode schema 3 without graphics fields → defaults default/60
+# - resolve: global dxvk + profile nil → dxvk/60
+# - resolve: global dxvk + profile unlimited → dxvk/unlimited
+# - resolve: global wined3d + profile default → default (explicit profile default wins)
+# - environment(): dxvk+60 sets CYDER_GRAPHICS_BACKEND=dxvk and DXVK_FRAME_RATE=60
+# - environment(): default sets neither CYDER_GRAPHICS_BACKEND nor DXVK_FRAME_RATE
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TMP="$(mktemp -d)"

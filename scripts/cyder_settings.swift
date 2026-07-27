@@ -42,6 +42,20 @@ func cyderDefaultFontPreset() -> String {
     cyderSystemProvidesMingLiU() ? "mingliu" : "songti"
 }
 
+enum CyderGraphicsBackend: String, Codable, CaseIterable {
+    case `default`, wined3d, dxvk, d3dmetal
+}
+
+enum CyderDxvkFrameRate: String, Codable, CaseIterable {
+    case sixty = "60"
+    case unlimited
+}
+
+struct CyderResolvedGraphics {
+    var backend: CyderGraphicsBackend
+    var dxvkFrameRate: CyderDxvkFrameRate
+}
+
 struct CyderExecutableSettings: Codable {
     var arguments: [String] = []
     var environment: [String: String] = [:]
@@ -52,6 +66,8 @@ struct CyderExecutableSettings: Codable {
     var fontPreset: String?
     var fontSmoothing: String?
     var powerMode: String?
+    var graphicsBackend: CyderGraphicsBackend?
+    var dxvkFrameRate: CyderDxvkFrameRate?
 
     init() {}
 
@@ -64,7 +80,9 @@ struct CyderExecutableSettings: Codable {
         dpi: Int? = nil,
         fontPreset: String? = nil,
         fontSmoothing: String? = nil,
-        powerMode: String? = nil
+        powerMode: String? = nil,
+        graphicsBackend: CyderGraphicsBackend? = nil,
+        dxvkFrameRate: CyderDxvkFrameRate? = nil
     ) {
         self.arguments = arguments
         self.environment = environment
@@ -75,6 +93,8 @@ struct CyderExecutableSettings: Codable {
         self.fontPreset = fontPreset
         self.fontSmoothing = fontSmoothing
         self.powerMode = powerMode
+        self.graphicsBackend = graphicsBackend
+        self.dxvkFrameRate = dxvkFrameRate
     }
 
     init(from decoder: Decoder) throws {
@@ -88,13 +108,20 @@ struct CyderExecutableSettings: Codable {
         fontPreset = try values.decodeIfPresent(String.self, forKey: .fontPreset)
         fontSmoothing = try values.decodeIfPresent(String.self, forKey: .fontSmoothing)
         powerMode = try values.decodeIfPresent(String.self, forKey: .powerMode)
+        graphicsBackend = CyderSettings.sanitizedOptionalGraphicsBackend(
+            try values.decodeIfPresent(String.self, forKey: .graphicsBackend)
+        )
+        dxvkFrameRate = CyderSettings.sanitizedOptionalDxvkFrameRate(
+            try values.decodeIfPresent(String.self, forKey: .dxvkFrameRate)
+        )
     }
 }
 
 struct CyderSettings: Codable {
-    // Schema 3 adds profile-keyed overrides. Keep perExecutable as a legacy
-    // basename fallback; never infer a profile from a basename.
-    var schemaVersion = 3
+    // Schema 4 adds graphics backend and DXVK frame rate. Schema 3 adds
+    // profile-keyed overrides. Keep perExecutable as a legacy basename fallback;
+    // never infer a profile from a basename.
+    var schemaVersion = 4
     var revision = 0
     var msync = false
     var esync: Bool? = false
@@ -102,6 +129,8 @@ struct CyderSettings: Codable {
     var dpi = 192
     var fontPreset = cyderDefaultFontPreset()
     var fontSmoothing = "cleartype-rgb"
+    var graphicsBackend: CyderGraphicsBackend = .default
+    var dxvkFrameRate: CyderDxvkFrameRate = .sixty
     var perExecutable: [String: CyderExecutableSettings] = [:]
     var perProfile: [String: CyderExecutableSettings] = [:]
 
@@ -114,10 +143,10 @@ struct CyderSettings: Codable {
     init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
         let version = try values.decodeIfPresent(Int.self, forKey: .schemaVersion) ?? 1
-        guard version <= 3 else { throw DecodingError.dataCorruptedError(
+        guard version <= 4 else { throw DecodingError.dataCorruptedError(
             forKey: .schemaVersion, in: values, debugDescription: "unsupported settings schema \(version)"
         ) }
-        schemaVersion = 3
+        schemaVersion = 4
         revision = try values.decodeIfPresent(Int.self, forKey: .revision) ?? 0
         msync = try values.decodeIfPresent(Bool.self, forKey: .msync) ?? false
         esync = try values.decodeIfPresent(Bool?.self, forKey: .esync) ?? false
@@ -125,6 +154,12 @@ struct CyderSettings: Codable {
         dpi = try values.decodeIfPresent(Int.self, forKey: .dpi) ?? 192
         fontPreset = try values.decodeIfPresent(String.self, forKey: .fontPreset) ?? cyderDefaultFontPreset()
         fontSmoothing = try values.decodeIfPresent(String.self, forKey: .fontSmoothing) ?? "cleartype-rgb"
+        graphicsBackend = Self.sanitizedGraphicsBackend(
+            try values.decodeIfPresent(String.self, forKey: .graphicsBackend)
+        )
+        dxvkFrameRate = Self.sanitizedDxvkFrameRate(
+            try values.decodeIfPresent(String.self, forKey: .dxvkFrameRate)
+        )
         perExecutable = try values.decodeIfPresent([String: CyderExecutableSettings].self, forKey: .perExecutable) ?? [:]
         let decodedProfiles = try values.decodeIfPresent([String: CyderExecutableSettings].self, forKey: .perProfile) ?? [:]
         perProfile = decodedProfiles.reduce(into: [:]) { result, item in
@@ -139,6 +174,36 @@ struct CyderSettings: Codable {
         if !["off", "grayscale", "cleartype-rgb", "cleartype-bgr"].contains(fontSmoothing) {
             fontSmoothing = "cleartype-rgb"
         }
+    }
+
+    static func sanitizedGraphicsBackend(_ raw: String?) -> CyderGraphicsBackend {
+        guard let raw, let value = CyderGraphicsBackend(rawValue: raw) else { return .default }
+        return value
+    }
+
+    static func sanitizedDxvkFrameRate(_ raw: String?) -> CyderDxvkFrameRate {
+        guard let raw, let value = CyderDxvkFrameRate(rawValue: raw) else { return .sixty }
+        return value
+    }
+
+    static func sanitizedOptionalGraphicsBackend(_ raw: String?) -> CyderGraphicsBackend? {
+        guard let raw else { return nil }
+        return CyderGraphicsBackend(rawValue: raw)
+    }
+
+    static func sanitizedOptionalDxvkFrameRate(_ raw: String?) -> CyderDxvkFrameRate? {
+        guard let raw else { return nil }
+        return CyderDxvkFrameRate(rawValue: raw)
+    }
+
+    static func resolveGraphics(
+        global: CyderSettings,
+        profile: CyderExecutableSettings?
+    ) -> CyderResolvedGraphics {
+        CyderResolvedGraphics(
+            backend: profile?.graphicsBackend ?? global.graphicsBackend,
+            dxvkFrameRate: profile?.dxvkFrameRate ?? global.dxvkFrameRate
+        )
     }
 
     static func isValidProfileID(_ value: String) -> Bool {
@@ -177,6 +242,14 @@ struct CyderSettings: Codable {
            !["standard", "energySaving"].contains(powerMode) {
             result.powerMode = nil
         }
+        if let backend = value.graphicsBackend,
+           !CyderGraphicsBackend.allCases.contains(backend) {
+            result.graphicsBackend = nil
+        }
+        if let frameRate = value.dxvkFrameRate,
+           !CyderDxvkFrameRate.allCases.contains(frameRate) {
+            result.dxvkFrameRate = nil
+        }
         return result
     }
 }
@@ -196,7 +269,7 @@ final class CyderSettingsStore {
         do {
             let data = try Data(contentsOf: url)
             let decoded = try JSONDecoder().decode(CyderSettings.self, from: data)
-            guard decoded.schemaVersion <= 3 else {
+            guard decoded.schemaVersion <= 4 else {
                 CyderDiagnostics.shared.warning("unsupported settings schema=\(decoded.schemaVersion); using defaults")
                 value = .defaults
                 return
@@ -212,7 +285,7 @@ final class CyderSettingsStore {
         CyderDiagnostics.shared.enter(.settingsSave)
         var next = value
         work(&next)
-        next.schemaVersion = 3
+        next.schemaVersion = 4
         next.perProfile = next.perProfile.reduce(into: [:]) { result, item in
             guard CyderSettings.isValidProfileID(item.key) else { return }
             result[item.key] = CyderSettings.sanitized(item.value)
@@ -254,6 +327,13 @@ final class CyderSettingsStore {
     ) -> [String: String] {
         var result = environment
         let rule = override ?? executableSettings(profileID: profileID, legacyBasename: legacyBasename)
+        let graphics = CyderSettings.resolveGraphics(global: value, profile: rule)
+        if graphics.backend != .default {
+            result["CYDER_GRAPHICS_BACKEND"] = graphics.backend.rawValue
+        }
+        if graphics.backend == .dxvk, graphics.dxvkFrameRate == .sixty {
+            result["DXVK_FRAME_RATE"] = "60"
+        }
         guard let rule else { return result }
         if let v = rule.msync { result["CYDER_MSYNC"] = v ? "1" : "0" }
         if let v = rule.esync { result["CYDER_ESYNC"] = v ? "1" : "0" }
