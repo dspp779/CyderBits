@@ -85,10 +85,13 @@ else
   }
 fi
 
-ENGINE_VERSION_LABEL="$(cyder_detect_engine_version_label "$WINE_INSTALL/bin/wine")" || {
-  echo "Could not detect engine version from wine --version" >&2
-  exit 1
-}
+ENGINE_VERSION_LABEL="${CYDER_ENGINE_VERSION_LABEL:-}"
+if [[ -z "$ENGINE_VERSION_LABEL" ]]; then
+  ENGINE_VERSION_LABEL="$(cyder_detect_engine_version_label "$WINE_INSTALL/bin/wine")" || {
+    echo "Could not detect engine version from wine --version" >&2
+    exit 1
+  }
+fi
 ENGINE_VERSION_SLUG="$(cyder_engine_version_slug_from_label "$ENGINE_VERSION_LABEL")"
 ENGINE_VERSION="$ENGINE_VERSION_SLUG"
 ARTIFACTS_DIR="$(cyder_engine_artifacts_dir)"
@@ -149,7 +152,11 @@ printf '%s\n' "$ENGINE_VERSION_LABEL" >"$VERSION_FILE"
   echo "slug=$ENGINE_VERSION_SLUG"
   echo "format=$FORMAT"
   echo "archive=$(basename "$ARCHIVE")"
-  echo "wine=$(arch -x86_64 "$WINE_INSTALL/bin/wine" --version 2>/dev/null || true)"
+  if [[ -n "${CYDER_ENGINE_VERSION_LABEL:-}" ]]; then
+    echo "wine=$ENGINE_VERSION_LABEL"
+  else
+    echo "wine=$(arch -x86_64 "$WINE_INSTALL/bin/wine" --version 2>/dev/null || true)"
+  fi
   echo "packed_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 } >"$STAMP_FILE"
 shasum -a 256 "$ARCHIVE" >"${ARCHIVE}.sha256"
