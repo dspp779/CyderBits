@@ -23,10 +23,12 @@ profile_id="$(bash "$TMP/scripts/cyder-profile.sh" id "$exe")"
     "fontPreset" => "mingliu",
     "fontSmoothing" => "grayscale",
     "powerMode" => "energySaving",
+    "graphicsBackend" => "d3dmetal",
+    "dxvkFrameRate" => "unlimited",
     "environment" => {"TEST_GAME_SETTING" => "yes"},
     "arguments" => ["--windowed", "two words"]
   }
-  document = {"schemaVersion" => 3, "perProfile" => {id => rule}}
+  document = {"schemaVersion" => 4, "perProfile" => {id => rule}}
   File.write(output, JSON.pretty_generate(document))
 ' "$TMP/support/settings.json" "$profile_id"
 
@@ -112,5 +114,24 @@ CYDER_SCRIPTS="$TMP/scripts" CYDER_FORCE_SETTINGS=1 \
   ' _ "$ROOT" "$TMP" || force_status=$?
 assert_eq "$force_status" "99" \
   "explicit Apply All Settings should remain the only Wine registry-client path"
+
+# Native launches receive graphics settings from CyderSettingsStore. The Wine
+# environment must locate GPTK through CyderGptk, never through a fabricated
+# engine-local apple_gptk tree.
+app_source="$(<"$ROOT/scripts/cyder_app_main.swift")"
+assert_contains "$app_source" "CyderGptk.preferredSource()" \
+  "native Wine environment should resolve the preferred GPTK source"
+assert_contains "$app_source" 'environment["CYDER_GPTK_ROOT"]' \
+  "native Wine environment should expose the selected GPTK root"
+assert_contains "$app_source" 'environment["DYLD_FRAMEWORK_PATH"]' \
+  "native Wine environment should expose GPTK frameworks"
+assert_contains "$app_source" 'environment["CYDER_GRAPHICS_BACKENDS_ROOT"] = engineRoot.path' \
+  "native Wine environment should retain the engine graphics backends root"
+assert_contains "$app_source" 'gptk-source=\(gptkSource)' \
+  "native Wine environment diagnostics should report the GPTK source"
+if [[ "$app_source" == *"lib64/apple_gptk"* ]]; then
+  echo "ASSERT failed: native Wine environment must not invent an engine-local GPTK path" >&2
+  exit 1
+fi
 
 echo "PASS test-cyder-game-launch-settings"

@@ -1211,11 +1211,34 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         environment["WINEPREFIX"] = prefix.path
         environment["WINESERVER"] = engineRoot.appendingPathComponent("bin/wineserver").path
         environment["CYDER_GRAPHICS_BACKENDS_ROOT"] = engineRoot.path
-        let d3dShared = engineRoot
-            .appendingPathComponent("lib64/apple_gptk/external/libd3dshared.dylib")
-        if FileManager.default.fileExists(atPath: d3dShared.path) {
-            environment["CX_APPLEGPTK_LIBD3DSHARED_PATH"] = d3dShared.path
+        let gptkSource: String
+        if let source = CyderGptk.preferredSource() {
+            let root: URL
+            switch source {
+            case .crossOver(let url):
+                root = url
+                gptkSource = "crossOver"
+            case .runtime(let url):
+                root = url
+                gptkSource = "runtime"
+            }
+            environment["CYDER_GPTK_ROOT"] = root.path
+            let shared = root.appendingPathComponent("external/libd3dshared.dylib")
+            if FileManager.default.isReadableFile(atPath: shared.path) {
+                environment["CX_APPLEGPTK_LIBD3DSHARED_PATH"] = shared.path
+            }
+            let external = root.appendingPathComponent("external", isDirectory: true).path
+            let existingFrameworkPath = environment["DYLD_FRAMEWORK_PATH"] ?? ""
+            environment["DYLD_FRAMEWORK_PATH"] = existingFrameworkPath.isEmpty
+                ? external
+                : external + ":" + existingFrameworkPath
+        } else {
+            gptkSource = "none"
         }
+        CyderDiagnostics.shared.info(
+            "wine-environment graphics-backend=\(environment["CYDER_GRAPHICS_BACKEND"] ?? "default") "
+                + "gptk-source=\(gptkSource)"
+        )
         environment["PATH"] = engineRoot.appendingPathComponent("bin").path
             + ":" + (environment["PATH"] ?? "/usr/bin:/bin")
         let crossoverBottle = prefix.appendingPathComponent("cxbottle.conf").path
