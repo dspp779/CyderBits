@@ -7,9 +7,13 @@ source "$ROOT/tests/assert.sh"
 runtime_patch="$ROOT/patches/cyder-compatdb-runtime.patch"
 fixture="$ROOT/compatdb/tests/golden/bundled-v1.cdb"
 source_archive="$ROOT/tools/archives/crossover-sources-26.3.0.tar.gz"
+if [[ ! -f "$source_archive" ]]; then
+  source_archive="$(git -C "$ROOT" rev-parse --git-common-dir)/../tools/archives/crossover-sources-26.3.0.tar.gz"
+fi
 
 assert test -f "$runtime_patch"
 assert test -f "$fixture"
+assert test -f "$source_archive"
 
 patch_text="$(cat "$runtime_patch")"
 assert_contains "$patch_text" 'cyder_compat_apply_process_rules' \
@@ -46,6 +50,14 @@ assert_contains "$patch_text" 'CYDER_WINED3D_RENDERER' \
   "wined3d should consume the process-local renderer selection"
 assert_contains "$patch_text" 'CYDER_GRAPHICS_BACKENDS_ROOT' \
   "translation backends should be capability-gated by their runtime payload"
+assert_contains "$patch_text" 'CYDER_GPTK_ROOT' \
+  "d3dmetal should accept an explicit GPTK runtime root"
+assert_contains "$patch_text" 'CX_APPLEGPTK_LIBD3DSHARED_PATH' \
+  "d3dmetal should export the GPTK shared-library path"
+assert_contains "$patch_text" 'getenv( "CYDER_GRAPHICS_BACKEND" )' \
+  "the environment should force a graphics backend after CompatDB rules"
+assert_contains "$patch_text" 'apply_graphics_backend( &slice, &applied )' \
+  "the forced graphics backend should use the normal backend activation path"
 if [[ "$patch_text" == *'steamwebhelper.exe'* ]]; then
   echo "ASSERT failed: Wine runtime must not hard-code a Steam executable" >&2
   exit 1
