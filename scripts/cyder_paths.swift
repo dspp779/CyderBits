@@ -10,6 +10,9 @@ enum CyderPaths {
         }
         return home.appendingPathComponent("Library/Application Support/Cyder", isDirectory: true)
     }()
+    static var appleGptkRuntime: URL {
+        support.appendingPathComponent("runtime/apple_gptk", isDirectory: true)
+    }
     static let runtimeRoot: URL = {
         if let override = ProcessInfo.processInfo.environment["CYDER_RUNTIME_ROOT"], !override.isEmpty {
             return URL(fileURLWithPath: override, isDirectory: true)

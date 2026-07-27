@@ -245,6 +245,7 @@ SWIFT_BUILD_DIR="$(mktemp -d "${TMPDIR:-/tmp}/cyder-swift.XXXXXX")"
 SWIFT_SOURCES=(
   "$SCRIPT_DIR/cyder_diagnostics.swift"
   "$SCRIPT_DIR/cyder_paths.swift"
+  "$SCRIPT_DIR/cyder_gptk.swift"
   "$SCRIPT_DIR/cyder_settings.swift"
   "$SCRIPT_DIR/cyder_launch_support.swift"
   "$SCRIPT_DIR/cyder_profiles.swift"
