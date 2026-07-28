@@ -33,6 +33,8 @@ assert_contains "$ui" "CyderGptk.syncEngineLink()" "graphics tab should refresh 
 assert_contains "$(cat "$ROOT/scripts/cyder_gptk.swift")" "Cyder 已安裝" "installed GPTK should win and show version in status"
 assert_contains "$ui" "let showFrameRate = backend == .dxvk" "frame-rate limiter only for manual DXVK"
 assert_contains "$ui" "let showDxvkFrametimes = backend == .dxvk" "frametimes toggle should only appear for manual DXVK"
+assert_contains "$ui" "let enableDxvkFrametimes = graphicsHudValue == .dxvk" "frametimes toggle should only enable for DXVK HUD"
+assert_contains "$ui" "dxvkHudFrametimes.isEnabled = enableDxvkFrametimes" "frametimes toggle should disable outside DXVK HUD"
 assert_contains "$ui" "let showGptkControls = backend != .dxvk && backend != .wined3d" "global GPTK controls should hide for non-GPTK backends"
 assert_contains "$(cat "$ROOT/scripts/cyder_settings.swift")" 'cascadePreferredBackend' "settings should resolve auto cascade before Wine"
 assert_contains "$(cat "$ROOT/scripts/cyder_settings.swift")" 'graphicsHud' "settings schema should persist HUD preference"

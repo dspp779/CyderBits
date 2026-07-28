@@ -463,6 +463,7 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
     }
 
     @objc private func graphicsHudChanged() {
+        refreshGraphicsControls()
         saveImmediately()
     }
 
@@ -744,10 +745,12 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
         let backend = graphicsBackendValue
         let showFrameRate = backend == .dxvk
         let showDxvkFrametimes = backend == .dxvk
+        let enableDxvkFrametimes = graphicsHudValue == .dxvk
         let showGptkControls = backend != .dxvk && backend != .wined3d
         dxvkFrameRate.isHidden = !showFrameRate
         (dxvkFrameRate.superview as? NSStackView)?.isHidden = !showFrameRate
         dxvkHudFrametimes.isHidden = !showDxvkFrametimes
+        dxvkHudFrametimes.isEnabled = enableDxvkFrametimes
         (dxvkHudFrametimes.superview as? NSStackView)?.isHidden = !showDxvkFrametimes
         graphicsHelp.stringValue = switch backend {
         case .default: "帶入預載的遊戲專屬設定；多數遊戲建議使用。"
@@ -764,8 +767,9 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
                 ? "D3DMetal 不可用：找不到 CrossOver 或已安裝的 GPTK"
                 : "D3DMetal 不可用：需要 macOS 14+"
         }
+        // d3dmetalStatus and gptkNote sit directly in the tab stack; hide only
+        // the views themselves, not superview (that would hide the whole tab).
         d3dmetalStatus.isHidden = !showGptkControls
-        (d3dmetalStatus.superview as? NSStackView)?.isHidden = !showGptkControls
         installGptkButton.isHidden = !showGptkControls
         removeGptkButton.isHidden = !FileManager.default.fileExists(atPath: CyderPaths.appleGptkRuntime.path)
             || !showGptkControls

@@ -73,6 +73,8 @@ assert_contains "$oem_build_script" 'Set :CFBundleExecutable CyderMapleStoryOEM'
   "OEM packaging should set a distinct CFBundleExecutable"
 assert_contains "$oem_build_script" 'cp "$SCRIPT_DIR/cyder_maplestory_oem_main.sh" "$MACOS/CyderMapleStoryOEM"' \
   "OEM packaging should rename its primary launcher executable"
+assert_contains "$oem_build_script" 'rm -f "$MACOS/Cyder"' \
+  "OEM packaging should remove the inherited base launcher"
 assert_contains "$oem_build_script" 'for helper in CyderOEMBootstrap CyderMapleStoryOEM; do' \
   "OEM signing should include the renamed launcher"
 if [[ "$oem_build_script" == *'*/MacOS/Cyder |'* ]]; then
