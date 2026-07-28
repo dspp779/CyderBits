@@ -6,6 +6,8 @@
 # - resolve: global wined3d + profile default → default (explicit profile default wins)
 # - environment(): dxvk+60 sets CYDER_GRAPHICS_BACKEND=dxvk and DXVK_FRAME_RATE=60
 # - environment(): default sets neither CYDER_GRAPHICS_BACKEND nor DXVK_FRAME_RATE
+# - auto cascade: d3dmetal → dxvk → wined3d at App resolve (CompatDB not consulted)
+# - OEM (CYDER_OEM_FLAVOR=maplestory): defaults to auto; legacy default → auto
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TMP="$(mktemp -d)"
@@ -17,6 +19,7 @@ mkdir -p "$CYDER_SUPPORT"
 
 swiftc -O -module-cache-path "$CACHE" \
   "$ROOT/scripts/cyder_paths.swift" \
+  "$ROOT/scripts/cyder_gptk.swift" \
   "$ROOT/scripts/cyder_settings.swift" \
   "$ROOT/tests/fixtures/cyder_settings_diagnostics_stub.swift" \
   "$ROOT/tests/fixtures/cyder_settings_harness.swift" \

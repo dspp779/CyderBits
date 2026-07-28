@@ -584,12 +584,8 @@ private final class CyderGameSettingsWindowController: NSWindowController, NSWin
 
         dpi.addItems(withTitles: dpiTitles)
         power.addItems(withTitles: ["標準", "省電"])
-        graphicsBackend.addItems(withTitles: ["跟隨全域", "預設（跟隨 CompatDB）", "WineD3D", "DXVK", "D3DMetal"])
-        if !supportsD3DMetal {
-            let item = graphicsBackend.item(at: 4)
-            item?.isEnabled = false
-            item?.toolTip = "需要 macOS 14+"
-        }
+        graphicsBackend.addItems(withTitles: graphicsBackendTitles)
+        updateD3DMetalMenuItemAvailability()
         graphicsBackend.target = self
         graphicsBackend.action = #selector(graphicsBackendChanged)
         dxvkFrameRate.addItems(withTitles: ["跟隨全域", "60", "不限制"])
@@ -647,7 +643,7 @@ private final class CyderGameSettingsWindowController: NSWindowController, NSWin
             row("縮放比例 / DPI", dpi, information: "設定 Windows 顯示縮放比例；老遊戲視窗可能需要較低 DPI。"),
             row("能源模式", power, information: "省電模式會降低程序優先級，可能減少耗電但造成遊戲卡頓。"),
             row("圖形轉譯", graphicsBackend, information: "選「跟隨全域」會使用 Cyder 偏好設定的圖形後端。"),
-            row("限制幀率", dxvkFrameRate, information: "僅 DXVK 使用；「跟隨全域」會使用 Cyder 偏好設定。"),
+            row("限制幀率", dxvkFrameRate, information: "僅在手動選擇 DXVK 時可用；「跟隨全域」會使用偏好設定。"),
             row("遊戲字體", font, information: "選擇 Wine 的字體替代方案；細明體需要系統已安裝對應字型。"),
             row("字體平滑", smoothing, information: "控制 Windows 字體平滑方式。"),
             row(
@@ -998,16 +994,53 @@ private final class CyderGameSettingsWindowController: NSWindowController, NSWin
     private var dpiTitles: [String] { ["100%（96 DPI）", "125%（120 DPI）", "150%（144 DPI）", "175%（168 DPI）", "200%（192 DPI）", "250%（240 DPI）"] }
     private var smoothingValues: [String] { ["off", "grayscale", "cleartype-rgb"] }
 
-    private var supportsD3DMetal: Bool {
+    private var supportsD3DMetalOS: Bool {
         ProcessInfo.processInfo.operatingSystemVersion.majorVersion >= 14
     }
 
+    private var canSelectD3DMetal: Bool {
+        supportsD3DMetalOS && CyderGptk.preferredSource() != nil
+    }
+
+    private var graphicsBackendTitles: [String] {
+        if CyderProduct.isMapleStoryOEM {
+            return ["跟隨全域", "自動", "D3DMetal", "DXVK", "WineD3D"]
+        }
+        return ["跟隨全域", "預設", "自動", "D3DMetal", "DXVK", "WineD3D"]
+    }
+
+    private var d3dMetalMenuIndex: Int {
+        CyderProduct.isMapleStoryOEM ? 2 : 3
+    }
+
+    private func updateD3DMetalMenuItemAvailability() {
+        guard let item = graphicsBackend.item(at: d3dMetalMenuIndex) else { return }
+        item.isEnabled = canSelectD3DMetal
+        if !supportsD3DMetalOS {
+            item.toolTip = "需要 macOS 14+"
+        } else if CyderGptk.preferredSource() == nil {
+            item.toolTip = "需要本機 CrossOver 或已安裝的評估版 GPTK"
+        } else {
+            item.toolTip = nil
+        }
+    }
+
     private var graphicsBackendOverride: CyderGraphicsBackend? {
+        if CyderProduct.isMapleStoryOEM {
+            switch graphicsBackend.indexOfSelectedItem {
+            case 1: return .auto
+            case 2: return canSelectD3DMetal ? .d3dmetal : .auto
+            case 3: return .dxvk
+            case 4: return .wined3d
+            default: return nil
+            }
+        }
         switch graphicsBackend.indexOfSelectedItem {
         case 1: return .default
-        case 2: return .wined3d
-        case 3: return .dxvk
-        case 4: return .d3dmetal
+        case 2: return .auto
+        case 3: return canSelectD3DMetal ? .d3dmetal : nil
+        case 4: return .dxvk
+        case 5: return .wined3d
         default: return nil
         }
     }
@@ -1022,18 +1055,35 @@ private final class CyderGameSettingsWindowController: NSWindowController, NSWin
 
     private func graphicsBackendIndex(_ value: CyderGraphicsBackend?) -> Int {
         guard let value else { return 0 }
+        if CyderProduct.isMapleStoryOEM {
+            switch value {
+            case .auto, .default: return 1
+            case .d3dmetal: return canSelectD3DMetal ? 2 : 0
+            case .dxvk: return 3
+            case .wined3d: return 4
+            }
+        }
         switch value {
         case .default: return 1
-        case .wined3d: return 2
-        case .dxvk: return 3
-        case .d3dmetal: return supportsD3DMetal ? 4 : 0
+        case .auto: return 2
+        case .d3dmetal: return canSelectD3DMetal ? 3 : 0
+        case .dxvk: return 4
+        case .wined3d: return 5
         }
     }
 
     private func refreshGraphicsControls() {
-        let resolvedBackend = graphicsBackendOverride ?? settingsStore.value.graphicsBackend
-        dxvkFrameRate.isHidden = resolvedBackend != .dxvk
-        (dxvkFrameRate.superview as? NSStackView)?.isHidden = resolvedBackend != .dxvk
+        updateD3DMetalMenuItemAvailability()
+        let preference = graphicsBackendOverride ?? settingsStore.value.graphicsBackend
+        let showFrameRate: Bool
+        if let override = graphicsBackendOverride {
+            showFrameRate = override == .dxvk
+        } else {
+            showFrameRate = settingsStore.value.graphicsBackend == .dxvk
+        }
+        _ = preference
+        dxvkFrameRate.isHidden = !showFrameRate
+        (dxvkFrameRate.superview as? NSStackView)?.isHidden = !showFrameRate
     }
 
     private func defaultRule() -> CyderExecutableSettings {

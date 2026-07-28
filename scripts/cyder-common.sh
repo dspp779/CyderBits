@@ -1916,6 +1916,7 @@ cyder_stop_all_exes() {
     [[ -d "$prefix" ]] || continue
     echo "Stopping all EXEs in $prefix" >&2
     WINEPREFIX="$prefix" arch -x86_64 "$wineserver" -k || true
+    WINEPREFIX="$prefix" arch -x86_64 "$wineserver" -w || true
   done
 }
 

@@ -67,7 +67,11 @@ assert_contains "$patch_text" 'getenv( "CYDER_GRAPHICS_BACKEND" )' \
   "the environment should force a graphics backend after CompatDB rules"
 assert_contains "$patch_text" 'apply_graphics_backend( &slice, &applied )' \
   "the forced graphics backend should use the normal backend activation path"
+assert_contains "$patch_text" 'Skip CompatDB graphics_backend when App force is set' \
+  "forced App backend must skip CompatDB graphics to avoid DLL/path stacking"
 oem_patch_text="$(cat "$oem_runtime_patch")"
+assert_contains "$oem_patch_text" 'Skip CompatDB graphics_backend when App force is set' \
+  "OEM25 forced App backend must skip CompatDB graphics likewise"
 assert_contains "$oem_patch_text" 'cyder_compat_apply_process_rules' \
   "OEM25 should use its compatible CompatDB process hook"
 assert_contains "$oem_patch_text" 'CYDER_GPTK_ROOT' \
@@ -104,9 +108,13 @@ forced_backend="$(python3 "$graphics_env_fixture" \
   '{"CYDER_GRAPHICS_BACKEND":"dxvk"}' d3dmetal)"
 assert_eq "$forced_backend" "dxvk" \
   "the App-selected backend must win over a CompatDB child environment rule"
+assert_eq "$(python3 "$graphics_env_fixture" '{"CYDER_GRAPHICS_BACKEND":"dxvk"}' d3dmetal --skip-check)" "0" \
+  "App force must skip applying CompatDB graphics_backend actions"
 rule_backend="$(python3 "$graphics_env_fixture" '{}' d3dmetal)"
 assert_eq "$rule_backend" "d3dmetal" \
   "CompatDB should select its backend when the App did not select one"
+assert_eq "$(python3 "$graphics_env_fixture" '{}' d3dmetal --skip-check)" "1" \
+  "CompatDB graphics_backend applies when the App did not force a backend"
 
 tmp="$(mktemp -d "${TMPDIR:-/tmp}/cyder-compatdb-runtime.XXXXXX")"
 trap 'rm -rf "$tmp"' EXIT

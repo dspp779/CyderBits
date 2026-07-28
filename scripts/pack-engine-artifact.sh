@@ -113,8 +113,17 @@ trap cleanup EXIT
 ENGINE_TREE="$STAGING/wine-x86_64"
 
 echo "==> Staging engine tree ($ENGINE_VERSION_LABEL)"
-rsync -a --delete "$WINE_INSTALL/" "$ENGINE_TREE/"
+# Fail closed: never ship Apple GPTK inside a redistributable engine artifact.
+rsync -a --delete \
+  --exclude 'lib64/apple_gptk' \
+  --exclude 'apple_gptk' \
+  "$WINE_INSTALL/" "$ENGINE_TREE/"
 find "$ENGINE_TREE" -name '.DS_Store' -delete 2>/dev/null || true
+if [[ -e "$ENGINE_TREE/lib64/apple_gptk" ]] ||
+   find "$ENGINE_TREE" -type d -name 'apple_gptk' -print -quit | grep -q .; then
+  echo "Refusing to pack engine that contains apple_gptk (GPTK must not be redistributed)" >&2
+  exit 1
+fi
 cyder_write_engine_version_file "$ENGINE_TREE" "$ENGINE_VERSION_LABEL"
 bash "$SCRIPT_DIR/strip-wine-install.sh" "$ENGINE_TREE"
 # Preserve MoltenVK already in the install tree (VULKAN_SOURCE=existing only

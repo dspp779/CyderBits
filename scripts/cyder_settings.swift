@@ -42,13 +42,71 @@ func cyderDefaultFontPreset() -> String {
     cyderSystemProvidesMingLiU() ? "mingliu" : "songti"
 }
 
+enum CyderProduct {
+    /// MapleStory OEM ships a dedicated App wrapper that exports this flavor.
+    static var isMapleStoryOEM: Bool {
+        ProcessInfo.processInfo.environment["CYDER_OEM_FLAVOR"] == "maplestory"
+    }
+
+    /// Official builds follow CompatDB when unset; OEM uses App-side auto cascade.
+    static var defaultGraphicsBackend: CyderGraphicsBackend {
+        isMapleStoryOEM ? .auto : .default
+    }
+}
+
 enum CyderGraphicsBackend: String, Codable, CaseIterable {
-    case `default`, wined3d, dxvk, d3dmetal
+    case `default`
+    /// App-side cascade: d3dmetal → dxvk → wined3d (CompatDB is not consulted).
+    case auto
+    case wined3d, dxvk, d3dmetal
 }
 
 enum CyderDxvkFrameRate: String, Codable, CaseIterable {
     case sixty = "60"
     case unlimited
+}
+
+/// Global-only smoothness overlay. Default is off.
+enum CyderGraphicsHud: String, Codable, CaseIterable {
+    case off
+    case metal
+    case dxvk
+}
+
+struct CyderGraphicsCapabilities: Equatable {
+    var hasD3DMetal: Bool
+    var hasDxvk: Bool
+
+    /// Probe local GPTK / DXVK availability. When `engineRoot` is nil, DXVK is
+    /// assumed present (0.8 engines ship it); launch paths should pass the real root.
+    static func current(engineRoot: URL? = nil) -> CyderGraphicsCapabilities {
+        let osOK = ProcessInfo.processInfo.operatingSystemVersion.majorVersion >= 14
+        let hasGptk = CyderGptk.preferredSource() != nil
+        return CyderGraphicsCapabilities(
+            hasD3DMetal: osOK && hasGptk,
+            hasDxvk: hasDxvkPayload(engineRoot: engineRoot)
+        )
+    }
+
+    static func hasDxvkPayload(engineRoot: URL?) -> Bool {
+        let root: URL?
+        if let engineRoot {
+            root = engineRoot
+        } else if let path = ProcessInfo.processInfo.environment["CYDER_GRAPHICS_BACKENDS_ROOT"],
+                  !path.isEmpty {
+            root = URL(fileURLWithPath: path, isDirectory: true)
+        } else {
+            // Settings / prefs probes without an engine still allow cascade past d3dmetal.
+            return true
+        }
+        guard let root else { return true }
+        let manager = FileManager.default
+        let dxvkDLL = root.appendingPathComponent("lib/dxvk/x86_64-windows/d3d11.dll")
+        let moltenA = root.appendingPathComponent("lib/wine/x86_64-unix/libMoltenVK.dylib")
+        let moltenB = root.appendingPathComponent("lib64/libMoltenVK.dylib")
+        return manager.isReadableFile(atPath: dxvkDLL.path)
+            && (manager.isReadableFile(atPath: moltenA.path) || manager.isReadableFile(atPath: moltenB.path))
+    }
 }
 
 struct CyderResolvedGraphics {
@@ -118,10 +176,10 @@ struct CyderExecutableSettings: Codable {
 }
 
 struct CyderSettings: Codable {
-    // Schema 4 adds graphics backend and DXVK frame rate. Schema 3 adds
-    // profile-keyed overrides. Keep perExecutable as a legacy basename fallback;
-    // never infer a profile from a basename.
-    var schemaVersion = 4
+    // Schema 5 adds graphicsHud. Schema 4 adds graphics backend and DXVK frame
+    // rate. Schema 3 adds profile-keyed overrides. Keep perExecutable as a
+    // legacy basename fallback; never infer a profile from a basename.
+    var schemaVersion = 5
     var revision = 0
     var msync = false
     var esync: Bool? = false
@@ -129,24 +187,26 @@ struct CyderSettings: Codable {
     var dpi = 192
     var fontPreset = cyderDefaultFontPreset()
     var fontSmoothing = "cleartype-rgb"
-    var graphicsBackend: CyderGraphicsBackend = .default
+    var graphicsBackend: CyderGraphicsBackend = CyderProduct.defaultGraphicsBackend
     var dxvkFrameRate: CyderDxvkFrameRate = .sixty
+    var graphicsHud: CyderGraphicsHud = .off
     var perExecutable: [String: CyderExecutableSettings] = [:]
     var perProfile: [String: CyderExecutableSettings] = [:]
 
-    static let defaults = CyderSettings()
+    static var defaults: CyderSettings { CyderSettings() }
 
     init() {
         fontPreset = cyderDefaultFontPreset()
+        graphicsBackend = CyderProduct.defaultGraphicsBackend
     }
 
     init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
         let version = try values.decodeIfPresent(Int.self, forKey: .schemaVersion) ?? 1
-        guard version <= 4 else { throw DecodingError.dataCorruptedError(
+        guard version <= 5 else { throw DecodingError.dataCorruptedError(
             forKey: .schemaVersion, in: values, debugDescription: "unsupported settings schema \(version)"
         ) }
-        schemaVersion = 4
+        schemaVersion = 5
         revision = try values.decodeIfPresent(Int.self, forKey: .revision) ?? 0
         msync = try values.decodeIfPresent(Bool.self, forKey: .msync) ?? false
         esync = try values.decodeIfPresent(Bool?.self, forKey: .esync) ?? false
@@ -159,6 +219,9 @@ struct CyderSettings: Codable {
         )
         dxvkFrameRate = Self.sanitizedDxvkFrameRate(
             try values.decodeIfPresent(String.self, forKey: .dxvkFrameRate)
+        )
+        graphicsHud = Self.sanitizedGraphicsHud(
+            try values.decodeIfPresent(String.self, forKey: .graphicsHud)
         )
         perExecutable = try values.decodeIfPresent([String: CyderExecutableSettings].self, forKey: .perExecutable) ?? [:]
         let decodedProfiles = try values.decodeIfPresent([String: CyderExecutableSettings].self, forKey: .perProfile) ?? [:]
@@ -174,15 +237,26 @@ struct CyderSettings: Codable {
         if !["off", "grayscale", "cleartype-rgb", "cleartype-bgr"].contains(fontSmoothing) {
             fontSmoothing = "cleartype-rgb"
         }
+        // DXVK HUD is only meaningful with a manual DXVK preference.
+        if graphicsHud == .dxvk && graphicsBackend != .dxvk {
+            graphicsHud = .off
+        }
     }
 
     static func sanitizedGraphicsBackend(_ raw: String?) -> CyderGraphicsBackend {
-        guard let raw, let value = CyderGraphicsBackend(rawValue: raw) else { return .default }
+        guard let raw, let value = CyderGraphicsBackend(rawValue: raw) else {
+            return CyderProduct.defaultGraphicsBackend
+        }
         return value
     }
 
     static func sanitizedDxvkFrameRate(_ raw: String?) -> CyderDxvkFrameRate {
         guard let raw, let value = CyderDxvkFrameRate(rawValue: raw) else { return .sixty }
+        return value
+    }
+
+    static func sanitizedGraphicsHud(_ raw: String?) -> CyderGraphicsHud {
+        guard let raw, let value = CyderGraphicsHud(rawValue: raw) else { return .off }
         return value
     }
 
@@ -200,10 +274,105 @@ struct CyderSettings: Codable {
         global: CyderSettings,
         profile: CyderExecutableSettings?
     ) -> CyderResolvedGraphics {
-        CyderResolvedGraphics(
-            backend: profile?.graphicsBackend ?? global.graphicsBackend,
+        var backend = profile?.graphicsBackend ?? global.graphicsBackend
+        // OEM does not use CompatDB graphics; legacy "default" means App auto cascade.
+        if CyderProduct.isMapleStoryOEM && backend == .default {
+            backend = .auto
+        }
+        return CyderResolvedGraphics(
+            backend: backend,
             dxvkFrameRate: profile?.dxvkFrameRate ?? global.dxvkFrameRate
         )
+    }
+
+    /// Preference chain for `auto`: D3DMetal → DXVK → WineD3D.
+    static func cascadePreferredBackend(hasD3DMetal: Bool, hasDxvk: Bool) -> CyderGraphicsBackend {
+        if hasD3DMetal { return .d3dmetal }
+        if hasDxvk { return .dxvk }
+        return .wined3d
+    }
+
+    /// Concrete backend to inject into Wine, or `nil` to leave CompatDB alone.
+    static func effectiveLaunchBackend(
+        preference: CyderGraphicsBackend,
+        hasD3DMetal: Bool,
+        hasDxvk: Bool
+    ) -> CyderGraphicsBackend? {
+        switch preference {
+        case .default:
+            if CyderProduct.isMapleStoryOEM {
+                return cascadePreferredBackend(hasD3DMetal: hasD3DMetal, hasDxvk: hasDxvk)
+            }
+            return nil
+        case .auto:
+            return cascadePreferredBackend(hasD3DMetal: hasD3DMetal, hasDxvk: hasDxvk)
+        case .wined3d, .dxvk, .d3dmetal:
+            return preference
+        }
+    }
+
+    /// HUD choice after applying the "DXVK HUD only with manual DXVK" rule.
+    static func resolvedGraphicsHud(
+        preference: CyderGraphicsBackend,
+        requested: CyderGraphicsHud
+    ) -> CyderGraphicsHud {
+        if requested == .dxvk && preference != .dxvk {
+            return .off
+        }
+        return requested
+    }
+
+    /// Copy engine DXVK PE DLLs into the prefix system32/syswow64.
+    /// Required for CrossOver OEM: `--dll native` loads from the prefix, not
+    /// `lib/dxvk` alone, and builtin still wins without native overrides.
+    @discardableResult
+    static func provisionDxvkIntoPrefix(engineRoot: URL, prefix: URL) -> Bool {
+        let manager = FileManager.default
+        let moltenA = engineRoot.appendingPathComponent("lib/wine/x86_64-unix/libMoltenVK.dylib")
+        let moltenB = engineRoot.appendingPathComponent("lib64/libMoltenVK.dylib")
+        guard manager.isReadableFile(atPath: moltenA.path)
+            || manager.isReadableFile(atPath: moltenB.path) else {
+            return false
+        }
+        var installed = 0
+        let arches: [(String, String)] = [
+            ("x86_64-windows", "system32"),
+            ("i386-windows", "syswow64"),
+        ]
+        for (machine, windowsDir) in arches {
+            let source = engineRoot
+                .appendingPathComponent("lib/dxvk/\(machine)", isDirectory: true)
+            let destination = prefix
+                .appendingPathComponent("drive_c/windows/\(windowsDir)", isDirectory: true)
+            guard manager.fileExists(atPath: source.path) else { continue }
+            do {
+                try manager.createDirectory(at: destination, withIntermediateDirectories: true)
+            } catch {
+                return false
+            }
+            for module in ["d3d11", "dxgi"] {
+                let src = source.appendingPathComponent("\(module).dll")
+                let dst = destination.appendingPathComponent("\(module).dll")
+                guard manager.isReadableFile(atPath: src.path) else { return false }
+                let temp = destination.appendingPathComponent(".\(module).dll.cyder-new")
+                do {
+                    if manager.fileExists(atPath: temp.path) {
+                        try manager.removeItem(at: temp)
+                    }
+                    try manager.copyItem(at: src, to: temp)
+                    try manager.setAttributes([.posixPermissions: 0o644], ofItemAtPath: temp.path)
+                    if manager.fileExists(atPath: dst.path) {
+                        try manager.removeItem(at: dst)
+                    }
+                    try manager.moveItem(at: temp, to: dst)
+                    installed += 1
+                } catch {
+                    try? manager.removeItem(at: temp)
+                    return false
+                }
+            }
+        }
+        return installed > 0
     }
 
     static func isValidProfileID(_ value: String) -> Bool {
@@ -269,7 +438,7 @@ final class CyderSettingsStore {
         do {
             let data = try Data(contentsOf: url)
             let decoded = try JSONDecoder().decode(CyderSettings.self, from: data)
-            guard decoded.schemaVersion <= 4 else {
+            guard decoded.schemaVersion <= 5 else {
                 CyderDiagnostics.shared.warning("unsupported settings schema=\(decoded.schemaVersion); using defaults")
                 value = .defaults
                 return
@@ -285,7 +454,7 @@ final class CyderSettingsStore {
         CyderDiagnostics.shared.enter(.settingsSave)
         var next = value
         work(&next)
-        next.schemaVersion = 4
+        next.schemaVersion = 5
         next.perProfile = next.perProfile.reduce(into: [:]) { result, item in
             guard CyderSettings.isValidProfileID(item.key) else { return }
             result[item.key] = CyderSettings.sanitized(item.value)
@@ -323,16 +492,36 @@ final class CyderSettingsStore {
     func environment(
         profileID: String?,
         legacyBasename: String?,
-        override: CyderExecutableSettings? = nil
+        override: CyderExecutableSettings? = nil,
+        capabilities: CyderGraphicsCapabilities? = nil,
+        engineRoot: URL? = nil
     ) -> [String: String] {
         var result = environment
         let rule = override ?? executableSettings(profileID: profileID, legacyBasename: legacyBasename)
         let graphics = CyderSettings.resolveGraphics(global: value, profile: rule)
-        if graphics.backend != .default {
-            result["CYDER_GRAPHICS_BACKEND"] = graphics.backend.rawValue
+        let caps = capabilities ?? CyderGraphicsCapabilities.current(engineRoot: engineRoot)
+        let effective = CyderSettings.effectiveLaunchBackend(
+            preference: graphics.backend,
+            hasD3DMetal: caps.hasD3DMetal,
+            hasDxvk: caps.hasDxvk
+        )
+        if let effective {
+            result["CYDER_GRAPHICS_BACKEND"] = effective.rawValue
         }
+        // Frame-rate limiter is only offered for a manual DXVK preference.
         if graphics.backend == .dxvk, graphics.dxvkFrameRate == .sixty {
             result["DXVK_FRAME_RATE"] = "60"
+        }
+        switch resolvedGraphicsHud(preference: graphics.backend) {
+        case .metal:
+            result["MTL_HUD_ENABLED"] = "1"
+            result["DXVK_HUD"] = "0"
+        case .dxvk:
+            result["DXVK_HUD"] = "fps,frametimes"
+            result.removeValue(forKey: "MTL_HUD_ENABLED")
+        case .off:
+            result["DXVK_HUD"] = "0"
+            result.removeValue(forKey: "MTL_HUD_ENABLED")
         }
         guard let rule else { return result }
         if let v = rule.msync { result["CYDER_MSYNC"] = v ? "1" : "0" }
@@ -344,6 +533,10 @@ final class CyderSettingsStore {
         if let v = rule.powerMode { result["CYDER_POWER_MODE"] = v == "energySaving" ? "background" : "normal" }
         result.merge(rule.environment.filter { CyderSettings.isValidEnvironmentKey($0.key) }) { _, override in override }
         return result
+    }
+
+    private func resolvedGraphicsHud(preference: CyderGraphicsBackend) -> CyderGraphicsHud {
+        CyderSettings.resolvedGraphicsHud(preference: preference, requested: value.graphicsHud)
     }
 
     func arguments(forExecutable basename: String) -> [String] {

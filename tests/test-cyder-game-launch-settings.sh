@@ -119,7 +119,7 @@ assert_eq "$force_status" "99" \
 # environment must locate GPTK through CyderGptk.applyLaunchEnvironment(), never
 # through a fabricated engine-local apple_gptk tree.
 app_source="$(<"$ROOT/scripts/cyder_app_main.swift")"
-assert_contains "$app_source" "CyderGptk.applyLaunchEnvironment(to: &environment)" \
+assert_contains "$app_source" "CyderGptk.applyLaunchEnvironment(to: &environment, engineRoot: engineRoot)" \
   "native Wine environment should resolve GPTK through CyderGptk"
 if [[ "$app_source" == *"lib64/apple_gptk"* ]]; then
   echo "ASSERT failed: native Wine environment must not invent an engine-local GPTK path" >&2

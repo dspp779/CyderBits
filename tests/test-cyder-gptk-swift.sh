@@ -50,13 +50,24 @@ enum CyderGptkHarness {
         precondition(manifest["installedAt"] != nil)
 
         switch CyderGptk.preferredSource() {
-        case .crossOver(let source):
-            precondition(source == CyderGptk.crossOverAppleGptk)
         case .runtime(let source):
             precondition(source == runtime)
+        case .crossOver:
+            fatalError("Expected runtime install to win over CrossOver when both exist")
         case nil:
             fatalError("Expected a GPTK source after installation")
         }
+
+        let info = CyderGptk.activeInfo()
+        precondition(info?.versionLabel == "3.0")
+        precondition(info?.statusLine == "目前套用：GPTK 3.0（Cyder 已安裝）")
+
+        let engineRoot = URL(fileURLWithPath: CommandLine.arguments[1], isDirectory: true)
+        CyderGptk.syncEngineLink(engineRoot: engineRoot)
+        let link = engineRoot.appendingPathComponent("lib64/apple_gptk")
+        precondition(FileManager.default.fileExists(atPath: link.path))
+        let destination = try FileManager.default.destinationOfSymbolicLink(atPath: link.path)
+        precondition(URL(fileURLWithPath: destination).standardizedFileURL.path == runtime.standardizedFileURL.path)
 
         try CyderGptk.removeRuntimeInstall()
         precondition(!FileManager.default.fileExists(atPath: runtime.path))
@@ -80,5 +91,6 @@ swiftc -O -module-cache-path "$CACHE" \
   "$TMP/cyder_gptk_harness.swift" \
   -o "$BIN"
 
-"$BIN"
+mkdir -p "$TMP/engine/lib64"
+"$BIN" "$TMP/engine"
 echo "PASS test-cyder-gptk-swift"

@@ -52,6 +52,8 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
     var onSaveFailed: (() -> Void)?
     var onClose: (() -> Void)?
     var hasRunningExes: (() -> Bool)?
+    /// Stops all Cyder Wine processes (wineserver -k) and waits (-w). Returns true on success.
+    var onStopAllWine: (() -> Bool)?
     private let store = CyderSettingsStore.shared
     private let msync = NSSwitch()
     private let esync = NSSwitch()
@@ -61,9 +63,11 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
     private let smoothing = NSPopUpButton()
     private let graphicsBackend = NSPopUpButton()
     private let dxvkFrameRate = NSPopUpButton()
+    private let graphicsHud = NSPopUpButton()
     private let graphicsHelp = NSTextField(wrappingLabelWithString: "")
     private let d3dmetalStatus = NSTextField(labelWithString: "")
     private let removeGptkButton = NSButton()
+    private let stopAllWineButton = NSButton()
     private let executableList = NSPopUpButton()
     private let executableRecommendation = NSPopUpButton()
     private let executableName = NSTextField(labelWithString: "尚未選擇 EXE")
@@ -249,24 +253,24 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
     }
 
     private func makeGraphicsTab() -> NSTabViewItem {
-        graphicsBackend.addItems(withTitles: ["預設（跟隨 CompatDB）", "WineD3D", "DXVK", "D3DMetal"])
+        graphicsBackend.addItems(withTitles: graphicsBackendTitles)
         graphicsBackend.target = self
         graphicsBackend.action = #selector(graphicsBackendChanged)
-        if !supportsD3DMetal {
-            let item = graphicsBackend.item(at: 3)
-            item?.isEnabled = false
-            item?.toolTip = "需要 macOS 14+"
-        }
+        updateD3DMetalMenuItemAvailability()
         dxvkFrameRate.addItems(withTitles: ["60", "不限制"])
         dxvkFrameRate.target = self
         dxvkFrameRate.action = #selector(dxvkFrameRateChanged)
+        graphicsHud.target = self
+        graphicsHud.action = #selector(graphicsHudChanged)
         graphicsHelp.textColor = .secondaryLabelColor
         graphicsHelp.font = .systemFont(ofSize: 12)
-        graphicsHelp.maximumNumberOfLines = 3
+        graphicsHelp.maximumNumberOfLines = 4
         graphicsHelp.widthAnchor.constraint(equalToConstant: 460).isActive = true
         d3dmetalStatus.textColor = .secondaryLabelColor
         d3dmetalStatus.font = .systemFont(ofSize: 12)
-        let install = NSButton(title: "安裝 Apple GPTK…", target: self, action: #selector(installGptk))
+        d3dmetalStatus.maximumNumberOfLines = 3
+        d3dmetalStatus.widthAnchor.constraint(equalToConstant: 460).isActive = true
+        let install = NSButton(title: "安裝 GPTK…", target: self, action: #selector(installGptk))
         install.bezelStyle = .rounded
         removeGptkButton.title = "移除已安裝 GPTK"
         removeGptkButton.bezelStyle = .rounded
@@ -279,9 +283,10 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
             row("圖形轉譯", graphicsBackend),
             graphicsHelp,
             row("限制幀率", dxvkFrameRate),
+            row("顯示畫面流暢度", graphicsHud),
             d3dmetalStatus,
             buttons,
-            note("D3DMetal 使用本機 CrossOver 或使用者自行從 Apple Evaluation DMG 安裝的 GPTK；Cyder 不會隨 App 散布 GPTK。"),
+            note("D3DMetal 可使用本機 CrossOver 內附的 GPTK，或自行從 Apple 下載並安裝；若兩者皆有，Cyder 優先使用已安裝版本。"),
         ])
     }
 
@@ -294,6 +299,10 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
         applyAll.bezelStyle = .rounded
         let winetricks = NSButton(title: "Winetricks 元件…", target: self, action: #selector(openWinetricks))
         winetricks.bezelStyle = .rounded
+        stopAllWineButton.title = "關閉所有 Wine 程序"
+        stopAllWineButton.bezelStyle = .rounded
+        stopAllWineButton.target = self
+        stopAllWineButton.action = #selector(stopAllWine)
         return tab("進階", rows: [
             gameLibrary,
             note("加入 Windows 遊戲、直接啟動，或管理每個遊戲的獨立 Wine prefix 與設定。"),
@@ -303,6 +312,8 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
             note("使用 Wine 完整寫入目前所有設定；一般調整會在點選控制項時立即快速儲存。"),
             winetricks,
             note("以原生選擇器安裝 VC++、.NET、WMP、Quartz、Devenum 等元件到 shared prefix。請先關閉所有遊戲。"),
+            stopAllWineButton,
+            note("對目前 Cyder 使用的 Wine 環境執行 wineserver -k，並等待程序結束。"),
         ])
     }
 
@@ -370,6 +381,7 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
         smoothing.selectItem(at: smoothingValues.firstIndex(of: value.fontSmoothing) ?? 2)
         graphicsBackend.selectItem(at: graphicsBackendIndex(value.graphicsBackend))
         dxvkFrameRate.selectItem(at: value.dxvkFrameRate == .unlimited ? 1 : 0)
+        rebuildGraphicsHudMenu(selecting: value.graphicsHud)
         refreshGraphicsControls()
         profileDrafts = value.perProfile
         profileRecords = Dictionary(uniqueKeysWithValues: profileStore.listRecords().map { ($0.profileId, $0) })
@@ -424,6 +436,11 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
     }
 
     @objc private func graphicsBackendChanged() {
+        if graphicsBackendValue != .dxvk, store.value.graphicsHud == .dxvk {
+            // Drop an invalid DXVK-only HUD choice when leaving manual DXVK.
+            try? store.update { $0.graphicsHud = .off }
+        }
+        rebuildGraphicsHudMenu(selecting: store.value.graphicsHud)
         refreshGraphicsControls()
         saveImmediately()
     }
@@ -432,30 +449,107 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
         saveImmediately()
     }
 
+    @objc private func graphicsHudChanged() {
+        saveImmediately()
+    }
+
+    @objc private func stopAllWine() {
+        let alert = NSAlert()
+        alert.messageText = "關閉所有 Wine 程序？"
+        alert.informativeText = "會結束目前 Cyder 使用的 Wine 環境中所有遊戲與相關程序。"
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "關閉")
+        alert.addButton(withTitle: "取消")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        stopAllWineButton.isEnabled = false
+        status.stringValue = "正在關閉 Wine 程序…"
+        status.textColor = .secondaryLabelColor
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let ok = self?.onStopAllWine?() ?? false
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.stopAllWineButton.isEnabled = true
+                if ok {
+                    self.status.stringValue = "已關閉所有 Wine 程序"
+                    self.status.textColor = .secondaryLabelColor
+                } else {
+                    self.status.stringValue = "關閉 Wine 程序失敗或尚未就緒"
+                    self.status.textColor = .systemRed
+                }
+            }
+        }
+    }
+
+    private static let gptkDownloadURL = URL(
+        string: "https://developer.apple.com/download/all/?q=game%20porting%20toolkit"
+    )!
+
     @objc private func installGptk() {
         let candidates = CyderGptk.scanEvaluationVolumes()
         guard !candidates.isEmpty else {
-            showGptkAlert(
-                title: "找不到 Apple GPTK 安裝來源",
-                message: "請先開啟 Evaluation environment for Windows games DMG 並同意授權，然後再試一次。"
-            )
+            let alert = NSAlert()
+            alert.messageText = "找不到可安裝的 GPTK"
+            alert.informativeText = """
+            請先從 Apple Developer 下載「Evaluation environment for Windows games」DMG，掛載並同意授權後再回來安裝。
+
+            若已安裝 CrossOver 且未另外安裝 GPTK，Cyder 會使用 CrossOver 內附版本。
+            """
+            alert.alertStyle = .informational
+            alert.addButton(withTitle: "打開下載頁面")
+            alert.addButton(withTitle: "取消")
+            if alert.runModal() == .alertFirstButtonReturn {
+                NSWorkspace.shared.open(Self.gptkDownloadURL)
+            }
             return
         }
-        let selector = NSPopUpButton()
-        selector.addItems(withTitles: candidates.map(\.displayName))
+
+        guard let chosen = chooseGptkCandidate(candidates) else { return }
+        let confirm = NSAlert()
+        confirm.messageText = "確定安裝此版本？"
+        confirm.informativeText = chosen.displayName
+        confirm.addButton(withTitle: "安裝")
+        confirm.addButton(withTitle: "取消")
+        guard confirm.runModal() == .alertFirstButtonReturn else { return }
+        do {
+            try CyderGptk.install(from: chosen)
+            refreshGraphicsControls()
+            showGptkAlert(title: "已安裝 GPTK", message: "已安裝：\(chosen.displayName)")
+        } catch {
+            showGptkAlert(title: "無法安裝 GPTK", message: error.localizedDescription)
+        }
+    }
+
+    /// Pick among mounted GPTK volumes. Prefer explicit buttons (reliable on
+    /// NSAlert); fall back to a sized popup when there are many candidates.
+    private func chooseGptkCandidate(
+        _ candidates: [CyderGptkVolumeCandidate]
+    ) -> CyderGptkVolumeCandidate? {
+        let labels = candidates.map { CyderGptk.versionLabel(fromVolumeDisplayName: $0.displayName) }
+        if candidates.count <= 4 {
+            let alert = NSAlert()
+            alert.messageText = "安裝 GPTK"
+            alert.informativeText = "偵測到已掛載的 GPTK 卷宗，請選擇要安裝的版本："
+            for label in labels {
+                alert.addButton(withTitle: label)
+            }
+            alert.addButton(withTitle: "取消")
+            let response = alert.runModal()
+            let index = response.rawValue - NSApplication.ModalResponse.alertFirstButtonReturn.rawValue
+            guard index >= 0, index < candidates.count else { return nil }
+            return candidates[index]
+        }
+
+        let selector = NSPopUpButton(frame: NSRect(x: 0, y: 0, width: 420, height: 28), pullsDown: false)
+        selector.addItems(withTitles: labels)
         let alert = NSAlert()
-        alert.messageText = "安裝 Apple GPTK"
-        alert.informativeText = "請選擇已掛載並已同意授權的 Evaluation environment for Windows games 卷宗。"
+        alert.messageText = "安裝 GPTK"
+        alert.informativeText = "偵測到已掛載的 GPTK 卷宗，請選擇要安裝的版本："
         alert.accessoryView = selector
         alert.addButton(withTitle: "安裝")
         alert.addButton(withTitle: "取消")
-        guard alert.runModal() == .alertFirstButtonReturn else { return }
-        do {
-            try CyderGptk.install(from: candidates[max(0, selector.indexOfSelectedItem)])
-            refreshGraphicsControls()
-        } catch {
-            showGptkAlert(title: "無法安裝 Apple GPTK", message: error.localizedDescription)
-        }
+        guard alert.runModal() == .alertFirstButtonReturn else { return nil }
+        let index = max(0, min(selector.indexOfSelectedItem, candidates.count - 1))
+        return candidates[index]
     }
 
     @objc private func removeGptk() {
@@ -490,6 +584,7 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
                 $0.fontSmoothing = smoothingValues[max(0, smoothing.indexOfSelectedItem)]
                 $0.graphicsBackend = graphicsBackendValue
                 $0.dxvkFrameRate = dxvkFrameRate.indexOfSelectedItem == 1 ? .unlimited : .sixty
+                $0.graphicsHud = graphicsHudValue
                 for profileID in deletedProfiles {
                     $0.perProfile.removeValue(forKey: profileID)
                 }
@@ -524,46 +619,126 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
         saveImmediately(registrySetting: "font")
     }
 
-    private var supportsD3DMetal: Bool {
+    private var supportsD3DMetalOS: Bool {
         ProcessInfo.processInfo.operatingSystemVersion.majorVersion >= 14
     }
 
+    private var canSelectD3DMetal: Bool {
+        supportsD3DMetalOS && CyderGptk.preferredSource() != nil
+    }
+
+    private var graphicsBackendTitles: [String] {
+        if CyderProduct.isMapleStoryOEM {
+            return ["自動", "D3DMetal", "DXVK", "WineD3D"]
+        }
+        return ["預設", "自動", "D3DMetal", "DXVK", "WineD3D"]
+    }
+
+    private var d3dMetalMenuIndex: Int {
+        CyderProduct.isMapleStoryOEM ? 1 : 2
+    }
+
+    private func updateD3DMetalMenuItemAvailability() {
+        guard let item = graphicsBackend.item(at: d3dMetalMenuIndex) else { return }
+        item.isEnabled = canSelectD3DMetal
+        if !supportsD3DMetalOS {
+            item.toolTip = "需要 macOS 14+"
+        } else if CyderGptk.preferredSource() == nil {
+            item.toolTip = "需要本機 CrossOver 或已安裝的評估版 GPTK"
+        } else {
+            item.toolTip = nil
+        }
+    }
+
     private var graphicsBackendValue: CyderGraphicsBackend {
+        if CyderProduct.isMapleStoryOEM {
+            switch graphicsBackend.indexOfSelectedItem {
+            case 1: return canSelectD3DMetal ? .d3dmetal : .auto
+            case 2: return .dxvk
+            case 3: return .wined3d
+            default: return .auto
+            }
+        }
         switch graphicsBackend.indexOfSelectedItem {
-        case 1: return .wined3d
-        case 2: return .dxvk
-        case 3: return .d3dmetal
+        case 1: return .auto
+        case 2: return canSelectD3DMetal ? .d3dmetal : .default
+        case 3: return .dxvk
+        case 4: return .wined3d
         default: return .default
         }
     }
 
     private func graphicsBackendIndex(_ value: CyderGraphicsBackend) -> Int {
+        if CyderProduct.isMapleStoryOEM {
+            switch value {
+            case .auto, .default: return 0
+            case .d3dmetal: return canSelectD3DMetal ? 1 : 0
+            case .dxvk: return 2
+            case .wined3d: return 3
+            }
+        }
         switch value {
         case .default: return 0
-        case .wined3d: return 1
-        case .dxvk: return 2
-        case .d3dmetal: return supportsD3DMetal ? 3 : 0
+        case .auto: return 1
+        case .d3dmetal: return canSelectD3DMetal ? 2 : 0
+        case .dxvk: return 3
+        case .wined3d: return 4
+        }
+    }
+
+    private var graphicsHudValue: CyderGraphicsHud {
+        let titles = graphicsHud.itemTitles
+        let index = max(0, graphicsHud.indexOfSelectedItem)
+        guard index < titles.count else { return .off }
+        switch titles[index] {
+        case "Metal HUD": return .metal
+        case "DXVK HUD": return .dxvk
+        default: return .off
+        }
+    }
+
+    private func rebuildGraphicsHudMenu(selecting preferred: CyderGraphicsHud? = nil) {
+        let backend = graphicsBackendValue
+        let previous = preferred ?? graphicsHudValue
+        graphicsHud.removeAllItems()
+        var titles = ["關閉", "Metal HUD"]
+        if backend == .dxvk {
+            titles.append("DXVK HUD")
+        }
+        graphicsHud.addItems(withTitles: titles)
+        let effective = CyderSettings.resolvedGraphicsHud(preference: backend, requested: previous)
+        let wanted: String
+        switch effective {
+        case .metal: wanted = "Metal HUD"
+        case .dxvk: wanted = "DXVK HUD"
+        case .off: wanted = "關閉"
+        }
+        if let idx = titles.firstIndex(of: wanted) {
+            graphicsHud.selectItem(at: idx)
+        } else {
+            graphicsHud.selectItem(at: 0)
         }
     }
 
     private func refreshGraphicsControls() {
+        updateD3DMetalMenuItemAvailability()
+        CyderGptk.syncEngineLink()
         let backend = graphicsBackendValue
-        dxvkFrameRate.isHidden = backend != .dxvk
-        (dxvkFrameRate.superview as? NSStackView)?.isHidden = backend != .dxvk
+        let showFrameRate = backend == .dxvk
+        dxvkFrameRate.isHidden = !showFrameRate
+        (dxvkFrameRate.superview as? NSStackView)?.isHidden = !showFrameRate
         graphicsHelp.stringValue = switch backend {
-        case .default: "跟隨 CompatDB 與引擎預設；建議多數遊戲使用。"
+        case .default: "帶入預載的遊戲專屬設定；多數遊戲建議使用。"
+        case .auto: "依本機能力自動選擇：有 GPTK 用 D3DMetal，否則 DXVK，再否則 WineD3D。"
         case .wined3d: "使用 Wine 內建 Direct3D；相容性較廣，但效能通常較差。"
         case .dxvk: "使用 DXVK 將 Direct3D 轉為 Vulkan，再由 MoltenVK 轉為 Metal。"
         case .d3dmetal: "使用 Apple D3DMetal／GPTK；需要 macOS 14+ 與可用的 GPTK。"
         }
-        switch CyderGptk.preferredSource() {
-        case .crossOver:
-            d3dmetalStatus.stringValue = "D3DMetal 可用：CrossOver"
-        case .runtime:
-            d3dmetalStatus.stringValue = "D3DMetal 可用：已安裝評估版"
-        case nil:
-            d3dmetalStatus.stringValue = supportsD3DMetal
-                ? "D3DMetal 不可用：找不到 CrossOver 或已安裝的評估版 GPTK"
+        if let info = CyderGptk.activeInfo() {
+            d3dmetalStatus.stringValue = info.statusLine
+        } else {
+            d3dmetalStatus.stringValue = supportsD3DMetalOS
+                ? "D3DMetal 不可用：找不到 CrossOver 或已安裝的 GPTK"
                 : "D3DMetal 不可用：需要 macOS 14+"
         }
         removeGptkButton.isHidden = !FileManager.default.fileExists(atPath: CyderPaths.appleGptkRuntime.path)

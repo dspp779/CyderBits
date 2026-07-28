@@ -49,6 +49,9 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             self?.environmentPreparationInProgress = false
         }
         controller.hasRunningExes = { [weak self] in self?.hasRunningExes() ?? false }
+        controller.onStopAllWine = { [weak self] in
+            self?.stopAllExesWaiting() ?? false
+        }
         controller.onRebuild = { [weak self] in self?.rebuildEnvironment() }
         controller.onCreateProfile = { [weak self] executable in
             self?.createIndependentProfile(for: executable)
@@ -483,7 +486,12 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func stopAllExes() {
-        guard let resourcePath = Bundle.main.resourcePath else { return }
+        _ = stopAllExesWaiting()
+    }
+
+    @discardableResult
+    private func stopAllExesWaiting() -> Bool {
+        guard let resourcePath = Bundle.main.resourcePath else { return false }
         let context = CyderLaunchContext(resourcePath: resourcePath)
         let result = runLauncher(
             context: context,
@@ -494,6 +502,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         if !result.succeeded {
             showAlert("有些遊戲未能關閉", "請先手動關閉遊戲，再重新套用設定。")
         }
+        return result.succeeded
     }
 
     private func hasRunningExes() -> Bool {
@@ -993,6 +1002,22 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             prefix: prefix,
             gameSettings: gameSettings
         )
+        let engineRoot = wine.deletingLastPathComponent().deletingLastPathComponent()
+        let effectiveBackend = environment["CYDER_GRAPHICS_BACKEND"]
+        let isMapleStoryOEM = ProcessInfo.processInfo.environment["CYDER_OEM_FLAVOR"] == "maplestory"
+            || (environment["CYDER_OEM_FLAVOR"] == "maplestory")
+            || (environment["CYDER_ENGINE_NAME"] ?? "").range(
+                of: "maplestory.*oem",
+                options: .regularExpression
+            ) != nil
+        if isMapleStoryOEM, effectiveBackend == "dxvk" {
+            if !CyderSettings.provisionDxvkIntoPrefix(engineRoot: engineRoot, prefix: prefix) {
+                CyderDiagnostics.shared.warning("OEM DXVK prefix provision failed engine=\(engineRoot.path)")
+            }
+        }
+        let oemDxvkDllOverrides = (isMapleStoryOEM && effectiveBackend == "dxvk")
+            ? "d3d11,dxgi=n"
+            : nil
         let savedGameArguments = CyderSettingsStore.shared.arguments(
             profileID: profileID,
             legacyBasename: nil,
@@ -1020,7 +1045,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         let diagnosticArguments = redactDynamicArguments
             ? "<\(gameArguments.count) dynamic arguments redacted>"
             : compatibleGameArguments.joined(separator: " ")
-        let frontendArguments = wineFrontendArguments(wine: wine)
+        let frontendArguments = wineFrontendArguments(wine: wine, dllOverrides: oemDxvkDllOverrides)
         let wineCommandArguments = frontendArguments + [exe] + compatibleGameArguments
         let powerMode = environment["CYDER_POWER_MODE"] ?? "normal"
         let taskpolicy = findExecutable(named: "taskpolicy", environment: environment)
@@ -1199,21 +1224,35 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         let processLocale = ["LC_ALL", "LANG", "LC_CTYPE"]
             .compactMap { environment[$0] }
             .first { !$0.isEmpty }
+        // Drop inherited graphics keys so "default" / non-dxvk really follow settings
+        // instead of a parent shell leaking CYDER_GRAPHICS_BACKEND / DXVK_FRAME_RATE.
+        environment.removeValue(forKey: "CYDER_GRAPHICS_BACKEND")
+        environment.removeValue(forKey: "CX_GRAPHICS_BACKEND")
+        environment.removeValue(forKey: "DXVK_FRAME_RATE")
+        environment.removeValue(forKey: "DXVK_HUD")
+        environment.removeValue(forKey: "MTL_HUD_ENABLED")
+        let engineRoot = wine.deletingLastPathComponent().deletingLastPathComponent()
         for (key, value) in CyderSettingsStore.shared.environment(
             profileID: profileID,
             legacyBasename: nil,
-            override: gameSettings
+            override: gameSettings,
+            engineRoot: engineRoot
         ) {
             environment[key] = value
         }
+        // CrossOver OEM cxcompatdb reads CX_GRAPHICS_BACKEND (not CYDER_*).
+        if let backend = environment["CYDER_GRAPHICS_BACKEND"] {
+            environment["CX_GRAPHICS_BACKEND"] = backend
+        }
 
-        let engineRoot = wine.deletingLastPathComponent().deletingLastPathComponent()
         environment["WINEPREFIX"] = prefix.path
         environment["WINESERVER"] = engineRoot.appendingPathComponent("bin/wineserver").path
         environment["CYDER_GRAPHICS_BACKENDS_ROOT"] = engineRoot.path
-        let gptkSource = CyderGptk.applyLaunchEnvironment(to: &environment)
+        let gptkSource = CyderGptk.applyLaunchEnvironment(to: &environment, engineRoot: engineRoot)
         CyderDiagnostics.shared.info(
             "wine-environment graphics-backend=\(environment["CYDER_GRAPHICS_BACKEND"] ?? "default") "
+                + "cx-graphics-backend=\(environment["CX_GRAPHICS_BACKEND"] ?? "unset") "
+                + "hud=\(environment["DXVK_HUD"] ?? environment["MTL_HUD_ENABLED"] ?? "off") "
                 + "gptk-source=\(gptkSource)"
         )
         environment["PATH"] = engineRoot.appendingPathComponent("bin").path
@@ -1229,7 +1268,9 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             || isMapleStoryOEM
         if isCrossover {
             environment["CX_BOTTLE"] = prefix.path
+            environment["CX_ROOT"] = engineRoot.path
             environment["WINEARCH"] = "win64"
+            syncCrossoverBottleGraphicsEnvironment(prefix: prefix, environment: environment)
         }
 
         if environment["CYDER_MSYNC"] == "1" {
@@ -1398,7 +1439,51 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         return socketAttributes[.type] as? FileAttributeType == .typeSocket
     }
 
-    private func wineFrontendArguments(wine: URL) -> [String] {
+    /// CrossOver's `bin/wine` loads `[EnvironmentVariables]` from cxbottle.conf
+    /// after the process environment, so App graphics/HUD keys must be mirrored
+    /// into the bottle or they are overwritten/cleared.
+    private func syncCrossoverBottleGraphicsEnvironment(
+        prefix: URL,
+        environment: [String: String]
+    ) {
+        let conf = prefix.appendingPathComponent("cxbottle.conf")
+        guard var text = try? String(contentsOf: conf, encoding: .utf8) else { return }
+        let keys = [
+            "CX_GRAPHICS_BACKEND",
+            "DXVK_FRAME_RATE",
+            "DXVK_HUD",
+            "MTL_HUD_ENABLED",
+        ]
+        if !text.contains("[EnvironmentVariables]") {
+            text += "\n[EnvironmentVariables]\n"
+        }
+        for key in keys {
+            let pattern = #"^"\#(key)"\s*=\s*".*"$"#
+            if let value = environment[key], !value.isEmpty {
+                let line = "\"\(key)\" = \"\(value)\""
+                if let regex = try? NSRegularExpression(pattern: pattern, options: .anchorsMatchLines),
+                   regex.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)) != nil {
+                    text = regex.stringByReplacingMatches(
+                        in: text,
+                        range: NSRange(text.startIndex..., in: text),
+                        withTemplate: line
+                    )
+                } else if let range = text.range(of: "[EnvironmentVariables]") {
+                    let insertAt = text.index(range.upperBound, offsetBy: 0)
+                    text.insert(contentsOf: "\n\(line)", at: insertAt)
+                }
+            } else if let regex = try? NSRegularExpression(pattern: pattern + #"\n?"#, options: .anchorsMatchLines) {
+                text = regex.stringByReplacingMatches(
+                    in: text,
+                    range: NSRange(text.startIndex..., in: text),
+                    withTemplate: ""
+                )
+            }
+        }
+        try? text.write(to: conf, atomically: true, encoding: .utf8)
+    }
+
+    private func wineFrontendArguments(wine: URL, dllOverrides: String? = nil) -> [String] {
         if let override = ProcessInfo.processInfo.environment["CYDER_WINE_FRONTEND_ARGS"],
            !override.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             return override.split(whereSeparator: \.isWhitespace).map(String.init)
@@ -1409,7 +1494,14 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         else {
             return []
         }
-        return ["--wait-children", "--enable-alt-loader", "macdrv"]
+        var args: [String] = []
+        if let dllOverrides, !dllOverrides.isEmpty {
+            // CrossOver `wine --dll` must appear before frontend flags; the Perl
+            // wrapper otherwise treats it as the Windows command.
+            args += ["--dll", dllOverrides]
+        }
+        args += ["--wait-children", "--enable-alt-loader", "macdrv"]
+        return args
     }
 
     @objc private func wineAppWillActivate(_ notification: Notification) {

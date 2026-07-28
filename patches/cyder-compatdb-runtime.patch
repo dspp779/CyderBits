@@ -10,7 +10,7 @@
  	unix/file.c \
 --- /dev/null
 +++ b/dlls/ntdll/unix/cyder_compat.c
-@@ -0,0 +1,1592 @@
+@@ -0,0 +1,1630 @@
 +/*
 + * Cyder compatibility database process hook
 + *
@@ -1367,6 +1367,17 @@
 +
 +    memset( &rule, 0, sizeof(rule) );
 +    memset( &applied, 0, sizeof(applied) );
++    if (forced_graphics_backend)
++    {
++        struct cyder_slice forced =
++            { (const unsigned char *)forced_graphics_backend, strlen( forced_graphics_backend ) };
++
++        /* Skip CompatDB graphics_backend when App force is set. */
++        if (strcmp( forced_graphics_backend, "default" ) &&
++            strcmp( forced_graphics_backend, "" ) &&
++            valid_graphics_backend( &forced ))
++            applied.graphics_backend = TRUE;
++    }
 +    for (i = 0; i < db->record_count; ++i)
 +    {
 +        uint16_t type = read_u16( db->data + offset );
@@ -1567,7 +1578,7 @@
 +
 +    result->params = *params;
 +    TRACE( "loaded CDB v1 with %u rules from %s\n", db.rule_count, debugstr_a(path) );
-+    if (!parse_and_apply_rules( &db, image_path, result, FALSE, NULL ))
++    if (!parse_and_apply_rules( &db, image_path, result, FALSE, forced_graphics_backend ))
 +    {
 +        WARN( "ignoring compatibility changes after runtime failure\n" );
 +        cyder_compat_cleanup_process_rules( result );
