@@ -35,9 +35,10 @@ install_arch() {
   local machine="$1" windows_dir="$2"
   local source="$ENGINE/lib/dxvk/$machine"
   local module target temp
+  local modules=(d3d9 d3d10 d3d10_1 d3d10core d3d11 dxgi)
   [[ -d "$source" ]] || return 0
   mkdir -p "$windows_dir"
-  for module in d3d11 dxgi; do
+  for module in "${modules[@]}"; do
     [[ -f "$source/$module.dll" ]] || {
       echo "Incomplete DXVK payload: missing $source/$module.dll" >&2
       return 1

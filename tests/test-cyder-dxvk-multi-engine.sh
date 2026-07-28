@@ -24,8 +24,10 @@ for engine in "$PRIMARY" "$SECONDARY"; do
     "$engine/lib/dxvk/x86_64-windows" \
     "$engine/lib/dxvk/i386-windows"
 done
+MODULES=(d3d9 d3d10 d3d10_1 d3d10core d3d11 dxgi)
+
 for machine in x86_64-windows i386-windows; do
-  for module in d3d11 dxgi; do
+  for module in "${MODULES[@]}"; do
     printf 'shared-%s-%s\n' "$machine" "$module" \
       >"$PRIMARY/lib/dxvk/$machine/$module.dll"
   done
@@ -39,7 +41,7 @@ bash "$ROOT/scripts/build-dxvk.sh" \
   --also-engine "$SECONDARY"
 
 for machine in x86_64-windows i386-windows; do
-  for module in d3d11 dxgi; do
+  for module in "${MODULES[@]}"; do
     assert test -f "$SECONDARY/lib/dxvk/$machine/$module.dll"
     h1="$(shasum -a 256 "$PRIMARY/lib/dxvk/$machine/$module.dll" | awk '{print $1}')"
     h2="$(shasum -a 256 "$SECONDARY/lib/dxvk/$machine/$module.dll" | awk '{print $1}')"
@@ -47,17 +49,28 @@ for machine in x86_64-windows i386-windows; do
   done
 done
 
-if [[ -f "$E1/lib/dxvk/x86_64-windows/d3d11.dll" &&
-      -f "$E2/lib/dxvk/x86_64-windows/d3d11.dll" ]]; then
+installed_full_set=1
+for engine in "$E1" "$E2"; do
   for machine in x86_64-windows i386-windows; do
-    for module in d3d11 dxgi; do
+    for module in "${MODULES[@]}"; do
+      if [[ ! -f "$engine/lib/dxvk/$machine/$module.dll" ]]; then
+        installed_full_set=0
+        break 3
+      fi
+    done
+  done
+done
+
+if (( installed_full_set )); then
+  for machine in x86_64-windows i386-windows; do
+    for module in "${MODULES[@]}"; do
       h1="$(shasum -a 256 "$E1/lib/dxvk/$machine/$module.dll" | awk '{print $1}')"
       h2="$(shasum -a 256 "$E2/lib/dxvk/$machine/$module.dll" | awk '{print $1}')"
       assert_eq "$h1" "$h2" "installed engines must share $machine/$module.dll"
     done
   done
 else
-  echo "SKIP hash check: one or both install engines lack lib/dxvk (run build-dxvk.sh first)"
+  echo "SKIP hash check: one or both install engines lack the full lib/dxvk module set (run build-dxvk.sh first)"
 fi
 
 echo "PASS test-cyder-dxvk-multi-engine"

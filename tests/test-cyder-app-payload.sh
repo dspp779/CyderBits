@@ -44,6 +44,8 @@ assert_contains "$build_script" 'cp "$SCRIPT_DIR/cyder-recipe.sh" "$RES/ogom-scr
   "Cyder.app must bundle the declarative recipe runner"
 assert_contains "$build_script" 'cp "$SCRIPT_DIR/install-dxvk-prefix.sh" "$RES/ogom-scripts/"' \
   "Cyder.app must bundle the DXVK prefix provisioner"
+assert_contains "$build_script" 'cp "$SCRIPT_DIR/cyder-oem-sync-dxvk.sh" "$RES/ogom-scripts/"' \
+  "Cyder.app must bundle the OEM DXVK sidecar repair helper"
 winetricks_launcher="$(cat "$ROOT/scripts/cyder-winetricks.sh")"
 assert_contains "$winetricks_launcher" 'exec /usr/bin/arch -x86_64 /bin/sh "$winetricks" --unattended "$@"' \
   "Cyder Winetricks integration should use unattended CLI mode"

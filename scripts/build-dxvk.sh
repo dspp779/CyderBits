@@ -20,8 +20,8 @@ usage() {
   cat <<EOF
 Usage: $(basename "$0") [--engine PATH] [--also-engine PATH] [--work-dir PATH] [--copy-only] [--dry-run]
 
-Build the D3D11/DXGI subset of CrossOver 25.0.1's DXVK snapshot for win64
-and win32, then install it below ENGINE/lib/dxvk/. Repeat --also-engine to
+Build the D3D9/D3D10/D3D11/DXGI subset of CrossOver 25.0.1's DXVK snapshot for
+win64 and win32, then install it below ENGINE/lib/dxvk/. Repeat --also-engine to
 install the same staged payload into additional engines without rebuilding.
 
 With --copy-only, skip the build and copy ENGINE/lib/dxvk/ into each
@@ -59,10 +59,11 @@ run() {
 
 install_dxvk_into_engine() {
   local dest_engine="$1"
+  local modules=(d3d9 d3d10 d3d10_1 d3d10core d3d11 dxgi)
   [[ "$dest_engine" == /* ]] || { echo "Engine path must be absolute: $dest_engine" >&2; return 1; }
   run mkdir -p "$dest_engine/lib/dxvk/x86_64-windows" "$dest_engine/lib/dxvk/i386-windows"
   for machine in x86_64-windows i386-windows; do
-    for module in d3d11 dxgi; do
+    for module in "${modules[@]}"; do
       run cp "$STAGE/$machine/bin/$module.dll" "$dest_engine/lib/dxvk/$machine/$module.dll"
     done
   done
@@ -164,8 +165,8 @@ build_arch() {
       --bindir bin \
       --libdir lib \
       -Denable_tests=false \
-      -Denable_d3d9=false \
-      -Denable_d3d10=false \
+      -Denable_d3d9=true \
+      -Denable_d3d10=true \
       -Denable_d3d11=true \
       -Denable_dxgi=true \
       "$build" "$SOURCE"
@@ -187,7 +188,7 @@ for also in "${ALSO_ENGINES[@]}"; do
   install_dxvk_into_engine "$also"
 done
 
-echo "DXVK D3D11/DXGI installed in $ENGINE/lib/dxvk"
+echo "DXVK D3D9/D3D10/D3D11/DXGI installed in $ENGINE/lib/dxvk"
 if ((${#ALSO_ENGINES[@]})); then
   echo "DXVK also installed in ${#ALSO_ENGINES[@]} additional engine(s)"
 fi

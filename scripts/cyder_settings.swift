@@ -339,6 +339,7 @@ struct CyderSettings: Codable {
             ("x86_64-windows", "system32"),
             ("i386-windows", "syswow64"),
         ]
+        let modules = ["d3d9", "d3d10", "d3d10_1", "d3d10core", "d3d11", "dxgi"]
         for (machine, windowsDir) in arches {
             let source = engineRoot
                 .appendingPathComponent("lib/dxvk/\(machine)", isDirectory: true)
@@ -350,7 +351,7 @@ struct CyderSettings: Codable {
             } catch {
                 return false
             }
-            for module in ["d3d11", "dxgi"] {
+            for module in modules {
                 let src = source.appendingPathComponent("\(module).dll")
                 let dst = destination.appendingPathComponent("\(module).dll")
                 guard manager.isReadableFile(atPath: src.path) else { return false }
