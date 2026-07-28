@@ -29,6 +29,9 @@ assert cmp -s "$TEST_TMP/first.cdb" "$TEST_TMP/second.cdb"
 assert cmp -s \
   "$TEST_TMP/first.cdb" \
   "$ROOT/compatdb/tests/golden/bundled-v1.cdb"
+assert cmp -s \
+  "$TEST_TMP/first.cdb" \
+  "$ROOT/compatdb/compiled/compatdb.cdb"
 
 inspection="$(python3 "$TOOL" inspect "$TEST_TMP/first.cdb" --json)"
 assert_contains "$inspection" '"rule_count": 2' \

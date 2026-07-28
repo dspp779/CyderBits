@@ -159,12 +159,17 @@ fi
 }
 
 mkdir -p "$RES/ogom-scripts" "$RES/addons/libarchive" "$RES/tools/zstd" "$RES/tools/cabextract" "$RES/licenses" "$RES/CompatDB" "$RES/Components/cnc-ddraw/7.1.0.0"
+COMPATDB_COMPILED="$OGOM/compatdb/compiled/compatdb.cdb"
 [[ -f "$OGOM/scripts/cyder-compatdb.py" ]] || {
-  echo "Missing CompatDB compiler: scripts/cyder-compatdb.py" >&2
+  echo "Missing CompatDB tool: scripts/cyder-compatdb.py" >&2
   exit 1
 }
-python3 "$OGOM/scripts/cyder-compatdb.py" compile \
-  "$OGOM/compatdb/rules" -o "$RES/CompatDB/compatdb.cdb"
+[[ -f "$COMPATDB_COMPILED" ]] || {
+  echo "Missing precompiled CompatDB: $COMPATDB_COMPILED" >&2
+  echo "Run: python3 scripts/cyder-compatdb.py compile compatdb/rules -o compatdb/compiled/compatdb.cdb" >&2
+  exit 1
+}
+cp "$COMPATDB_COMPILED" "$RES/CompatDB/compatdb.cdb"
 python3 "$OGOM/scripts/cyder-compatdb.py" inspect "$RES/CompatDB/compatdb.cdb" >/dev/null
 cp "$SCRIPT_DIR/cyder_launcher.sh" "$RES/ogom-scripts/"
 cp "$SCRIPT_DIR/cyder-common.sh" "$RES/ogom-scripts/"

@@ -11,7 +11,8 @@ import sys
 from pathlib import Path
 from typing import Any, Iterable
 
-import yaml
+_yaml: Any | None = None
+_StrictSafeLoader: Any | None = None
 
 
 MAGIC = b"CYDRCDB\0"
@@ -83,41 +84,60 @@ class CompatDBError(Exception):
     pass
 
 
-class StrictSafeLoader(yaml.SafeLoader):
-    """SafeLoader which also rejects aliases and duplicate mapping keys."""
-
-    def compose_node(self, parent: Any, index: Any) -> Any:
-        if self.check_event(yaml.AliasEvent):
-            event = self.peek_event()
-            raise CompatDBError(
-                f"YAML aliases are not supported (alias {event.anchor!r})"
-            )
-        return super().compose_node(parent, index)
-
-
-def _construct_mapping(
-    loader: StrictSafeLoader, node: yaml.MappingNode, deep: bool = False
-) -> dict[Any, Any]:
-    result: dict[Any, Any] = {}
-    for key_node, value_node in node.value:
-        key = loader.construct_object(key_node, deep=deep)
-        try:
-            duplicate = key in result
-        except TypeError as exc:
-            raise CompatDBError("mapping keys must be scalar values") from exc
-        if duplicate:
-            raise CompatDBError(f"duplicate YAML mapping key: {key!r}")
-        result[key] = loader.construct_object(value_node, deep=deep)
-    return result
-
-
-StrictSafeLoader.add_constructor(
-    yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG, _construct_mapping
-)
-
-
 def fail(message: str) -> None:
     raise CompatDBError(message)
+
+
+def _require_yaml() -> Any:
+    global _yaml, _StrictSafeLoader
+    if _yaml is not None:
+        return _yaml
+    try:
+        import yaml as yaml_mod
+    except ImportError as exc:
+        raise CompatDBError(
+            "PyYAML is required for validate/compile "
+            "(pip install pyyaml); inspect/decode do not need it"
+        ) from exc
+
+    class StrictSafeLoader(yaml_mod.SafeLoader):
+        """SafeLoader which also rejects aliases and duplicate mapping keys."""
+
+        def compose_node(self, parent: Any, index: Any) -> Any:
+            if self.check_event(yaml_mod.AliasEvent):
+                event = self.peek_event()
+                raise CompatDBError(
+                    f"YAML aliases are not supported (alias {event.anchor!r})"
+                )
+            return super().compose_node(parent, index)
+
+    def construct_mapping(
+        loader: StrictSafeLoader, node: Any, deep: bool = False
+    ) -> dict[Any, Any]:
+        result: dict[Any, Any] = {}
+        for key_node, value_node in node.value:
+            key = loader.construct_object(key_node, deep=deep)
+            try:
+                duplicate = key in result
+            except TypeError as exc:
+                raise CompatDBError("mapping keys must be scalar values") from exc
+            if duplicate:
+                raise CompatDBError(f"duplicate YAML mapping key: {key!r}")
+            result[key] = loader.construct_object(value_node, deep=deep)
+        return result
+
+    StrictSafeLoader.add_constructor(
+        yaml_mod.resolver.BaseResolver.DEFAULT_MAPPING_TAG, construct_mapping
+    )
+    _yaml = yaml_mod
+    _StrictSafeLoader = StrictSafeLoader
+    return _yaml
+
+
+def _strict_safe_loader() -> Any:
+    _require_yaml()
+    assert _StrictSafeLoader is not None
+    return _StrictSafeLoader
 
 
 def expect_mapping(value: Any, where: str) -> dict[str, Any]:
@@ -583,10 +603,11 @@ def load_rules(inputs: Iterable[str]) -> list[dict[str, Any]]:
         if len(data) > MAX_SOURCE_SIZE or total_size > MAX_FILE_SIZE:
             fail(f"{path}: authoring input exceeds size bound")
         try:
-            document = yaml.load(data, Loader=StrictSafeLoader)
+            yaml_mod = _require_yaml()
+            document = yaml_mod.load(data, Loader=_strict_safe_loader())
         except CompatDBError:
             raise
-        except yaml.YAMLError as exc:
+        except yaml_mod.YAMLError as exc:
             fail(f"{path}: malformed YAML: {exc}")
         root = expect_mapping(document, str(path))
         expect_keys(root, {"schema_version", "rules"}, {"schema_version", "rules"}, str(path))

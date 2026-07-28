@@ -30,10 +30,10 @@ assert_contains "$build_script" 'cp "$OGOM/tools/zstd/zstd" "$RES/tools/zstd/zst
   "Cyder.app must bundle the universal zstd extractor"
 assert_contains "$build_script" 'cp "$OGOM/tools/zstd/LICENSE" "$RES/licenses/zstd-LICENSE"' \
   "Cyder.app must bundle the zstd license"
-assert_contains "$build_script" 'python3 "$OGOM/scripts/cyder-compatdb.py" compile' \
-  "Cyder.app packaging must compile fresh CompatDB data from YAML"
+assert_contains "$build_script" 'compatdb/compiled/compatdb.cdb' \
+  "Cyder.app packaging must bundle the precompiled CompatDB artifact"
 assert_contains "$build_script" 'python3 "$OGOM/scripts/cyder-compatdb.py" inspect' \
-  "Cyder.app packaging must inspect the generated runtime CompatDB"
+  "Cyder.app packaging must inspect the bundled runtime CompatDB"
 assert_contains "$build_script" '"$SCRIPT_DIR/cyder-cnc-ddraw.sh" verify' \
   "Cyder.app packaging must verify the pinned cnc-ddraw payload"
 assert_contains "$build_script" 'vendor/cnc-ddraw/7.1.0.0/cnc-ddraw.zip' \
