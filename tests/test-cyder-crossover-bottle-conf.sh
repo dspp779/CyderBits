@@ -22,6 +22,7 @@ cat >"$ENGINE/share/crossover/bottle_data/cxbottle.conf" <<'EOF'
 EOF
 
 BOTTLE="$TMP/bottle"
+unset CYDER_OEM_FLAVOR CYDER_ENGINE_NAME CYDER_BOTTLE_NAME
 cyder_seed_crossover_bottle_conf "$ENGINE/bin/wine" "$BOTTLE"
 assert test -r "$BOTTLE/cxbottle.conf"
 conf="$(cat "$BOTTLE/cxbottle.conf")"
@@ -82,20 +83,48 @@ unset CYDER_WINE_FRONTEND_ARGS
 assert_eq "$(cyder_wine_frontend_args "$RETAIL/bin/wine")" "" \
   "retail Wine must not receive CrossOver frontend flags"
 
+export CYDER_WINE_FRONTEND_ARGS='--wait-children --enable-alt-loader macdrv'
+assert_contains "$(cyder_wine_frontend_args "$ENGINE/bin/wine" 'd3d11,dxgi=n,b')" \
+  '--dll d3d11,dxgi=n,b --wait-children --enable-alt-loader macdrv' \
+  "CrossOver frontend args must prepend --dll overrides"
+unset CYDER_WINE_FRONTEND_ARGS CYDER_WINE_DLL_OVERRIDES
+
+# Saved settings should control DXVK frametimes in the shell launcher path.
+SETTINGS_DIR="$TMP/support"
+mkdir -p "$SETTINGS_DIR"
+cat >"$SETTINGS_DIR/settings.json" <<'JSON'
+{
+  "schemaVersion": 6,
+  "graphicsBackend": "dxvk",
+  "dxvkFrameRate": "sixty",
+  "graphicsHud": "dxvk",
+  "dxvkHudFrametimes": false
+}
+JSON
+(
+  export CYDER_SUPPORT="$SETTINGS_DIR"
+  export CYDER_GRAPHICS_BACKEND=
+  unset DXVK_FRAME_RATE DXVK_HUD MTL_HUD_ENABLED
+  cyder_load_saved_settings
+  assert_eq "$DXVK_FRAME_RATE" "60" "shell settings loader should preserve DXVK frame limit"
+  assert_eq "$DXVK_HUD" "fps" "shell settings loader should allow DXVK HUD without frametimes"
+)
+
 # Engine / bottle name overrides stay under the shared roots.
 (
   export CYDER_ENGINE_NAME=maplestory-oem25
   export CYDER_BOTTLE_NAME=maplestory-oem25
-  unset CYDER_PREFIX CYDER_SHARED_PREFIX
+  export CYDER_SUPPORT="$TMP/cyder-support"
+  unset CYDER_PREFIX CYDER_SHARED_PREFIX CYDER_OEM_FLAVOR
   # shellcheck source=../scripts/cyder-common.sh
   source "$ROOT/scripts/cyder-common.sh"
   cyder_init_paths "$ROOT/scripts"
   assert_eq "$CYDER_ENGINE_NAME" "maplestory-oem25" "engine name override"
   assert_eq "$CYDER_PREFIX" \
-    "$HOME/Library/Application Support/Cyder/bottles/maplestory-oem25" \
+    "$TMP/cyder-support/bottles/maplestory-oem25" \
     "prefix path uses CYDER_BOTTLE_NAME"
   assert_eq "$CYDER_SHARED_PREFIX" \
-    "$HOME/Library/Application Support/Cyder/bottles/maplestory-oem25" \
+    "$TMP/cyder-support/bottles/maplestory-oem25" \
     "shared prefix remains a compatibility alias"
 )
 

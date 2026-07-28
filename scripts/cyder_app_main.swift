@@ -1016,7 +1016,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             }
         }
         let oemDxvkDllOverrides = (isMapleStoryOEM && effectiveBackend == "dxvk")
-            ? "d3d11,dxgi=n"
+            ? "d3d11,dxgi=n,b"
             : nil
         let savedGameArguments = CyderSettingsStore.shared.arguments(
             profileID: profileID,
@@ -1484,23 +1484,23 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func wineFrontendArguments(wine: URL, dllOverrides: String? = nil) -> [String] {
+        var args: [String] = []
         if let override = ProcessInfo.processInfo.environment["CYDER_WINE_FRONTEND_ARGS"],
            !override.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            return override.split(whereSeparator: \.isWhitespace).map(String.init)
-        }
-        guard let contents = try? String(contentsOf: wine, encoding: .utf8),
-              let firstLine = contents.split(separator: "\n", maxSplits: 1).first,
-              firstLine.contains("perl")
-        else {
+            args = override.split(whereSeparator: \.isWhitespace).map(String.init)
+        } else if let contents = try? String(contentsOf: wine, encoding: .utf8),
+                  let firstLine = contents.split(separator: "\n", maxSplits: 1).first,
+                  firstLine.contains("perl") {
+            args += ["--wait-children", "--enable-alt-loader", "macdrv"]
+        } else {
             return []
         }
-        var args: [String] = []
-        if let dllOverrides, !dllOverrides.isEmpty {
+        if let dllOverrides, !dllOverrides.isEmpty, !args.contains("--dll") {
             // CrossOver `wine --dll` must appear before frontend flags; the Perl
-            // wrapper otherwise treats it as the Windows command.
-            args += ["--dll", dllOverrides]
+            // wrapper otherwise treats it as the Windows command. OEM launchers
+            // always set CYDER_WINE_FRONTEND_ARGS, so merge overrides here.
+            args.insert(contentsOf: ["--dll", dllOverrides], at: 0)
         }
-        args += ["--wait-children", "--enable-alt-loader", "macdrv"]
         return args
     }
 

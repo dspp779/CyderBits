@@ -114,6 +114,7 @@ OEM_BUNDLE_ID="${CYDER_OEM_BUNDLE_ID:-local.cyder.maplestory-oem25}"
 OEM_BUNDLE_NAME="${CYDER_OEM_BUNDLE_NAME:-Cyder MapleStory OEM}"
 /usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier $OEM_BUNDLE_ID" "$APP/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c "Set :CFBundleName $OEM_BUNDLE_NAME" "$APP/Contents/Info.plist"
+/usr/libexec/PlistBuddy -c "Set :CFBundleExecutable CyderMapleStoryOEM" "$APP/Contents/Info.plist"
 if /usr/libexec/PlistBuddy -c 'Print :CFBundleDisplayName' "$APP/Contents/Info.plist" >/dev/null 2>&1; then
   /usr/libexec/PlistBuddy -c "Set :CFBundleDisplayName $OEM_BUNDLE_NAME" "$APP/Contents/Info.plist"
 else
@@ -121,9 +122,9 @@ else
 fi
 
 MACOS="$APP/Contents/MacOS"
-cp "$SCRIPT_DIR/cyder_maplestory_oem_main.sh" "$MACOS/Cyder"
+cp "$SCRIPT_DIR/cyder_maplestory_oem_main.sh" "$MACOS/CyderMapleStoryOEM"
 cp "$SCRIPT_DIR/cyder_oem_bootstrap_main.sh" "$MACOS/CyderOEMBootstrap"
-chmod +x "$MACOS/Cyder" "$MACOS/CyderOEMBootstrap"
+chmod +x "$MACOS/CyderMapleStoryOEM" "$MACOS/CyderOEMBootstrap"
 
 if [[ "$SIGN_IDENTITY" == "-" ]]; then
   timestamp_flag="--timestamp=none"
@@ -140,7 +141,7 @@ sign_macho() {
 }
 
 # Shell helpers in MacOS/ must be signed before the bundle (nested code).
-for helper in CyderOEMBootstrap Cyder; do
+for helper in CyderOEMBootstrap CyderMapleStoryOEM; do
   [[ -f "$MACOS/$helper" ]] || continue
   codesign --force --options runtime "$timestamp_flag" \
     --sign "$SIGN_IDENTITY" "$MACOS/$helper"
@@ -150,7 +151,7 @@ sign_macho "$APP/Contents/Resources/tools/cabextract/cabextract"
 sign_macho "$MACOS/CyderSwift"
 while IFS= read -r -d '' path; do
   case "$path" in
-    */MacOS/Cyder | */MacOS/CyderSwift | */MacOS/CyderOEMBootstrap | */tools/zstd/zstd | */tools/cabextract/cabextract) continue ;;
+    */MacOS/CyderMapleStoryOEM | */MacOS/CyderSwift | */MacOS/CyderOEMBootstrap | */tools/zstd/zstd | */tools/cabextract/cabextract) continue ;;
   esac
   sign_macho "$path"
 done < <(find "$APP/Contents" -type f -print0)

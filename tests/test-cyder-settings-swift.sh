@@ -16,6 +16,7 @@ CACHE="$TMP/module-cache"
 BIN="$TMP/cyder-settings-harness"
 export CYDER_SUPPORT="$TMP/support"
 mkdir -p "$CYDER_SUPPORT"
+unset CYDER_OEM_FLAVOR CYDER_ENGINE_NAME CYDER_BOTTLE_NAME
 
 swiftc -O -module-cache-path "$CACHE" \
   "$ROOT/scripts/cyder_paths.swift" \

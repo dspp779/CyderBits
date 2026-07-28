@@ -64,8 +64,11 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
     private let graphicsBackend = NSPopUpButton()
     private let dxvkFrameRate = NSPopUpButton()
     private let graphicsHud = NSPopUpButton()
+    private let dxvkHudFrametimes = NSSwitch()
     private let graphicsHelp = NSTextField(wrappingLabelWithString: "")
     private let d3dmetalStatus = NSTextField(labelWithString: "")
+    private let gptkNote = NSTextField(wrappingLabelWithString: "")
+    private let installGptkButton = NSButton()
     private let removeGptkButton = NSButton()
     private let stopAllWineButton = NSButton()
     private let executableList = NSPopUpButton()
@@ -262,6 +265,8 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
         dxvkFrameRate.action = #selector(dxvkFrameRateChanged)
         graphicsHud.target = self
         graphicsHud.action = #selector(graphicsHudChanged)
+        dxvkHudFrametimes.target = self
+        dxvkHudFrametimes.action = #selector(dxvkHudFrametimesChanged)
         graphicsHelp.textColor = .secondaryLabelColor
         graphicsHelp.font = .systemFont(ofSize: 12)
         graphicsHelp.maximumNumberOfLines = 4
@@ -270,13 +275,19 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
         d3dmetalStatus.font = .systemFont(ofSize: 12)
         d3dmetalStatus.maximumNumberOfLines = 3
         d3dmetalStatus.widthAnchor.constraint(equalToConstant: 460).isActive = true
-        let install = NSButton(title: "安裝 GPTK…", target: self, action: #selector(installGptk))
-        install.bezelStyle = .rounded
+        gptkNote.textColor = .secondaryLabelColor
+        gptkNote.font = .systemFont(ofSize: 12)
+        gptkNote.maximumNumberOfLines = 4
+        gptkNote.widthAnchor.constraint(equalToConstant: 460).isActive = true
+        installGptkButton.title = "安裝 GPTK…"
+        installGptkButton.target = self
+        installGptkButton.action = #selector(installGptk)
+        installGptkButton.bezelStyle = .rounded
         removeGptkButton.title = "移除已安裝 GPTK"
         removeGptkButton.bezelStyle = .rounded
         removeGptkButton.target = self
         removeGptkButton.action = #selector(removeGptk)
-        let buttons = NSStackView(views: [install, removeGptkButton])
+        let buttons = NSStackView(views: [installGptkButton, removeGptkButton])
         buttons.orientation = .horizontal
         buttons.spacing = 8
         return tab("圖形", rows: [
@@ -284,9 +295,10 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
             graphicsHelp,
             row("限制幀率", dxvkFrameRate),
             row("顯示畫面流暢度", graphicsHud),
+            row("顯示 frametimes", dxvkHudFrametimes),
             d3dmetalStatus,
             buttons,
-            note("D3DMetal 可使用本機 CrossOver 內附的 GPTK，或自行從 Apple 下載並安裝；若兩者皆有，Cyder 優先使用已安裝版本。"),
+            gptkNote,
         ])
     }
 
@@ -382,6 +394,7 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
         graphicsBackend.selectItem(at: graphicsBackendIndex(value.graphicsBackend))
         dxvkFrameRate.selectItem(at: value.dxvkFrameRate == .unlimited ? 1 : 0)
         rebuildGraphicsHudMenu(selecting: value.graphicsHud)
+        dxvkHudFrametimes.state = value.dxvkHudFrametimes ? .on : .off
         refreshGraphicsControls()
         profileDrafts = value.perProfile
         profileRecords = Dictionary(uniqueKeysWithValues: profileStore.listRecords().map { ($0.profileId, $0) })
@@ -450,6 +463,10 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
     }
 
     @objc private func graphicsHudChanged() {
+        saveImmediately()
+    }
+
+    @objc private func dxvkHudFrametimesChanged() {
         saveImmediately()
     }
 
@@ -585,6 +602,7 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
                 $0.graphicsBackend = graphicsBackendValue
                 $0.dxvkFrameRate = dxvkFrameRate.indexOfSelectedItem == 1 ? .unlimited : .sixty
                 $0.graphicsHud = graphicsHudValue
+                $0.dxvkHudFrametimes = dxvkHudFrametimes.state == .on
                 for profileID in deletedProfiles {
                     $0.perProfile.removeValue(forKey: profileID)
                 }
@@ -725,8 +743,12 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
         CyderGptk.syncEngineLink()
         let backend = graphicsBackendValue
         let showFrameRate = backend == .dxvk
+        let showDxvkFrametimes = backend == .dxvk
+        let showGptkControls = backend != .dxvk && backend != .wined3d
         dxvkFrameRate.isHidden = !showFrameRate
         (dxvkFrameRate.superview as? NSStackView)?.isHidden = !showFrameRate
+        dxvkHudFrametimes.isHidden = !showDxvkFrametimes
+        (dxvkHudFrametimes.superview as? NSStackView)?.isHidden = !showDxvkFrametimes
         graphicsHelp.stringValue = switch backend {
         case .default: "帶入預載的遊戲專屬設定；多數遊戲建議使用。"
         case .auto: "依本機能力自動選擇：有 GPTK 用 D3DMetal，否則 DXVK，再否則 WineD3D。"
@@ -734,6 +756,7 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
         case .dxvk: "使用 DXVK 將 Direct3D 轉為 Vulkan，再由 MoltenVK 轉為 Metal。"
         case .d3dmetal: "使用 Apple D3DMetal／GPTK；需要 macOS 14+ 與可用的 GPTK。"
         }
+        gptkNote.stringValue = "D3DMetal 可使用本機 CrossOver 內附的 GPTK，或自行從 Apple 下載並安裝；若兩者皆有，Cyder 優先使用已安裝版本。"
         if let info = CyderGptk.activeInfo() {
             d3dmetalStatus.stringValue = info.statusLine
         } else {
@@ -741,7 +764,13 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
                 ? "D3DMetal 不可用：找不到 CrossOver 或已安裝的 GPTK"
                 : "D3DMetal 不可用：需要 macOS 14+"
         }
+        d3dmetalStatus.isHidden = !showGptkControls
+        (d3dmetalStatus.superview as? NSStackView)?.isHidden = !showGptkControls
+        installGptkButton.isHidden = !showGptkControls
         removeGptkButton.isHidden = !FileManager.default.fileExists(atPath: CyderPaths.appleGptkRuntime.path)
+            || !showGptkControls
+        (installGptkButton.superview as? NSStackView)?.isHidden = !showGptkControls
+        gptkNote.isHidden = !showGptkControls
     }
 
     private func showGptkAlert(title: String, message: String) {

@@ -176,10 +176,10 @@ struct CyderExecutableSettings: Codable {
 }
 
 struct CyderSettings: Codable {
-    // Schema 5 adds graphicsHud. Schema 4 adds graphics backend and DXVK frame
+    // Schema 6 adds dxvkHudFrametimes. Schema 5 adds graphicsHud. Schema 4 adds graphics backend and DXVK frame
     // rate. Schema 3 adds profile-keyed overrides. Keep perExecutable as a
     // legacy basename fallback; never infer a profile from a basename.
-    var schemaVersion = 5
+    var schemaVersion = 6
     var revision = 0
     var msync = false
     var esync: Bool? = false
@@ -190,6 +190,7 @@ struct CyderSettings: Codable {
     var graphicsBackend: CyderGraphicsBackend = CyderProduct.defaultGraphicsBackend
     var dxvkFrameRate: CyderDxvkFrameRate = .sixty
     var graphicsHud: CyderGraphicsHud = .off
+    var dxvkHudFrametimes = true
     var perExecutable: [String: CyderExecutableSettings] = [:]
     var perProfile: [String: CyderExecutableSettings] = [:]
 
@@ -203,10 +204,10 @@ struct CyderSettings: Codable {
     init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
         let version = try values.decodeIfPresent(Int.self, forKey: .schemaVersion) ?? 1
-        guard version <= 5 else { throw DecodingError.dataCorruptedError(
+        guard version <= 6 else { throw DecodingError.dataCorruptedError(
             forKey: .schemaVersion, in: values, debugDescription: "unsupported settings schema \(version)"
         ) }
-        schemaVersion = 5
+        schemaVersion = 6
         revision = try values.decodeIfPresent(Int.self, forKey: .revision) ?? 0
         msync = try values.decodeIfPresent(Bool.self, forKey: .msync) ?? false
         esync = try values.decodeIfPresent(Bool?.self, forKey: .esync) ?? false
@@ -223,6 +224,7 @@ struct CyderSettings: Codable {
         graphicsHud = Self.sanitizedGraphicsHud(
             try values.decodeIfPresent(String.self, forKey: .graphicsHud)
         )
+        dxvkHudFrametimes = try values.decodeIfPresent(Bool.self, forKey: .dxvkHudFrametimes) ?? true
         perExecutable = try values.decodeIfPresent([String: CyderExecutableSettings].self, forKey: .perExecutable) ?? [:]
         let decodedProfiles = try values.decodeIfPresent([String: CyderExecutableSettings].self, forKey: .perProfile) ?? [:]
         perProfile = decodedProfiles.reduce(into: [:]) { result, item in
@@ -439,7 +441,7 @@ final class CyderSettingsStore {
         do {
             let data = try Data(contentsOf: url)
             let decoded = try JSONDecoder().decode(CyderSettings.self, from: data)
-            guard decoded.schemaVersion <= 5 else {
+            guard decoded.schemaVersion <= 6 else {
                 CyderDiagnostics.shared.warning("unsupported settings schema=\(decoded.schemaVersion); using defaults")
                 value = .defaults
                 return
@@ -455,7 +457,7 @@ final class CyderSettingsStore {
         CyderDiagnostics.shared.enter(.settingsSave)
         var next = value
         work(&next)
-        next.schemaVersion = 5
+        next.schemaVersion = 6
         next.perProfile = next.perProfile.reduce(into: [:]) { result, item in
             guard CyderSettings.isValidProfileID(item.key) else { return }
             result[item.key] = CyderSettings.sanitized(item.value)
@@ -509,8 +511,10 @@ final class CyderSettingsStore {
         if let effective {
             result["CYDER_GRAPHICS_BACKEND"] = effective.rawValue
         }
-        // Frame-rate limiter is only offered for a manual DXVK preference.
-        if graphics.backend == .dxvk, graphics.dxvkFrameRate == .sixty {
+        // Manual DXVK exposes the limiter everywhere. OEM also preserves the
+        // saved limiter when auto/default collapses to a concrete DXVK launch.
+        if graphics.dxvkFrameRate == .sixty,
+           (graphics.backend == .dxvk || (CyderProduct.isMapleStoryOEM && effective == .dxvk)) {
             result["DXVK_FRAME_RATE"] = "60"
         }
         switch resolvedGraphicsHud(preference: graphics.backend) {
@@ -518,7 +522,7 @@ final class CyderSettingsStore {
             result["MTL_HUD_ENABLED"] = "1"
             result["DXVK_HUD"] = "0"
         case .dxvk:
-            result["DXVK_HUD"] = "fps,frametimes"
+            result["DXVK_HUD"] = value.dxvkHudFrametimes ? "fps,frametimes" : "fps"
             result.removeValue(forKey: "MTL_HUD_ENABLED")
         case .off:
             result["DXVK_HUD"] = "0"

@@ -6,10 +6,11 @@ struct CyderSettingsHarness {
         let path = URL(fileURLWithPath: CommandLine.arguments[1])
         let store = CyderSettingsStore(url: path)
         let profileID = "profile-0123456789abcdef01234567"
-        precondition(store.value.schemaVersion == 5)
+        precondition(store.value.schemaVersion == 6)
         precondition(store.value.graphicsBackend == .default)
         precondition(store.value.dxvkFrameRate == .sixty)
         precondition(store.value.graphicsHud == .off)
+        precondition(store.value.dxvkHudFrametimes)
         precondition(store.environment["CYDER_DPI"] == "480")
         let profileEnvironment = store.environment(profileID: profileID, legacyBasename: "game.exe")
         precondition(profileEnvironment["PROFILE_VALUE"] == "yes")
@@ -51,7 +52,7 @@ struct CyderSettingsHarness {
         let environment = profile["environment"] as! [String: Any]
         precondition(environment["NOT VALID"] == nil)
         let reloaded = CyderSettingsStore(url: path)
-        precondition(reloaded.value.schemaVersion == 5)
+        precondition(reloaded.value.schemaVersion == 6)
         precondition(reloaded.value.revision == 1)
 
         var globalDxvk = CyderSettings()
@@ -78,11 +79,18 @@ struct CyderSettingsHarness {
             settings.graphicsBackend = .dxvk
             settings.dxvkFrameRate = .sixty
             settings.graphicsHud = .dxvk
+            settings.dxvkHudFrametimes = false
         }
         let dxvkEnv = store.environment(profileID: nil, legacyBasename: nil)
         precondition(dxvkEnv["CYDER_GRAPHICS_BACKEND"] == "dxvk")
         precondition(dxvkEnv["DXVK_FRAME_RATE"] == "60")
-        precondition(dxvkEnv["DXVK_HUD"] == "fps,frametimes")
+        precondition(dxvkEnv["DXVK_HUD"] == "fps")
+
+        try store.update { settings in
+            settings.dxvkHudFrametimes = true
+        }
+        let dxvkFrametimesEnv = store.environment(profileID: nil, legacyBasename: nil)
+        precondition(dxvkFrametimesEnv["DXVK_HUD"] == "fps,frametimes")
 
         try store.update { settings in
             settings.graphicsBackend = .auto

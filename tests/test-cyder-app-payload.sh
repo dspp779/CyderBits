@@ -68,5 +68,16 @@ assert test -x "$ROOT/tools/winetricks/winetricks"
 assert test -x "$ROOT/tools/zstd/zstd"
 assert_contains "$(head -20 "$ROOT/tools/winetricks/winetricks")" "WINETRICKS_VERSION=20260125" \
   "bundled Winetricks version should be pinned"
+oem_build_script="$(cat "$ROOT/scripts/create-cyder-maplestory-oem-app.sh")"
+assert_contains "$oem_build_script" 'Set :CFBundleExecutable CyderMapleStoryOEM' \
+  "OEM packaging should set a distinct CFBundleExecutable"
+assert_contains "$oem_build_script" 'cp "$SCRIPT_DIR/cyder_maplestory_oem_main.sh" "$MACOS/CyderMapleStoryOEM"' \
+  "OEM packaging should rename its primary launcher executable"
+assert_contains "$oem_build_script" 'for helper in CyderOEMBootstrap CyderMapleStoryOEM; do' \
+  "OEM signing should include the renamed launcher"
+if [[ "$oem_build_script" == *'*/MacOS/Cyder |'* ]]; then
+  echo "ASSERT failed: OEM payload signing should no longer whitelist the old Cyder launcher path" >&2
+  exit 1
+fi
 
 echo "PASS test-cyder-app-payload"

@@ -616,6 +616,49 @@ cyder_load_saved_settings() {
       *) export CYDER_POWER_MODE=normal ;;
     esac
   fi
+  if [[ -z "${CYDER_GRAPHICS_BACKEND:-}" ]]; then
+    value="$(plutil -extract graphicsBackend raw -o - "$settings" 2>/dev/null || true)"
+    case "$value" in
+      wined3d|dxvk|d3dmetal)
+        export CYDER_GRAPHICS_BACKEND="$value"
+        export CX_GRAPHICS_BACKEND="$value"
+        ;;
+      auto)
+        if cyder_is_maplestory_oem; then
+          local engine_root="$CYDER_ENGINES/$CYDER_ENGINE_NAME"
+          if [[ -f "$engine_root/lib64/apple_gptk/external/libd3dshared.dylib" ]]; then
+            export CYDER_GRAPHICS_BACKEND=d3dmetal
+          elif [[ -f "$engine_root/lib/dxvk/x86_64-windows/d3d11.dll" ]]; then
+            export CYDER_GRAPHICS_BACKEND=dxvk
+          else
+            export CYDER_GRAPHICS_BACKEND=wined3d
+          fi
+          export CX_GRAPHICS_BACKEND="$CYDER_GRAPHICS_BACKEND"
+        fi
+        ;;
+    esac
+  fi
+  if [[ "${CYDER_GRAPHICS_BACKEND:-}" == dxvk ]]; then
+    local hud_value show_frametimes
+    value="$(plutil -extract dxvkFrameRate raw -o - "$settings" 2>/dev/null || true)"
+    [[ "$value" == sixty ]] && export DXVK_FRAME_RATE=60
+    hud_value="$(plutil -extract graphicsHud raw -o - "$settings" 2>/dev/null || true)"
+    show_frametimes=1
+    value="$(plutil -extract dxvkHudFrametimes raw -o - "$settings" 2>/dev/null || true)"
+    [[ "$value" == "false" || "$value" == "0" ]] && show_frametimes=0
+    unset MTL_HUD_ENABLED
+    case "$hud_value" in
+      dxvk)
+        if (( show_frametimes )); then
+          export DXVK_HUD=fps,frametimes
+        else
+          export DXVK_HUD=fps
+        fi
+        ;;
+      metal) export MTL_HUD_ENABLED=1 ;;
+      off) export DXVK_HUD=0 ;;
+    esac
+  fi
 }
 
 cyder_find_taskpolicy() {
@@ -777,11 +820,7 @@ cyder_seed_crossover_bottle_conf() {
 ' "$dest"
   fi
   local is_maplestory=0
-  if [[ "${CYDER_OEM_FLAVOR:-}" == maplestory ||
-        "${CYDER_ENGINE_NAME:-}" == maplestory*oem* ||
-        "${CYDER_BOTTLE_NAME:-}" == maplestory* ]]; then
-    is_maplestory=1
-  fi
+  cyder_is_maplestory_oem && is_maplestory=1
   if (( is_maplestory )) && ! grep -qE '^[[:space:]]*"RAW_AUDIO_PARSE"[[:space:]]*=' "$dest"; then
     /usr/bin/sed -i '' '/^\[EnvironmentVariables\]$/a\
 "RAW_AUDIO_PARSE" = "1"
@@ -807,6 +846,18 @@ cyder_wine_is_perl_script() {
   [[ "$first_line" == *perl* ]]
 }
 
+cyder_is_maplestory_oem() {
+  [[ "${CYDER_OEM_FLAVOR:-}" == maplestory ||
+     "${CYDER_ENGINE_NAME:-}" == maplestory*oem* ||
+     "${CYDER_BOTTLE_NAME:-}" == maplestory* ]]
+}
+
+cyder_oem_dxvk_dll_overrides() {
+  cyder_is_maplestory_oem || return 1
+  [[ "${CYDER_GRAPHICS_BACKEND:-}" == dxvk ]] || return 1
+  printf '%s\n' 'd3d11,dxgi=n,b'
+}
+
 cyder_wine_is_crossover_frontend() {
   local wine_bin="$1" resolved target engine_root launcher_wine
   [[ -n "$wine_bin" ]] || return 1
@@ -827,12 +878,24 @@ cyder_wine_is_crossover_frontend() {
 }
 
 cyder_wine_frontend_args() {
-  local wine_bin="$1"
+  local wine_bin="${1:-}"
+  local dll_overrides="${2:-${CYDER_WINE_DLL_OVERRIDES:-}}"
+  local -a args=()
   if [[ -n "${CYDER_WINE_FRONTEND_ARGS:-}" ]]; then
-    printf '%s\n' "$CYDER_WINE_FRONTEND_ARGS"
+    read -r -a args <<<"${CYDER_WINE_FRONTEND_ARGS}"
   elif cyder_wine_is_crossover_frontend "$wine_bin"; then
-    printf '%s\n' '--wait-children --enable-alt-loader macdrv'
+    args=(--wait-children --enable-alt-loader macdrv)
   fi
+  if [[ -n "$dll_overrides" ]]; then
+    local has_dll=0 arg
+    for arg in "${args[@]}"; do
+      [[ "$arg" == --dll ]] && has_dll=1 && break
+    done
+    if (( ! has_dll )); then
+      args=(--dll "$dll_overrides" "${args[@]}")
+    fi
+  fi
+  ((${#args[@]})) && printf '%s\n' "${args[*]}"
 }
 
 cyder_resolve_exe_from_args() {
@@ -2118,6 +2181,16 @@ cyder_run_wine_exe() {
     export CYDER_GRAPHICS_BACKENDS_ROOT="$(cd "$(dirname "$wine_bin")/.." && pwd)"
     if [[ -f "$CYDER_GRAPHICS_BACKENDS_ROOT/lib64/apple_gptk/external/libd3dshared.dylib" ]]; then
       export CX_APPLEGPTK_LIBD3DSHARED_PATH="$CYDER_GRAPHICS_BACKENDS_ROOT/lib64/apple_gptk/external/libd3dshared.dylib"
+    fi
+    if overrides="$(cyder_oem_dxvk_dll_overrides 2>/dev/null)" && [[ -n "$overrides" ]]; then
+      export CYDER_WINE_DLL_OVERRIDES="$overrides"
+      if [[ -x "$CYDER_SCRIPTS/install-dxvk-prefix.sh" ]]; then
+        bash "$CYDER_SCRIPTS/install-dxvk-prefix.sh" \
+          --prefix "$prefix" \
+          --engine "$CYDER_GRAPHICS_BACKENDS_ROOT" || true
+      fi
+    else
+      unset CYDER_WINE_DLL_OVERRIDES
     fi
     if [[ "${CYDER_MSYNC:-0}" == 1 ]]; then
       export WINEMSYNC=1
