@@ -106,6 +106,32 @@ find_glslang() {
   return 1
 }
 
+patch_dxvk_source() {
+  local header="$SOURCE/src/d3d10/d3d10_interfaces.h"
+  [[ -f "$header" ]] || return 0
+  python3 - "$header" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+text = path.read_text()
+old = """#ifdef _MSC_VER
+struct __declspec(uuid("0803425a-57f5-4dd6-9465-a87570834a08")) ID3D10StateBlock;
+#else
+__CRT_UUID_DECL(ID3D10StateBlock, 0x0803425a,0x57f5,0x4dd6,0x94,0x65,0xa8,0x75,0x70,0x83,0x4a,0x08);
+#endif
+"""
+new = """#ifdef _MSC_VER
+struct __declspec(uuid("0803425a-57f5-4dd6-9465-a87570834a08")) ID3D10StateBlock;
+#elif !defined(__MINGW32__)
+__CRT_UUID_DECL(ID3D10StateBlock, 0x0803425a,0x57f5,0x4dd6,0x94,0x65,0xa8,0x75,0x70,0x83,0x4a,0x08);
+#endif
+"""
+if old in text:
+    path.write_text(text.replace(old, new, 1))
+PY
+}
+
 if (( ! DRY_RUN )); then
   [[ -f "$ARCHIVE" ]] || { echo "Missing DXVK source archive: $ARCHIVE" >&2; exit 1; }
   [[ -x "$TOOLCHAIN/bin/x86_64-w64-mingw32-clang" ]] ||
@@ -121,6 +147,7 @@ if (( ! DRY_RUN )); then
     run mkdir -p "$WORK"
     run tar -xzf "$ARCHIVE" -C "$WORK" sources/dxvk
   fi
+  patch_dxvk_source
 else
   GLSLANG="${GLSLANG_VALIDATOR:-$ROOT/.brew-x86/bin/glslangValidator}"
 fi
@@ -154,21 +181,32 @@ build_arch() {
   else
     make_cross_file "$cross" "$triplet" "$family" "$cpu"
   fi
-  if [[ ! -f "$build/build.ninja" ]]; then
+  local setup_args=(
+    --cross-file "$cross"
+    --buildtype release
+    --prefix "$STAGE/$machine"
+    --bindir bin
+    --libdir lib
+    -Denable_tests=false
+    -Denable_d3d9=true
+    -Denable_d3d10=true
+    -Denable_d3d11=true
+    -Denable_dxgi=true
+  )
+  if [[ -f "$build/build.ninja" ]]; then
     run env \
       PATH="$TOOLCHAIN/bin:$ROOT/.brew-x86/bin:/usr/bin:/bin" \
       GLSLANG_VALIDATOR="$GLSLANG" \
       "$ROOT/.brew-x86/bin/meson" setup \
-      --cross-file "$cross" \
-      --buildtype release \
-      --prefix "$STAGE/$machine" \
-      --bindir bin \
-      --libdir lib \
-      -Denable_tests=false \
-      -Denable_d3d9=true \
-      -Denable_d3d10=true \
-      -Denable_d3d11=true \
-      -Denable_dxgi=true \
+      --reconfigure \
+      "${setup_args[@]}" \
+      "$build" "$SOURCE"
+  else
+    run env \
+      PATH="$TOOLCHAIN/bin:$ROOT/.brew-x86/bin:/usr/bin:/bin" \
+      GLSLANG_VALIDATOR="$GLSLANG" \
+      "$ROOT/.brew-x86/bin/meson" setup \
+      "${setup_args[@]}" \
       "$build" "$SOURCE"
   fi
   run env \
