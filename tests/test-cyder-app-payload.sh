@@ -16,6 +16,12 @@ assert_contains "$build_script" 'cp "$SCRIPT_DIR/cyder-macos-wrapper.sh" "$MACOS
   "Cyder.app entrypoint must be the OS-version wrapper"
 assert_contains "$build_script" '<string>10.15</string>' \
   "Info.plist LSMinimumSystemVersion must match the Wine engine floor"
+assert_contains "$build_script" '<key>CFBundleTypeIconFile</key>' \
+  "Info.plist must declare a document icon for .exe"
+assert_contains "$build_script" '<key>UTImportedTypeDeclarations</key>' \
+  "Info.plist must import the Windows executable UTI with an icon"
+assert_contains "$build_script" '<key>UTTypeIconFile</key>' \
+  "imported Windows executable UTI must reference AppIcon"
 assert_contains "$build_script" 'cp "$SCRIPT_DIR/cyder-edit-user-reg.sh" "$RES/ogom-scripts/"' \
   "Cyder.app must bundle the fast registry editor"
 assert_contains "$build_script" 'cp "$SCRIPT_DIR/cyder_create_game_app.py" "$RES/ogom-scripts/"' \
