@@ -26,6 +26,9 @@ cat > "$TMP/codesign-stub" <<'INNER'
 #!/usr/bin/env bash
 set -euo pipefail
 echo "codesign $*" >> "$CODESIGN_LOG"
+if [[ "${1:-}" == "--verify" ]]; then
+  exit 0
+fi
 INNER
 
 cat > "$TMP/xattr-stub" <<'INNER'
@@ -71,5 +74,38 @@ script_output="$({
   bash "$ROOT/scripts/sign-wine.sh" --root "$TMP/root-script" --entitlements "$TMP/entitlements.plist" --dry-run
 } 2>&1)"
 assert_contains "$script_output" "bin/wineloader" "script-based CrossOver wine should verify its native wineloader"
+
+# A transient invalid signature must be retried once and verified again.
+mkdir -p "$TMP/root-retry/bin"
+touch "$TMP/root-retry/bin/wine" "$TMP/root-retry/bin/wineserver"
+cat > "$TMP/codesign-retry-stub" <<'INNER'
+#!/usr/bin/env bash
+set -euo pipefail
+echo "codesign $*" >> "$CODESIGN_LOG"
+if [[ "${1:-}" == "--verify" && "${@: -1}" == */bin/wineserver ]]; then
+  count_file="$CODESIGN_RETRY_COUNT"
+  count="$(cat "$count_file")"
+  count=$((count + 1))
+  printf '%s\n' "$count" >"$count_file"
+  [[ "$count" -gt 1 ]]
+fi
+INNER
+chmod +x "$TMP/codesign-retry-stub"
+printf '0\n' >"$TMP/retry-count"
+: >"$TMP/retry-codesign.log"
+retry_output="$(
+  FILE_CMD="$TMP/file-stub" \
+  CODESIGN_CMD="$TMP/codesign-retry-stub" \
+  XATTR_CMD="$TMP/xattr-stub" \
+  CODESIGN_LOG="$TMP/retry-codesign.log" \
+  CODESIGN_RETRY_COUNT="$TMP/retry-count" \
+  XATTR_LOG="$TMP/xattr.log" \
+  bash "$ROOT/scripts/sign-wine.sh" --root "$TMP/root-retry" --entitlements "$TMP/entitlements.plist" 2>&1
+)"
+assert_contains "$retry_output" "Retrying invalid signature" \
+  "an invalid Mach-O signature should be retried"
+retry_sign_count="$(grep -c -- '--force --sign' "$TMP/retry-codesign.log")"
+assert_eq "$retry_sign_count" "3" "two initial signs plus one retry should run"
+assert_eq "$(cat "$TMP/retry-count")" "2" "retried file should be strictly verified twice"
 
 echo "PASS test-sign-wine"

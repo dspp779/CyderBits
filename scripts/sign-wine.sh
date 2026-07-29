@@ -87,14 +87,45 @@ if [[ "$SIGN_IDENTITY" == "-" ]] && [[ -f "$verify_target" ]] && has_developer_i
 fi
 
 # Sign only regular Mach-O files (skip symlinks to Homebrew dylibs).
+macho_files=()
 while IFS= read -r -d '' path; do
   if "$FILE_CMD" -b "$path" | grep -q 'Mach-O'; then
+    macho_files+=("$path")
     run "$CODESIGN_CMD" --force --sign "$SIGN_IDENTITY" "$TIMESTAMP_FLAG" \
       --entitlements "$ENTITLEMENTS" \
       --options runtime \
       "$path"
   fi
 done < <(find "$TARGET_ROOT" -type f -print0)
+
+# Replacing some pre-existing Wine/CrossOver Mach-O signature slots can yield a
+# CMS blob that verifies in the staging tree but is unusable after archival.
+# A second Developer ID pass stabilizes the embedded signature before packing.
+if [[ "$DRY_RUN" -eq 0 && "$SIGN_IDENTITY" != "-" ]]; then
+  for path in "${macho_files[@]}"; do
+    "$CODESIGN_CMD" --force --sign "$SIGN_IDENTITY" "$TIMESTAMP_FLAG" \
+      --entitlements "$ENTITLEMENTS" \
+      --options runtime \
+      "$path"
+  done
+fi
+
+# Verify every signed Mach-O, not only the Wine entry point. Developer ID
+# timestamping can occasionally leave an individual file with an unusable CMS
+# signature even though codesign returned success. Retry that file once, then
+# fail closed if strict verification still does not pass.
+if [[ "$DRY_RUN" -eq 0 ]]; then
+  for path in "${macho_files[@]}"; do
+    if ! "$CODESIGN_CMD" --verify --strict "$path"; then
+      echo "Retrying invalid signature: $path" >&2
+      "$CODESIGN_CMD" --force --sign "$SIGN_IDENTITY" "$TIMESTAMP_FLAG" \
+        --entitlements "$ENTITLEMENTS" \
+        --options runtime \
+        "$path"
+    fi
+    "$CODESIGN_CMD" --verify --strict "$path"
+  done
+fi
 
 [[ -f "$verify_target" ]] || {
   echo "No Mach-O Wine entry point available for signature verification" >&2

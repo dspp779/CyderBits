@@ -155,6 +155,27 @@ case "$FORMAT" in
     ;;
 esac
 
+# Verify the archive itself, not only the staging tree. This catches signatures
+# whose embedded CMS data does not survive the final tar round trip.
+VERIFY_ROOT="$STAGING/archive-verify"
+mkdir -p "$VERIFY_ROOT"
+case "$FORMAT" in
+  zst)
+    "$ZSTD_BIN" -dc "$ARCHIVE" | tar -xf - -C "$VERIFY_ROOT"
+    ;;
+  xz)
+    tar -xJf "$ARCHIVE" -C "$VERIFY_ROOT"
+    ;;
+esac
+verified_macho=0
+while IFS= read -r -d '' signed_path; do
+  if file -b "$signed_path" | grep -q 'Mach-O'; then
+    codesign --verify --strict "$signed_path"
+    verified_macho=$((verified_macho + 1))
+  fi
+done < <(find "$VERIFY_ROOT/wine-x86_64" -type f -print0)
+echo "==> Verified $verified_macho Mach-O signatures after archive extraction"
+
 printf '%s\n' "$ENGINE_VERSION_LABEL" >"$VERSION_FILE"
 {
   echo "version=$ENGINE_VERSION_LABEL"

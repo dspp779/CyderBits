@@ -411,6 +411,14 @@ sign_macho() {
     --entitlements "$OGOM/config/entitlements.plist" \
     --sign "$SIGN_IDENTITY" \
     "$path"
+  # Stabilize Developer ID CMS data before the file is sealed into the app.
+  if [[ "$SIGN_IDENTITY" != "-" ]]; then
+    codesign --force --options runtime "$TIMESTAMP_FLAG" \
+      --entitlements "$OGOM/config/entitlements.plist" \
+      --sign "$SIGN_IDENTITY" \
+      "$path"
+  fi
+  codesign --verify --strict "$path"
 }
 
 # Sign nested helpers before the main executable / bundle (inside-out).
@@ -430,6 +438,13 @@ codesign --force --options runtime "$TIMESTAMP_FLAG" \
   --entitlements "$OGOM/config/entitlements.plist" \
   --sign "$SIGN_IDENTITY" \
   "$APP"
+if [[ "$SIGN_IDENTITY" != "-" ]]; then
+  codesign --force --options runtime "$TIMESTAMP_FLAG" \
+    --entitlements "$OGOM/config/entitlements.plist" \
+    --sign "$SIGN_IDENTITY" \
+    "$APP"
+fi
+codesign --verify --deep --strict --verbose=2 "$APP"
 
 echo ""
 echo "Created $APP"

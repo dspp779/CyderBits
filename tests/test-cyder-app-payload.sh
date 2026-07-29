@@ -63,6 +63,10 @@ assert_contains "$build_script" 'cp "$SCRIPT_DIR/cyder_common.py" "$RES/ogom-scr
   "the PE icon extraction helper must include its common module"
 assert_contains "$build_script" 'xattr -cr "$APP"' \
   "Cyder.app packaging must clear nested quarantine attributes before signing"
+assert_contains "$build_script" 'codesign --verify --strict "$path"' \
+  "Cyder.app packaging must strictly verify each signed nested Mach-O"
+assert_contains "$build_script" 'codesign --verify --deep --strict --verbose=2 "$APP"' \
+  "Cyder.app packaging must strictly verify the final signed bundle"
 assert_contains "$copy_script" 'xattr -c "$dest_archive"' \
   "engine archive payload must not retain quarantine from the source"
 assert_contains "$common_script" 'if [[ ! -f "$dest/.cyder-engine-signed" ]]' \
