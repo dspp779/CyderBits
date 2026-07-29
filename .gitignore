@@ -18,6 +18,11 @@ BlueCrossgateNew/
 # Archives under tools/ (tracked libarchive/ is the small exception)
 tools/archives/
 
+# Local Wine debugging outputs
+tools/runtime/
+tools/debug-logs/
+tools/wine-11.14-compat-libs/
+
 # Archives and binary drops at repo root
 *.tar.gz
 *.tar.xz
