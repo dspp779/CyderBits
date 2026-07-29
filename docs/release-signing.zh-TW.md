@@ -147,7 +147,7 @@ OEM 版 (`Cyder-maplestory-oem25.app`) 與正式版使用相同的 Developer ID 
 bash scripts/create-cyder-maplestory-oem-app.sh
 ```
 
-產出為 `dist/Cyder-maplestory-oem25.app`（預設版本字串 `0.8.0-maplestory-oem25`）。公證步驟與正式版相同，僅替換 App 名稱：
+產出為 `dist/Cyder-maplestory-oem25.app`（預設版本字串 `0.8.2-maplestory-oem25`）。公證步驟與正式版相同，僅替換 App 名稱：
 
 ```bash
 codesign --verify --deep --strict --verbose=2 dist/Cyder-maplestory-oem25.app
@@ -159,7 +159,7 @@ xcrun notarytool submit dist/Cyder-maplestory-oem25-notarize.zip \
 xcrun stapler staple dist/Cyder-maplestory-oem25.app
 xcrun stapler validate dist/Cyder-maplestory-oem25.app
 
-ditto -c -k --keepParent dist/Cyder-maplestory-oem25.app dist/Cyder-maplestory-oem25-0.8.0.zip
+ditto -c -k --keepParent dist/Cyder-maplestory-oem25.app dist/Cyder-maplestory-oem25-0.8.2.zip
 ```
 
 **0.8.0 起 engine 內建 DXVK，但不含 Apple GPTK** — 公證前請確認打包後的 engine 沒有 `lib64/apple_gptk` 或評估 DMG 內容被打進 App；GPTK 僅能由使用者本機 CrossOver 或偏好設定從官方評估卷安裝。兩套 App（正式版與 OEM）皆需各自送公證並 staple 後再壓 zip 發佈。

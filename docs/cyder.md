@@ -19,7 +19,7 @@ open dist/Cyder.app
 - 首次啟動將 engine 實體解壓至無空白路徑 `~/.cyder/runtime/Engines/wine-x86_64/`（archive 內含 `wine-x86_64/` 目錄）
 - 使用 `logo/cyder-logo.png` 產生 app 圖示
 - 內含 Universal Swift launcher（arm64 + x86_64）、shell worker（`cyder_launcher.sh`）與 bootstrap helper（mono、tar、locale、hi-res）
-- 在 `Info.plist` 宣告可開啟 `.exe`（`LSHandlerRank: Alternate`；不強制設為預設）
+- 在 `Info.plist` 宣告可開啟 `.exe`（`LSHandlerRank: Alternate`；不強制設為預設），並以 `AppIcon` 作為文件類型圖示（`CFBundleTypeIconFile` / `UTTypeIconFile`）
 
 ### 系統版本
 
@@ -45,7 +45,7 @@ Engine 內嵌的 Homebrew runtime 庫（freetype／png／gnutls 鏈等）與 med
 
 首次執行某 `.exe` 時會自動 bootstrap 共用 prefix（見下節），之後再開其他 `.exe` 不會重複安裝。
 
-Cyder **不會**自動將自己設為 `.exe` 預設程式；`Info.plist` 僅向系統宣告可開啟 Windows 執行檔（`LSHandlerRank: Alternate`），是否設為預設由使用者在 Finder 自行決定。從 Finder **雙擊 `.exe`**（已設為預設）或拖放到 Cyder 時會直接啟動該檔（`Cyder.app` 內建 Swift 啟動器接收 open-document 事件）。
+Cyder **不會**自動將自己設為 `.exe` 預設程式；`Info.plist` 僅向系統宣告可開啟 Windows 執行檔（`LSHandlerRank: Alternate`），是否設為預設由使用者在 Finder 自行決定。設為預設後，Finder 中的 `.exe` 會使用 Cyder 的 `AppIcon` 作為文件類型圖示（仍為文件外觀，非 `.app` 獨立 squircle）。從 Finder **雙擊 `.exe`**（已設為預設）或拖放到 Cyder 時會直接啟動該檔（`Cyder.app` 內建 Swift 啟動器接收 open-document 事件）。
 
 開發／除錯時可用 `scripts/cyder-exe-association.swift handlers` 查詢 Launch Services 狀態；若先前誤將 `public.executable` 設為 Cyder，可用 `cleanup` 還原（見 `docs/scripts.md`）。
 
