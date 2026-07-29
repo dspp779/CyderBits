@@ -8,7 +8,7 @@ unset HOMEBREW_PREFIX OGOM WINE_INSTALL ENTITLEMENTS_PLIST
 source "$SCRIPT_DIR/env-x86_64.sh"
 
 OUT_DIR="${OGOM}/dist"
-CYDER_APP_VERSION="${CYDER_APP_VERSION:-0.8.2}"
+CYDER_APP_VERSION="${CYDER_APP_VERSION:-0.8.3}"
 # Release identity by default; export SIGN_IDENTITY=- for an unsigned local build.
 SIGN_IDENTITY="${SIGN_IDENTITY:-Developer ID Application: Chun Ho Kwok (3U9565WWM2)}"
 if [[ "$SIGN_IDENTITY" == "-" ]]; then

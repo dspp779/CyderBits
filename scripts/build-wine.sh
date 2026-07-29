@@ -348,6 +348,9 @@ remove_obsolete_cyder_patch() {
 
 remove_obsolete_cyder_patch "$OGOM/patches/cyder-steam-webhelper-compat.patch"
 apply_cyder_patch "$OGOM/patches/cyder-compatdb-runtime.patch"
+if [[ "$CX_VERSION" == "26" ]]; then
+  apply_cyder_patch "$OGOM/patches/cyder-ntdll-frame-walk-guard.patch"
+fi
 
 # CrossOver tarball is not a git checkout; make_makefiles requires `git ls-files`.
 # Regenerators are only needed when hacking the wine tree as a git worktree.

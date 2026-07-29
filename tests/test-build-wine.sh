@@ -29,6 +29,8 @@ assert_contains "$output" "remove obsolete patch if applied: $ROOT/patches/cyder
   "build should remove the earlier executable-specific Steam patch"
 assert_contains "$output" "$ROOT/patches/cyder-compatdb-runtime.patch" \
   "build should apply the generic CompatDB runtime patch"
+assert_contains "$output" "$ROOT/patches/cyder-ntdll-frame-walk-guard.patch" \
+  "build should guard x86_64 frame walking against invalid unwind metadata"
 # Tarball trees skip make_*; git checkouts regenerate.
 if [[ -e "$ROOT/build/cx26/sources/wine/.git" ]]; then
   assert_contains "$output" "./tools/make_requests" "dry-run should rebuild Wine generated files"
@@ -66,6 +68,18 @@ if [[ "$output_cx25" != *"crossover-sources-25.1.1.tar.gz"* && "$output_cx25" !=
   exit 1
 fi
 assert_contains "$output_cx25" "build/cx25" "CX25 prepare should target cx25 tree"
+
+if [[ -d "$ROOT/build/cx26/sources/wine" ]]; then
+  output_cx25_build="$(
+    WINE_SRC="$ROOT/build/cx26/sources/wine" \
+    WINE_INSTALL="${TMPDIR:-/tmp}/cyder-test-wine-cx25" \
+      bash "$ROOT/scripts/build-wine.sh" --cx 25 --dry-run --without-vulkan 2>&1 || true
+  )"
+  if [[ "$output_cx25_build" == *"cyder-ntdll-frame-walk-guard.patch"* ]]; then
+    echo "ASSERT failed: CX25 builds must not apply the CX26 frame-walk guard" >&2
+    exit 1
+  fi
+fi
 
 
 echo "PASS test-build-wine"
