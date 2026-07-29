@@ -6,7 +6,7 @@
 
 **在 Mac 上跑經典 Windows 遊戲 — 先支援 DirectDraw 與 GDI。**
 
-驗證路徑是傳統 2D Win32 圖形：**DirectDraw → Wine wined3d/OpenGL** 與 GDI。目前封裝的 `CX26.3.0-W11-Cyder004` engine 也包含 x86_64 **MoltenVK**（重新打包預設 `VULKAN_MODE=with` + `VULKAN_SOURCE=existing`），供 Wine Vulkan 使用；但 BlueCG 不走 Vulkan、DXVK、dxmt 或 D3DMetal。
+驗證路徑是傳統 2D Win32 圖形：**DirectDraw → Wine wined3d/OpenGL** 與 GDI。目前封裝的 `CX26.3.0-W11-Cyder006` engine 也包含 x86_64 **MoltenVK**（重新打包預設 `VULKAN_MODE=with` + `VULKAN_SOURCE=existing`），供 Wine Vulkan 使用；但 BlueCG 不走 Vulkan、DXVK、dxmt 或 D3DMetal。
 
 CyderBits 在 Apple Silicon 上自建 CrossOver 系 Wine，並提供兩個工具：**Cyder** — 一鍵啟動 `.exe` — 與 **CyderBits** — 把 `.exe` 包成可雙擊的 macOS `.app`。
 

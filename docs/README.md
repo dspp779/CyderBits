@@ -8,6 +8,7 @@
 
 | 版本 | 文件 | 重點 |
 |------|------|------|
+| 0.8.3 | [繁中](releases/v0.8.3.md) · [English](releases/v0.8.3.en.md) | CX26.3 Cyder006：x86_64 stack walk／unwind 相容性修正 |
 | 0.8.0 | [繁中](releases/v0.8.0.md) · [English](releases/v0.8.0.en.md) | 圖形後端偏好（WineD3D/DXVK/D3DMetal）、共用 DXVK、GPTK 本機安裝 |
 | 0.7.0 | [繁中](releases/v0.7.0.md) · [English](releases/v0.7.0.en.md) | CrossOver bottle 隔離、cabextract、新 App 圖示、MapleStory OEM flavor |
 | 0.6.0 | [繁中](releases/v0.6.0.md) · [English](releases/v0.6.0.en.md) | CX26.3 Cyder004、10.15 runtime dylib、Winetricks、直接 provision、legacy UI、動態 argv、簽署路徑 |
@@ -28,7 +29,7 @@
 | [bluecg-winemac-resize-black-screen.md](bluecg-winemac-resize-black-screen.md) | 開發 / 追蹤 | BlueCG 視窗縮放黑屏的背景、A6 正式解法矩陣與歷史調查 |
 | [bluecg-winemac-runtime-comparison.md](bluecg-winemac-runtime-comparison.md) | 開發 / 比較 | baseline、A2、A4、A6 的功能／畫質／風險矩陣 |
 | [bluecg-winemac-experiments.md](bluecg-winemac-experiments.md) | 開發 / 歷史 | A1–A6-R5 的逐步實驗與失敗邊界 |
-| [bluecg-winemac-a6-engine.md](bluecg-winemac-a6-engine.md) | 開發 / 發布 | A6 最終 patch、Cyder003 驗收 artifact（現行 Cyder 為 Cyder004） |
+| [bluecg-winemac-a6-engine.md](bluecg-winemac-a6-engine.md) | 開發 / 發布 | A6 最終 patch、Cyder003 驗收 artifact（現行 Cyder 為 Cyder006） |
 | [bluecg-winemac-a2-engine.md](bluecg-winemac-a2-engine.md) | 開發 / 歷史 | A2 guard-only artifact；非 Retina 對照 |
 | [scripts.md](scripts.md) | 開發者 | `scripts/` 腳本一覽與依賴關係 |
 

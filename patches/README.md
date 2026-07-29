@@ -2,6 +2,26 @@
 
 Applied only when a clean build fails. Prefer proper dependency fixes first.
 
+## Cyder — x86_64 frame-walk page-fault guard
+
+`cyder-ntdll-frame-walk-guard.patch` prevents a page fault raised while
+`RtlWalkFrameChain()` calls `RtlVirtualUnwind2()` from escaping into the
+application exception handler. Invalid or self-modifying unwind metadata now
+terminates the current stack walk, matching the existing nonzero-status path,
+instead of recursively re-entering the application's exception handler.
+
+The issue was reproduced with MapleStory Classic on the
+`CX26.3.0-W11-Cyder005` engine: login stopped at `登入中，請稍候`, an invalid
+frame pointer faulted in `RtlVirtualUnwind2`, and repeated exception handling
+ended in a Wine stack overflow. The guarded CX26 build was verified through
+login, character selection, the GRAP security module, entering the game world,
+and a clean user-requested exit.
+
+The patch is enabled only for CrossOver 26 builds in `scripts/build-wine.sh`.
+It is intentionally not applied to CrossOver 25 / Wine 10 by default because
+that source is from a different major Wine version and has not been validated
+with this failure.
+
 ## W1 — `SONAME_LIBVULKAN` fallback (`w1-win32u-vulkan-soname.patch`)
 
 **Symptom:** `dlls/win32u/vulkan.c: error: use of undeclared identifier 'SONAME_LIBVULKAN'`
