@@ -466,8 +466,8 @@ private final class CyderGameSettingsWindowController: NSWindowController, NSWin
     private let launchButton = NSButton()
     private let launchHint = NSTextField(labelWithString: "使用目前選項啟動；測試會寫入 Logs/last-launch.log.gz（gzip 壓縮）")
     private let removeProfileButton = NSButton()
-    private let msync = NSSwitch()
-    private let esync = NSSwitch()
+    private let syncMode = NSPopUpButton()
+    private let syncModeDescription = NSTextField(wrappingLabelWithString: "")
     private let retina = NSSwitch()
     private let dpi = NSPopUpButton()
     private let power = NSPopUpButton()
@@ -531,8 +531,8 @@ private final class CyderGameSettingsWindowController: NSWindowController, NSWin
         let dxvkFrameRateValue = rule?.dxvkFrameRate
         let fontValue = rule?.fontPreset ?? global.fontPreset
         let smoothingValue = rule?.fontSmoothing ?? global.fontSmoothing
-        msync.state = msyncValue ? .on : .off
-        esync.state = esyncValue ? .on : .off
+        syncMode.selectItem(at: CyderSyncMode(msync: msyncValue, esync: esyncValue).rawValue)
+        updateSyncModeDescription()
         retina.state = retinaValue ? .on : .off
         dpi.selectItem(at: dpiValues.firstIndex(of: dpiValue) ?? 4)
         power.selectItem(at: powerValue == "energySaving" ? 1 : 0)
@@ -608,10 +608,13 @@ private final class CyderGameSettingsWindowController: NSWindowController, NSWin
         }
         environment.placeholderString = "KEY=value  KEY2=value2"
         arguments.placeholderString = "例如：--fullscreen --width 1920"
-        msync.target = self
-        msync.action = #selector(msyncChanged)
-        esync.target = self
-        esync.action = #selector(esyncChanged)
+        syncMode.addItems(withTitles: CyderSyncMode.allCases.map { $0.title })
+        syncMode.target = self
+        syncMode.action = #selector(syncModeChanged)
+        syncModeDescription.textColor = .secondaryLabelColor
+        syncModeDescription.font = .systemFont(ofSize: 12)
+        syncModeDescription.maximumNumberOfLines = 5
+        syncModeDescription.widthAnchor.constraint(equalToConstant: 360).isActive = true
         retina.target = self
         retina.action = #selector(retinaChanged)
 
@@ -637,8 +640,8 @@ private final class CyderGameSettingsWindowController: NSWindowController, NSWin
         stack.translatesAutoresizingMaskIntoConstraints = false
 
         let form: [NSView] = [
-            row("MSync", msync, information: "使用 macOS 原生同步機制改善部分遊戲效能；若遊戲凍結或無法啟動，可保持關閉。"),
-            row("ESync", esync, information: "使用事件同步機制降低等待開銷；MSync 與 ESync 不能同時開啟。"),
+            row("同步機制", syncMode),
+            syncModeDescription,
             row("Retina Mode", retina, information: "啟用 macOS Retina 高解析度模式；部分遊戲可能需要關閉。"),
             row("縮放比例 / DPI", dpi, information: "設定 Windows 顯示縮放比例；老遊戲視窗可能需要較低 DPI。"),
             row("能源模式", power, information: "省電模式會降低程序優先級，可能減少耗電但造成遊戲卡頓。"),
@@ -737,7 +740,7 @@ private final class CyderGameSettingsWindowController: NSWindowController, NSWin
     }
 
     private func setControlsEnabled(_ enabled: Bool) {
-        [msync, esync, retina, dpi, power, graphicsBackend, dxvkFrameRate, font, smoothing].forEach { $0.isEnabled = enabled }
+        [syncMode, retina, dpi, power, graphicsBackend, dxvkFrameRate, font, smoothing].forEach { $0.isEnabled = enabled }
         environment.isEditable = enabled
         arguments.isEditable = enabled
         settingViews.forEach { $0.alphaValue = enabled ? 1 : 0.52 }
@@ -773,12 +776,13 @@ private final class CyderGameSettingsWindowController: NSWindowController, NSWin
         }
     }
 
-    @objc private func msyncChanged() {
-        if msync.state == .on { esync.state = .off }
+    @objc private func syncModeChanged() {
+        updateSyncModeDescription()
     }
 
-    @objc private func esyncChanged() {
-        if esync.state == .on { msync.state = .off }
+    private func updateSyncModeDescription() {
+        let index = max(0, min(syncMode.indexOfSelectedItem, CyderSyncMode.allCases.count - 1))
+        syncModeDescription.stringValue = CyderSyncMode.allCases[index].description
     }
 
     @objc private func retinaChanged() {
@@ -807,8 +811,9 @@ private final class CyderGameSettingsWindowController: NSWindowController, NSWin
 
     private func currentRule() -> CyderExecutableSettings {
         var rule = settingsStore.value.perProfile[game.id] ?? defaultRule()
-        rule.msync = msync.state == .on
-        rule.esync = esync.state == .on
+        let mode = CyderSyncMode.allCases[max(0, min(syncMode.indexOfSelectedItem, CyderSyncMode.allCases.count - 1))]
+        rule.msync = mode == .msync
+        rule.esync = mode == .esync
         rule.retinaMode = retina.state == .on
         rule.dpi = dpiValues[max(0, dpi.indexOfSelectedItem)]
         rule.powerMode = power.indexOfSelectedItem == 1 ? "energySaving" : "standard"

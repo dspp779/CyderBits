@@ -460,7 +460,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         }
         let alert = NSAlert()
         alert.messageText = "清理除錯記錄？"
-        alert.informativeText = "這會移除 Wine launch/debug log 與 last-launch.log.gz，但不會刪除遊戲、Windows 環境或偏好設定。"
+        alert.informativeText = "這會移除 Wine launch/debug log，以及 Logs/operations 和 Logs/sessions 內的紀錄，但不會刪除遊戲、Windows 環境或偏好設定。"
         alert.alertStyle = .warning
         alert.addButton(withTitle: "清理")
         alert.addButton(withTitle: "取消")

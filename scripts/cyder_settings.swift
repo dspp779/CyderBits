@@ -92,6 +92,41 @@ enum CyderWineDiagnostics: String, Codable, CaseIterable {
     }
 }
 
+enum CyderSyncMode: Int, CaseIterable {
+    case off
+    case msync
+    case esync
+
+    init(msync: Bool, esync: Bool) {
+        if msync {
+            self = .msync
+        } else if esync {
+            self = .esync
+        } else {
+            self = .off
+        }
+    }
+
+    var title: String {
+        switch self {
+        case .off: return "關閉"
+        case .msync: return "MSync"
+        case .esync: return "ESync"
+        }
+    }
+
+    var description: String {
+        switch self {
+        case .off:
+            return "不使用額外的同步機制；遇到遊戲凍結或無法啟動時，建議先使用此選項。"
+        case .msync:
+            return "使用 macOS 原生同步機制改善部分遊戲效能；若遊戲凍結或無法啟動，可改回關閉。"
+        case .esync:
+            return "使用事件同步機制降低等待開銷；若遊戲凍結或無法啟動，可改回關閉。"
+        }
+    }
+}
+
 struct CyderGraphicsCapabilities: Equatable {
     var hasD3DMetal: Bool
     var hasDxvk: Bool

@@ -29,6 +29,10 @@ assert_contains "$ui" "除錯" "diagnostics tab should be visibly labeled"
 assert_contains "$ui" "Wine 診斷記錄" "diagnostics tab should expose Wine diagnostics"
 assert_contains "$ui" "安靜（預設）" "Wine diagnostics should default to quiet"
 assert_contains "$ui" "完整堆疊追蹤" "Wine diagnostics should expose the unwind profile"
+assert_contains "$ui" "diagnosticsWarning.isHidden = value.wineDiagnostics == .quiet" "diagnostics warning should hide in quiet mode"
+assert_contains "$ui" "let syncMode = NSPopUpButton()" "global settings should use one synchronization selector"
+assert_contains "$ui" 'row("同步機制", syncMode)' "global settings should label the combined synchronization selector"
+assert_contains "$ui" "CyderSyncMode.allCases.map" "sync selector should expose off/MSync/ESync choices"
 assert_contains "$ui" "匯出上次遊戲記錄…" "diagnostics tab should expose last-game export"
 assert_contains "$ui" "清理除錯記錄…" "diagnostics tab should expose debug-log cleanup"
 assert_contains "$ui" "⚠ 除錯記錄可能快速佔用大量磁碟空間" "diagnostics tab should show a high-visibility storage warning"
@@ -84,6 +88,8 @@ assert_contains "$library_ui" 'return ["跟隨全域", "預設", "自動", "D3DM
 assert_contains "$library_ui" "private var graphicsBackendOverride: CyderGraphicsBackend?" "follow-global backend should use an optional profile override"
 assert_contains "$library_ui" "private var dxvkFrameRateOverride: CyderDxvkFrameRate?" "follow-global frame rate should use an optional profile override"
 assert_contains "$library_ui" "限制幀率" "game graphics overrides should expose DXVK frame-rate choices"
+assert_contains "$library_ui" 'row("同步機制", syncMode)' "game settings should use one synchronization selector"
+assert_contains "$library_ui" "updateSyncModeDescription" "game sync selector should update its prompt"
 if [[ "$library_ui" == *"顯示 frametimes"* ]]; then
   echo "ASSERT failed: game settings should not expose a frametimes override" >&2
   exit 1

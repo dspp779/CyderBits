@@ -232,8 +232,9 @@ final class CyderDiagnostics {
         }
     }
 
-    /// Remove Wine launch logs, including the convenience launch-log pointers.
-    /// Session logs and game files remain untouched.
+    /// Remove diagnostic records, including launch pointers and the contents of
+    /// the operations/sessions directories. The active Cyder session file is
+    /// truncated in place so this running app can continue logging safely.
     func cleanupDebugLogs() throws -> CyderLogCleanupSummary {
         let manager = FileManager.default
         var targets: [URL] = []
@@ -246,20 +247,37 @@ final class CyderDiagnostics {
                 targets.append(latestLaunch)
             }
         }
-        if let files = try? manager.contentsOfDirectory(
-            at: logsURL.appendingPathComponent("sessions", isDirectory: true),
-            includingPropertiesForKeys: nil,
-            options: [.skipsHiddenFiles]
-        ) {
-            targets.append(contentsOf: files.filter {
-                ($0.pathExtension == "log" || $0.pathExtension == "gz")
-                    && $0.lastPathComponent.contains("-wine-launch.log")
-            })
+        let activeSessionPath = sessionLogURL.standardizedFileURL.path
+        var activeSessionByteCount: Int64 = 0
+        lock.lock()
+        if fileExistsOrSymlink(sessionLogURL) {
+            activeSessionByteCount = Int64((try? sessionLogURL.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0)
+            try? logHandle?.synchronize()
+            try? logHandle?.truncate(atOffset: 0)
+            try? logHandle?.seek(toOffset: 0)
+        }
+        lock.unlock()
+
+        for directoryName in ["operations", "sessions"] {
+            let directory = logsURL.appendingPathComponent(directoryName, isDirectory: true)
+            if let files = try? manager.contentsOfDirectory(
+                at: directory,
+                includingPropertiesForKeys: nil,
+                options: []
+            ) {
+                targets.append(contentsOf: files.filter {
+                    $0.standardizedFileURL.path != activeSessionPath
+                })
+            }
         }
 
         var seen = Set<String>()
         var fileCount = 0
         var byteCount: Int64 = 0
+        if activeSessionByteCount > 0 {
+            fileCount += 1
+            byteCount += activeSessionByteCount
+        }
         for target in targets where seen.insert(target.standardizedFileURL.path).inserted {
             guard fileExistsOrSymlink(target) else {
                 continue

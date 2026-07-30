@@ -154,8 +154,7 @@ Cyder 目前使用一個預設 Wine bottle，所有 `.exe` 共用同一套 Windo
 
 Cyder 的 `設定…`（`⌘,`）、Dock 右鍵或執行檔選擇器的「進階設定…」可調整：
 
-- MSync（預設關閉）
-- ESync（預設關閉；開啟時會自動關閉 MSync）
+- 同步機制：關閉（預設）、MSync 或 ESync（三者互斥）
 - Retina Mode（預設開啟）
 - DPI（預設 192 / 200%；非整數縮放可能讓部分老遊戲出現鋸齒或模糊）
 - 字體平滑（預設 ClearType RGB，可選關閉或灰階；與 Retina Mode 獨立）
@@ -166,7 +165,7 @@ Cyder 的 `設定…`（`⌘,`）、Dock 右鍵或執行檔選擇器的「進階
 
 設定儲存在 `~/Library/Application Support/Cyder/settings.json`。全域顯示與字體設定會在控制項變更時，以原生 `sed` 直接更新未執行中的 Wine prefix；遊戲庫的個別設定則在遊戲設定頁按「套用」後保存，並在之後開啟該 EXE 時載入。
 
-遊戲庫以 EXE 的 canonical path 計算穩定 ID，個別選項存放於 `perProfile`；這不代表一定建立獨立 bottle。遊戲設定頁直接開放 MSync、ESync、Retina、DPI、字體、能源模式、環境變數與命令列參數。環境變數寫 `KEY=value`，可以空白或換行分隔多組（換行視同空白），值含空白請用引號。命令列參數直接接在 EXE 後，以空白分隔，亦可換行書寫（換行視同空白）；含空白的單一參數可用引號保留。提供「測試」以套用目前草稿後開啟遊戲，或按「套用」保存供之後從遊戲庫、Finder／直接 EXE 開啟時使用。每個 EXE 的能源模式使用 `powerMode=standard|energySaving`；啟動契約環境變數為 `CYDER_POWER_MODE=normal|background`。
+遊戲庫以 EXE 的 canonical path 計算穩定 ID，個別選項存放於 `perProfile`；這不代表一定建立獨立 bottle。遊戲設定頁直接開放同步機制（關閉／MSync／ESync）、Retina、DPI、字體、能源模式、環境變數與命令列參數。環境變數寫 `KEY=value`，可以空白或換行分隔多組（換行視同空白），值含空白請用引號。命令列參數直接接在 EXE 後，以空白分隔，亦可換行書寫（換行視同空白）；含空白的單一參數可用引號保留。提供「測試」以套用目前草稿後開啟遊戲，或按「套用」保存供之後從遊戲庫、Finder／直接 EXE 開啟時使用。每個 EXE 的能源模式使用 `powerMode=standard|energySaving`；啟動契約環境變數為 `CYDER_POWER_MODE=normal|background`。
 
 ### Winetricks（SharedPrefix）
 
@@ -238,7 +237,8 @@ BlueCG（魔力寶貝）可透過 Cyder 直接開 `BlueLauncher.exe`；遊戲目
 Cyder 每次啟動都會建立小型 session 記錄，保存目前階段、shell worker 輸出與結束原因；Wine stdout／stderr 預設不保存：
 
 ```text
-~/Library/Application Support/Cyder/Logs/
+  ~/Library/Application Support/Cyder/Logs/
+  operations/               # wineboot、環境套用等操作記錄
   sessions/                 # 每次啟動及各子程序的獨立記錄
   session-state.json        # 目前／上次 session 是否正常完成
   last-error.json           # 最近一次結構化錯誤
@@ -247,7 +247,7 @@ Cyder 每次啟動都會建立小型 session 記錄，保存目前階段、shell
   engine-install.log        # engine 解壓與安裝記錄
 ```
 
-除使用者主動取消外，非預期失敗會顯示 `CYD-*` 錯誤代碼、失敗階段、exit status 或 signal，並提供「複製診斷資訊」及「開啟相關記錄」。偏好設定 →「除錯」只匯出上次遊戲的 Wine launch log；其他初始化或啟動錯誤可直接複製錯誤對話框中的診斷資訊，另可在關閉遊戲後清理 Wine launch/debug log。若 native process 來不及顯示對話框便 crash，Cyder 會在下次啟動時偵測未完成的 session 並提示查看上次記錄。
+除使用者主動取消外，非預期失敗會顯示 `CYD-*` 錯誤代碼、失敗階段、exit status 或 signal，並提供「複製診斷資訊」及「開啟相關記錄」。偏好設定 →「除錯」只匯出上次遊戲的 Wine launch log；其他初始化或啟動錯誤可直接複製錯誤對話框中的診斷資訊。清理除錯記錄會在關閉遊戲後移除 launch/debug log，以及 `operations`、`sessions` 內的舊紀錄。若 native process 來不及顯示對話框便 crash，Cyder 會在下次啟動時偵測未完成的 session 並提示查看上次記錄。
 
 ## 相關文件
 

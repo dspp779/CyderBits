@@ -57,8 +57,8 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
     /// Stops all Cyder Wine processes (wineserver -k) and waits (-w). Returns true on success.
     var onStopAllWine: (() -> Bool)?
     private let store = CyderSettingsStore.shared
-    private let msync = NSSwitch()
-    private let esync = NSSwitch()
+    private let syncMode = NSPopUpButton()
+    private let syncModeDescription = NSTextField(wrappingLabelWithString: "")
     private let retina = NSSwitch()
     private let dpi = NSPopUpButton()
     private let font = NSPopUpButton()
@@ -78,8 +78,7 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
     private let executableList = NSPopUpButton()
     private let executableRecommendation = NSPopUpButton()
     private let executableName = NSTextField(labelWithString: "尚未選擇 EXE")
-    private let executableMsync = NSSwitch()
-    private let executableEsync = NSSwitch()
+    private let executableSyncMode = NSPopUpButton()
     private let executableRetina = NSSwitch()
     private let executableDpi = NSPopUpButton()
     private let executablePowerMode = NSPopUpButton()
@@ -157,12 +156,11 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
     }
 
     private func makeGeneralTab() -> NSTabViewItem {
-        msync.target = self
-        msync.action = #selector(msyncChanged)
-        esync.target = self
-        esync.action = #selector(esyncChanged)
-        let msyncDescription = note("使用 macOS 原生同步機制改善部分遊戲效能；若遊戲凍結或無法啟動，可保持關閉。")
-        let esyncDescription = note("使用事件同步機制降低等待開銷。MSync 與 ESync 不能同時開啟。")
+        syncMode.addItems(withTitles: CyderSyncMode.allCases.map { $0.title })
+        syncMode.target = self
+        syncMode.action = #selector(syncModeChanged)
+        configureNote(syncModeDescription)
+        updateSyncModeDescription()
         let gameLibrary = NSButton(title: "打開遊戲庫…", target: self, action: #selector(openGameLibrary))
         gameLibrary.bezelStyle = .rounded
         stopAllWineButton.title = "關閉所有 Wine 程序"
@@ -174,10 +172,8 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
             note("加入 Windows 遊戲、直接啟動，或管理每個遊戲的獨立 Wine prefix 與設定。"),
             stopAllWineButton,
             note("對目前 Cyder 使用的 Wine 環境執行 wineserver -k，並等待程序結束。"),
-            row("MSync", msync),
-            msyncDescription,
-            row("ESync", esync),
-            esyncDescription,
+            row("同步機制", syncMode),
+            syncModeDescription,
         ])
     }
 
@@ -342,6 +338,7 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
         diagnosticsWarning.stringValue = "⚠ 除錯記錄可能快速佔用大量磁碟空間，並改變遊戲時序。只在重現問題時短時間開啟；完成後請切回「安靜」，再清理除錯記錄。"
         diagnosticsWarning.textColor = .systemRed
         diagnosticsWarning.font = .boldSystemFont(ofSize: 12)
+        diagnosticsWarning.isHidden = true
 
         let export = NSButton(title: "匯出上次遊戲記錄…", target: self, action: #selector(exportLastGameLog))
         export.bezelStyle = .rounded
@@ -354,7 +351,7 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
             export,
             note("只複製上次遊戲啟動的 Wine log；其他初始化或啟動錯誤可直接複製錯誤對話框中的診斷資訊。"),
             cleanup,
-            note("只會移除 Wine launch/debug log 與 last-launch.log.gz，不會刪除遊戲、prefix 或設定。清理前請先關閉遊戲。"),
+            note("會移除 Wine launch/debug log，以及 Logs/operations 和 Logs/sessions 內的紀錄；不會刪除遊戲、prefix 或設定。清理前請先關閉遊戲。"),
         ])
     }
 
@@ -403,17 +400,26 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
 
     private func note(_ text: String) -> NSView {
         let label = NSTextField(wrappingLabelWithString: text)
+        configureNote(label)
+        return label
+    }
+
+    private func configureNote(_ label: NSTextField) {
         label.textColor = .secondaryLabelColor
         label.font = .systemFont(ofSize: 12)
         label.maximumNumberOfLines = 7
         label.widthAnchor.constraint(equalToConstant: 460).isActive = true
-        return label
+    }
+
+    private func updateSyncModeDescription() {
+        let index = max(0, min(syncMode.indexOfSelectedItem, CyderSyncMode.allCases.count - 1))
+        syncModeDescription.stringValue = CyderSyncMode.allCases[index].description
     }
 
     private func reload() {
         let value = store.value
-        msync.state = value.msync ? .on : .off
-        esync.state = (value.esync ?? false) && !value.msync ? .on : .off
+        syncMode.selectItem(at: CyderSyncMode(msync: value.msync, esync: value.esync ?? false).rawValue)
+        updateSyncModeDescription()
         retina.state = value.retinaMode ? .on : .off
         let dpiValues = [96, 120, 144, 168, 192, 240]
         dpi.selectItem(at: dpiValues.firstIndex(of: value.dpi) ?? 4)
@@ -429,6 +435,7 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
         case .errors: wineDiagnostics.selectItem(at: 1)
         case .unwind: wineDiagnostics.selectItem(at: 2)
         }
+        diagnosticsWarning.isHidden = value.wineDiagnostics == .quiet
         refreshGraphicsControls()
         profileDrafts = value.perProfile
         profileRecords = Dictionary(uniqueKeysWithValues: profileStore.listRecords().map { ($0.profileId, $0) })
@@ -532,6 +539,7 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
                 return
             }
         }
+        diagnosticsWarning.isHidden = selected == .quiet
         saveImmediately()
     }
 
@@ -651,13 +659,8 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
         }
     }
 
-    @objc private func msyncChanged() {
-        if msync.state == .on { esync.state = .off }
-        markDirty()
-    }
-
-    @objc private func esyncChanged() {
-        if esync.state == .on { msync.state = .off }
+    @objc private func syncModeChanged() {
+        updateSyncModeDescription()
         markDirty()
     }
 
@@ -666,8 +669,9 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
         let smoothingValues = ["off", "grayscale", "cleartype-rgb"]
         do {
             try store.update {
-                $0.msync = msync.state == .on
-                $0.esync = esync.state == .on
+                let mode = CyderSyncMode.allCases[max(0, min(syncMode.indexOfSelectedItem, CyderSyncMode.allCases.count - 1))]
+                $0.msync = mode == .msync
+                $0.esync = mode == .esync
                 $0.retinaMode = retina.state == .on
                 $0.dpi = dpiValues[max(0, dpi.indexOfSelectedItem)]
                 $0.fontPreset = font.indexOfSelectedItem == 1 ? "mingliu" : "songti"
@@ -942,13 +946,7 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
         executableSettingChanged()
     }
 
-    @objc private func executableMsyncChanged() {
-        if executableMsync.state == .on { executableEsync.state = .off }
-        executableSettingChanged()
-    }
-
-    @objc private func executableEsyncChanged() {
-        if executableEsync.state == .on { executableMsync.state = .off }
+    @objc private func executableSyncModeChanged() {
         executableSettingChanged()
     }
 
@@ -996,8 +994,9 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
         guard let profileID = selectedProfileID else { return }
         let dpiValues = [96, 120, 144, 168, 192, 240]
         var rule = profileDrafts[profileID] ?? defaultExecutableSettings()
-        rule.msync = executableMsync.state == .on
-        rule.esync = executableEsync.state == .on
+        let mode = CyderSyncMode.allCases[max(0, min(executableSyncMode.indexOfSelectedItem, CyderSyncMode.allCases.count - 1))]
+        rule.msync = mode == .msync
+        rule.esync = mode == .esync
         rule.retinaMode = executableRetina.state == .on
         rule.dpi = dpiValues[max(0, executableDpi.indexOfSelectedItem)]
         rule.powerMode = ["standard", "energySaving"][max(0, executablePowerMode.indexOfSelectedItem)]
@@ -1033,8 +1032,13 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
         }
         let sourceURL = URL(fileURLWithPath: record.sourcePath)
         executableName.stringValue = "\(sourceURL.lastPathComponent)（\(sourceURL.deletingLastPathComponent().path)）"
-        executableMsync.state = (rule.msync ?? defaults.msync ?? false) ? .on : .off
-        executableEsync.state = (rule.esync ?? defaults.esync ?? false) ? .on : .off
+        if executableSyncMode.numberOfItems == 0 {
+            executableSyncMode.addItems(withTitles: CyderSyncMode.allCases.map { $0.title })
+        }
+        executableSyncMode.selectItem(at: CyderSyncMode(
+            msync: rule.msync ?? defaults.msync ?? false,
+            esync: rule.esync ?? defaults.esync ?? false
+        ).rawValue)
         executableRetina.state = (rule.retinaMode ?? defaults.retinaMode ?? true) ? .on : .off
         executableDpi.selectItem(at: dpiValues.firstIndex(of: rule.dpi ?? defaults.dpi ?? 192) ?? 4)
         executablePowerMode.selectItem(at: rule.powerMode == "energySaving" ? 1 : 0)
@@ -1086,8 +1090,7 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
 
     private func setExecutableControlsEnabled(_ enabled: Bool) {
         executableRecommendation.isEnabled = enabled
-        executableMsync.isEnabled = enabled
-        executableEsync.isEnabled = enabled
+        executableSyncMode.isEnabled = enabled
         executableRetina.isEnabled = enabled
         executableDpi.isEnabled = enabled
         executablePowerMode.isEnabled = enabled
@@ -1097,8 +1100,7 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
         executableArguments.isEnabled = enabled
         removeExecutableButton.isEnabled = enabled
         if !enabled {
-            executableMsync.state = .off
-            executableEsync.state = .off
+            executableSyncMode.selectItem(at: CyderSyncMode.off.rawValue)
             executableRetina.state = .off
             executableDpi.selectItem(at: 4)
             executablePowerMode.selectItem(at: 0)
@@ -1119,8 +1121,8 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
         alert.addButton(withTitle: "取消")
         guard alert.runModal() == .alertFirstButtonReturn else { return }
         let value = CyderSettings.defaults
-        msync.state = value.msync ? .on : .off
-        esync.state = (value.esync ?? false) ? .on : .off
+        syncMode.selectItem(at: CyderSyncMode(msync: value.msync, esync: value.esync ?? false).rawValue)
+        updateSyncModeDescription()
         retina.state = value.retinaMode ? .on : .off
         dpi.selectItem(at: 4)
         font.selectItem(at: 0)
@@ -1173,8 +1175,9 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
 
     private func sessionSettingsChanged() -> Bool {
         let value = store.value
-        if value.msync != (msync.state == .on)
-            || (value.esync ?? false) != (esync.state == .on) {
+        let selectedMode = CyderSyncMode.allCases[max(0, min(syncMode.indexOfSelectedItem, CyderSyncMode.allCases.count - 1))]
+        if value.msync != (selectedMode == .msync)
+            || (value.esync ?? false) != (selectedMode == .esync) {
             return true
         }
         for profileID in deletedProfiles {

@@ -41,5 +41,7 @@ assert test ! -e "$TMP/export-support/export.zip"
 CYDER_SUPPORT="$TMP/cleanup-support" "$TMP/diagnostics-harness" cleanup
 assert test ! -e "$TMP/cleanup-support/Logs/sessions/22222222-2222-2222-2222-222222222222-001-wine-launch.log"
 assert test ! -e "$TMP/cleanup-support/Logs/last-launch.log"
+assert test ! -e "$TMP/cleanup-support/Logs/sessions/old-session.log"
+assert test ! -e "$TMP/cleanup-support/Logs/operations/old-operation.log"
 
 echo "PASS test-cyder-diagnostics"

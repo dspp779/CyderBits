@@ -45,15 +45,23 @@ struct CyderDiagnosticsHarness {
         case "cleanup":
             let manager = FileManager.default
             let sessions = diagnostics.logsURL.appendingPathComponent("sessions", isDirectory: true)
+            let operations = diagnostics.logsURL.appendingPathComponent("operations", isDirectory: true)
+            try! manager.createDirectory(at: operations, withIntermediateDirectories: true)
+            let oldSession = sessions.appendingPathComponent("old-session.log")
+            try! "old session".write(to: oldSession, atomically: true, encoding: .utf8)
+            let operation = operations.appendingPathComponent("old-operation.log")
+            try! "old operation".write(to: operation, atomically: true, encoding: .utf8)
             let launchLog = sessions.appendingPathComponent("22222222-2222-2222-2222-222222222222-001-wine-launch.log")
             try! "debug".write(to: launchLog, atomically: true, encoding: .utf8)
             let lastLaunch = diagnostics.logsURL.appendingPathComponent("last-launch.log")
             try? manager.removeItem(at: lastLaunch)
             try! manager.createSymbolicLink(atPath: lastLaunch.path, withDestinationPath: launchLog.path)
             let summary = try! diagnostics.cleanupDebugLogs()
-            guard summary.fileCount == 2,
+            guard summary.fileCount >= 5,
                   !manager.fileExists(atPath: launchLog.path),
-                  !manager.fileExists(atPath: lastLaunch.path) else {
+                  !manager.fileExists(atPath: lastLaunch.path),
+                  !manager.fileExists(atPath: oldSession.path),
+                  !manager.fileExists(atPath: operation.path) else {
                 exit(14)
             }
             diagnostics.finish(outcome: "cleaned")
