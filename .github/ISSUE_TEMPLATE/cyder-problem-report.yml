@@ -1,0 +1,175 @@
+name: Cyder 問題回報
+description: 回報在 macOS 上使用 Cyder 或 Cyder-maplestory-oem 執行遊戲時遇到的問題。
+title: "[問題] "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        感謝協助回報問題。請先確認已使用最新版 **Cyder** 或 **Cyder-maplestory-oem**。
+
+        更新時請只刪除舊版 Cyder App 後再安裝最新版；除非教學另有說明，請勿刪除遊戲資料或 Cyder 容器。
+
+        請勿在 Issue 中公開帳號、密碼、角色資訊、電子郵件或其他個人資料。
+
+  - type: input
+    id: summary
+    attributes:
+      label: 問題摘要
+      description: 請用一句話描述問題。
+      placeholder: 例如：按下開始遊戲後沒有反應
+    validations:
+      required: true
+
+  - type: dropdown
+    id: game
+    attributes:
+      label: 使用的遊戲
+      options:
+        - 楓之谷經典版（MapleStory Classic）
+        - 新楓之谷（MapleStory）
+        - 水藍魔力（BlueCG）
+        - 其他
+    validations:
+      required: true
+
+  - type: input
+    id: other-game
+    attributes:
+      label: 其他遊戲名稱
+      description: 若上一題選擇「其他」，請填寫遊戲名稱；否則可留空。
+      placeholder: 例如：遊戲名稱與版本
+
+  - type: dropdown
+    id: cyder-edition
+    attributes:
+      label: 使用的 Cyder 類型
+      options:
+        - Cyder
+        - Cyder-maplestory-oem
+        - 不確定
+    validations:
+      required: true
+
+  - type: input
+    id: cyder-version
+    attributes:
+      label: Cyder 版本號
+      description: 可在 Cyder 選單中的「關於 Cyder」查看。
+      placeholder: 例如：0.7.0
+    validations:
+      required: true
+
+  - type: dropdown
+    id: macos-major-version
+    attributes:
+      label: macOS 主要版本
+      options:
+        - macOS 26
+        - macOS 15 Sequoia
+        - macOS 14 Sonoma
+        - macOS 13 Ventura
+        - macOS 12 Monterey
+        - macOS 11 Big Sur
+        - macOS 10.15 Catalina
+        - 其他或不確定
+    validations:
+      required: true
+
+  - type: input
+    id: macos-full-version
+    attributes:
+      label: 完整 macOS 版本
+      description: 從「 → 關於這台 Mac」查看。
+      placeholder: 例如：15.6.1
+    validations:
+      required: true
+
+  - type: input
+    id: mac-model
+    attributes:
+      label: Mac 機型與晶片
+      description: 從「 → 關於這台 Mac」查看。
+      placeholder: 例如：2021 MacBook Pro，M1 Pro
+    validations:
+      required: true
+
+  - type: input
+    id: memory
+    attributes:
+      label: 記憶體容量（選填）
+      placeholder: 例如：16 GB
+
+  - type: dropdown
+    id: stage
+    attributes:
+      label: 哪個階段遇到問題？
+      options:
+        - 安裝或開啟 Cyder
+        - Cyder 初始化
+        - 下載或更新遊戲
+        - 開啟遊戲後、登入前
+        - 登入或啟動遊戲時
+        - 遊戲進行中
+        - 結束遊戲或重新開啟時
+        - 其他
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: 問題描述與重現步驟
+      description: 請說明操作步驟、原本預期的結果、實際結果，以及完整錯誤訊息。
+      placeholder: |
+        1. 我做了什麼操作：
+        2. 原本預期會發生什麼：
+        3. 實際發生了什麼：
+        4. 錯誤訊息（若有）：
+    validations:
+      required: true
+
+  - type: dropdown
+    id: frequency
+    attributes:
+      label: 問題發生頻率
+      options:
+        - 每次都會發生
+        - 偶爾發生
+        - 只發生過一次
+        - 不確定
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: attempted-fixes
+    attributes:
+      label: 曾嘗試過哪些處理方式？
+      description: 可複選；若尚未嘗試，請選擇「尚未嘗試」。
+      options:
+        - label: 重新開啟 Cyder
+        - label: 重新啟動 Mac
+        - label: 刪除舊版 Cyder App 後安裝最新版
+        - label: 重新初始化 Cyder
+        - label: 重新下載或修復遊戲
+        - label: 尚未嘗試
+
+  - type: textarea
+    id: attachments
+    attributes:
+      label: 截圖、畫面錄影或連結（選填）
+      description: 請拖曳截圖或短影片到此欄位，或貼上可檢視的分享連結。上傳前請遮蔽個人資料。
+      placeholder: 可直接把檔案拖曳到這裡，或貼上 YouTube、Google Drive、iCloud 等連結。
+
+  - type: textarea
+    id: additional-context
+    attributes:
+      label: 補充說明（選填）
+      description: 例如是否使用外接螢幕、VPN、修改過 Wine／Cyder 設定、搬動過遊戲資料夾，或問題只發生在特定角色、地圖或操作下。
+
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: 確認事項
+      options:
+        - label: 我已確認使用最新版 Cyder，且 Issue 未包含帳號、密碼或其他個人資料。
+          required: true
