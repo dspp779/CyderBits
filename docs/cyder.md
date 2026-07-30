@@ -201,7 +201,7 @@ Wine 的 macOS RetinaMode、DPI 與字體 registry 是整個 Wine session／bott
 
 正式啟動路徑不設定 `WINEDLLOVERRIDES`。DLL 相容性設定存放在 prefix Registry；目前僅為 `bluecg.exe` 設定 `HKCU\Software\Wine\AppDefaults\bluecg.exe\DllOverrides` 的 `ddraw=native,builtin`，不影響 BlueLauncher 或其他 EXE。
 
-Finder 啟動時，Cyder 會在呼叫 `/usr/bin/arch` 前監聽 CrossOver Wine 的 `WineAppWillActivateNotification`。收到與 `bottles/shared` 相同、且 `ActivatingAppPID` 已登記為 `regular/Foreground` 的通知後，macOS 14 以上會由 Cyder 先讓出焦點，再透過 cooperative activation 將所有 Wine 視窗帶到前方；macOS 12、13 則使用舊版 activation API 作為相容 fallback。送出一次 activation 後 Cyder 隨即退出；wrapper PID 不參與 activation，也不搜尋 process tree 或視窗 owner。若 Wine 未發出通知，隱藏 launcher最多等待 30 秒；Wine 仍在執行時只記錄 warning，不誤判為失敗。若 Wine 在顯示視窗前退出或被 signal 終止，Cyder 會顯示錯誤代碼與結束狀態。一般啟動不保存 Wine stdout／stderr；需要追查 Wine 問題時可設定 `CYDER_CAPTURE_WINE_LOG=1`，此時 `Logs/last-launch.log` 會指向最近一次啟動記錄。
+Finder 啟動時，Cyder 會在呼叫 `/usr/bin/arch` 前監聽 CrossOver Wine 的 `WineAppWillActivateNotification`。收到與 `bottles/shared` 相同、且 `ActivatingAppPID` 已登記為 `regular/Foreground` 的通知後，macOS 14 以上會由 Cyder 先讓出焦點，再透過 cooperative activation 將所有 Wine 視窗帶到前方；macOS 12、13 則使用舊版 activation API 作為相容 fallback。送出一次 activation 後 Cyder 隨即退出；wrapper PID 不參與 activation，也不搜尋 process tree 或視窗 owner。若 Wine 未發出通知，隱藏 launcher最多等待 30 秒；Wine 仍在執行時只記錄 warning，不誤判為失敗。若 Wine 在顯示視窗前退出或被 signal 終止，Cyder 會顯示錯誤代碼與結束狀態。一般啟動不保存 Wine stdout／stderr；需要追查 Wine 問題時，可在偏好設定「除錯」tab 開啟 Wine 診斷記錄。非安靜模式會以 macOS 內建 gzip 串流保存為 `.log.gz`，降低高重複錯誤造成的磁碟成長。
 
 命令列直接呼叫 `cyder_launcher.sh` 時仍以前景模式執行，方便腳本等待遊戲結束；只有 Universal Cyder 的 Finder EXE 入口會使用 Swift 直接啟動的分離模式。
 
@@ -242,12 +242,12 @@ Cyder 每次啟動都會建立小型 session 記錄，保存目前階段、shell
   sessions/                 # 每次啟動及各子程序的獨立記錄
   session-state.json        # 目前／上次 session 是否正常完成
   last-error.json           # 最近一次結構化錯誤
-  last-launch.log           # 最近一次 Wine 啟動記錄的連結
+  last-launch.log.gz        # 最近一次 Wine 啟動記錄的 gzip 連結
   bootstrap-error.log       # bootstrap 詳細錯誤（若有）
   engine-install.log        # engine 解壓與安裝記錄
 ```
 
-除使用者主動取消外，非預期失敗會顯示 `CYD-*` 錯誤代碼、失敗階段、exit status 或 signal，並提供「複製診斷資訊」及「開啟記錄資料夾」。若 native process 來不及顯示對話框便 crash，Cyder 會在下次啟動時偵測未完成的 session 並提示查看上次記錄。
+除使用者主動取消外，非預期失敗會顯示 `CYD-*` 錯誤代碼、失敗階段、exit status 或 signal，並提供「複製診斷資訊」及「開啟相關記錄」。偏好設定 →「除錯」只匯出上次遊戲的 Wine launch log；其他初始化或啟動錯誤可直接複製錯誤對話框中的診斷資訊，另可在關閉遊戲後清理 Wine launch/debug log。若 native process 來不及顯示對話框便 crash，Cyder 會在下次啟動時偵測未完成的 session 並提示查看上次記錄。
 
 ## 相關文件
 

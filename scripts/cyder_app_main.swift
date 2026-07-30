@@ -62,6 +62,12 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         controller.onOpenWinetricks = { [weak self] verbs in
             self?.installWinetricks(verbs)
         }
+        controller.onExportLastGameLog = { [weak self] in
+            self?.exportLastGameLog()
+        }
+        controller.onCleanDebugLogs = { [weak self] in
+            self?.cleanDebugLogs()
+        }
         controller.onClose = { [weak self] in
             guard let self, self.terminateWhenSettingsClose,
                   !self.environmentPreparationInProgress,
@@ -405,6 +411,78 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         settingsController.showWindow(nil)
         settingsController.window?.makeKeyAndOrderFront(nil)
         settingsController.window?.orderFrontRegardless()
+    }
+
+    private func exportLastGameLog() {
+        let panel = NSSavePanel()
+        panel.title = "匯出上次遊戲記錄"
+        panel.message = "選擇要複製上次遊戲 Wine log 的位置。"
+        panel.nameFieldStringValue = "Cyder-last-game.log.gz"
+        panel.canCreateDirectories = true
+        if #available(macOS 11.0, *) {
+            panel.allowedContentTypes = [UTType(filenameExtension: "gz") ?? .data]
+        }
+        guard panel.runModal() == .OK, let destination = panel.url else { return }
+
+        environmentPreparationInProgress = true
+        showSetup("正在匯出上次遊戲記錄…")
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            guard let self else { return }
+            do {
+                try CyderDiagnostics.shared.exportLastGameLog(to: destination)
+                DispatchQueue.main.async {
+                    self.hideSetup()
+                    self.environmentPreparationInProgress = false
+                    self.showAlert(
+                        "上次遊戲記錄已匯出",
+                        destination.path,
+                        style: .informational
+                    )
+                }
+            } catch {
+                DispatchQueue.main.async {
+                    self.hideSetup()
+                    self.environmentPreparationInProgress = false
+                    self.showAlert(
+                        "無法匯出上次遊戲記錄",
+                        error.localizedDescription,
+                        style: .critical
+                    )
+                }
+            }
+        }
+    }
+
+    private func cleanDebugLogs() {
+        guard !hasRunningExes() else {
+            showAlert("無法清理除錯記錄", "請先關閉所有遊戲，再清理目前的 Wine launch/debug log。")
+            return
+        }
+        let alert = NSAlert()
+        alert.messageText = "清理除錯記錄？"
+        alert.informativeText = "這會移除 Wine launch/debug log 與 last-launch.log.gz，但不會刪除遊戲、Windows 環境或偏好設定。"
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "清理")
+        alert.addButton(withTitle: "取消")
+        guard runFrontmostAlert(alert, dockVisible: true, anchorWindow: settingsController.window)
+            == .alertFirstButtonReturn else { return }
+
+        do {
+            let summary = try CyderDiagnostics.shared.cleanupDebugLogs()
+            let bytes = ByteCountFormatter.string(
+                fromByteCount: summary.byteCount,
+                countStyle: .file
+            )
+            showAlert(
+                "除錯記錄已清理",
+                summary.fileCount == 0
+                    ? "目前沒有可清理的除錯記錄。"
+                    : "已移除 \(summary.fileCount) 個檔案，共 \(bytes)。",
+                style: .informational
+            )
+        } catch {
+            showAlert("無法清理除錯記錄", error.localizedDescription, style: .critical)
+        }
     }
 
     @objc private func showGameLibrary() {
@@ -996,14 +1074,22 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             || ProcessInfo.processInfo.environment["CYDER_LAUNCH_KIND"] == "test"
             || diagnosticLevel != .quiet
         let launchLog = captureWineLog
-            ? CyderDiagnostics.shared.makeOperationLog("wine-launch")
+            ? CyderDiagnostics.shared.makeOperationLog("wine-launch").appendingPathExtension("gz")
             : URL(fileURLWithPath: "/dev/null")
         let diagnosticLog = captureWineLog ? launchLog : CyderDiagnostics.shared.sessionLogURL
-        let legacyLog = logDirectory.appendingPathComponent("last-launch.log")
-        try? FileManager.default.removeItem(at: legacyLog)
+        let legacyLogs = [
+            logDirectory.appendingPathComponent("last-launch.log"),
+            logDirectory.appendingPathComponent("last-launch.log.gz"),
+        ]
+        for legacyLog in legacyLogs {
+            try? FileManager.default.removeItem(at: legacyLog)
+        }
         if captureWineLog {
             FileManager.default.createFile(atPath: launchLog.path, contents: nil)
-            try? FileManager.default.createSymbolicLink(at: legacyLog, withDestinationURL: launchLog)
+            try? FileManager.default.createSymbolicLink(
+                at: legacyLogs[1],
+                withDestinationURL: launchLog
+            )
         }
 
         let engineRoot = wine.deletingLastPathComponent().deletingLastPathComponent()
@@ -1076,14 +1162,33 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         process.currentDirectoryURL = URL(fileURLWithPath: exe).deletingLastPathComponent()
         process.environment = environment
 
-        guard let handle = FileHandle(forWritingAtPath: launchLog.path) else {
-            return .failure(CyderFailure(
-                code: "CYD-LOG-002",
-                stage: .wineSpawn,
-                summary: "無法建立 Wine 啟動記錄。",
-                technicalDetails: "Unable to open \(launchLog.path) for writing.",
-                logURL: CyderDiagnostics.shared.sessionLogURL
-            ))
+        let compressedWriter: CyderCompressedLogWriter?
+        let outputHandle: FileHandle
+        if captureWineLog {
+            do {
+                compressedWriter = try CyderCompressedLogWriter(outputURL: launchLog)
+                outputHandle = compressedWriter!.inputHandle
+            } catch {
+                return .failure(CyderFailure(
+                    code: "CYD-LOG-002",
+                    stage: .wineSpawn,
+                    summary: "無法建立 Wine 啟動記錄。",
+                    technicalDetails: "Unable to open compressed log \(launchLog.path): \(error)",
+                    logURL: CyderDiagnostics.shared.sessionLogURL
+                ))
+            }
+        } else {
+            compressedWriter = nil
+            guard let quietHandle = FileHandle(forWritingAtPath: "/dev/null") else {
+                return .failure(CyderFailure(
+                    code: "CYD-LOG-002",
+                    stage: .wineSpawn,
+                    summary: "無法建立 Wine 啟動記錄。",
+                    technicalDetails: "Unable to open /dev/null for quiet launch output.",
+                    logURL: CyderDiagnostics.shared.sessionLogURL
+                ))
+            }
+            outputHandle = quietHandle
         }
         let msyncEnabled = environment["CYDER_MSYNC"] == "1" || environment["WINEMSYNC"] == "1"
         let esyncEnabled = environment["CYDER_ESYNC"] == "1" || environment["WINEESYNC"] == "1"
@@ -1141,9 +1246,9 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
           taskpolicy_available=\(hasTaskpolicy)
 
         """
-        try? handle.write(contentsOf: Data(CyderDiagnostics.shared.redact(preamble).utf8))
-        process.standardOutput = handle
-        process.standardError = handle
+        try? compressedWriter?.write(Data(CyderDiagnostics.shared.redact(preamble).utf8))
+        process.standardOutput = outputHandle
+        process.standardError = outputHandle
 
         let msync = msyncEnabled ? "1" : "0"
         let esync = esyncEnabled ? "1" : "0"
@@ -1162,7 +1267,8 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             try process.run()
             CyderDiagnostics.shared.info("wine process started pid=\(process.processIdentifier)")
         } catch {
-            try? handle.close()
+            compressedWriter?.closeInput(waitForExit: true)
+            if compressedWriter == nil { try? outputHandle.close() }
             return .failure(CyderFailure(
                 code: "CYD-WIN-001",
                 stage: .wineSpawn,
@@ -1179,12 +1285,14 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         while Date() < deadline {
             if activationWaiter.semaphore.wait(timeout: .now() + 0.2) == .success {
                 CyderDiagnostics.shared.enter(.wineActivation, detail: "notification-received")
-                try? handle.close()
+                compressedWriter?.closeInput(waitForExit: false)
+                if compressedWriter == nil { try? outputHandle.close() }
                 return .success
             }
             if !process.isRunning {
                 process.waitUntilExit()
-                try? handle.close()
+                compressedWriter?.closeInput(waitForExit: true)
+                if compressedWriter == nil { try? outputHandle.close() }
                 let reason: String
                 let code: String
                 if process.terminationReason == .uncaughtSignal {
@@ -1208,7 +1316,8 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
                 ))
             }
         }
-        try? handle.close()
+        compressedWriter?.closeInput(waitForExit: false)
+        if compressedWriter == nil { try? outputHandle.close() }
         CyderDiagnostics.shared.warning("wine activation timed out after 30s pid=\(process.processIdentifier); process remains running")
         return .success
     }
@@ -1708,7 +1817,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             }
             alert.addButton(withTitle: "關閉")
             alert.addButton(withTitle: "複製診斷資訊")
-            alert.addButton(withTitle: "開啟記錄資料夾")
+            alert.addButton(withTitle: "開啟相關記錄")
             if allowsRebuild {
                 alert.addButton(withTitle: "重建 Windows 遊戲環境")
             }

@@ -73,6 +73,25 @@ struct CyderPreviousSession {
     let logPath: String
 }
 
+struct CyderLogCleanupSummary {
+    let fileCount: Int
+    let byteCount: Int64
+}
+
+enum CyderDiagnosticsError: LocalizedError {
+    case noPreviousGameLog
+    case exportFailed(String)
+
+    var errorDescription: String? {
+        switch self {
+        case .noPreviousGameLog:
+            return "找不到可匯出的上次遊戲記錄。請先執行一次遊戲或測試啟動。"
+        case .exportFailed(let detail):
+            return "無法匯出遊戲記錄：\(detail)"
+        }
+    }
+}
+
 final class CyderDiagnostics {
     static let shared = CyderDiagnostics()
 
@@ -199,13 +218,93 @@ final class CyderDiagnostics {
             .appendingPathComponent(String(format: "%@-%03d-%@.log", sessionID, sequence, safeName))
     }
 
+    /// Export only the most recent game launch log.
+    /// Other pre-launch failures provide their own copyable diagnostics.
+    func exportLastGameLog(to destinationURL: URL) throws {
+        let manager = FileManager.default
+        guard let source = lastGameLogURL() else {
+            throw CyderDiagnosticsError.noPreviousGameLog
+        }
+        do {
+            try manager.copyItem(at: source.resolvingSymlinksInPath(), to: destinationURL)
+        } catch {
+            throw CyderDiagnosticsError.exportFailed(error.localizedDescription)
+        }
+    }
+
+    /// Remove Wine launch logs, including the convenience launch-log pointers.
+    /// Session logs and game files remain untouched.
+    func cleanupDebugLogs() throws -> CyderLogCleanupSummary {
+        let manager = FileManager.default
+        var targets: [URL] = []
+        let latestLaunches = [
+            logsURL.appendingPathComponent("last-launch.log"),
+            logsURL.appendingPathComponent("last-launch.log.gz"),
+        ]
+        for latestLaunch in latestLaunches {
+            if fileExistsOrSymlink(latestLaunch) {
+                targets.append(latestLaunch)
+            }
+        }
+        if let files = try? manager.contentsOfDirectory(
+            at: logsURL.appendingPathComponent("sessions", isDirectory: true),
+            includingPropertiesForKeys: nil,
+            options: [.skipsHiddenFiles]
+        ) {
+            targets.append(contentsOf: files.filter {
+                ($0.pathExtension == "log" || $0.pathExtension == "gz")
+                    && $0.lastPathComponent.contains("-wine-launch.log")
+            })
+        }
+
+        var seen = Set<String>()
+        var fileCount = 0
+        var byteCount: Int64 = 0
+        for target in targets where seen.insert(target.standardizedFileURL.path).inserted {
+            guard fileExistsOrSymlink(target) else {
+                continue
+            }
+            let values = try? target.resourceValues(forKeys: [.fileSizeKey])
+            byteCount += Int64(values?.fileSize ?? 0)
+            try manager.removeItem(at: target)
+            fileCount += 1
+        }
+        return CyderLogCleanupSummary(fileCount: fileCount, byteCount: byteCount)
+    }
+
     func tail(of url: URL, maxBytes: Int = 16_384) -> String {
+        if url.pathExtension == "gz" {
+            return decompressedTail(of: url, maxBytes: maxBytes)
+        }
         guard let handle = try? FileHandle(forReadingFrom: url) else { return "" }
         defer { try? handle.close() }
         let size = (try? handle.seekToEnd()) ?? 0
         let offset = size > UInt64(maxBytes) ? size - UInt64(maxBytes) : 0
         try? handle.seek(toOffset: offset)
         guard let data = try? handle.readToEnd() else { return "" }
+        return redact(String(decoding: data, as: UTF8.self))
+    }
+
+    private func decompressedTail(of url: URL, maxBytes: Int) -> String {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/gzip")
+        process.arguments = ["-cd", url.path]
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        do {
+            try process.run()
+        } catch {
+            return ""
+        }
+        var data = Data()
+        while let chunk = try? pipe.fileHandleForReading.read(upToCount: 64 * 1024),
+              !chunk.isEmpty {
+            data.append(chunk)
+            if data.count > maxBytes {
+                data.removeFirst(data.count - maxBytes)
+            }
+        }
+        process.waitUntilExit()
         return redact(String(decoding: data, as: UTF8.self))
     }
 
@@ -268,7 +367,7 @@ final class CyderDiagnostics {
             includingPropertiesForKeys: [.contentModificationDateKey],
             options: [.skipsHiddenFiles]
         ) else { return }
-        let logs = files.filter { $0.pathExtension == "log" }
+        let logs = files.filter { $0.pathExtension == "log" || $0.pathExtension == "gz" }
         let sorted = logs.sorted {
             let left = (try? $0.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
             let right = (try? $1.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
@@ -277,6 +376,41 @@ final class CyderDiagnostics {
         for url in sorted.dropFirst(limit * 5) {
             try? FileManager.default.removeItem(at: url)
         }
+    }
+
+    private func lastGameLogURL() -> URL? {
+        let manager = FileManager.default
+        let sessionsURL = logsURL.appendingPathComponent("sessions", isDirectory: true)
+        let sessionFiles = (try? manager.contentsOfDirectory(
+            at: sessionsURL,
+            includingPropertiesForKeys: [.contentModificationDateKey],
+            options: [.skipsHiddenFiles]
+        ))?.filter { $0.pathExtension == "log" || $0.pathExtension == "gz" } ?? []
+
+        let lastLaunches = [
+            logsURL.appendingPathComponent("last-launch.log.gz"),
+            logsURL.appendingPathComponent("last-launch.log"),
+        ]
+        for lastLaunch in lastLaunches where manager.fileExists(atPath: lastLaunch.path) {
+            let resolved = lastLaunch.resolvingSymlinksInPath()
+            if manager.fileExists(atPath: resolved.path) {
+                return resolved
+            }
+        }
+        return sessionFiles
+            .filter { $0.lastPathComponent.contains("-wine-launch.log") }
+            .sorted { modificationDate(of: $0) > modificationDate(of: $1) }
+            .first
+    }
+
+    private func modificationDate(of url: URL) -> Date {
+        (try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate)
+            ?? .distantPast
+    }
+
+    private func fileExistsOrSymlink(_ url: URL) -> Bool {
+        FileManager.default.fileExists(atPath: url.path)
+            || (try? FileManager.default.destinationOfSymbolicLink(atPath: url.path)) != nil
     }
 
     private static func readPreviousSession(from url: URL) -> CyderPreviousSession? {

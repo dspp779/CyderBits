@@ -200,6 +200,58 @@ struct CyderLaunchContext {
     }
 }
 
+/// Streams Wine output through macOS's built-in gzip process so verbose
+/// diagnostics do not grow as quickly while the game is running.
+final class CyderCompressedLogWriter {
+    let inputHandle: FileHandle
+    private let inputPipe: Pipe
+    private let outputHandle: FileHandle
+    private let compressor: Process
+    private var didCloseInput = false
+
+    init(outputURL: URL) throws {
+        let manager = FileManager.default
+        manager.createFile(atPath: outputURL.path, contents: nil)
+        outputHandle = try FileHandle(forWritingTo: outputURL)
+        inputPipe = Pipe()
+        compressor = Process()
+        inputHandle = inputPipe.fileHandleForWriting
+        compressor.executableURL = URL(fileURLWithPath: "/usr/bin/gzip")
+        compressor.arguments = ["-c"]
+        compressor.standardInput = inputPipe.fileHandleForReading
+        compressor.standardOutput = outputHandle
+        do {
+            try compressor.run()
+        } catch {
+            try? outputHandle.close()
+            throw error
+        }
+    }
+
+    deinit {
+        closeInput(waitForExit: false)
+        try? outputHandle.close()
+    }
+
+    func write(_ data: Data) throws {
+        try inputHandle.write(contentsOf: data)
+    }
+
+    func closeInput(waitForExit: Bool) {
+        guard !didCloseInput else {
+            if waitForExit, compressor.isRunning {
+                compressor.waitUntilExit()
+            }
+            return
+        }
+        didCloseInput = true
+        try? inputHandle.close()
+        if waitForExit {
+            compressor.waitUntilExit()
+        }
+    }
+}
+
 func resolveEngineSrc(resourcePath: String) -> String {
     let archiveListFile = resourcePath + "/engine-archive.txt"
     if let archiveName = try? String(contentsOfFile: archiveListFile, encoding: .utf8) {

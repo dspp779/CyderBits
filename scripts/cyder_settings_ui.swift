@@ -48,6 +48,8 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
     var onCreateProfile: ((URL) -> Void)?
     var onOpenGameLibrary: (() -> Void)?
     var onOpenWinetricks: (([String]) -> Void)?
+    var onExportLastGameLog: (() -> Void)?
+    var onCleanDebugLogs: (() -> Void)?
     var onSaveStarted: (() -> Void)?
     var onSaveFailed: (() -> Void)?
     var onClose: (() -> Void)?
@@ -72,6 +74,7 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
     private let removeGptkButton = NSButton()
     private let stopAllWineButton = NSButton()
     private let wineDiagnostics = NSPopUpButton()
+    private let diagnosticsWarning = NSTextField(wrappingLabelWithString: "")
     private let executableList = NSPopUpButton()
     private let executableRecommendation = NSPopUpButton()
     private let executableName = NSTextField(labelWithString: "尚未選擇 EXE")
@@ -129,6 +132,7 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
         tabs.addTabViewItem(makeFontsTab())
         tabs.addTabViewItem(makeGraphicsTab())
         tabs.addTabViewItem(makeAdvancedTab())
+        tabs.addTabViewItem(makeDiagnosticsTab())
 
         status.font = .systemFont(ofSize: 11)
         status.textColor = .secondaryLabelColor
@@ -159,7 +163,17 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
         esync.action = #selector(esyncChanged)
         let msyncDescription = note("使用 macOS 原生同步機制改善部分遊戲效能；若遊戲凍結或無法啟動，可保持關閉。")
         let esyncDescription = note("使用事件同步機制降低等待開銷。MSync 與 ESync 不能同時開啟。")
+        let gameLibrary = NSButton(title: "打開遊戲庫…", target: self, action: #selector(openGameLibrary))
+        gameLibrary.bezelStyle = .rounded
+        stopAllWineButton.title = "關閉所有 Wine 程序"
+        stopAllWineButton.bezelStyle = .rounded
+        stopAllWineButton.target = self
+        stopAllWineButton.action = #selector(stopAllWine)
         return tab("一般", rows: [
+            gameLibrary,
+            note("加入 Windows 遊戲、直接啟動，或管理每個遊戲的獨立 Wine prefix 與設定。"),
+            stopAllWineButton,
+            note("對目前 Cyder 使用的 Wine 環境執行 wineserver -k，並等待程序結束。"),
             row("MSync", msync),
             msyncDescription,
             row("ESync", esync),
@@ -304,34 +318,43 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
     }
 
     private func makeAdvancedTab() -> NSTabViewItem {
-        wineDiagnostics.addItems(withTitles: ["安靜（預設）", "只記錄錯誤", "完整堆疊追蹤"])
-        wineDiagnostics.target = self
-        wineDiagnostics.action = #selector(wineDiagnosticsChanged)
-        let gameLibrary = NSButton(title: "打開遊戲庫…", target: self, action: #selector(openGameLibrary))
-        gameLibrary.bezelStyle = .rounded
         let rebuild = NSButton(title: "重建 Windows 遊戲環境…", target: self, action: #selector(rebuildEnvironment))
         rebuild.bezelStyle = .rounded
         let applyAll = NSButton(title: "套用所有設定", target: self, action: #selector(applyAllSettings))
         applyAll.bezelStyle = .rounded
         let winetricks = NSButton(title: "Winetricks 元件…", target: self, action: #selector(openWinetricks))
         winetricks.bezelStyle = .rounded
-        stopAllWineButton.title = "關閉所有 Wine 程序"
-        stopAllWineButton.bezelStyle = .rounded
-        stopAllWineButton.target = self
-        stopAllWineButton.action = #selector(stopAllWine)
         return tab("進階", rows: [
-            row("Wine 診斷記錄", wineDiagnostics),
-            note("「只記錄錯誤」適合一般排障；「完整堆疊追蹤」負擔很高，可能改變遊戲時序，僅供短時間重現問題。"),
-            gameLibrary,
-            note("加入 Windows 遊戲、直接啟動，或管理每個遊戲的獨立 Wine prefix 與設定。"),
             rebuild,
             note("重新建立執行 Windows 遊戲所需的環境。遊戲檔案不會刪除，但已安裝的 Windows 元件與自訂設定需要重新套用。"),
             applyAll,
             note("使用 Wine 完整寫入目前所有設定；一般調整會在點選控制項時立即快速儲存。"),
             winetricks,
             note("以原生選擇器安裝 VC++、.NET、WMP、Quartz、Devenum 等元件到 shared prefix。請先關閉所有遊戲。"),
-            stopAllWineButton,
-            note("對目前 Cyder 使用的 Wine 環境執行 wineserver -k，並等待程序結束。"),
+        ])
+    }
+
+    private func makeDiagnosticsTab() -> NSTabViewItem {
+        wineDiagnostics.addItems(withTitles: ["安靜（預設）", "只記錄錯誤", "完整堆疊追蹤"])
+        wineDiagnostics.target = self
+        wineDiagnostics.action = #selector(wineDiagnosticsChanged)
+
+        diagnosticsWarning.stringValue = "⚠ 除錯記錄可能快速佔用大量磁碟空間，並改變遊戲時序。只在重現問題時短時間開啟；完成後請切回「安靜」，再清理除錯記錄。"
+        diagnosticsWarning.textColor = .systemRed
+        diagnosticsWarning.font = .boldSystemFont(ofSize: 12)
+
+        let export = NSButton(title: "匯出上次遊戲記錄…", target: self, action: #selector(exportLastGameLog))
+        export.bezelStyle = .rounded
+        let cleanup = NSButton(title: "清理除錯記錄…", target: self, action: #selector(cleanDebugLogs))
+        cleanup.bezelStyle = .rounded
+        return tab("除錯", rows: [
+            row("Wine 診斷記錄", wineDiagnostics),
+            diagnosticsWarning,
+            note("「只記錄錯誤」適合一般排障；「完整堆疊追蹤」會產生更多資料，僅供短時間重現 exception／unwind 問題。"),
+            export,
+            note("只複製上次遊戲啟動的 Wine log；其他初始化或啟動錯誤可直接複製錯誤對話框中的診斷資訊。"),
+            cleanup,
+            note("只會移除 Wine launch/debug log 與 last-launch.log.gz，不會刪除遊戲、prefix 或設定。清理前請先關閉遊戲。"),
         ])
     }
 
@@ -483,7 +506,41 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
     }
 
     @objc private func wineDiagnosticsChanged() {
+        let selected: CyderWineDiagnostics
+        switch wineDiagnostics.indexOfSelectedItem {
+        case 1: selected = .errors
+        case 2: selected = .unwind
+        default: selected = .quiet
+        }
+        if selected != .quiet {
+            let alert = NSAlert()
+            alert.messageText = selected == .unwind
+                ? "即將開啟高容量堆疊追蹤"
+                : "即將保存 Wine 錯誤記錄"
+            alert.informativeText = selected == .unwind
+                ? "完整堆疊追蹤可能快速產生數十 MB 以上的記錄，並改變遊戲時序。請只在短時間重現問題時使用。"
+                : "只記錄錯誤會保存每次遊戲啟動的 Wine 輸出，可能增加磁碟使用量。重現完成後請切回「安靜」並清理除錯記錄。"
+            alert.alertStyle = .warning
+            alert.addButton(withTitle: "啟用")
+            alert.addButton(withTitle: "取消")
+            if alert.runModal() != .alertFirstButtonReturn {
+                switch store.value.wineDiagnostics {
+                case .quiet: wineDiagnostics.selectItem(at: 0)
+                case .errors: wineDiagnostics.selectItem(at: 1)
+                case .unwind: wineDiagnostics.selectItem(at: 2)
+                }
+                return
+            }
+        }
         saveImmediately()
+    }
+
+    @objc private func exportLastGameLog() {
+        onExportLastGameLog?()
+    }
+
+    @objc private func cleanDebugLogs() {
+        onCleanDebugLogs?()
     }
 
     @objc private func stopAllWine() {

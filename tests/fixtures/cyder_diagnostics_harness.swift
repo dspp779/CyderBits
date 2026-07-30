@@ -22,6 +22,41 @@ struct CyderDiagnosticsHarness {
                 technicalDetails: FileManager.default.homeDirectoryForCurrentUser.path + "/secret/game.exe"
             ))
             diagnostics.finish(outcome: "test-failure-recorded")
+        case "export":
+            let manager = FileManager.default
+            let sessions = diagnostics.logsURL.appendingPathComponent("sessions", isDirectory: true)
+            let priorID = "11111111-1111-1111-1111-111111111111"
+            let sessionLog = sessions.appendingPathComponent("\(priorID).log")
+            let launchLog = sessions.appendingPathComponent("\(priorID)-001-wine-launch.log")
+            try! "session".write(to: sessionLog, atomically: true, encoding: .utf8)
+            try! "Wine diagnostics: errors\n".write(to: launchLog, atomically: true, encoding: .utf8)
+            let lastLaunch = diagnostics.logsURL.appendingPathComponent("last-launch.log")
+            try? manager.removeItem(at: lastLaunch)
+            try! manager.createSymbolicLink(
+                at: lastLaunch,
+                withDestinationURL: launchLog
+            )
+            let exported = diagnostics.supportURL.appendingPathComponent("exported-game.log")
+            try! diagnostics.exportLastGameLog(to: exported)
+            guard manager.fileExists(atPath: exported.path),
+                  (try? String(contentsOf: exported, encoding: .utf8)) == "Wine diagnostics: errors\n"
+            else { exit(13) }
+            diagnostics.finish(outcome: "exported")
+        case "cleanup":
+            let manager = FileManager.default
+            let sessions = diagnostics.logsURL.appendingPathComponent("sessions", isDirectory: true)
+            let launchLog = sessions.appendingPathComponent("22222222-2222-2222-2222-222222222222-001-wine-launch.log")
+            try! "debug".write(to: launchLog, atomically: true, encoding: .utf8)
+            let lastLaunch = diagnostics.logsURL.appendingPathComponent("last-launch.log")
+            try? manager.removeItem(at: lastLaunch)
+            try! manager.createSymbolicLink(atPath: lastLaunch.path, withDestinationPath: launchLog.path)
+            let summary = try! diagnostics.cleanupDebugLogs()
+            guard summary.fileCount == 2,
+                  !manager.fileExists(atPath: launchLog.path),
+                  !manager.fileExists(atPath: lastLaunch.path) else {
+                exit(14)
+            }
+            diagnostics.finish(outcome: "cleaned")
         default:
             exit(12)
         }

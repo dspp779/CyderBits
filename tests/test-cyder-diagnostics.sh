@@ -33,4 +33,13 @@ if [[ "$failure" == *"$HOME/secret"* ]]; then
   exit 1
 fi
 
+CYDER_SUPPORT="$TMP/export-support" "$TMP/diagnostics-harness" export
+assert_contains "$(cat "$TMP/export-support/exported-game.log")" "Wine diagnostics: errors" \
+  "export should copy only the most recent game launch log"
+assert test ! -e "$TMP/export-support/export.zip"
+
+CYDER_SUPPORT="$TMP/cleanup-support" "$TMP/diagnostics-harness" cleanup
+assert test ! -e "$TMP/cleanup-support/Logs/sessions/22222222-2222-2222-2222-222222222222-001-wine-launch.log"
+assert test ! -e "$TMP/cleanup-support/Logs/last-launch.log"
+
 echo "PASS test-cyder-diagnostics"
