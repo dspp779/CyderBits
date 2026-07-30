@@ -1,16 +1,20 @@
 {
   "schemaVersion": 1,
-  "engineId": "cx26.3-w11-cyder006",
-  "versionLabel": "CX26.3.0-W11-Cyder006",
+  "engineId": "cx26.3-w11-cyder007",
+  "versionLabel": "CX26.3.0-W11-Cyder007",
   "base": {
     "crossover": "26.3.0",
     "wine": "11.0"
   },
   "hostArchitecture": "x86_64",
+  "windowsArchitectures": ["i386", "x86_64"],
   "minimumCyderVersion": "0.8.3",
-  "ntdllSHA256": "1cad2a9cbd2213542376cd30ba392677997e0da2138f7d71315bff34fcb0a137",
-  "artifact": "engine-wine-x86_64-CX26-3-0-W11-Cyder006.tar.xz",
-  "artifactSHA256": "431119089fb0b8659bd1b67823bdab2f37dce32d1bb2fc2b797cb929ff36ca00",
-  "sourceProject": "cyder-wine-engine",
-  "patchSet": "cyder006-combined-frame-walk-guard"
+  "ntdllSHA256": "a79ca2e2aab01fe809bfbb2499e374a731734fa1fa2fc32b0890a267c9030de4",
+  "artifact": "engine-wine-x86_64-CX26-3-0-W11-Cyder007.tar.xz",
+  "artifactSHA256": "30478510ae254af59ee35b786876bd0f96987a04358e0799a8804ec1fe5d2186",
+  "patches": [
+    "cyder-compatdb-runtime.patch",
+    "wine-11.1-rtlwalkframechain-null-function.patch",
+    "cyder-ntdll-frame-walk-page-fault-guard.patch"
+  ]
 }
