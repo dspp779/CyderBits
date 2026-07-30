@@ -71,6 +71,7 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
     private let installGptkButton = NSButton()
     private let removeGptkButton = NSButton()
     private let stopAllWineButton = NSButton()
+    private let wineDiagnostics = NSPopUpButton()
     private let executableList = NSPopUpButton()
     private let executableRecommendation = NSPopUpButton()
     private let executableName = NSTextField(labelWithString: "尚未選擇 EXE")
@@ -303,6 +304,9 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
     }
 
     private func makeAdvancedTab() -> NSTabViewItem {
+        wineDiagnostics.addItems(withTitles: ["安靜（預設）", "只記錄錯誤", "完整堆疊追蹤"])
+        wineDiagnostics.target = self
+        wineDiagnostics.action = #selector(wineDiagnosticsChanged)
         let gameLibrary = NSButton(title: "打開遊戲庫…", target: self, action: #selector(openGameLibrary))
         gameLibrary.bezelStyle = .rounded
         let rebuild = NSButton(title: "重建 Windows 遊戲環境…", target: self, action: #selector(rebuildEnvironment))
@@ -316,6 +320,8 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
         stopAllWineButton.target = self
         stopAllWineButton.action = #selector(stopAllWine)
         return tab("進階", rows: [
+            row("Wine 診斷記錄", wineDiagnostics),
+            note("「只記錄錯誤」適合一般排障；「完整堆疊追蹤」負擔很高，可能改變遊戲時序，僅供短時間重現問題。"),
             gameLibrary,
             note("加入 Windows 遊戲、直接啟動，或管理每個遊戲的獨立 Wine prefix 與設定。"),
             rebuild,
@@ -395,6 +401,11 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
         dxvkFrameRate.selectItem(at: value.dxvkFrameRate == .unlimited ? 1 : 0)
         rebuildGraphicsHudMenu(selecting: value.graphicsHud)
         dxvkHudFrametimes.state = value.dxvkHudFrametimes ? .on : .off
+        switch value.wineDiagnostics {
+        case .quiet: wineDiagnostics.selectItem(at: 0)
+        case .errors: wineDiagnostics.selectItem(at: 1)
+        case .unwind: wineDiagnostics.selectItem(at: 2)
+        }
         refreshGraphicsControls()
         profileDrafts = value.perProfile
         profileRecords = Dictionary(uniqueKeysWithValues: profileStore.listRecords().map { ($0.profileId, $0) })
@@ -468,6 +479,10 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
     }
 
     @objc private func dxvkHudFrametimesChanged() {
+        saveImmediately()
+    }
+
+    @objc private func wineDiagnosticsChanged() {
         saveImmediately()
     }
 
@@ -604,6 +619,11 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
                 $0.dxvkFrameRate = dxvkFrameRate.indexOfSelectedItem == 1 ? .unlimited : .sixty
                 $0.graphicsHud = graphicsHudValue
                 $0.dxvkHudFrametimes = dxvkHudFrametimes.state == .on
+                switch wineDiagnostics.indexOfSelectedItem {
+                case 1: $0.wineDiagnostics = .errors
+                case 2: $0.wineDiagnostics = .unwind
+                default: $0.wineDiagnostics = .quiet
+                }
                 for profileID in deletedProfiles {
                     $0.perProfile.removeValue(forKey: profileID)
                 }

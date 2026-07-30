@@ -51,7 +51,11 @@ done
 launch_log="$(readlink "$support/Logs/last-launch.log")"
 launch_log="$support/Logs/$launch_log"
 summary="$(cat "$launch_log")"
-assert_contains "$summary" 'T9 test account 0123456789' "debug launch summary should include dynamic arguments"
+assert_contains "$summary" '<5 game arguments redacted>' "launch summary should redact dynamic arguments"
+if [[ "$summary" == *'0123456789'* || "$summary" == *'T9 test account'* ]]; then
+  echo "ASSERT failed: launch logs must never persist dynamic credentials" >&2
+  exit 1
+fi
 
 CYDER_RUNTIME_ROOT="$runtime" \
 CYDER_SUPPORT="$support" \
@@ -62,7 +66,7 @@ CYDER_REDACT_DYNAMIC_ARGS=1 \
     --launch-exe "$exe" -- 'BeanFun' 'T9 test account' '0123456789'
 redacted_log="$(readlink "$support/Logs/last-launch.log")"
 redacted_summary="$(cat "$support/Logs/$redacted_log")"
-assert_contains "$redacted_summary" '<3 dynamic arguments redacted>' "support logs should offer opt-in argument redaction"
+assert_contains "$redacted_summary" '<3 game arguments redacted>' "support logs should always redact arguments"
 if [[ "$redacted_summary" == *'0123456789'* || "$redacted_summary" == *'T9 test account'* ]]; then
   echo "ASSERT failed: opt-in redaction must hide dynamic credentials" >&2
   exit 1
@@ -82,7 +86,7 @@ assert_contains "$app" 'CYDER_LAUNCH_KIND' "test launches should mark launch kin
 assert_contains "$app" 'Running command:' "Wine launch logs should include a CrossOver-style command header"
 assert_contains "$app" 'let hasDynamicArguments = !(launchArguments ?? []).isEmpty' \
   "empty dynamic argv must not wipe test/saved game arguments"
-assert_contains "$app" 'CYDER_REDACT_DYNAMIC_ARGS' "native diagnostics should offer opt-in dynamic argument redaction"
+assert_contains "$app" '<\(gameArguments.count) game arguments redacted>' "native diagnostics should always redact arguments"
 
 # UI: command-line args field should be multiline like environment variables.
 library_ui="$(cat "$ROOT/scripts/cyder_game_library_ui.swift")"

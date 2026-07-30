@@ -23,10 +23,11 @@
 | [cyder.md](cyder.md) | 一般使用者 | Cyder 啟動器：開 `.exe`、SharedPrefix、bootstrap |
 | [cyder-graphics-backends.zh-TW.md](cyder-graphics-backends.zh-TW.md) | 一般使用者 | 圖形後端（WineD3D/DXVK/D3DMetal）、GPTK 安裝、DXVK 限幀 vs VSync |
 | [cyder-compatdb.zh-TW.md](cyder-compatdb.zh-TW.md) | 開發 / 發布 | CompatDB 架構、Engine 重包判斷、YAML 規則新增與本機測試 |
+| [cyder-wine-engine-project.md](cyder-wine-engine-project.md) | 開發 / 發布 | Wine engine 獨立專案邊界、manifest 契約與 Cyder 匯入流程 |
 | [cyderbits.md](cyderbits.md) | 一般使用者 | CyderBits 打包器：建立 game `.app`、選項與疑難排解 |
 | [bluecg.md](bluecg.md) | 開發 / 驗證 | BlueCG 自建 Wine、執行、高解析度與已知問題 |
 | [wine-configure-options.md](wine-configure-options.md) | 開發 / 建置 | Wine `configure` 旗標說明與老遊戲取捨 |
-| [maplestory-classic-cx26-frame-walk-debug.md](maplestory-classic-cx26-frame-walk-debug.md) | 開發 / 除錯 | 新楓之谷經典版登入卡住：Wine 11.8 對照、CX26 NTDLL 修補、增量編譯與完整驗收 |
+| [maplestory-classic-cx26-frame-walk-debug.md](maplestory-classic-cx26-frame-walk-debug.md) | 開發 / 除錯 | 新楓之谷經典版登入卡住：Wine 11.1–11.14 對照、CX26 NTDLL 修補、增量編譯與完整驗收 |
 | [bluecg-winemac-resize-black-screen.md](bluecg-winemac-resize-black-screen.md) | 開發 / 追蹤 | BlueCG 視窗縮放黑屏的背景、A6 正式解法矩陣與歷史調查 |
 | [bluecg-winemac-runtime-comparison.md](bluecg-winemac-runtime-comparison.md) | 開發 / 比較 | baseline、A2、A4、A6 的功能／畫質／風險矩陣 |
 | [bluecg-winemac-experiments.md](bluecg-winemac-experiments.md) | 開發 / 歷史 | A1–A6-R5 的逐步實驗與失敗邊界 |

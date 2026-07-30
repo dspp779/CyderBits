@@ -73,6 +73,25 @@ enum CyderGraphicsHud: String, Codable, CaseIterable {
     case dxvk
 }
 
+/// Wine trace volume for normal game launches. Keep the default silent because
+/// high-volume unwind/SEH tracing can materially change timing-sensitive games.
+enum CyderWineDiagnostics: String, Codable, CaseIterable {
+    case quiet
+    case errors
+    case unwind
+
+    var wineDebug: String {
+        switch self {
+        case .quiet:
+            return "-all"
+        case .errors:
+            return "-all,err+all,+timestamp,+pid,+tid"
+        case .unwind:
+            return "-all,+timestamp,+pid,+tid,+seh,+unwind"
+        }
+    }
+}
+
 struct CyderGraphicsCapabilities: Equatable {
     var hasD3DMetal: Bool
     var hasDxvk: Bool
@@ -176,10 +195,10 @@ struct CyderExecutableSettings: Codable {
 }
 
 struct CyderSettings: Codable {
-    // Schema 6 adds dxvkHudFrametimes. Schema 5 adds graphicsHud. Schema 4 adds graphics backend and DXVK frame
-    // rate. Schema 3 adds profile-keyed overrides. Keep perExecutable as a
+    // Schema 7 adds wineDiagnostics. Schema 6 adds dxvkHudFrametimes. Schema 5 adds graphicsHud.
+    // Schema 4 adds graphics backend and DXVK frame rate. Schema 3 adds profile-keyed overrides. Keep perExecutable as a
     // legacy basename fallback; never infer a profile from a basename.
-    var schemaVersion = 6
+    var schemaVersion = 7
     var revision = 0
     var msync = false
     var esync: Bool? = false
@@ -191,6 +210,7 @@ struct CyderSettings: Codable {
     var dxvkFrameRate: CyderDxvkFrameRate = .sixty
     var graphicsHud: CyderGraphicsHud = .off
     var dxvkHudFrametimes = true
+    var wineDiagnostics: CyderWineDiagnostics = .quiet
     var perExecutable: [String: CyderExecutableSettings] = [:]
     var perProfile: [String: CyderExecutableSettings] = [:]
 
@@ -204,10 +224,10 @@ struct CyderSettings: Codable {
     init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
         let version = try values.decodeIfPresent(Int.self, forKey: .schemaVersion) ?? 1
-        guard version <= 6 else { throw DecodingError.dataCorruptedError(
+        guard version <= 7 else { throw DecodingError.dataCorruptedError(
             forKey: .schemaVersion, in: values, debugDescription: "unsupported settings schema \(version)"
         ) }
-        schemaVersion = 6
+        schemaVersion = 7
         revision = try values.decodeIfPresent(Int.self, forKey: .revision) ?? 0
         msync = try values.decodeIfPresent(Bool.self, forKey: .msync) ?? false
         esync = try values.decodeIfPresent(Bool?.self, forKey: .esync) ?? false
@@ -225,6 +245,9 @@ struct CyderSettings: Codable {
             try values.decodeIfPresent(String.self, forKey: .graphicsHud)
         )
         dxvkHudFrametimes = try values.decodeIfPresent(Bool.self, forKey: .dxvkHudFrametimes) ?? true
+        wineDiagnostics = Self.sanitizedWineDiagnostics(
+            try values.decodeIfPresent(String.self, forKey: .wineDiagnostics)
+        )
         perExecutable = try values.decodeIfPresent([String: CyderExecutableSettings].self, forKey: .perExecutable) ?? [:]
         let decodedProfiles = try values.decodeIfPresent([String: CyderExecutableSettings].self, forKey: .perProfile) ?? [:]
         perProfile = decodedProfiles.reduce(into: [:]) { result, item in
@@ -259,6 +282,11 @@ struct CyderSettings: Codable {
 
     static func sanitizedGraphicsHud(_ raw: String?) -> CyderGraphicsHud {
         guard let raw, let value = CyderGraphicsHud(rawValue: raw) else { return .off }
+        return value
+    }
+
+    static func sanitizedWineDiagnostics(_ raw: String?) -> CyderWineDiagnostics {
+        guard let raw, let value = CyderWineDiagnostics(rawValue: raw) else { return .quiet }
         return value
     }
 
@@ -441,7 +469,7 @@ final class CyderSettingsStore {
         do {
             let data = try Data(contentsOf: url)
             let decoded = try JSONDecoder().decode(CyderSettings.self, from: data)
-            guard decoded.schemaVersion <= 6 else {
+            guard decoded.schemaVersion <= 7 else {
                 CyderDiagnostics.shared.warning("unsupported settings schema=\(decoded.schemaVersion); using defaults")
                 value = .defaults
                 return
@@ -457,7 +485,7 @@ final class CyderSettingsStore {
         CyderDiagnostics.shared.enter(.settingsSave)
         var next = value
         work(&next)
-        next.schemaVersion = 6
+        next.schemaVersion = 7
         next.perProfile = next.perProfile.reduce(into: [:]) { result, item in
             guard CyderSettings.isValidProfileID(item.key) else { return }
             result[item.key] = CyderSettings.sanitized(item.value)
@@ -485,6 +513,7 @@ final class CyderSettingsStore {
             "CYDER_FONT_PRESET": value.fontPreset,
             "CYDER_FONT_SMOOTHING": value.fontSmoothing,
             "CYDER_POWER_MODE": "normal",
+            "CYDER_WINE_DIAGNOSTICS": value.wineDiagnostics.rawValue,
         ]
     }
 

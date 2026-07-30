@@ -561,7 +561,7 @@ cyder_load_saved_settings() {
   # currently selected game's overrides; reloading the global settings file
   # here used to replace Retina=0/DPI=96 with the global Retina=1/DPI=192.
   local keep_msync=0 keep_esync=0 keep_retina=0 keep_dpi=0
-  local keep_font=0 keep_smoothing=0 keep_power=0
+  local keep_font=0 keep_smoothing=0 keep_power=0 keep_diagnostics=0
   case "${CYDER_MSYNC-}" in 0|1) keep_msync=1 ;; esac
   case "${CYDER_ESYNC-}" in 0|1) keep_esync=1 ;; esac
   case "${CYDER_RETINA_MODE-}" in 0|1) keep_retina=1 ;; esac
@@ -569,6 +569,7 @@ cyder_load_saved_settings() {
   case "${CYDER_FONT_PRESET-}" in songti|mingliu) keep_font=1 ;; esac
   case "${CYDER_FONT_SMOOTHING-}" in off|grayscale|cleartype-rgb|cleartype-bgr) keep_smoothing=1 ;; esac
   case "${CYDER_POWER_MODE-}" in normal|background) keep_power=1 ;; esac
+  case "${CYDER_WINE_DIAGNOSTICS-}" in quiet|errors|unwind) keep_diagnostics=1 ;; esac
 
   export CYDER_MSYNC="${CYDER_MSYNC:-0}"
   export CYDER_ESYNC="${CYDER_ESYNC:-0}"
@@ -577,6 +578,7 @@ cyder_load_saved_settings() {
   export CYDER_FONT_PRESET="${CYDER_FONT_PRESET:-$(cyder_detect_default_font_preset)}"
   export CYDER_FONT_SMOOTHING="${CYDER_FONT_SMOOTHING:-cleartype-rgb}"
   export CYDER_POWER_MODE="${CYDER_POWER_MODE:-normal}"
+  export CYDER_WINE_DIAGNOSTICS="${CYDER_WINE_DIAGNOSTICS:-quiet}"
   [[ -f "$settings" ]] || return 0
   command -v plutil >/dev/null 2>&1 || return 0
 
@@ -614,6 +616,13 @@ cyder_load_saved_settings() {
       standard) export CYDER_POWER_MODE=normal ;;
       energySaving) export CYDER_POWER_MODE=background ;;
       *) export CYDER_POWER_MODE=normal ;;
+    esac
+  fi
+  if [[ "$keep_diagnostics" -eq 0 ]]; then
+    value="$(plutil -extract wineDiagnostics raw -o - "$settings" 2>/dev/null || true)"
+    case "$value" in
+      quiet|errors|unwind) export CYDER_WINE_DIAGNOSTICS="$value" ;;
+      *) export CYDER_WINE_DIAGNOSTICS=quiet ;;
     esac
   fi
   if [[ -z "${CYDER_GRAPHICS_BACKEND:-}" ]]; then
@@ -895,7 +904,10 @@ cyder_wine_frontend_args() {
       args=(--dll "$dll_overrides" "${args[@]}")
     fi
   fi
-  ((${#args[@]})) && printf '%s\n' "${args[*]}"
+  if ((${#args[@]})); then
+    printf '%s\n' "${args[*]}"
+  fi
+  return 0
 }
 
 cyder_resolve_exe_from_args() {
@@ -2085,9 +2097,11 @@ cyder_run_wine_exe() {
   if (( ${#CYDER_STEAM_ARGUMENTS[@]} > 0 )); then
     game_args=("${CYDER_STEAM_ARGUMENTS[@]}")
   fi
-  local game_args_text="${game_args[*]-}"
-  if [[ "${CYDER_REDACT_DYNAMIC_ARGS:-0}" == 1 ]]; then
-    game_args_text="<${#game_args[@]} dynamic arguments redacted>"
+  # Login credentials often arrive through argv. Execute the original array,
+  # but never copy argument values into persistent logs.
+  local game_args_text="(no game arguments)"
+  if (( ${#game_args[@]} > 0 )); then
+    game_args_text="<${#game_args[@]} game arguments redacted>"
   fi
   if declare -F cyder_apply_moltenvk_os_floor >/dev/null 2>&1; then
     cyder_apply_moltenvk_os_floor
@@ -2102,6 +2116,30 @@ cyder_run_wine_exe() {
   local session_id=""
   cyder_wine_locale_exports
   local capture_log="${CYDER_CAPTURE_WINE_LOG:-0}"
+  local wine_diagnostics="${CYDER_WINE_DIAGNOSTICS:-quiet}"
+  local wine_debug="-all"
+  case "$wine_diagnostics" in
+    errors)
+      wine_debug="-all,err+all,+timestamp,+pid,+tid"
+      capture_log=1
+      ;;
+    unwind)
+      wine_debug="-all,+timestamp,+pid,+tid,+seh,+unwind"
+      capture_log=1
+      ;;
+    *)
+      wine_diagnostics="quiet"
+      ;;
+  esac
+  local engine_root canonical_prefix engine_version ntdll_sha256="unavailable"
+  engine_root="$(cd "$(dirname "$wine_bin")/.." && pwd -P)"
+  canonical_prefix="$(cd "$prefix" 2>/dev/null && pwd -P || printf '%s' "$prefix")"
+  engine_version="$(head -n 1 "$engine_root/version" 2>/dev/null || true)"
+  if [[ "$capture_log" == 1 && -f "$engine_root/lib/wine/x86_64-windows/ntdll.dll" ]]; then
+    ntdll_sha256="$(/usr/bin/shasum -a 256 \
+      "$engine_root/lib/wine/x86_64-windows/ntdll.dll" 2>/dev/null | awk '{print $1}')"
+    [[ -n "$ntdll_sha256" ]] || ntdll_sha256="unavailable"
+  fi
   local log_file="/dev/null"
   rm -f "$CYDER_SUPPORT/Logs/last-launch.log"
   if [[ "$capture_log" == 1 ]]; then
@@ -2152,7 +2190,11 @@ cyder_run_wine_exe() {
     echo "***** $(date '+%Y-%m-%dT%H:%M:%SZ')"
     echo "Running command: \"$exe\""
     echo "Launch kind: ${CYDER_LAUNCH_KIND:-cli}"
-    echo "Prefix: $prefix"
+    echo "Runtime: $engine_root"
+    echo "Prefix: $canonical_prefix"
+    echo "Engine version: ${engine_version:-unknown}"
+    echo "NTDLL SHA-256: $ntdll_sha256"
+    echo "Graphics backend: ${CYDER_GRAPHICS_BACKEND:-default}"
     if [[ "${CYDER_MSYNC:-0}" == 1 ]]; then
       echo "MSync: Enabled"
     else
@@ -2164,6 +2206,7 @@ cyder_run_wine_exe() {
       echo "ESync: Disabled"
     fi
     echo "Power mode: ${CYDER_POWER_MODE:-normal}"
+    echo "Wine diagnostics: $wine_diagnostics"
     echo "cwd: $(dirname "$exe")"
     echo
     echo "Command:"
@@ -2173,16 +2216,19 @@ cyder_run_wine_exe() {
     echo "  WINEPREFIX=$prefix"
     echo "  CYDER_MSYNC=${CYDER_MSYNC:-0}"
     echo "  CYDER_ESYNC=${CYDER_ESYNC:-0}"
+    echo "  CYDER_WINE_DIAGNOSTICS=$wine_diagnostics"
+    echo "  WINEDEBUG=$wine_debug"
     echo "  taskpolicy_available=$([[ -n "$taskpolicy_bin" ]] && echo true || echo false)"
     echo
   } >>"$log_file"
   (
-    export WINEPREFIX="$prefix" WINESERVER="$wineserver"
+    export WINEPREFIX="$prefix" WINESERVER="$wineserver" WINEDEBUG="$wine_debug"
     export CYDER_GRAPHICS_BACKENDS_ROOT="$(cd "$(dirname "$wine_bin")/.." && pwd)"
     if [[ -f "$CYDER_GRAPHICS_BACKENDS_ROOT/lib64/apple_gptk/external/libd3dshared.dylib" ]]; then
       export CX_APPLEGPTK_LIBD3DSHARED_PATH="$CYDER_GRAPHICS_BACKENDS_ROOT/lib64/apple_gptk/external/libd3dshared.dylib"
     fi
-    if overrides="$(cyder_oem_dxvk_dll_overrides 2>/dev/null)" && [[ -n "$overrides" ]]; then
+    overrides="$(cyder_oem_dxvk_dll_overrides 2>/dev/null || true)"
+    if [[ -n "$overrides" ]]; then
       export CYDER_WINE_DLL_OVERRIDES="$overrides"
       if [[ -x "$CYDER_SCRIPTS/install-dxvk-prefix.sh" ]]; then
         bash "$CYDER_SCRIPTS/install-dxvk-prefix.sh" \

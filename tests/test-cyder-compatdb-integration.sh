@@ -149,7 +149,7 @@ assert_contains "$app" 'configureCompatDBEnvironment(&environment' \
   "native launches should select the same CompatDB"
 assert_contains "$app" 'appendingPathComponent("CompatDB", isDirectory: true)' \
   "native launches should support content-addressed updates and bundle fallback"
-assert_contains "$app" 'compatDBSHA256(candidate) == digest' \
+assert_contains "$app" 'fileSHA256(candidate) == digest' \
   "native session pins should be revalidated against their recorded digest"
 assert_contains "$app" '.typeSocket' \
   "native wineserver detection should require a real Unix socket"

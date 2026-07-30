@@ -976,12 +976,25 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         }
 
         CyderDiagnostics.shared.enter(.wineSpawn, detail: CyderDiagnostics.shared.redact(exe))
+        let process = Process()
+        let environment = wineEnvironment(
+            wine: wine,
+            support: support,
+            exe: exe,
+            profileID: profileID,
+            prefix: prefix,
+            gameSettings: gameSettings
+        )
+        let diagnosticLevel = CyderWineDiagnostics(
+            rawValue: environment["CYDER_WINE_DIAGNOSTICS"] ?? ""
+        ) ?? .quiet
         // Test launches (override settings from the library "測試" button) always
-        // capture a CrossOver-style preamble + Wine stdout/stderr. Opt-in via
-        // CYDER_CAPTURE_WINE_LOG=1 for Finder / library play launches.
+        // capture a CrossOver-style preamble + Wine stdout/stderr. Error and
+        // unwind diagnostics also imply capture; quiet play launches stay silent.
         let captureWineLog = ProcessInfo.processInfo.environment["CYDER_CAPTURE_WINE_LOG"] == "1"
             || gameSettings != nil
             || ProcessInfo.processInfo.environment["CYDER_LAUNCH_KIND"] == "test"
+            || diagnosticLevel != .quiet
         let launchLog = captureWineLog
             ? CyderDiagnostics.shared.makeOperationLog("wine-launch")
             : URL(fileURLWithPath: "/dev/null")
@@ -993,15 +1006,6 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             try? FileManager.default.createSymbolicLink(at: legacyLog, withDestinationURL: launchLog)
         }
 
-        let process = Process()
-        let environment = wineEnvironment(
-            wine: wine,
-            support: support,
-            exe: exe,
-            profileID: profileID,
-            prefix: prefix,
-            gameSettings: gameSettings
-        )
         let engineRoot = wine.deletingLastPathComponent().deletingLastPathComponent()
         let effectiveBackend = environment["CYDER_GRAPHICS_BACKEND"]
         let isMapleStoryOEM = ProcessInfo.processInfo.environment["CYDER_OEM_FLAVOR"] == "maplestory"
@@ -1040,11 +1044,11 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         } else {
             argumentSource = "saved"
         }
-        let redactDynamicArguments = hasDynamicArguments
-            && ProcessInfo.processInfo.environment["CYDER_REDACT_DYNAMIC_ARGS"] == "1"
-        let diagnosticArguments = redactDynamicArguments
-            ? "<\(gameArguments.count) dynamic arguments redacted>"
-            : compatibleGameArguments.joined(separator: " ")
+        // Login tokens and account identifiers commonly arrive through argv.
+        // Preserve the real argv for Process, but never copy values into logs.
+        let diagnosticArguments = gameArguments.isEmpty
+            ? "(no game arguments)"
+            : "<\(gameArguments.count) game arguments redacted>"
         let frontendArguments = wineFrontendArguments(wine: wine, dllOverrides: oemDxvkDllOverrides)
         let wineCommandArguments = frontendArguments + [exe] + compatibleGameArguments
         let powerMode = environment["CYDER_POWER_MODE"] ?? "normal"
@@ -1086,17 +1090,30 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         let launchKind = ProcessInfo.processInfo.environment["CYDER_LAUNCH_KIND"]
             ?? (gameSettings == nil ? "play" : "test")
         let extraEnvironment = (gameSettings?.environment ?? [:])
-            .sorted { $0.key < $1.key }
-            .map { "  \($0.key)=\($0.value)" }
+            .keys.sorted()
+            .map { "  \($0)=<value redacted>" }
             .joined(separator: "\n")
         let timestamp = ISO8601DateFormatter().string(from: Date())
+        let canonicalEngine = engineRoot.resolvingSymlinksInPath().standardizedFileURL
+        let canonicalPrefix = prefix.resolvingSymlinksInPath().standardizedFileURL
+        let engineVersion = ((try? String(
+            contentsOf: canonicalEngine.appendingPathComponent("version"),
+            encoding: .utf8
+        )) ?? "unknown").trimmingCharacters(in: .whitespacesAndNewlines)
+        let ntdll = canonicalEngine.appendingPathComponent("lib/wine/x86_64-windows/ntdll.dll")
+        let ntdllSHA256 = fileSHA256(ntdll) ?? "unavailable"
         // CrossOver-style preamble: command first, then bottle/sync/env, then Wine output.
         let preamble = """
         ***** \(timestamp)
         Running command: "\(exe)"
         Launch kind: \(launchKind)
         Profile: \(profileID ?? "shared")
-        Prefix: \(prefixPath)
+        Runtime: \(canonicalEngine.path)
+        Prefix: \(canonicalPrefix.path)
+        Engine version: \(engineVersion.isEmpty ? "unknown" : engineVersion)
+        NTDLL SHA-256: \(ntdllSHA256)
+        Graphics backend: \(effectiveBackend ?? "default")
+        Wine diagnostics: \(diagnosticLevel.rawValue)
         MSync: \(msyncEnabled ? "Enabled" : "Disabled")
         ESync: \(esyncEnabled ? "Enabled" : "Disabled")
         Power mode: \(powerMode)
@@ -1119,6 +1136,8 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
           CYDER_DPI=\(environment["CYDER_DPI"] ?? "<unset>")
           CYDER_RETINA_MODE=\(environment["CYDER_RETINA_MODE"] ?? "<unset>")
           CYDER_FONT_PRESET=\(environment["CYDER_FONT_PRESET"] ?? "<unset>")
+          CYDER_WINE_DIAGNOSTICS=\(environment["CYDER_WINE_DIAGNOSTICS"] ?? "<unset>")
+          WINEDEBUG=\(environment["WINEDEBUG"] ?? "<unset>")
           taskpolicy_available=\(hasTaskpolicy)
 
         """
@@ -1132,7 +1151,10 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             "game-launch effective-settings profile=\(profileID ?? "shared") "
                 + "source=\(gameSettings == nil ? "saved" : "test-or-override") "
                 + "argument_source=\(argumentSource) argument_count=\(gameArguments.count) "
-                + "msync=\(msync) esync=\(esync) power=\(powerMode) captureWineLog=\(captureWineLog) "
+                + "engine_version=\(engineVersion.isEmpty ? "unknown" : engineVersion) "
+                + "ntdll_sha256=\(ntdllSHA256) graphics=\(effectiveBackend ?? "default") "
+                + "diagnostics=\(diagnosticLevel.rawValue) msync=\(msync) esync=\(esync) "
+                + "power=\(powerMode) captureWineLog=\(captureWineLog) "
                 + "log=\(CyderDiagnostics.shared.redact(launchLog.path))"
         )
 
@@ -1288,6 +1310,11 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         environment["LANG"] = locale
         environment["LC_ALL"] = locale
         environment["LC_CTYPE"] = locale
+        let diagnostics = CyderWineDiagnostics(
+            rawValue: environment["CYDER_WINE_DIAGNOSTICS"] ?? ""
+        ) ?? .quiet
+        environment["CYDER_WINE_DIAGNOSTICS"] = diagnostics.rawValue
+        environment["WINEDEBUG"] = diagnostics.wineDebug
         configureCompatDBEnvironment(&environment, prefix: prefix)
         return environment
     }
@@ -1308,7 +1335,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
            let explicit = environment["CYDER_COMPATDB_PATH"],
            let expected = environment["CYDER_COMPATDB_SHA256"],
            isCompatDBDigest(expected),
-           compatDBSHA256(URL(fileURLWithPath: explicit)) == expected {
+           fileSHA256(URL(fileURLWithPath: explicit)) == expected {
             return
         }
         environment.removeValue(forKey: "CYDER_COMPATDB_PATH")
@@ -1345,7 +1372,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             let updated = compatRoot
                 .appendingPathComponent(value, isDirectory: true)
                 .appendingPathComponent("compatdb.cdb")
-            if compatDBSHA256(updated) == value {
+            if fileSHA256(updated) == value {
                 selected = updated
                 selectedKind = "unsigned"
                 selectedDigest = value
@@ -1411,13 +1438,13 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
               allowUnsigned,
               let digest = fields["sha256"],
               isCompatDBDigest(digest),
-              compatDBSHA256(candidate) == digest else {
+              fileSHA256(candidate) == digest else {
             return nil
         }
         return candidate
     }
 
-    private func compatDBSHA256(_ file: URL) -> String? {
+    private func fileSHA256(_ file: URL) -> String? {
         guard let data = try? Data(contentsOf: file, options: .mappedIfSafe) else {
             return nil
         }

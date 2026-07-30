@@ -6,11 +6,13 @@ struct CyderSettingsHarness {
         let path = URL(fileURLWithPath: CommandLine.arguments[1])
         let store = CyderSettingsStore(url: path)
         let profileID = "profile-0123456789abcdef01234567"
-        precondition(store.value.schemaVersion == 6)
+        precondition(store.value.schemaVersion == 7)
         precondition(store.value.graphicsBackend == .default)
         precondition(store.value.dxvkFrameRate == .sixty)
         precondition(store.value.graphicsHud == .off)
         precondition(store.value.dxvkHudFrametimes)
+        precondition(store.value.wineDiagnostics == .quiet)
+        precondition(store.environment["CYDER_WINE_DIAGNOSTICS"] == "quiet")
         precondition(store.environment["CYDER_DPI"] == "480")
         let profileEnvironment = store.environment(profileID: profileID, legacyBasename: "game.exe")
         precondition(profileEnvironment["PROFILE_VALUE"] == "yes")
@@ -52,8 +54,15 @@ struct CyderSettingsHarness {
         let environment = profile["environment"] as! [String: Any]
         precondition(environment["NOT VALID"] == nil)
         let reloaded = CyderSettingsStore(url: path)
-        precondition(reloaded.value.schemaVersion == 6)
+        precondition(reloaded.value.schemaVersion == 7)
         precondition(reloaded.value.revision == 1)
+
+        try store.update { settings in
+            settings.wineDiagnostics = .errors
+        }
+        precondition(store.environment["CYDER_WINE_DIAGNOSTICS"] == "errors")
+        precondition(CyderWineDiagnostics.errors.wineDebug == "-all,err+all,+timestamp,+pid,+tid")
+        precondition(CyderWineDiagnostics.unwind.wineDebug == "-all,+timestamp,+pid,+tid,+seh,+unwind")
 
         var globalDxvk = CyderSettings()
         globalDxvk.graphicsBackend = .dxvk

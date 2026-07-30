@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "engineId": "cx26.3-w11-cyder006",
+  "versionLabel": "CX26.3.0-W11-Cyder006",
+  "base": {
+    "crossover": "26.3.0",
+    "wine": "11.0"
+  },
+  "hostArchitecture": "x86_64",
+  "minimumCyderVersion": "0.8.3",
+  "ntdllSHA256": "1cad2a9cbd2213542376cd30ba392677997e0da2138f7d71315bff34fcb0a137",
+  "artifact": "engine-wine-x86_64-CX26-3-0-W11-Cyder006.tar.xz",
+  "artifactSHA256": "431119089fb0b8659bd1b67823bdab2f37dce32d1bb2fc2b797cb929ff36ca00",
+  "sourceProject": "cyder-wine-engine",
+  "patchSet": "cyder006-combined-frame-walk-guard"
+}

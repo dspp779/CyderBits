@@ -116,6 +116,10 @@ assert_contains "$(cat "$TMP/run-support/Logs/last-launch.log")" "Running comman
   "captured launches should include a CrossOver-style Running command header"
 assert_contains "$(cat "$TMP/run-support/Logs/last-launch.log")" "MSync:" \
   "captured launches should record MSync state"
+assert_contains "$(cat "$TMP/run-support/Logs/last-launch.log")" "Wine diagnostics: quiet" \
+  "captured launches should record the default quiet diagnostics profile"
+assert_contains "$(cat "$TMP/run-support/Logs/last-launch.log")" "Engine version:" \
+  "captured launches should record the actual engine identity"
 launch_log_count="$(find "$TMP/run-support/Logs" -maxdepth 1 -type f -name 'launch-*.log' | wc -l | tr -d ' ')"
 if [[ "$launch_log_count" -lt 2 ]]; then
   echo "ASSERT failed: timestamped Wine logs should not overwrite the previous launch" >&2
@@ -132,6 +136,19 @@ PATH="$TMP/fake-bin:$PATH" \
     _ "$ROOT" "$TMP/fake-bin" "$TMP/foreground-test.exe"
 assert test ! -e "$TMP/no-log-support/Logs/last-launch.log"
 assert test ! -e "$TMP/no-log-support/Logs"
+
+# Non-quiet diagnostics should imply capture even without the legacy capture flag.
+CYDER_SUPPORT="$TMP/errors-log-support" \
+CYDER_SCRIPTS="$ROOT/scripts" \
+CYDER_TEST_ARGS="$TMP/errors-log-args" \
+CYDER_WINE_DIAGNOSTICS=errors \
+PATH="$TMP/fake-bin:$PATH" \
+  bash -c 'source "$1/scripts/cyder-common.sh"; cyder_init_paths "$1"; cyder_run_wine_exe "$2/wine" "$3"' \
+    _ "$ROOT" "$TMP/fake-bin" "$TMP/foreground-test.exe"
+assert test -L "$TMP/errors-log-support/Logs/last-launch.log"
+assert_contains "$(cat "$TMP/errors-log-support/Logs/last-launch.log")" \
+  "WINEDEBUG=-all,err+all,+timestamp,+pid,+tid" \
+  "errors diagnostics should enable the bounded Wine error profile"
 
 # Sync modes are mutually exclusive, and normal Cyder launches must not add
 # global DLL overrides now that those settings live in the prefix registry.
