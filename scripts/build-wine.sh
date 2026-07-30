@@ -331,8 +331,13 @@ apply_cyder_patch() {
 
 remove_obsolete_cyder_patch() {
   local patch_file="$1"
+  local superseding_patch
+  shift
   if [[ "$DRY_RUN" -eq 1 ]]; then
     echo "+ remove obsolete patch if applied: $patch_file"
+    for superseding_patch in "$@"; do
+      echo "  superseded by: $superseding_patch"
+    done
     return 0
   fi
   if patch --reverse --batch --dry-run -s -d "$WINE_SRC" -p1 < "$patch_file"; then
@@ -341,6 +346,12 @@ remove_obsolete_cyder_patch() {
   elif patch --forward --batch --dry-run -s -d "$WINE_SRC" -p1 < "$patch_file"; then
     return 0
   else
+    for superseding_patch in "$@"; do
+      if patch --reverse --batch --dry-run -s -d "$WINE_SRC" -p1 < "$superseding_patch"; then
+        echo "Obsolete patch already superseded: $(basename "$patch_file")"
+        return 0
+      fi
+    done
     echo "Cannot determine obsolete Wine patch state: $patch_file" >&2
     exit 1
   fi
@@ -349,7 +360,12 @@ remove_obsolete_cyder_patch() {
 remove_obsolete_cyder_patch "$OGOM/patches/cyder-steam-webhelper-compat.patch"
 apply_cyder_patch "$OGOM/patches/cyder-compatdb-runtime.patch"
 if [[ "$CX_VERSION" == "26" ]]; then
-  apply_cyder_patch "$OGOM/patches/cyder-ntdll-frame-walk-guard.patch"
+  remove_obsolete_cyder_patch \
+    "$OGOM/patches/obsolete/cyder-ntdll-frame-walk-guard.patch" \
+    "$OGOM/patches/cyder-ntdll-frame-walk-page-fault-guard.patch" \
+    "$OGOM/patches/wine-11.1-rtlwalkframechain-null-function.patch"
+  apply_cyder_patch "$OGOM/patches/wine-11.1-rtlwalkframechain-null-function.patch"
+  apply_cyder_patch "$OGOM/patches/cyder-ntdll-frame-walk-page-fault-guard.patch"
 fi
 
 # CrossOver tarball is not a git checkout; make_makefiles requires `git ls-files`.

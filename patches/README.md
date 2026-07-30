@@ -2,13 +2,20 @@
 
 Applied only when a clean build fails. Prefer proper dependency fixes first.
 
-## Cyder — x86_64 frame-walk page-fault guard
+## Cyder — x86_64 frame-walk guards
 
-`cyder-ntdll-frame-walk-guard.patch` prevents a page fault raised while
-`RtlWalkFrameChain()` calls `RtlVirtualUnwind2()` from escaping into the
-application exception handler. Invalid or self-modifying unwind metadata now
-terminates the current stack walk, matching the existing nonzero-status path,
-instead of recursively re-entering the application's exception handler.
+CrossOver 26 builds apply these patches in order:
+
+1. `wine-11.1-rtlwalkframechain-null-function.patch` is the exact x64 runtime
+   fix from upstream Wine commit
+   `02831b283ec70b5a4f92b33f49a6860f70697ce6`. It stops
+   `RtlWalkFrameChain()` when `RtlLookupFunctionEntry()` returns `NULL`.
+   Wine first released this behavior in 11.1 and retains it through 11.14.
+2. `cyder-ntdll-frame-walk-page-fault-guard.patch` catches a page fault raised
+   by `RtlVirtualUnwind2()` when a non-NULL function entry refers to invalid,
+   unreadable, or concurrently modified unwind metadata. The current stack
+   walk terminates through its existing nonzero-status path instead of
+   recursively re-entering the application's exception handler.
 
 The issue was reproduced with MapleStory Classic on the
 `CX26.3.0-W11-Cyder005` engine: login stopped at `登入中，請稍候`, an invalid
@@ -17,10 +24,27 @@ ended in a Wine stack overflow. The guarded CX26 build was verified through
 login, character selection, the GRAP security module, entering the game world,
 and a clean user-requested exit.
 
-The patch is enabled only for CrossOver 26 builds in `scripts/build-wine.sh`.
-It is intentionally not applied to CrossOver 25 / Wine 10 by default because
-that source is from a different major Wine version and has not been validated
-with this failure.
+Both patches are enabled only for CrossOver 26 builds in
+`scripts/build-wine.sh`. They are intentionally not applied to CrossOver 25 /
+Wine 10 because that source is from a different major Wine version and has not
+been validated with this failure.
+
+`obsolete/cyder-ntdll-frame-walk-guard.patch` is the original Cyder006
+page-fault-only patch. It is retained only so the build script can detect and
+reverse it in an existing incremental build tree before applying the two
+ordered patches. Do not apply the obsolete patch to a clean source tree.
+
+The standalone x64 PE regression test is:
+
+```bash
+bash tests/test-ntdll-frame-walk-patches.sh
+bash tests/test-ntdll-frame-walk-guard.sh
+```
+
+Set `FRAME_WALK_WINE_RUNTIME=/path/to/runtime` to test a candidate without
+overwriting the installed or released engine. The first test verifies clean
+round-trip application and migration from a Cyder006 incremental source tree;
+the second verifies runtime behavior.
 
 ## W1 — `SONAME_LIBVULKAN` fallback (`w1-win32u-vulkan-soname.patch`)
 

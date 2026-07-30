@@ -29,7 +29,15 @@ assert_contains "$output" "remove obsolete patch if applied: $ROOT/patches/cyder
   "build should remove the earlier executable-specific Steam patch"
 assert_contains "$output" "$ROOT/patches/cyder-compatdb-runtime.patch" \
   "build should apply the generic CompatDB runtime patch"
-assert_contains "$output" "$ROOT/patches/cyder-ntdll-frame-walk-guard.patch" \
+assert_contains "$output" "$ROOT/patches/obsolete/cyder-ntdll-frame-walk-guard.patch" \
+  "build should migrate an existing combined frame-walk patch"
+assert_contains "$output" "superseded by: $ROOT/patches/cyder-ntdll-frame-walk-page-fault-guard.patch" \
+  "build should recognize the fully migrated two-patch source state"
+assert_contains "$output" "superseded by: $ROOT/patches/wine-11.1-rtlwalkframechain-null-function.patch" \
+  "build should recognize a partially migrated incremental source tree"
+assert_contains "$output" "$ROOT/patches/wine-11.1-rtlwalkframechain-null-function.patch" \
+  "build should backport the upstream x64 null-function stop"
+assert_contains "$output" "$ROOT/patches/cyder-ntdll-frame-walk-page-fault-guard.patch" \
   "build should guard x86_64 frame walking against invalid unwind metadata"
 # Tarball trees skip make_*; git checkouts regenerate.
 if [[ -e "$ROOT/build/cx26/sources/wine/.git" ]]; then
@@ -75,8 +83,10 @@ if [[ -d "$ROOT/build/cx26/sources/wine" ]]; then
     WINE_INSTALL="${TMPDIR:-/tmp}/cyder-test-wine-cx25" \
       bash "$ROOT/scripts/build-wine.sh" --cx 25 --dry-run --without-vulkan 2>&1 || true
   )"
-  if [[ "$output_cx25_build" == *"cyder-ntdll-frame-walk-guard.patch"* ]]; then
-    echo "ASSERT failed: CX25 builds must not apply the CX26 frame-walk guard" >&2
+  if [[ "$output_cx25_build" == *"rtlwalkframechain-null-function.patch"* ||
+        "$output_cx25_build" == *"ntdll-frame-walk-page-fault-guard.patch"* ||
+        "$output_cx25_build" == *"obsolete/cyder-ntdll-frame-walk-guard.patch"* ]]; then
+    echo "ASSERT failed: CX25 builds must not migrate or apply CX26 frame-walk patches" >&2
     exit 1
   fi
 fi

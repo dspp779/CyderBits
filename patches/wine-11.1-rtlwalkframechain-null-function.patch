@@ -1,0 +1,10 @@
+--- a/dlls/ntdll/signal_x86_64.c
++++ b/dlls/ntdll/signal_x86_64.c
+@@ -887,6 +887,7 @@
+     for (i = 0; i < count; i++)
+     {
+         func = RtlLookupFunctionEntry( context.Rip, &base, &table );
++        if (!func) break;
+         if (RtlVirtualUnwind2( UNW_FLAG_NHANDLER, base, context.Rip, func, &context, NULL,
+                                &data, &frame, NULL, NULL, NULL, &handler, 0 ))
+             break;

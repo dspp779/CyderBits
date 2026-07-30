@@ -16,10 +16,11 @@ x86_64 例外處理期間呼叫 `RtlWalkFrameChain()`；舊版實作把
 `RtlVirtualUnwind2()` 會觸發 page fault。該 fault 逃回應用程式的例外 handler，
 handler 再次要求 stack walk，最後形成遞迴例外與 Wine stack overflow。
 
-Wine 11.8 的參考實作相較 Wine 11.0，會先以 `if (!func) break` 阻止 NULL
-`RUNTIME_FUNCTION` 進入 `RtlVirtualUnwind2()`。Cyder 在 CrossOver 26 分支採用更
-防禦性的延伸：以 Wine SEH 捕捉 stack walk 內的 page fault，將其轉成
-`STATUS_ACCESS_VIOLATION`，並沿用既有的「非零狀態即停止目前 stack walk」行為。
+Wine 11.1–11.14 的 upstream 實作相較 Wine 11.0，會先以 `if (!func) break` 阻止
+NULL `RUNTIME_FUNCTION` 進入 `RtlVirtualUnwind2()`。這項差異最初是在 Wine 11.8
+對照測試中發現。Cyder 在 CrossOver 26 分支採用更防禦性的延伸：以 Wine SEH 捕捉
+stack walk 內的 page fault，將其轉成 `STATUS_ACCESS_VIOLATION`，並沿用既有的
+「非零狀態即停止目前 stack walk」行為。
 
 修補後已實測通過：
 
@@ -92,6 +93,7 @@ scripts/run-maplestory-classic-debug.sh \
 MAPLE_WINE_RUNTIME=/path/to/wine-runtime \
 MAPLE_WINEPREFIX="$HOME/Library/Application Support/Cyder/bottles/shared" \
 MAPLE_GAME_EXE="$HOME/games/tms_cw/Maplestory_Classic.exe" \
+MAPLE_SYNC_MODE=none \
 scripts/run-maplestory-classic-debug.sh \
   <arg1> <session-token> <arg3> <arg4>
 ```
@@ -99,24 +101,29 @@ scripts/run-maplestory-classic-debug.sh \
 啟動器預設：
 
 ```text
+MAPLE_SYNC_MODE=none
 WINEDLLOVERRIDES=d3d11,dxgi=n,b
 WINEDEBUG=-all
 ```
 
-這適合重複功能測試。要診斷例外時，應直接啟動 Wine 並暫時開啟精簡 trace：
+`MAPLE_SYNC_MODE` 可設為 `none`、`msync` 或 `esync`；啟動器會讓
+`WINEMSYNC`／`WINEESYNC` 保持互斥，並把 `WINESERVER` 明確綁定到同一份候選
+runtime。要保留低負擔錯誤 log：
 
 ```bash
 mkdir -p tools/debug-logs
 
-WINEPREFIX="$HOME/Library/Application Support/Cyder/bottles/shared" \
-WINEDLLOVERRIDES='d3d11,dxgi=n,b' \
-WINEDEBUG='+timestamp,+seh,+unwind' \
-arch -x86_64 \
-  /path/to/runtime/bin/wine \
-  "$HOME/games/tms_cw/Maplestory_Classic.exe" \
-  <arg1> <session-token> <arg3> <arg4> \
-  >tools/debug-logs/maplestory-classic-seh.log 2>&1
+MAPLE_WINEDEBUG='-all,err+all,+timestamp,+pid,+tid' \
+MAPLE_LOG_FILE="$PWD/tools/debug-logs/maplestory-low-overhead.log" \
+MAPLE_SYNC_MODE=none \
+scripts/run-maplestory-classic-debug.sh \
+  <arg1> <session-token> <arg3> <arg4>
 ```
+
+只有在已縮小到例外處理窗口時，才暫時使用
+`+timestamp,+pid,+tid,+seh,+unwind`。完整 SEH／unwind trace 會在 GRAP 初始化時
+快速產生數十萬行資料，足以改變執行緒時序；它適合擷取短窗口，不適合拿來判定商城、
+切換頻道或正常退出是否穩定。
 
 若要分享 log，必須先確認命令列參數沒有被印出，並移除 session token、帳號識別碼、
 本機路徑及其他敏感資料。
@@ -137,9 +144,9 @@ DirectX 初始化，而改查主執行緒與例外處理。
 
 ### 4.3 使用新版 upstream Wine 做 A/B
 
-本機的 `tools/archives/wine-11.14.tar.tar` 實際上是 xz 壓縮的 Wine 11.14 source
-archive。新版 upstream Wine 能讓遊戲推進得更遠，顯示問題與 CrossOver 26 所基於的
-Wine 11.0 程式碼差異很可能有關。
+本機使用 `tools/archives/wine-11.14.tar.xz` 作為 Wine 11.14 source archive。
+新版 upstream Wine 能讓遊戲推進得更遠，顯示問題與 CrossOver 26 所基於的 Wine
+11.0 程式碼差異很可能有關。
 
 但 Wine 11.14 不是最終解：
 
@@ -173,7 +180,7 @@ if (RtlVirtualUnwind2( UNW_FLAG_NHANDLER, base, context.Rip, func, &context, NUL
 對一般 PE 程式通常成立，但對含保護、動態產生或執行期修改程式碼的遊戲／安全模組
 並不夠安全。
 
-## 5. Wine 11.8 參考修正
+## 5. Wine 11.1–11.14 upstream guard
 
 [Wine 11.8](https://www.winehq.org/news/2026050101)（[官方 source
 archive](https://dl.winehq.org/wine/source/11.x/wine-11.8.tar.xz)）的
@@ -188,11 +195,18 @@ archive](https://dl.winehq.org/wine/source/11.x/wine-11.8.tar.xz)）的
 這項差異直接涵蓋「找不到 `RUNTIME_FUNCTION` 卻仍呼叫 unwind」的情況，也是新版
 Wine A/B 測試能推進流程的重要線索。
 
-版本考證注意事項：
+進一步追查 Wine 公開 mirror 後，精確提交為
+[`02831b283ec70b5a4f92b33f49a6860f70697ce6`](https://github.com/wine-mirror/wine/commit/02831b283ec70b5a4f92b33f49a6860f70697ce6)，
+提交訊息是 `ntdll: Stop walk in RtlWalkFrameChain() if there is no function
+entry on x64.`。該提交的 runtime 變更只有 `signal_x86_64.c` 這一行，另外把既有
+exception test 的四行預期從 TODO 改為正式通過。
+
+版本考證：
 
 - 官方 Wine 11.0 source 沒有這個 guard；
-- Wine 11.8 source 有這個 guard；
-- 額外核對 Wine 11.7 source 時也已看到相同行為。
+- Wine 11.1 是第一個包含該 guard 的正式版本；
+- Wine 11.2–11.14 都保留相同行為；
+- Wine 11.8 是本次調查最初採用的參考版本，不是首次引入版本。
 
 本次核對下載檔的 SHA-256：
 
@@ -201,9 +215,6 @@ Wine 11.0  c07a6857933c1fc60dff5448d79f39c92481c1e9db5aa628db9d0358446e0701
 Wine 11.7  b01ab21c79fede6c7bd531d469d99afd9dcdf53eb29af88adac6a332eb435f9f
 Wine 11.8  53aa85995d4b97f0116a1c56b8a6a1417730ef59a277819d2d3d31364ea556b0
 ```
-
-因此本文稱它為「Wine 11.8 參考實作中相對 Wine 11.0 的修正」，不主張該行一定在
-11.8 才首次進入 upstream。
 
 `if (!func) break` 只能處理 NULL。實際 CX26 trace 還可能遇到：
 
@@ -216,13 +227,22 @@ CX26 行為並擴大失敗邊界的保護。
 
 ## 6. 最終修補
 
-正式 patch：
+正式 patch 依序為：
 
 ```text
-patches/cyder-ntdll-frame-walk-guard.patch
+patches/wine-11.1-rtlwalkframechain-null-function.patch
+patches/cyder-ntdll-frame-walk-page-fault-guard.patch
 ```
 
-核心變更：
+第一段是 Wine upstream
+`02831b283ec70b5a4f92b33f49a6860f70697ce6` 的精確 x64 runtime 修正：
+
+```c
+func = RtlLookupFunctionEntry( context.Rip, &base, &table );
+if (!func) break;
+```
+
+第二段是 Cyder 對非 NULL、但 metadata 不可讀情況的額外保護：
 
 ```c
 status = STATUS_SUCCESS;
@@ -258,13 +278,203 @@ if (status) break;
 
 ```bash
 if [[ "$CX_VERSION" == "26" ]]; then
-  apply_cyder_patch "$OGOM/patches/cyder-ntdll-frame-walk-guard.patch"
+  remove_obsolete_cyder_patch \
+    "$OGOM/patches/obsolete/cyder-ntdll-frame-walk-guard.patch"
+  apply_cyder_patch \
+    "$OGOM/patches/wine-11.1-rtlwalkframechain-null-function.patch"
+  apply_cyder_patch \
+    "$OGOM/patches/cyder-ntdll-frame-walk-page-fault-guard.patch"
 fi
 ```
 
 CX25 基於 Wine 10，跨越 Wine major version，且未用同一個失敗案例驗證，因此預設
 不套用。需要支援 CX25 時，應重新比對該分支的 unwind ABI 與例外處理實作，不能直接
 假設 patch 安全。
+
+`patches/obsolete/cyder-ntdll-frame-walk-guard.patch` 只用於把既有 Cyder006
+incremental source tree 回復到未套用狀態；乾淨 source 不會套用它。
+
+### 6.1 「套用 Wine 11.14 修復」的三種範圍
+
+這句話可能代表三種完全不同的修改，風險不能混在一起評估：
+
+| 方案 | 實際修改 | 完整度 | 風險 |
+|------|----------|--------|------|
+| A. 回植 x64 NULL guard | 在 `RtlWalkFrameChain()` 加 `if (!func) break` | 補齊 upstream 11.1–11.14 行為 | 低 |
+| B. NULL guard + Cyder page-fault guard | 先拒絕 NULL，再捕捉非 NULL metadata 的 fault | 對本案涵蓋最完整 | 低至中 |
+| C. 搬移整份 11.14 NTDLL／整套 Wine | 同時引入 unwind、header、server、loader 等版本變更 | 功能面最廣，但不是本案的最小修復 | 高 |
+
+採用 **方案 B**。Cyder006 已有 page-fault guard；Cyder007 候選再加入 upstream 的
+`if (!func) break`，並把兩個來源拆成可獨立稽核的 patch。兩者處理不同失敗邊界：
+
+```c
+func = RtlLookupFunctionEntry( context.Rip, &base, &table );
+if (!func) break;  /* Wine 11.1–11.14 */
+
+status = STATUS_SUCCESS;
+__TRY
+{
+    status = RtlVirtualUnwind2( ... );  /* Cyder：保護非 NULL 但無效的 metadata */
+}
+__EXCEPT_PAGE_FAULT
+{
+    status = STATUS_ACCESS_VIOLATION;
+}
+__ENDTRY
+if (status) break;
+```
+
+這個順序的優點是：
+
+1. 找不到 function entry 時不再把 stack 當成 leaf frame 繼續猜測；
+2. 不需要先製造 page fault 再由 SEH 收斂；
+3. function entry 非 NULL、但 unwind data 不可讀時仍有 Cyder guard；
+4. 正常、有合法 unwind metadata 的路徑不變；
+5. 與 Wine upstream 的 x64 `RtlWalkFrameChain()` 行為更接近。
+
+### 6.2 是否需要修改其他 runtime 模組
+
+若採方案 A 或 B，**不需要修改其他 runtime 模組**。必要變更只有：
+
+```text
+dlls/ntdll/signal_x86_64.c
+```
+
+並重新建置、安裝：
+
+```text
+dlls/ntdll/x86_64-windows/ntdll.dll
+```
+
+不需要為這一行修改：
+
+- `wineserver`；
+- Unix `ntdll.so`；
+- `kernel32`／`kernelbase`；
+- `win32u`；
+- DXVK／WineD3D／MoltenVK；
+- prefix 或 registry；
+- GRAP／遊戲檔案。
+
+建議但非 runtime 必要的測試變更：
+
+```text
+dlls/ntdll/tests/exception.c
+```
+
+Wine 11.14 的測試會建立沒有 runtime function entry 的 x64 動態程式碼，確認
+`RtlCaptureStackBackTrace()` 與 `RtlWalkFrameChain()` 在該邊界停止。CX26 的 Wine
+11.0 test tree 尚未包含完整測試基礎；不應整份複製 Wine 11.14
+`tests/exception.c`，因為兩版相差數百行無關測試。較安全的方式是：
+
+1. 只回植該 test helper 及其必要初始化；或
+2. 在 Cyder 建立一個小型 x64 PE regression harness。
+
+若要執行 Wine test，需使用 `scripts/build-wine.sh --with-tests` 產生另一個測試
+build；正式 runtime 預設 `--disable-tests`，不應為了測試而改變發佈引擎內容。
+
+### 6.3 不應直接搬入的 Wine 11.14 變更
+
+Wine 11.0 到 11.14 的相關檔案差異並不只一個 bug fix：
+
+| 檔案 | 11.0→11.14 差異量 | 與本案的關係 |
+|------|-------------------|--------------|
+| `signal_x86_64.c` | 約 6 行新增、5 行刪除 | 只有 NULL guard 直接相關；另有 `RtlUnwindEx()` 修正 |
+| `unwind.c` | 約 43 行新增、23 行刪除 | 多為 ARM64 與 output pointer 行為，不是 x64 frame-walk guard |
+| `tests/exception.c` | 約 421 行新增、40 行刪除 | 包含大量無關 exception tests |
+| `include/winnt.h` | 約 550 行新增、34 行刪除 | 大型 header 演進，不是本案依賴 |
+
+Wine 11.14 `unwind.c` 內確實有 `__EXCEPT_PAGE_FAULT`，但它位於 **ARM64**
+`RtlVirtualUnwind2()` 實作。x64 `RtlVirtualUnwind2()` 並沒有同等的 11.14
+page-fault wrapper。直接把 ARM64 寫法移到 x64 callee 會把影響範圍從
+`RtlWalkFrameChain()` 擴張到所有 x64 unwind caller，包括：
+
+- 例外 dispatcher；
+- C/C++ exception runtime；
+- `RtlVirtualUnwind()`；
+- MSVCRT exception handling；
+- 其他直接呼叫 `RtlVirtualUnwind2()` 的程式。
+
+這可能在 context 已部分更新後把 fault 改成 status return，讓 caller 繼續使用不一致
+的 register／stack state。Wine upstream 沒有對 x64 做這項變更，因此不建議把它
+當成「11.14 x64 修復」回植。
+
+同樣地，不能只把 Wine 11.14 的完整 `signal_x86_64.c` 或 `unwind.c` 覆蓋到 CX26：
+
+- CrossOver 26.3 在 `signal_x86_64.c` 有自己的 TEB／PEB 修補；
+- 11.14 同檔還包含無 TEB frame 的 exit unwind 修正；
+- 11.14 移除了部分 `WIN32_NO_STATUS`，依賴同步演進的 headers；
+- 整份覆蓋會靜默丟失 CrossOver patches 或引入未配對的 header／ABI 假設。
+
+### 6.4 預期功效
+
+採方案 B 後，預期結果如下：
+
+| 情況 | 目前 Cyder006 | 加入 11.14 NULL guard 後 |
+|------|---------------|--------------------------|
+| `func == NULL`、stack 可讀 | 把它視為 leaf frame，從 stack 猜下一個 RIP | 立即停止 frame walk |
+| `func == NULL`、stack 不可讀 | page fault 被 Cyder guard 捕捉 | 不讀 stack，直接停止 |
+| `func != NULL`、metadata 有效 | 正常 unwind | 不變 |
+| `func != NULL`、metadata 無效／被修改 | page fault 被 Cyder guard 捕捉 | 不變，仍由 Cyder guard 捕捉 |
+| 正常遊戲 render／D3D11 | 不受 NTDLL patch 直接影響 | 不變 |
+| GRAP stack inspection | 已可通過 | 更接近 upstream／Windows 的停止邊界，但仍須實測 |
+
+可預期的實際效益：
+
+- 更早、更確定地終止不可靠的 stack walk；
+- 減少無意義的 leaf unwind 與 SEH fault 成本；
+- 降低從 stack data 誤判 return address、走入假 frame 的機率；
+- 改善 profiler、crash reporter、安全模組在缺失 unwind metadata 時的穩定性；
+- 保留目前已驗證能進入遊戲的非 NULL metadata 防護。
+
+它不會直接改善：
+
+- DX11 device 建立；
+- WineD3D／DXVK 效能；
+- MoltenVK 相容性；
+- 網路登入或伺服器延遲；
+- 通用 Wine 11.14 被 GRAP 關閉的 runtime 身分／行為差異。
+
+### 6.5 可能副作用
+
+最主要的行為變化是 **backtrace 可能變短**。x64 leaf function 可以沒有
+`.pdata`／unwind entry；`RtlVirtualUnwind2(NULL)` 原本能嘗試從 stack pop return
+address，但 Wine upstream 的 `RtlWalkFrameChain()` 選擇在這裡停止。
+
+可能影響：
+
+- JIT、手寫 assembly 或動態產生程式碼的 crash stack 少掉後續 frames；
+- profiler／telemetry 的 stack fingerprint 改變；
+- 依賴「猜測 leaf frame」的除錯工具看到較短 call chain；
+- 安全模組取得的 frame 數量改變。
+
+不過這正是 Wine 11.1–11.14 的既定行為，且 upstream exception test 明確要求在沒有
+runtime function entry 時停止。因此它更像 Windows 相容性修正，而不是任意截斷。
+對 GRAP 而言，較短但可信的 stack 通常比包含假 return address 的 stack 安全；仍不能
+只靠推論，必須重跑登入、選角、進地圖及正常退出。
+
+目前 Cyder page-fault guard 本身也有一項取捨：它把 frame-walk 內的 access
+violation 收斂成「停止 stack walk」，因此 crash reporter 可能看不到原本會逃出的
+fault。但保護範圍只包 `RtlVirtualUnwind2()`，不會吞掉遊戲其他位置的 access
+violation。加入 NULL guard 不會擴大這個 SEH 範圍，反而讓 NULL 情況不必進入它。
+
+### 6.6 驗證矩陣
+
+方案 B 的 Cyder007 候選至少應比較 Cyder006 與下列項目：
+
+1. upstream no-function-entry regression test；
+2. Cyder non-NULL invalid unwind metadata regression test；
+3. `tests/test-build-wine.sh` 的 CX26／CX25 patch 邊界；
+4. NTDLL 既有 unwind／exception tests；
+5. MapleStory Classic：DX11、登入、選服、選角、GRAP、進地圖、正常退出；
+6. BlueCG 等既有 x86_64／PE32 遊戲煙霧測試；
+7. crash log／diagnostics 是否仍能取得足夠 stack frames；
+8. 與 Cyder006 相同 prefix 做 A/B，避免 bottle 差異干擾。
+
+目前第 1–3 項已由 standalone x64 PE harness、build-script test 與乾淨 source
+round-trip 通過；第 5 項也已由 Cyder007 候選完成登入、進地圖、切換頻道、商城與
+正常退出。若只做一行 NULL guard 而不保留 Cyder page-fault guard，會失去本次已
+實際驗證的「非 NULL 但 metadata 無效」保護，不建議取代 Cyder006。
 
 ## 7. 編譯
 
@@ -298,19 +508,28 @@ Homebrew。
 ```bash
 patch --forward --batch --dry-run -s \
   -d build/cx26/sources/wine -p1 \
-  < patches/cyder-ntdll-frame-walk-guard.patch
+  < patches/wine-11.1-rtlwalkframechain-null-function.patch
+
+patch --forward --batch --dry-run -s \
+  -d build/cx26/sources/wine -p1 \
+  < patches/cyder-ntdll-frame-walk-page-fault-guard.patch
 ```
 
-若 source 已套用，反向 dry-run 應成功：
+若 source 已套用，應以相反順序做反向 dry-run：
 
 ```bash
 patch --reverse --batch --dry-run -s \
   -d build/cx26/sources/wine -p1 \
-  < patches/cyder-ntdll-frame-walk-guard.patch
+  < patches/cyder-ntdll-frame-walk-page-fault-guard.patch
+
+patch --reverse --batch --dry-run -s \
+  -d build/cx26/sources/wine -p1 \
+  < patches/wine-11.1-rtlwalkframechain-null-function.patch
 ```
 
 `scripts/build-wine.sh` 已把這兩種情況處理成「套用」或「Already applied」，無法判定
-時會 fail closed。
+時會 fail closed。它也會先移除既有 source tree 上的 Cyder006 合併修補，再依上述
+順序套用兩個新 patch。
 
 ### 7.3 完整重建
 
@@ -369,18 +588,26 @@ arch -x86_64 env \
 這會沿用既有 `build64` 的 configure 結果；如果 source、編譯器、configure options
 或依賴版本已改變，應改做完整重建。
 
-只安裝本次變更的 PE DLL：
+只安裝本次變更的 PE DLL。為避免覆蓋 Cyder006，本次先建立獨立候選 runtime：
 
 ```bash
+cp -a \
+  install/wine-cx26-x86_64 \
+  tools/runtime/wine-cx26-maple-cyder007-candidate
+
 cp \
   build/cx26/sources/wine/build64/dlls/ntdll/x86_64-windows/ntdll.dll \
-  install/wine-cx26-x86_64/lib/wine/x86_64-windows/ntdll.dll
+  tools/runtime/wine-cx26-maple-cyder007-candidate/lib/wine/x86_64-windows/ntdll.dll
 ```
 
-本次未 strip 的 build／install DLL SHA-256 相同：
+Cyder006 與 Cyder007 候選的未 strip NTDLL SHA-256：
 
 ```text
+Cyder006
 ef802ef474f15fb7e71a39d97f3fc3ea21f28356575b1e923f3d0064b1623c53
+
+Cyder007 candidate
+9a32d01eead59c22bf25fd32142b335dec25f8b08a2f30757d800980c3cd40fa
 ```
 
 驗證命令：
@@ -388,7 +615,7 @@ ef802ef474f15fb7e71a39d97f3fc3ea21f28356575b1e923f3d0064b1623c53
 ```bash
 shasum -a 256 \
   build/cx26/sources/wine/build64/dlls/ntdll/x86_64-windows/ntdll.dll \
-  install/wine-cx26-x86_64/lib/wine/x86_64-windows/ntdll.dll
+  tools/runtime/wine-cx26-maple-cyder007-candidate/lib/wine/x86_64-windows/ntdll.dll
 ```
 
 注意：incremental copy 不會更新 install tree 根目錄的 `version` 檔。正式引擎版本以
@@ -407,10 +634,26 @@ bash tests/test-build-wine.sh
 
 它會確認：
 
-- CX26 dry-run 包含 `cyder-ntdll-frame-walk-guard.patch`；
-- CX25 dry-run 不包含該 patch；
+- CX26 dry-run 先移除 obsolete Cyder006 patch，再依序包含 upstream 與 Cyder patch；
+- CX25 dry-run 不包含任何一個 frame-walk patch；
 - CX26 source、LLVM-MinGW、Rosetta、PE architectures 與 install path 正確；
 - 完整 build 仍包含 `make`、`make install` 與 dylib bundling。
+
+x64 NTDLL 行為回歸測試：
+
+```bash
+FRAME_WALK_WINE_RUNTIME="$PWD/tools/runtime/wine-cx26-maple-cyder007-candidate" \
+  bash tests/test-ntdll-frame-walk-guard.sh
+```
+
+它用 LLVM-MinGW 建立真正的 x86_64 PE，並在一次執行中驗證：
+
+1. 動態程式碼沒有 runtime function entry 時，frame walk 在可信邊界停止；
+2. function entry 非 NULL、但 unwind metadata 是 `PAGE_NOACCESS` 時，不讓
+   page fault 逃出或造成遞迴崩潰。
+
+Cyder006 對第一個案例會安全返回但得到 12 個 frame，而正確 upstream 邊界是 2；
+Cyder007 候選兩個案例均得到預期結果並通過。
 
 其他基本檢查：
 
@@ -431,6 +674,12 @@ git diff --check
 5. 再次 forward 套用成功。
 
 這可以避免 patch 只因工作目錄已被手動修改而「看似成功」。
+
+專案已把這個流程及 Cyder006 舊修補遷移做成測試：
+
+```bash
+bash tests/test-ntdll-frame-walk-patches.sh
+```
 
 ### 8.3 DLL 與 artifact 驗證
 
@@ -489,6 +738,60 @@ SHA-256：
 本次 Cyder006 已完整通過上述流程。僅到選角不算通過，因為通用 Wine 11.14 曾在該
 階段被 GRAP 強制關閉。
 
+### 8.5 商城、同步模式與退出補充測試
+
+Cyder 0.8.3／Cyder006 的人工 A/B 顯示：
+
+| 同步模式 | 進入遊戲 | 商城 | 退出 |
+|----------|----------|------|------|
+| None | 通過 | 通過 | 卡住 |
+| MSync | 本次在進入遊戲時卡住；較早測試曾偶爾通過 | 未測到 | 未測到 |
+| ESync | 通過 | 通過 | 卡住 |
+
+Cyder007 候選在 None 模式、開啟完整 `seh/unwind` trace 時，登入、進地圖及切換頻道
+通過，但開商城後完全凍結。凍結期間沒有新的 stack overflow、未處理例外或 DXVK
+device-lost；Wine 記錄到多個執行緒等待同一個 critical section。完整 trace 在 GRAP
+初始化期間產生約 20 MB／22 萬行資料，因此這個商城結果不能直接當成候選引擎回歸。
+
+改用低負擔 log 後，同一份 Cyder007 候選與 None 模式已通過登入、進地圖、商城及
+遊戲內正常退出；沒有 frame-walk、DX11 或 DXVK 錯誤。這證明前一次商城凍結是重度
+trace 改變時序，並非新增 NULL guard 的功能回歸。
+
+主遊戲正常退出後，Nexon Game Security／GRAP helper 仍會常駐，這是該安全模組的
+既有生命週期。實際清理方式是點擊 macOS 右上角的 Nexon 系統圖示，讓 NGS 圖示顯示
+在 Dock，再對 Dock 圖示按右鍵結束；除錯時也可停止該 prefix 的 wineserver。不能
+只因 GRAP helper 仍存在，就把遊戲內退出判定為失敗；應分別記錄「遊戲視窗／前端
+正常退出」與「NGS 背景程序仍常駐」。Cyder 不應在一般退出時無條件強制停止 shared
+prefix 的 wineserver，否則可能連帶終止同一 bottle 中仍在執行的其他程式。
+
+目前較合理的基線是 None；MSync 暫時不應作為此遊戲的預設。NGS 常駐應視為獨立的
+程序清理問題，不要為此擴大 NTDLL frame-walk patch。
+
+### 8.6 診斷層級、記錄識別與 OEM 25 前景處理
+
+Cyder 偏好設定的「進階 → Wine 診斷記錄」提供三種全域層級：
+
+| 層級 | `WINEDEBUG` | 用途 |
+|------|-------------|------|
+| 安靜（預設） | `-all` | 正常遊玩；避免 trace 改變 NGS、商城與退出時序 |
+| 只記錄錯誤 | `-all,err+all,+timestamp,+pid,+tid` | 一般排障；自動保留本次 Wine launch log |
+| 完整堆疊追蹤 | `-all,+timestamp,+pid,+tid,+seh,+unwind` | 短時間重現 exception／unwind；資料量大且可能造成假性凍結 |
+
+`errors` 與 `unwind` 會自動開啟 Wine stdout/stderr 擷取；`quiet` 的一般啟動不建立
+大量 Wine log。測試啟動仍會保留一份低輸出 launch preamble，方便確認設定。
+
+每份 launch log 會記錄實際解析 symlink 後的 runtime 與 prefix、engine `version`、
+`x86_64-windows/ntdll.dll` SHA-256、圖形後端、MSync／ESync、電源模式及診斷層級。
+遊戲 argv 一律只寫入參數數量，額外環境變數也只寫 key；ServiceAccountID、OTP 或
+其他登入值不會進入記錄。
+
+OEM 25 的 `maplestory-cx26-blackxchg-foreground.patch` 是另一類修補：
+`BlackXchg.aes` 啟動時不呼叫 macOS 的 foreground transform，避免短暫的防作弊 helper
+搶走 MapleStory renderer 視窗焦點；OEM 對 `DwarfWebBrowserClass` 也使用
+`SWP_NOACTIVATE`。這些是前景啟用／UX 處理，不是 `taskpolicy background`，也不會清理
+退出後仍常駐的 GRAP／NGS。Classic 目前沒有觀察到 BlackXchg 搶焦點，因此不把該 patch
+併入 NTDLL 穩定性修補；若日後出現可重現的焦點跳轉，再以獨立 patch 與 A/B 測試評估。
+
 ## 9. 為什麼不採用其他方案
 
 ### 直接換 Wine 11.14
@@ -528,11 +831,16 @@ version 預設套用。
 
 | 檔案 | 用途 |
 |------|------|
-| `patches/cyder-ntdll-frame-walk-guard.patch` | 正式 CX26 NTDLL 修補 |
+| `patches/wine-11.1-rtlwalkframechain-null-function.patch` | Wine upstream NULL function guard |
+| `patches/cyder-ntdll-frame-walk-page-fault-guard.patch` | Cyder 非 NULL metadata page-fault guard |
+| `patches/obsolete/cyder-ntdll-frame-walk-guard.patch` | 僅供既有 Cyder006 source tree 遷移 |
 | `patches/README.md` | Patch 摘要與套用範圍 |
 | `scripts/build-wine.sh` | CX26 自動套用與完整建置 |
 | `scripts/run-maplestory-classic-debug.sh` | 不保存 token 的四參數測試啟動器 |
 | `tests/test-build-wine.sh` | CX26 套用／CX25 排除測試 |
+| `tests/test-ntdll-frame-walk-patches.sh` | 乾淨 source round-trip 與 Cyder006 遷移 |
+| `tests/test-ntdll-frame-walk-guard.sh` | x64 PE frame-walk 行為回歸測試 |
+| `tests/fixtures/ntdll-frame-walk-guard.c` | NULL entry 與不可讀 metadata 測試程式 |
 | `scripts/pack-engine-artifact.sh` | 引擎 strip、簽署、封裝與解壓後驗證 |
 | `docs/releases/v0.8.3.md` | Cyder 0.8.3 發佈摘要 |
 
@@ -541,7 +849,9 @@ version 預設套用。
 本案的關鍵不是把「登入中」視為網路 timeout，也不是持續替換 DirectX 元件，而是把
 圖形初始化、GRAP 相容性與 NTDLL 例外遞迴分成三層調查。
 
-Wine 11.8 參考碼提供了相對 Wine 11.0 的重要線索：frame lookup 失敗後不應繼續
-virtual unwind。Cyder 最終在 CrossOver 26.3 的 Wine 11.0 patch set 上加入受限的
-page-fault guard，保留 CrossOver／GRAP 相容性，同時阻止無效 unwind metadata 導致
-遞迴例外。這個最小修改比整體升級 Wine 更容易驗證，也已在實際遊戲流程中通過。
+Wine 11.1–11.14 upstream guard 提供了相對 Wine 11.0 的重要線索：frame lookup
+失敗後不應繼續 virtual unwind。Cyder 在 CrossOver 26.3 的 Wine 11.0 patch set
+上先套用 upstream NULL guard，再加入受限的 page-fault guard，同時涵蓋「沒有
+function entry」與「entry 存在但 metadata 無效」兩種邊界。這保留
+CrossOver／GRAP 相容性，也不需要搬移整份 Wine 11.14 NTDLL；Cyder007 候選已通過
+兩個自動回歸案例，以及實際遊戲的登入、進地圖、切換頻道、商城與正常退出測試。
