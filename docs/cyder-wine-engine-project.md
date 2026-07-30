@@ -42,14 +42,15 @@ Cyder 的 [`scripts/import-engine-release.sh`](../scripts/import-engine-release.
 驗證包含 sidecar schema、archive digest、archive 內的 `version`、embedded manifest，以及
 實際解出的 `ntdll.dll` digest。任一項不一致即停止，不會部分更新 pin。
 
-目前 Cyder 仍 pin `CX26.3.0-W11-Cyder006`。獨立專案的下一個 release target 是
-`CX26.3.0-W11-Cyder007`；完成簽署、封裝與遊戲 smoke test 後，才透過 importer 更新。
+Cyder 0.9.0 已 pin `CX26.3.0-W11-Cyder007`。匯入時已驗證 archive、sidecar、內嵌
+manifest、版本與 packaged `ntdll.dll` digest；對外發布前仍必須完成 Developer ID 簽章、
+公證與遊戲 smoke test。
 
 ## 保留相容副本
 
 第一階段不立即刪除 Cyder repository 的 `patches/`、`scripts/build-wine.sh` 與相關測試，
-原因是既有 0.8.3 發布與本機增量 source tree 仍依賴這些路徑。新專案完成首次 release
-並由 Cyder 成功匯入後，再進行第二階段：
+原因是既有 0.8.3 發布與本機增量 source tree 仍依賴這些路徑。Cyder007 已完成首次
+release artifact 匯入；下一階段再進行：
 
 1. 將 Cyder 內的建置腳本改為明確的 forwarding wrapper，或完全移除。
 2. 將引擎專屬測試移出 Cyder CI。
