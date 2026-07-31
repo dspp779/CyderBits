@@ -47,6 +47,11 @@ minOS ≤ 10.15）。匯入時已驗證 archive、sidecar、內嵌 manifest、�
 `ntdll.dll` digest；對外發布前仍必須完成 Developer ID 簽章、公證與遊戲 smoke test
 （見 [`release-pipeline.zh-TW.md`](release-pipeline.zh-TW.md)）。
 
+**下一版引擎候選 `CX26.3.0-W11-Cyder008`：** 引擎 tree 已標版本並加入 leave／強制結束
+teardown soft-guard（async／pipe／completion）；細節在引擎 repo
+`docs/wineserver-teardown-hardening-cyder008.md`。須先 `pack-engine-artifact` 再 pin
+進 Cyder，**目前 App 仍跑 Cyder007**。
+
 ## 保留相容副本
 
 第一階段不立即刪除 Cyder repository 的 `patches/`、`scripts/build-wine.sh` 與相關測試，

@@ -116,8 +116,9 @@ grap64.dll  (NGS-X Init / Run)
    離場 `NtQueryDirectoryObject` 更兇，**尚未證明**，但是合理下一假設。
 3. **離開卡住／Dock 殘留** 屬同一 lifecycle 問題：主程式結束或卡死後，
    `grap-core`／`NGService`／communicator 未收斂。
-4. **強制結束 session 時** 仍可能踩 wineserver teardown SEGV
-   （`pipe_end_disconnect`／`add_completion`）；產品清理與引擎加固應並行。
+4. **強制結束 session 時** 曾踩 wineserver teardown SEGV
+   （`pipe_end_disconnect`／`add_completion`）。**Cyder008 候選**已含對應 soft-guard
+   （引擎 `docs/wineserver-teardown-hardening-cyder008.md`）；產品 session 清理仍應並行。
 5. 可玩設定仍見 [`maplestory-classic-wineserver-hang.md`](../../maplestory-classic-wineserver-hang.md)：
    建議 **MSync + DXVK 或 D3DMetal**；離場 livelock 在 sync 關／開皆曾出現。
 
@@ -129,23 +130,26 @@ grap64.dll  (NGS-X Init / Run)
 | P0 | 離開逾時清理 | 遊戲內結束後若 N 秒仍卡（或主程式已退、helper 仍在），grace 後 TERM→KILL **本輪** PID |
 | P0 | 啟動前殘留檢查 | 發現上次 grap／NGS 殘留則提示或一鍵清理（對齊 Nexon 官方「殘留害下次 init」） |
 | P1 | UX | 「結束遊戲殘留程序」；Dock 上 Nexon Game Security 發呆時可對應同一清理 |
-| P1 | 引擎 | 修 teardown SEGV，讓清理不會順便打爆 wineserver |
+| P1 | 引擎 | teardown SEGV soft-guard → **Cyder008**（已入引擎 tree；待 pack／pin） |
 | P2 | 診斷 | 一輪 `WINEDEBUG=+process,+loaddll`（或 Cyder「只記錄錯誤」以上）對照誰 spawn core／NGService、BlackCat 載入失敗字樣 |
 | 不做 | 卸載／patch GRAP | 超出相容性範圍 |
 
 ### 6.1 現有 Cyder 能力（缺口）
 
 - 啟動已帶 `--wait-children`（避免主程式早退就拆 session）——對「主程式還在、離場卡死」**不夠**。
-- 設定 UI 有對整瓶執行 `wineserver -k` 的停止手段——能清殘留，但是**整 bottle 粗暴結束**，且曾觸發 teardown SEGV；不是「只清 grap／NGS」的產品路徑。
+- 設定 UI 有對整瓶執行 `wineserver -k` 的停止手段——能清殘留，但是**整 bottle 粗暴結束**；
+  Cyder007 曾在此路徑 SIGSEGV，Cyder008 候選加固 teardown。仍不是「只清 grap／NGS」的產品路徑。
 - **尚無**依遊戲 session 追蹤 grap-core／NGService、離場逾時自動清理、或啟動前殘留檢查。
 
 ## 7. 後續驗證清單
 
+- [x] 引擎 teardown soft-guard（async／pipe／completion）→ Cyder008 候選（2026-07-31）
 - [ ] 開啟適度 Wine process／loaddll log，截一輪從進遊戲到正常離開（或卡住）的 spawn 序
 - [ ] 確認 Wine 下是否出現 `BlackCat`／`.sys`／service install 相關失敗（不要求修驅動）
 - [ ] 對照 MSync+DXVK 與 D3DMetal+sync-off 的離場：core 是否同樣 `NtQueryDirectoryObject` 風暴
 - [ ] Cyder session 清理 prototype：逾時後只殺本 bottle／本輪 grap 樹，驗證下次啟動 NGS-X 是否較穩
 - [ ] （可選）macdrv 是否把 NGService 推成 Dock app；能否在不破壞 AC 的前提下減少前景污染
+- [ ] Cyder008 pack + App pin 後，重複「離開／強制停止 Wine」並確認 diag 無 teardown SIGSEGV
 
 ## 8. 取樣指令（重現離場 hang 時）
 
