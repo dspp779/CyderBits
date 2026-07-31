@@ -116,6 +116,14 @@ assert_contains "$(cat "$TMP/run-support/Logs/last-launch.log")" "Running comman
   "captured launches should include a CrossOver-style Running command header"
 assert_contains "$(cat "$TMP/run-support/Logs/last-launch.log")" "MSync:" \
   "captured launches should record MSync state"
+assert_contains "$(cat "$TMP/run-support/Logs/last-launch.log")" "DXVK frame rate:" \
+  "captured launches should record DXVK frame rate"
+assert_contains "$(cat "$TMP/run-support/Logs/last-launch.log")" "DXVK HUD:" \
+  "captured launches should record DXVK HUD"
+assert_contains "$(cat "$TMP/run-support/Logs/last-launch.log")" "DXVK_FRAME_RATE=" \
+  "captured launches should include DXVK_FRAME_RATE in the effective env block"
+assert_contains "$(cat "$TMP/run-support/Logs/last-launch.log")" "DXVK_HUD=" \
+  "captured launches should include DXVK_HUD in the effective env block"
 assert_contains "$(cat "$TMP/run-support/Logs/last-launch.log")" "Wine diagnostics: quiet" \
   "captured launches should record the default quiet diagnostics profile"
 assert_contains "$(cat "$TMP/run-support/Logs/last-launch.log")" "Engine version:" \

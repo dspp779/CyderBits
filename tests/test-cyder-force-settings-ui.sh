@@ -66,6 +66,20 @@ assert_contains "$app" 'onStopAllWine' "settings stop-all Wine should wire to ap
 assert_contains "$app" 'syncCrossoverBottleGraphicsEnvironment' "OEM bottle env must mirror HUD/backend keys"
 assert_contains "$(cat "$ROOT/scripts/cyder_gptk.swift")" 'ensureEngineAppleGptkLink' "GPTK should link into engine lib64 for cxcompatdb"
 assert_contains "$app" 'environment.removeValue(forKey: "DXVK_FRAME_RATE")' "launch env should clear inherited DXVK frame rate"
+assert_contains "$app" 'DXVK frame rate: \(environment["DXVK_FRAME_RATE"] ?? "<unset>")' \
+  "wine-launch preamble should record DXVK frame rate"
+assert_contains "$app" 'DXVK HUD: \(environment["DXVK_HUD"] ?? "<unset>")' \
+  "wine-launch preamble should record DXVK HUD"
+assert_contains "$app" 'DXVK_FRAME_RATE=\(environment["DXVK_FRAME_RATE"] ?? "<unset>")' \
+  "effective Wine env block should include DXVK_FRAME_RATE"
+assert_contains "$app" 'DXVK_HUD=\(environment["DXVK_HUD"] ?? "<unset>")' \
+  "effective Wine env block should include DXVK_HUD"
+assert_contains "$app" 'appendingPathExtension("preamble.txt")' \
+  "wine-launch should write an uncompressed preamble sidecar for hang debugging"
+assert_contains "$app" 'last-launch.preamble.txt' \
+  "wine-launch should symlink the latest preamble beside last-launch.log.gz"
+assert_contains "$app" 'dxvk_frame_rate=\(environment["DXVK_FRAME_RATE"] ?? "unset")' \
+  "session effective-settings should include dxvk_frame_rate"
 assert_contains "$(cat "$ROOT/scripts/cyder_gptk.swift")" 'CYDER_ALLOW_TEST_HOOKS' "GPTK test override must require an allow flag"
 assert_contains "$(cat "$ROOT/scripts/pack-engine-artifact.sh")" 'apple_gptk' "engine pack must exclude/assert no apple_gptk"
 assert_contains "$(cat "$ROOT/scripts/cyder_settings.swift")" 'defaultGraphicsBackend' "OEM/default graphics backend should be product-aware"

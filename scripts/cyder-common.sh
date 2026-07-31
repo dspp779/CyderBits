@@ -2199,6 +2199,9 @@ cyder_run_wine_exe() {
     echo "Engine version: ${engine_version:-unknown}"
     echo "NTDLL SHA-256: $ntdll_sha256"
     echo "Graphics backend: ${CYDER_GRAPHICS_BACKEND:-default}"
+    echo "DXVK frame rate: ${DXVK_FRAME_RATE:-<unset>}"
+    echo "DXVK HUD: ${DXVK_HUD:-<unset>}"
+    echo "Metal HUD: ${MTL_HUD_ENABLED:-<unset>}"
     if [[ "${CYDER_MSYNC:-0}" == 1 ]]; then
       echo "MSync: Enabled"
     else
@@ -2220,7 +2223,11 @@ cyder_run_wine_exe() {
     echo "  WINEPREFIX=$prefix"
     echo "  CYDER_MSYNC=${CYDER_MSYNC:-0}"
     echo "  CYDER_ESYNC=${CYDER_ESYNC:-0}"
+    echo "  CYDER_GRAPHICS_BACKEND=${CYDER_GRAPHICS_BACKEND:-<unset>}"
     echo "  CYDER_WINE_DIAGNOSTICS=$wine_diagnostics"
+    echo "  DXVK_FRAME_RATE=${DXVK_FRAME_RATE:-<unset>}"
+    echo "  DXVK_HUD=${DXVK_HUD:-<unset>}"
+    echo "  MTL_HUD_ENABLED=${MTL_HUD_ENABLED:-<unset>}"
     echo "  WINEDEBUG=$wine_debug"
     echo "  taskpolicy_available=$([[ -n "$taskpolicy_bin" ]] && echo true || echo false)"
     echo

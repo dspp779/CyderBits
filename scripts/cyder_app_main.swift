@@ -1080,6 +1080,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         let legacyLogs = [
             logDirectory.appendingPathComponent("last-launch.log"),
             logDirectory.appendingPathComponent("last-launch.log.gz"),
+            logDirectory.appendingPathComponent("last-launch.preamble.txt"),
         ]
         for legacyLog in legacyLogs {
             try? FileManager.default.removeItem(at: legacyLog)
@@ -1218,6 +1219,9 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         Engine version: \(engineVersion.isEmpty ? "unknown" : engineVersion)
         NTDLL SHA-256: \(ntdllSHA256)
         Graphics backend: \(effectiveBackend ?? "default")
+        DXVK frame rate: \(environment["DXVK_FRAME_RATE"] ?? "<unset>")
+        DXVK HUD: \(environment["DXVK_HUD"] ?? "<unset>")
+        Metal HUD: \(environment["MTL_HUD_ENABLED"] ?? "<unset>")
         Wine diagnostics: \(diagnosticLevel.rawValue)
         MSync: \(msyncEnabled ? "Enabled" : "Disabled")
         ESync: \(esyncEnabled ? "Enabled" : "Disabled")
@@ -1241,12 +1245,38 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
           CYDER_DPI=\(environment["CYDER_DPI"] ?? "<unset>")
           CYDER_RETINA_MODE=\(environment["CYDER_RETINA_MODE"] ?? "<unset>")
           CYDER_FONT_PRESET=\(environment["CYDER_FONT_PRESET"] ?? "<unset>")
+          CYDER_GRAPHICS_BACKEND=\(environment["CYDER_GRAPHICS_BACKEND"] ?? "<unset>")
           CYDER_WINE_DIAGNOSTICS=\(environment["CYDER_WINE_DIAGNOSTICS"] ?? "<unset>")
+          DXVK_FRAME_RATE=\(environment["DXVK_FRAME_RATE"] ?? "<unset>")
+          DXVK_HUD=\(environment["DXVK_HUD"] ?? "<unset>")
+          MTL_HUD_ENABLED=\(environment["MTL_HUD_ENABLED"] ?? "<unset>")
           WINEDEBUG=\(environment["WINEDEBUG"] ?? "<unset>")
           taskpolicy_available=\(hasTaskpolicy)
 
         """
-        try? compressedWriter?.write(Data(CyderDiagnostics.shared.redact(preamble).utf8))
+        let redactedPreamble = CyderDiagnostics.shared.redact(preamble)
+        try? compressedWriter?.write(Data(redactedPreamble.utf8))
+        // Uncompressed sidecar so hang debugging can read backend/HUD/sync without
+        // waiting for gzip EOF (Wine clients still hold the compressor pipe open).
+        if captureWineLog {
+            var preambleURL = launchLog
+            if preambleURL.pathExtension == "gz" {
+                preambleURL = preambleURL.deletingPathExtension()
+            }
+            preambleURL = preambleURL
+                .deletingPathExtension()
+                .appendingPathExtension("preamble.txt")
+            try? redactedPreamble.write(to: preambleURL, atomically: true, encoding: .utf8)
+            let legacyPreamble = logDirectory.appendingPathComponent("last-launch.preamble.txt")
+            try? FileManager.default.removeItem(at: legacyPreamble)
+            try? FileManager.default.createSymbolicLink(
+                at: legacyPreamble,
+                withDestinationURL: preambleURL
+            )
+            CyderDiagnostics.shared.info(
+                "wine-launch-preamble path=\(CyderDiagnostics.shared.redact(preambleURL.path))"
+            )
+        }
         process.standardOutput = outputHandle
         process.standardError = outputHandle
 
@@ -1258,6 +1288,9 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
                 + "argument_source=\(argumentSource) argument_count=\(gameArguments.count) "
                 + "engine_version=\(engineVersion.isEmpty ? "unknown" : engineVersion) "
                 + "ntdll_sha256=\(ntdllSHA256) graphics=\(effectiveBackend ?? "default") "
+                + "dxvk_frame_rate=\(environment["DXVK_FRAME_RATE"] ?? "unset") "
+                + "dxvk_hud=\(environment["DXVK_HUD"] ?? "unset") "
+                + "mtl_hud=\(environment["MTL_HUD_ENABLED"] ?? "unset") "
                 + "diagnostics=\(diagnosticLevel.rawValue) msync=\(msync) esync=\(esync) "
                 + "power=\(powerMode) captureWineLog=\(captureWineLog) "
                 + "log=\(CyderDiagnostics.shared.redact(launchLog.path))"
