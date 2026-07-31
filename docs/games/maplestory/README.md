@@ -38,9 +38,10 @@ bottle 內 `C:\MapleTest`（APFS clone）；Documents `Z:` 在 source 上易出�
 ## 與《新楓之谷：經典版》CX26 的關係（2026-07-31）
 
 OEM-25（Wine 10／CrossOver OEM runtime）實測對同步機制與圖形後端較不敏感；經典版在
-`CX26.3.0-W11-Cyder007` 上則常在商城進出／開始遊戲時因 **wineserver 無聲消失** 而凍結，
-目前僅 **MSync + DXVK** 穩定。兩邊不是同一引擎、同一 hang 形狀，**不能**把 OEM「什麼
-sync 都能玩」直接外推到經典版。
+`CX26.3.0-W11-Cyder007` 曾因 **wineserver 無聲消失／SEGV** 在商城進出凍結。
+**Cyder 0.9.0** 的 Cyder007 已含 async fd rebind、soft-guard 與 diag；建議仍用
+**MSync + DXVK 或 D3DMetal**（勿依賴 WineD3D）。兩邊不是同一引擎、同一 hang 形狀，
+**不能**把 OEM「什麼 sync 都能玩」直接外推到經典版。
 
 OEM 文件裡與 wineserver／排程最相關、且曾被明確分類的項目是**效能 workaround**（降低
 wineserver 往返或 host `sched_yield`），bisect 已判定對無 OTP 畫面**非必要**；它們也

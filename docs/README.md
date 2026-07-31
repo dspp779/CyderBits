@@ -13,7 +13,7 @@
 
 | 版本 | 文件 | 重點 |
 |------|------|------|
-| 0.9.0 | [繁中](releases/v0.9.0.md) · [English](releases/v0.9.0.en.md) | CX26.3 Cyder007、可匯出／清理壓縮診斷記錄、同步設定與引擎發布契約 |
+| 0.9.0 | [繁中](releases/v0.9.0.md) · [English](releases/v0.9.0.en.md) | CX26.3 Cyder007（wineserver／DXVK／minOS 10.15）、診斷 preamble、test／release 發佈通道 |
 | 0.8.3 | [繁中](releases/v0.8.3.md) · [English](releases/v0.8.3.en.md) | CX26.3 Cyder006：x86_64 stack walk／unwind 相容性修正 |
 | 0.8.0 | [繁中](releases/v0.8.0.md) · [English](releases/v0.8.0.en.md) | 圖形後端偏好（WineD3D/DXVK/D3DMetal）、共用 DXVK、GPTK 本機安裝 |
 | 0.7.0 | [繁中](releases/v0.7.0.md) · [English](releases/v0.7.0.en.md) | CrossOver bottle 隔離、cabextract、新 App 圖示、MapleStory OEM flavor |

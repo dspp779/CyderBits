@@ -180,7 +180,10 @@ debug/capture-wine-hang.sh 5
 
 ## 7. 一句話結論
 
-商城／進場凍結的共同終態是 **wineserver 無聲消失 → client 永久等在自持的 `wait_fd`**；目前可玩 workaround 是 **MSync + DXVK**，已確認 SIGSEGV 含 `fd_reselect_async` NULL `fd_ops` 與 `pipe_end_disconnect` NULL `fd`；引擎已 soft-guard，並以 `sock-rebind-async-fd` 修 weak `async->fd`；仍建議用易卡組合／離場驗證。
+商城／進場凍結的共同終態是 **wineserver 無聲消失 → client 永久等在自持的 `wait_fd`**；
+**Cyder 0.9.0 / `CX26.3.0-W11-Cyder007`** 已含 soft-guard、`sock-rebind-async-fd` 與 diag
+dual-write，並強制打包 DXVK／minOS ≤ 10.15。可玩建議仍為 **MSync + DXVK 或 D3DMetal**；
+WineD3D 不建議。
 
 ## 8. 與 OEM-25「什麼 sync／後端都較穩」的對照
 

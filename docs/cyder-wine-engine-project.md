@@ -42,9 +42,10 @@ Cyder 的 [`scripts/import-engine-release.sh`](../scripts/import-engine-release.
 驗證包含 sidecar schema、archive digest、archive 內的 `version`、embedded manifest，以及
 實際解出的 `ntdll.dll` digest。任一項不一致即停止，不會部分更新 pin。
 
-Cyder 0.9.0 已 pin `CX26.3.0-W11-Cyder007`。匯入時已驗證 archive、sidecar、內嵌
-manifest、版本與 packaged `ntdll.dll` digest；對外發布前仍必須完成 Developer ID 簽章、
-公證與遊戲 smoke test。
+Cyder 0.9.0 已 pin `CX26.3.0-W11-Cyder007`（含 wineserver 修補、DXVK payload、host
+minOS ≤ 10.15）。匯入時已驗證 archive、sidecar、內嵌 manifest、版本與 packaged
+`ntdll.dll` digest；對外發布前仍必須完成 Developer ID 簽章、公證與遊戲 smoke test
+（見 [`release-pipeline.zh-TW.md`](release-pipeline.zh-TW.md)）。
 
 ## 保留相容副本
 
