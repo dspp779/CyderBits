@@ -139,9 +139,12 @@ debug/capture-wine-hang.sh 5
 1. **產品**：MapleStory Classic／OEM 預設或明確建議 **MSync + DXVK**；修正「凍結時先關同步」對此遊戲的誤導文案。
 2. **引擎診斷（已落地，待重現）**：`cyder-wine-engine` 的
    `cyder-wineserver-exit-diagnostics.patch` 已套入本機 runtime wineserver：
-   - 收到 SIGTERM／SIGINT／SIGHUP／SIGQUIT 時印 `signum`、名稱、`si_pid`／`si_uid`；
+   - 收到 SIGTERM／SIGINT／SIGHUP／SIGQUIT 時印 `signum`、名稱、`si_pid`／`si_uid`（Apple 另有 sender `path=`）；
    - `main_loop` 返回時印 `active_users`／`nb_users` 與 `running_processes`／`user_processes`／`shutdown_stage`；
-   - stale poll slot 訊息升級為 `FATAL:` 並立即 `fflush`（仍不 abort）。
+   - stale poll slot 訊息升級為 `FATAL:` 並立即 `fflush`（仍不 abort）；
+   - SIGSEGV 時印 `si_addr`／`si_code` 與 `backtrace()` 影格後 abort。
+   **死因已確認為 SIGSEGV**（非外部 SIGTERM）；下次重現請直接讀 diag log 的
+   `SIGSEGV pid=`／`SIGSEGV frame[`／`SIGSEGV sym[` 行以定位 fault 影格。
    重現時請用最容易卡的組合（例如 Sync 關閉 + DXVK），診斷層級建議「只記錄錯誤」。
    卡住後先跑 `debug/capture-wine-hang.sh`，再結束遊戲；**優先讀**
    `~/Library/Application Support/Cyder/bottles/shared/cyder-wineserver-diag.log`
