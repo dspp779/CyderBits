@@ -73,6 +73,7 @@ wineserver 往返或 host `sched_yield`），bisect 已判定對無 OTP 畫面**
 - [DXVK vs D3DMetal（本機筆記）](maplestory-dxvk-vs-d3dmetal.md)
 - [經典版 CX26 wineserver 凍結](../../maplestory-classic-wineserver-hang.md)
 - [經典版 CX26 frame-walk／登入卡住](../../maplestory-classic-cx26-frame-walk-debug.md)
+- [經典版 GRAP／NGS-X 插件盤點](classic-grap-ngs-x.md)：`Plugins/x86_64/grap*` 靜態盤點、與離場 livelock／Dock 殘留的關係
 
 ## OTP 專案的介面邊界
 

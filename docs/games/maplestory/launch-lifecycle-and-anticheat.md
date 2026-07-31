@@ -8,6 +8,10 @@
 實際啟動生命週期，以及 BlackCipher／Nexon Game Security（NGS）對 launcher 設計、
 成功判斷與結束處理的影響。
 
+《新楓之谷：經典版》改用 **GRAP／NGS-X** 插件樹（`grap64.dll`、`grap-core64.aes` 等），
+檔名與 V280 的 `BlackCipher64.aes` 不同，但 session 收斂原則相同。盤點見
+[classic-grap-ngs-x.md](classic-grap-ngs-x.md)。
+
 證據分三級：
 
 1. **已觀察**：Wine `+process`／`+loaddll` log、macOS process list、畫面與 20 分鐘實玩。

@@ -79,6 +79,29 @@ wineserver: server/fd.c:…: set_fd_events: Assertion `(poll_users[user] == fd)'
 
 假設（未證實）：macOS kqueue 路徑以 `udata` 帶 poll slot、以 `unix_fd` 做 `EV_DELETE`；fd 重用／註銷交錯可能誤送 `POLLHUP` 到 client `msg_fd`，導致 `running_processes` 誤判歸零。可用「強制 fallback 到 `poll()`」做對照實驗驗證。
 
+### 2.5 離開遊戲卡住（wineserver 仍在、高 CPU livelock）
+
+另一類終態：**遊戲內結束／離開後畫面卡死，BGM 仍播，wineserver 與 `grap-core64.aes` 各吃約 50% CPU，Maple 主程序低 CPU 等待。**  
+這與「wineserver 消失」不同——server **還活著**，但收工路徑走不完。
+
+2026-07-31 晚間在 **Cyder 0.9.0 / Cyder007**、**D3DMetal、同步關閉** 重現並採樣（BGM 仍在）：
+
+| 程序 | CPU | 取樣重點 |
+|------|-----|----------|
+| wineserver | ~47% | `main_loop` 忙於處理請求；可辨識符號為 `req_get_directory_entries` |
+| grap-core64.aes | ~55% | `NtQueryDirectoryObject` → `wine_server_call` 忙迴圈 |
+| Maplestory_Classic.exe | ~3% | 多半 `NtWaitForSingleObject`／`NtWaitForAlertByThreadId` |
+
+完整分析與 sample：`debug/hang-20260731-182944-leave-game/analysis.txt`  
+（同型：`hang-20260731-154434`、`hang-20260731-161329`）。
+
+GRAP／NGS-X 檔案樹與產品含義見
+[`docs/games/maplestory/classic-grap-ngs-x.md`](./games/maplestory/classic-grap-ngs-x.md)
+（`grap64.dll` 進程內入口；高 CPU 的是獨立 process `grap-core64.aes`；Dock 名
+「Nexon Game Security」來自 NGService／communicator）。
+
+強制結束時 diag 仍見 teardown SEGV：本次 `pipe_end_disconnect`；稍早同 bottle 為 `add_completion` ← `release_job_process`。離場 hang 本身是 **GRAP 目錄列舉 ↔ wineserver 請求風暴**，不是這兩次崩潰。
+
 ## 3. Sync × 圖形後端實測矩陣（2026-07-31）
 
 測試重點：進出商城、選角後開始遊戲。同一設定卡點可不固定；判定以 **wineserver 是否消失／畫面永久凍結** 為準。
@@ -176,14 +199,17 @@ debug/capture-wine-hang.sh 5
 | `docs/maplestory-classic-cx26-frame-walk-debug.md` | 先前 NTDLL frame-walk／登入卡住紀錄 |
 | `scripts/cyder_settings.swift` 等 | `sync` 診斷層級 |
 | `debug/capture-wine-hang.sh` | 凍結取樣（未進版控，見 `debug/`） |
+| `debug/hang-20260731-182944-leave-game/` | 0.9.0 離開遊戲 livelock（sample + `analysis.txt`） |
+| `docs/games/maplestory/classic-grap-ngs-x.md` | 經典版 GRAP／NGS-X 插件靜態盤點與處理建議 |
 | `cyder-wine-engine`：`patches/cyder-wineserver-*.patch` | pseudo-fd／poll-slot／fd_reselect／sock-rebind／pipe_end null-fd 修補與測試 |
 
 ## 7. 一句話結論
 
 商城／進場凍結的共同終態是 **wineserver 無聲消失 → client 永久等在自持的 `wait_fd`**；
+另有離開遊戲終態為 **wineserver 仍在、與 GRAP 陷入 `NtQueryDirectoryObject`／`req_get_directory_entries` livelock**（見 §2.5）。
 **Cyder 0.9.0 / `CX26.3.0-W11-Cyder007`** 已含 soft-guard、`sock-rebind-async-fd` 與 diag
 dual-write，並強制打包 DXVK／minOS ≤ 10.15。可玩建議仍為 **MSync + DXVK 或 D3DMetal**；
-WineD3D 不建議。
+WineD3D 不建議。離開遊戲 livelock 仍未解。
 
 ## 8. 與 OEM-25「什麼 sync／後端都較穩」的對照
 
