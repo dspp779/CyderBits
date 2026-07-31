@@ -143,8 +143,11 @@ debug/capture-wine-hang.sh 5
    - `main_loop` 返回時印 `active_users`／`nb_users` 與 `running_processes`／`user_processes`／`shutdown_stage`；
    - stale poll slot 訊息升級為 `FATAL:` 並立即 `fflush`（仍不 abort）；
    - SIGSEGV 時印 `si_addr`／`si_code` 與 `backtrace()` 影格後 abort。
-   **死因已確認為 SIGSEGV**（非外部 SIGTERM）；下次重現請直接讀 diag log 的
-   `SIGSEGV pid=`／`SIGSEGV frame[`／`SIGSEGV sym[` 行以定位 fault 影格。
+   **死因已確認為 SIGSEGV**（非外部 SIGTERM）：`fd_reselect_async` 在
+   `fd->fd_ops == NULL` 時呼叫 vtable（`si_addr=0x58`）。引擎已加
+   `cyder-wineserver-fd-reselect-async-null-ops.patch`（null-check + diag，不 abort）。
+   若仍有 SEGV，讀 diag log 的 `SIGSEGV pid=`／`frame[`／`sym[`；若只見
+   `fd_reselect_async: missing ops` 則為已攔截路徑。
    重現時請用最容易卡的組合（例如 Sync 關閉 + DXVK），診斷層級建議「只記錄錯誤」。
    卡住後先跑 `debug/capture-wine-hang.sh`，再結束遊戲；**優先讀**
    `~/Library/Application Support/Cyder/bottles/shared/cyder-wineserver-diag.log`
@@ -159,11 +162,11 @@ debug/capture-wine-hang.sh 5
 | `docs/maplestory-classic-cx26-frame-walk-debug.md` | 先前 NTDLL frame-walk／登入卡住紀錄 |
 | `scripts/cyder_settings.swift` 等 | `sync` 診斷層級 |
 | `debug/capture-wine-hang.sh` | 凍結取樣（未進版控，見 `debug/`） |
-| `cyder-wine-engine`：`patches/cyder-wineserver-*.patch` | pseudo-fd／poll-slot 修補與測試 |
+| `cyder-wine-engine`：`patches/cyder-wineserver-*.patch` | pseudo-fd／poll-slot／fd_reselect null-ops 修補與測試 |
 
 ## 7. 一句話結論
 
-商城／進場凍結的共同終態是 **wineserver 無聲消失 → client 永久等在自持的 `wait_fd`**；目前可玩 workaround 是 **MSync + DXVK**，根因仍待信號／自行退出二分與（可能的）kqueue／poll 對照確認。
+商城／進場凍結的共同終態是 **wineserver 無聲消失 → client 永久等在自持的 `wait_fd`**；目前可玩 workaround 是 **MSync + DXVK**，已確認一條 SIGSEGV 為 `fd_reselect_async` NULL `fd_ops`；引擎已 soft-guard，仍建議用易卡組合驗證。
 
 ## 8. 與 OEM-25「什麼 sync／後端都較穩」的對照
 
