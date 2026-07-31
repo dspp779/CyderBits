@@ -129,6 +129,9 @@ debug/capture-wine-hang.sh 5
 注意：Rosetta 翻譯下的 PE 呼叫鏈在 `sample` 中幾乎不可讀；價值在於確認「全體阻塞／server 是否存活」。
 
 ### 4.3 已知診斷限制
+- **hang-20260731-143139**：若 wineserver 死前 diag 只有 `diag start pid=`、沒有
+  `SIGSEGV`／signal 行，可能是舊 binary 在 cores 允許時未安裝 SEGV logger；請確認
+  runtime wineserver 已含 always-on SIGSEGV／SIGBUS 診斷後再重現。
 
 - wineserver stderr 會進 launch log（早期 assert 訊息曾出現在同一管道），因此「log 無 wineserver 字樣」有診斷意義。
 - 若 launch log 經 gzip 串流且程序僵屍未結束，末尾可能尚未 flush；結束卡住的 client 後再讀完整 `.log.gz`。
@@ -142,7 +145,9 @@ debug/capture-wine-hang.sh 5
    - 收到 SIGTERM／SIGINT／SIGHUP／SIGQUIT 時印 `signum`、名稱、`si_pid`／`si_uid`（Apple 另有 sender `path=`）；
    - `main_loop` 返回時印 `active_users`／`nb_users` 與 `running_processes`／`user_processes`／`shutdown_stage`；
    - stale poll slot 訊息升級為 `FATAL:` 並立即 `fflush`（仍不 abort）；
-   - SIGSEGV 時印 `si_addr`／`si_code` 與 `backtrace()` 影格後 abort。
+   - SIGSEGV／SIGBUS 時**一律**印 `si_addr`／`si_code` 與 `backtrace()` 影格後 abort
+     （不再只在 `RLIMIT_CORE==0` 時安裝 handler；否則 cores 開啟時會無聲死亡，diag
+     只剩 `diag start pid=`）。另有 `atexit pid=` breadcrumb。
    **死因已確認為 SIGSEGV**（非外部 SIGTERM）：`fd_reselect_async` 在
    `fd->fd_ops == NULL` 時呼叫 vtable（`si_addr=0x58`）。引擎已加
    `cyder-wineserver-fd-reselect-async-null-ops.patch`（null-check + diag，不 abort）。
