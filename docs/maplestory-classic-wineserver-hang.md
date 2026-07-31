@@ -134,13 +134,17 @@ debug/capture-wine-hang.sh 5
 - 若 launch log 經 gzip 串流且程序僵屍未結束，末尾可能尚未 flush；結束卡住的 client 後再讀完整 `.log.gz`。
 - `+sync` 量級仍可能影響時序；確認組合後請關閉診斷。
 
-## 5. 建議後續工作（尚未實作）
+## 5. 建議後續工作
 
 1. **產品**：MapleStory Classic／OEM 預設或明確建議 **MSync + DXVK**；修正「凍結時先關同步」對此遊戲的誤導文案。
-2. **引擎診斷**（純輸出）：SIGTERM／SIGINT 用 `SA_SIGINFO` 印 `si_pid`；`main_loop` 返回後印 `active_users`／`running_processes`。
+2. **引擎診斷（已落地，待重現）**：`cyder-wine-engine` 的
+   `cyder-wineserver-exit-diagnostics.patch` 已套入本機 runtime wineserver：
+   - 收到 SIGTERM／SIGINT／SIGHUP／SIGQUIT 時印 `signum`、名稱、`si_pid`／`si_uid`；
+   - `main_loop` 返回時印 `active_users`／`nb_users` 與 `running_processes`／`user_processes`／`shutdown_stage`；
+   - stale poll slot 訊息升級為 `FATAL:` 並立即 `fflush`（仍不 abort）。
+   重現時請用最容易卡的組合（例如 Sync 關閉 + DXVK），診斷層級可用「安靜」或「只記錄錯誤」；卡住後結束程序再讀 launch log 尾端，找上述字串。
 3. **對照**：強制 wineserver 走 `poll()`（關閉 kqueue）後，用 Sync 關閉 + DXVK 重測。
-4. **Guard 策略**：在仍有 MSync+DXVK 可玩的前提下，考慮診斷組合暫將 soft-guard 改回 assert／FATAL，避免無聲死亡。
-5. **補齊**：評估 `remove_poll_user()` 的同型 assert；引擎 patch 維護於 `cyder-wine-engine` 專案。
+4. **補齊**：評估 `remove_poll_user()` 的同型 assert；引擎 patch 維護於 `cyder-wine-engine` 專案。
 
 ## 6. 相關檔案
 
