@@ -1,0 +1,6 @@
+# Do not whole-file reverse these when removing only W:
+dlls/winemac.drv/cocoa_app.m  # also S (msedgewebview2 blacklist)
+# Coupling pulled into group-W.files for whole-file reverse with window.c:
+#   gdi.c + macdrv.h  (macdrv_DrawMenuBar / ShouldDrawMenuBars)
+#   mouse.c           (WM_MACDRV_CLIP_CURSOR in macdrv.h)
+# Wiring-only diffs (Makefile/headers) omitted from first-cut reverse; add if link fails.

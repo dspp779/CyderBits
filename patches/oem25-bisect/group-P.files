@@ -1,0 +1,9 @@
+dlls/ntdll/unix/sync.c
+dlls/ntdll/unix/file.c
+dlls/ntdll/unix/server.c
+dlls/ntdll/unix/unix_private.h
+dlls/dbghelp/dbghelp.c
+dlls/dbghelp/dbghelp.spec
+dlls/dbghelp/module.c
+dlls/dbghelp/stack.c
+dlls/dbghelp/symbol.c

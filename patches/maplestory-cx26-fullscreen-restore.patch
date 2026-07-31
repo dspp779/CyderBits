@@ -1,0 +1,55 @@
+--- a/dlls/win32u/ntuser_private.h
++++ b/dlls/win32u/ntuser_private.h
+@@ -75,6 +75,7 @@ typedef struct tagWND
+     int                pixel_format;  /* Pixel format set by the graphics driver */
+     int                clip_clients;  /* Has client surfaces that needs to be clipped out */
+     int                cbWndExtra;    /* class cbWndExtra at window creation */
++    DWORD              last_restore_ticks; /* MapleStory fullscreen restore guard */
+     DWORD_PTR          userdata;      /* User private data */
+     int                private_off;   /* offset of private extra bytes range */
+     int                private_len;   /* length of private extra bytes range */
+--- a/dlls/win32u/defwnd.c
++++ b/dlls/win32u/defwnd.c
+@@ -1026,6 +1026,15 @@ static LRESULT handle_sys_command( HWND hwnd, WPARAM wparam, LPARAM lparam )
+     case SC_RESTORE:
+         if (is_iconic( hwnd )) NtUserShowOwnedPopups( hwnd, TRUE );
+         NtUserShowWindow( hwnd, SW_RESTORE );
++        {
++            WND *win;
++
++            if ((win = get_win_ptr( hwnd )) && win != WND_OTHER_PROCESS && win != WND_DESKTOP)
++            {
++                win->last_restore_ticks = NtGetTickCount();
++                release_win_ptr( win );
++            }
++        }
+         break;
+ 
+     case SC_TASKLIST:
+--- a/dlls/win32u/window.c
++++ b/dlls/win32u/window.c
+@@ -1432,6 +1432,24 @@ static ULONG_PTR set_window_long( HWND hwnd, INT offset, UINT size, ULONG_PTR ne
+     case GWL_STYLE:
+         style.styleOld = win->dwStyle;
+         style.styleNew = newval;
++        /* MapleStoryPort: the game briefly restores its fullscreen window and
++         * then asks for a windowed style. Applying that transition inside the
++         * restore window loses the renderer's intended fullscreen state. */
++        if (style.styleOld == 0x94080000 && style.styleNew == 0x00ce0000)
++        {
++            static const WCHAR maplestory_class[] =
++                    {'M','a','p','l','e','S','t','o','r','y','C','l','a','s','s',0};
++            WCHAR class_name[32];
++            UNICODE_STRING name = { .Buffer = class_name, .MaximumLength = sizeof(class_name) };
++
++            if (NtUserGetClassName( hwnd, FALSE, &name ) && !wcscmp( class_name, maplestory_class )
++                    && win->last_restore_ticks && NtGetTickCount() - win->last_restore_ticks < 3000)
++            {
++                TRACE("Ignoring MapleStory fullscreen-to-windowed style change immediately after restore.\n");
++                release_win_ptr( win );
++                return style.styleNew;
++            }
++        }
+         release_win_ptr( win );
+         send_message( hwnd, WM_STYLECHANGING, GWL_STYLE, (LPARAM)&style );
+         if (!(win = get_win_ptr( hwnd )) || win == WND_OTHER_PROCESS) return 0;

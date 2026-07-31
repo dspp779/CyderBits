@@ -1,0 +1,5 @@
+dlls/dbghelp/dbghelp.c
+dlls/dbghelp/dbghelp.spec
+dlls/dbghelp/module.c
+dlls/dbghelp/stack.c
+dlls/dbghelp/symbol.c

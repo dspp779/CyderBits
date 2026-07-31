@@ -1,0 +1,6 @@
+dlls/kernelbase/file.c
+dlls/kernelbase/loader.c
+dlls/winegstreamer/Makefile.in
+dlls/winegstreamer/unix_private.h
+dlls/winegstreamer/unixlib.c
+dlls/winegstreamer/wg_parser.c

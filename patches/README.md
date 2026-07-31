@@ -101,3 +101,25 @@ and R5 changes; the R4 deminiaturize guard remains history-only and should not
 be applied to the final engine. See
 [`docs/bluecg-winemac-a6-engine.md`](../docs/bluecg-winemac-a6-engine.md) for
 the tested runtime and artifact checksum.
+
+## MapleStory OEM / CX26 reference patches (not applied by default)
+
+Brought over from `codex/maplestory-oem-special` for reading and selective A/B.
+**`scripts/build-wine.sh` on this branch does not auto-apply these files.**
+
+| Path | Role |
+|------|------|
+| `maplestory-cx26-*.patch` | Forward-port candidates from OEM CX25 MapleStory work (shared texture, ClearView, window/focus, `.tmp` module name, **no-sched-yield**, …) |
+| `maplestory-oem25-source-distversion.patch` | OEM source packaging marker |
+| `oem25-bisect/` | Reverse-bisect file groups and results (G/W/L/P/S) |
+
+Sync / wineserver-adjacent items documented in OEM research:
+
+- **8 KiB userspace file cache** (`ntdll/unix/file.c`) — reduce small-read wineserver traffic; invasive; **not** in the no-OTP necessary set.
+- **Disable `sched_yield` in `NtYieldExecution`** (`maplestory-cx26-no-sched-yield.patch`) — scheduling/perf workaround; **not** in the no-OTP necessary set.
+- **Display-mode cache** — fewer `EnumDisplaySettings` wineserver round-trips; perf only.
+- **Shared-resource flush/finish** — GPU/overlay state sync, not process-level wineserver keep-alive.
+
+For Classic CX26 hang analysis versus these OEM items, see
+[`docs/maplestory-classic-wineserver-hang.md`](../docs/maplestory-classic-wineserver-hang.md)
+and [`docs/games/maplestory/oem-cx25-maplestory-patches.md`](../docs/games/maplestory/oem-cx25-maplestory-patches.md).

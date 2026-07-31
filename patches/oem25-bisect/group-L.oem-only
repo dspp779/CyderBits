@@ -1,0 +1,2 @@
+# Delete these OEM-only paths when reversing L (no retail counterpart):
+dlls/winegstreamer/rawaudioparse.c

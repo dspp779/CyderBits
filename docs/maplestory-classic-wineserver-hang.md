@@ -154,3 +154,43 @@ debug/capture-wine-hang.sh 5
 ## 7. 一句話結論
 
 商城／進場凍結的共同終態是 **wineserver 無聲消失 → client 永久等在自持的 `wait_fd`**；目前可玩 workaround 是 **MSync + DXVK**，根因仍待信號／自行退出二分與（可能的）kqueue／poll 對照確認。
+
+## 8. 與 OEM-25「什麼 sync／後端都較穩」的對照
+
+來源：`codex/maplestory-oem-special` 的
+[`docs/games/maplestory/`](./games/maplestory/README.md)（已合入本樹供閱讀）與
+[`patches/oem25-bisect/`](../patches/oem25-bisect/README.md)。
+
+### 8.1 為什麼 OEM 經驗不能直接當經典版解法
+
+| 面向 | OEM-25 正式版 | 經典版 CX26（Cyder007） |
+|------|---------------|-------------------------|
+| Wine 基線 | CrossOver OEM 25／Wine **10** | CrossOver 26／Wine **11** |
+| 引擎一致性 | 整包同 build（wineserver／ntdll／winemac／DLL） | 正式 CX26 + Cyder patch；與 OEM binary **不可混用**（protocol 曾不一致） |
+| 使用者觀察 | 同步機制與圖形後端切換較少踩雷 | 幾乎只有 **MSync+DXVK** 能反覆進出商城 |
+| Hang 形狀 | 歷史主線多為黑畫面／進世界／防作弊路徑 | **wineserver 進程消失** 後 client 僵屍等待 |
+
+OEM bisect 的「必要集」是 MoltenVK、dbghelp、kernelbase `.msf`、整包 G（ClearView／shared texture），目標是**畫面／進世界**，不是修復「server 進程無聲退出」。
+
+### 8.2 OEM 文件裡真正跟 wineserver／同步有關的項目
+
+文件把「同步」分成兩類，容易混淆：
+
+1. **GPU／overlay 狀態同步**（shared-resource `finish`、ClearView 等）— D3D 正確性，不是 wineserver keep-alive。
+2. **效能 workaround（減少 wineserver 往返或 scheduler 成本）**：
+
+| 項目 | 做什麼 | Bisect 判定 | 對經典版 hang 的含義 |
+|------|--------|-------------|----------------------|
+| 8 KiB userspace file cache | 小檔讀取少打 wineserver | 無 OTP **非必要**（rev-Pfc） | 可能降低壓力，**未證明**能阻止 server 死亡；侵入性高 |
+| 停用 `NtYieldExecution`→`sched_yield` | 避免 tight poll 一直讓出 CPU | 無 OTP **非必要** | 改排程時序；可能改變重現機率，不是 server 生命週期修補 |
+| display-mode cache | 少打 `EnumDisplaySettings`／wineserver | 無 OTP **非必要** | 同上，效能向 |
+| OEM `wine --wait-children` | 主程式先結束、子進程仍在時不要過早放掉 session | 產品／防作弊 lifecycle | 防的是「誤判遊戲已關」；經典版是 **server 先死、client 還在**，方向相反，但提醒要區分「正常收工」與「異常消失」 |
+
+OEM 文件**沒有**記載等同於目前 classic 的「poll_users assert／無聲 exit／MSync 獨活」根因分析，也**沒有**把 MSync／ESync 開關當成黑畫面解法（明確寫過不是單純 CSMT／MSync）。
+
+### 8.3 對後續實驗的建議（仍屬假設）
+
+- 優先完成 wineserver **死因二分**（信號 `si_pid` vs `main_loop` 自行返回），再考慮移植 OEM 效能 patch。
+- 若要做 A/B：單一變因試 `maplestory-cx26-no-sched-yield.patch`（改動小）；file cache 另案且需回歸。
+- 勿把整包 OEM CX25 與 CX26 runtime 混接；protocol／ABI 不一致會製造假陽性。
+- 參考 patch 已放在 `patches/maplestory-cx26-*.patch`，**預設不套用**。

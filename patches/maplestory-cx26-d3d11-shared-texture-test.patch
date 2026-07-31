@@ -1,0 +1,171 @@
+--- a/dlls/d3d11/device.c
++++ b/dlls/d3d11/device.c
+@@ -2962,9 +2962,73 @@
+ }
+ 
+ static void STDMETHODCALLTYPE d3d11_device_context_ClearView(ID3D11DeviceContext4 *iface, ID3D11View *view,
+-        const FLOAT color[4], const D3D11_RECT *rect, UINT num_rects)
++        const FLOAT color[4], const D3D11_RECT *rects, UINT rect_count)
+ {
+-    FIXME("iface %p, view %p, color %p, rect %p, num_rects %u stub!\n", iface, view, color, rect, num_rects);
++    struct d3d11_device_context *context = impl_from_ID3D11DeviceContext4(iface);
++    IUnknown *unknown;
++    unsigned int i;
++
++    TRACE("iface %p, view %p, color %p, rects %p, rect_count %u.\n",
++            iface, view, color, rects, rect_count);
++
++    if (ID3D11View_QueryInterface(view, &IID_ID3D11UnorderedAccessView, (void **)&unknown) == S_OK)
++    {
++        struct d3d11_unordered_access_view *view_impl =
++                unsafe_impl_from_ID3D11UnorderedAccessView((ID3D11UnorderedAccessView *)unknown);
++
++        /* wined3d's public UAV clear currently clears the complete view. This
++         * matches ClearView when no rectangles are supplied and is preferable
++         * to Wine's former no-op for applications that use ClearView for their
++         * primary render path. Partial UAV rectangles can be added to wined3d
++         * independently without changing this D3D11 entry point again. */
++        if (rect_count)
++            FIXME("Partial unordered-access ClearView is not implemented; clearing the complete view.\n");
++        wined3d_device_context_clear_uav_float(context->wined3d_context,
++                view_impl->wined3d_view, (const struct wined3d_vec4 *)color);
++    }
++    else if (ID3D11View_QueryInterface(view, &IID_ID3D11RenderTargetView, (void **)&unknown) == S_OK)
++    {
++        struct d3d_rendertarget_view *view_impl =
++                unsafe_impl_from_ID3D11RenderTargetView((ID3D11RenderTargetView *)unknown);
++
++        if (!rect_count)
++        {
++            wined3d_device_context_clear_rendertarget_view(context->wined3d_context,
++                    view_impl->wined3d_view, NULL, WINED3DCLEAR_TARGET,
++                    (const struct wined3d_color *)color, 0.0f, 0);
++        }
++        else
++        {
++            for (i = 0; i < rect_count; ++i)
++                wined3d_device_context_clear_rendertarget_view(context->wined3d_context,
++                        view_impl->wined3d_view, &rects[i], WINED3DCLEAR_TARGET,
++                        (const struct wined3d_color *)color, 0.0f, 0);
++        }
++    }
++    else if (ID3D11View_QueryInterface(view, &IID_ID3D11DepthStencilView, (void **)&unknown) == S_OK)
++    {
++        struct d3d_depthstencil_view *view_impl =
++                unsafe_impl_from_ID3D11DepthStencilView((ID3D11DepthStencilView *)unknown);
++
++        if (!rect_count)
++        {
++            wined3d_device_context_clear_rendertarget_view(context->wined3d_context,
++                    view_impl->wined3d_view, NULL, WINED3DCLEAR_ZBUFFER, NULL, color[0], 0);
++        }
++        else
++        {
++            for (i = 0; i < rect_count; ++i)
++                wined3d_device_context_clear_rendertarget_view(context->wined3d_context,
++                        view_impl->wined3d_view, &rects[i], WINED3DCLEAR_ZBUFFER, NULL, color[0], 0);
++        }
++    }
++    else
++    {
++        FIXME("Unimplemented view type.\n");
++        return;
++    }
++
++    IUnknown_Release(unknown);
+ }
+ 
+ static void STDMETHODCALLTYPE d3d11_device_context_DiscardView1(ID3D11DeviceContext4 *iface, ID3D11View *view,
+@@ -4596,9 +4660,77 @@
+ static HRESULT STDMETHODCALLTYPE d3d11_device_OpenSharedResource(ID3D11Device5 *iface, HANDLE resource, REFIID iid,
+         void **out)
+ {
+-    FIXME("iface %p, resource %p, iid %s, out %p stub!\n", iface, resource, debugstr_guid(iid), out);
++    struct d3d_device *device = impl_from_ID3D11Device5(iface);
++    struct d3d_texture2d *object;
++    D3D11_TEXTURE2D_DESC desc;
++    char name[64];
++    HANDLE mapping;
++    void *view;
++    HRESULT hr;
++    struct DECLSPEC_ALIGN(8)
++    {
++        UINT width;
++        UINT height;
++    } *texture_metadata;
+ 
+-    return E_NOTIMPL;
++    TRACE("iface %p, resource %p, iid %s, out %p.\n", iface, resource, debugstr_guid(iid), out);
++
++    if (!IsEqualGUID(iid, &IID_ID3D11Texture2D))
++    {
++        FIXME("Only shared D3D11Texture2D resources are currently supported.\n");
++        return E_NOTIMPL;
++    }
++
++    sprintf(name, "winekmt_%p", resource);
++    if (!(mapping = OpenFileMappingA(FILE_MAP_ALL_ACCESS, FALSE, name)))
++        return E_INVALIDARG;
++
++    if (!(view = MapViewOfFile(mapping, FILE_MAP_ALL_ACCESS, 0, 0, 0)))
++    {
++        WARN("Failed to map shared resource, error %lu.\n", GetLastError());
++        CloseHandle(mapping);
++        return E_INVALIDARG;
++    }
++    /* DwarfAxe owns the mapping. Keep it mapped for the lifetime of the imported texture. */
++    texture_metadata = view;
++
++    desc.Width = texture_metadata->width;
++    desc.Height = texture_metadata->height;
++    desc.MipLevels = 1;
++    desc.ArraySize = 1;
++    desc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
++    desc.SampleDesc.Count = 1;
++    desc.SampleDesc.Quality = 0;
++    desc.Usage = D3D11_USAGE_DEFAULT;
++    desc.BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
++    desc.CPUAccessFlags = 0;
++    desc.MiscFlags = D3D11_RESOURCE_MISC_SHARED;
++
++    if (FAILED(hr = d3d_texture2d_create(device, &desc, NULL, NULL, &object)))
++    {
++        WARN("Failed to create shared texture, hr %#lx.\n", hr);
++        UnmapViewOfFile(view);
++        CloseHandle(mapping);
++        return hr;
++    }
++
++    wined3d_mutex_lock();
++    hr = wined3d_texture_update_desc(object->wined3d_texture, 0,
++            (char *)view + sizeof(*texture_metadata), 0);
++    wined3d_mutex_unlock();
++    if (FAILED(hr))
++    {
++        WARN("Failed to import shared texture memory, hr %#lx.\n", hr);
++        ID3D11Texture2D_Release(&object->ID3D11Texture2D_iface);
++        UnmapViewOfFile(view);
++        CloseHandle(mapping);
++        return hr;
++    }
++
++    TRACE("Imported shared texture %p (%ux%u).\n", object, desc.Width, desc.Height);
++    *out = &object->ID3D11Texture2D_iface;
++
++    return S_OK;
+ }
+ 
+ static HRESULT STDMETHODCALLTYPE d3d11_device_CheckFormatSupport(ID3D11Device5 *iface, DXGI_FORMAT format,
+--- a/dlls/wined3d/device.c
++++ b/dlls/wined3d/device.c
+@@ -4975,8 +4975,10 @@
+ void CDECL wined3d_device_context_flush(struct wined3d_device_context *context)
+ {
+     TRACE("context %p.\n", context);
+ 
+     wined3d_device_context_lock(context);
+     context->ops->flush(context);
++    /* MapleStoryPort: DwarfAxe consumes shared texture memory synchronously. */
++    context->ops->finish(context, WINED3D_CS_QUEUE_DEFAULT);
+     wined3d_device_context_unlock(context);
+ }

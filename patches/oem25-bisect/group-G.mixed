@@ -1,0 +1,6 @@
+# Formerly mixed with P display-mode cache; for reverse-G compile coupling these
+# are now whole-file reversed with G (see group-G.files). If rev-G fails, split
+# display-mode cache hunks back out before blaming ClearView/shared-texture.
+# dlls/wined3d/directx.c
+# dlls/wined3d/wined3d_private.h
+# include/wine/wined3d.h

@@ -1,0 +1,272 @@
+diff -ruN a/dlls/wined3d/texture.c b/dlls/wined3d/texture.c
+--- a/dlls/wined3d/texture.c
++++ b/dlls/wined3d/texture.c
+@@ -938,6 +938,8 @@
+     }
+
+     texture->sub_resources[sub_resource_idx].user_memory = mem;
++    /* MapleStoryPort hack 23278: keep user-memory textures in sysmem. */
++    texture->resource.pin_sysmem = 1;
+
+     if (update_memory_only)
+     {
+@@ -1485,6 +1487,8 @@
+         else
+             texture->flags |= WINED3D_TEXTURE_GENERATE_MIPMAPS;
+     }
++    if (format->upload && desc->access & (WINED3D_RESOURCE_ACCESS_MAP_W | WINED3D_RESOURCE_ACCESS_MAP_R))
++        texture->resource.pin_sysmem = 1;
+
+     if (flags & WINED3D_TEXTURE_CREATE_RECORD_DIRTY_REGIONS)
+     {
+diff -ruN a/dlls/wined3d/texture_vk.c b/dlls/wined3d/texture_vk.c
+--- a/dlls/wined3d/texture_vk.c
++++ b/dlls/wined3d/texture_vk.c
+@@ -171,7 +171,8 @@
+
+     /* We need to be outside of a render pass for vkCmdPipelineBarrier() and vkCmdCopyBufferToImage() calls below. */
+     wined3d_context_vk_end_current_render_pass(context_vk);
+-    if (!src_bo_addr->buffer_object)
++    /* MapleStoryPort hack 23278: converted formats need a staging upload. */
++    if (!src_bo_addr->buffer_object || plane_format->upload)
+     {
+         unsigned int staging_row_pitch, staging_slice_pitch, staging_size;
+
+diff -ruN a/dlls/winegstreamer/Makefile.in b/dlls/winegstreamer/Makefile.in
+--- a/dlls/winegstreamer/Makefile.in
++++ b/dlls/winegstreamer/Makefile.in
+@@ -18,0 +19 @@
++	rawaudioparse.c \
+diff -ruN a/dlls/winegstreamer/rawaudioparse.c b/dlls/winegstreamer/rawaudioparse.c
+--- a/dlls/winegstreamer/rawaudioparse.c
++++ b/dlls/winegstreamer/rawaudioparse.c
+@@ -0,0 +1,122 @@
++/*
++ * Copyright 2024 Brendan McGrath for CodeWeavers
++ *
++ * This library is free software; you can redistribute it and/or
++ * modify it under the terms of the GNU Lesser General Public
++ * License as published by the Free Software Foundation; either
++ * version 2.1 of the License, or (at your option) any later version.
++ *
++ * This library is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++ * Lesser General Public License for more details.
++ *
++ * You should have received a copy of the GNU Lesser General Public
++ * License along with this library; if not, write to the Free Software
++ * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
++ */
++
++#if 0
++#pragma makedep unix
++#endif
++
++#include <gst/audio/audio-info.h>
++#include <gst/base/gstbaseparse.h>
++
++typedef struct
++{
++    GstBaseParse baseparse;
++
++    GstAudioInfo audio_info;
++} RawAudioParse;
++
++typedef struct
++{
++    GstBaseParseClass parent_class;
++} RawAudioParseClass;
++
++G_DEFINE_TYPE(RawAudioParse, raw_audio_parse, GST_TYPE_BASE_PARSE);
++#define RAW_AUDIO_PARSE_TYPE (raw_audio_parse_get_type())
++#define RAW_AUDIO_PARSE(obj) (G_TYPE_CHECK_INSTANCE_CAST((obj), RAW_AUDIO_PARSE_TYPE, RawAudioParse))
++#define parent_class raw_audio_parse_parent_class
++
++gboolean gst_element_register_rawaudioparse(GstPlugin *plugin)
++{
++    return gst_element_register(plugin, "rawaudioparse", GST_RANK_NONE, RAW_AUDIO_PARSE_TYPE);
++}
++
++static GstStaticPadTemplate raw_audio_parse_sink_template = GST_STATIC_PAD_TEMPLATE("sink",
++        GST_PAD_SINK, GST_PAD_ALWAYS,
++        GST_STATIC_CAPS("audio/x-raw"));
++
++static GstStaticPadTemplate raw_audio_parse_src_template = GST_STATIC_PAD_TEMPLATE("src",
++        GST_PAD_SRC, GST_PAD_ALWAYS,
++        GST_STATIC_CAPS("audio/x-raw"));
++
++static GstCaps *raw_audio_parse_get_sink_caps (GstBaseParse *parse, GstCaps *filter);
++static gboolean raw_audio_parse_set_sink_caps (GstBaseParse *parse, GstCaps *caps);
++static GstFlowReturn raw_audio_parse_handle_frame (GstBaseParse *parse, GstBaseParseFrame *frame, gint *skipsize);
++
++static void raw_audio_parse_class_init (RawAudioParseClass *klass)
++{
++    GstBaseParseClass *parse_class = GST_BASE_PARSE_CLASS (klass);
++    GstElementClass *element_class = GST_ELEMENT_CLASS (klass);
++
++    parse_class->get_sink_caps = GST_DEBUG_FUNCPTR (raw_audio_parse_get_sink_caps);
++    parse_class->set_sink_caps = GST_DEBUG_FUNCPTR (raw_audio_parse_set_sink_caps);
++    parse_class->handle_frame = GST_DEBUG_FUNCPTR (raw_audio_parse_handle_frame);
++
++    gst_element_class_add_static_pad_template (element_class, &raw_audio_parse_sink_template);
++    gst_element_class_add_static_pad_template (element_class, &raw_audio_parse_src_template);
++
++    gst_element_class_set_static_metadata (element_class,
++      "Proton Raw Audio Parser", "Codec/Parser/Audio",
++      "Proton Audio Parser", "Brendan McGrath <bmcgrath@codeweavers.com>");
++}
++
++static void raw_audio_parse_init (RawAudioParse *raw_audio_parse)
++{
++}
++
++static GstCaps *raw_audio_parse_get_sink_caps (GstBaseParse *parse, GstCaps *filter)
++{
++    return gst_pad_peer_query_caps(GST_BASE_PARSE_SRC_PAD(parse), filter);
++}
++
++static gboolean raw_audio_parse_set_sink_caps (GstBaseParse *parse, GstCaps *caps)
++{
++    RawAudioParse *raw_audio_parse = RAW_AUDIO_PARSE(parse);
++    guint frame_size;
++    gboolean ret;
++    GstPad *pad;
++
++    pad = GST_BASE_PARSE_SRC_PAD(parse);
++    ret = gst_pad_set_caps(pad, caps);
++
++    GST_DEBUG_OBJECT(pad, "%sset caps to %"GST_PTR_FORMAT, ret ? "" : "failed to ", caps);
++
++    if (ret && (ret = gst_audio_info_from_caps(&raw_audio_parse->audio_info, caps)))
++    {
++        frame_size = raw_audio_parse->audio_info.rate * raw_audio_parse->audio_info.bpf * 0.3;
++        GST_DEBUG("Using frame size %d", frame_size);
++        gst_base_parse_set_min_frame_size(parse, frame_size);
++    }
++    else
++    {
++        GST_WARNING("Operating in passthrough mode");
++        gst_base_parse_set_passthrough(parse, TRUE);
++    }
++
++    return ret;
++}
++
++static GstFlowReturn raw_audio_parse_handle_frame (GstBaseParse *parse, GstBaseParseFrame *frame, gint *skipsize)
++{
++    RawAudioParse *raw_audio_parse = RAW_AUDIO_PARSE(parse);
++    gsize size;
++
++    size = gst_buffer_get_size(frame->buffer);
++    GST_BUFFER_DURATION(frame->buffer) = size * GST_SECOND / raw_audio_parse->audio_info.bpf / raw_audio_parse->audio_info.rate;
++    gst_base_parse_finish_frame(parse, frame, size);
++    return GST_FLOW_OK;
++}
+diff -ruN a/dlls/winegstreamer/unix_private.h b/dlls/winegstreamer/unix_private.h
+--- a/dlls/winegstreamer/unix_private.h
++++ b/dlls/winegstreamer/unix_private.h
+@@ -111,5 +111,6 @@
+         bool discard_data);
+
+ extern gboolean gst_element_register_winegstreamerstepper(GstPlugin *plugin);
++extern gboolean gst_element_register_rawaudioparse(GstPlugin *plugin);
+
+ #endif /* __WINE_WINEGSTREAMER_UNIX_PRIVATE_H */
+diff -ruN a/dlls/winegstreamer/unixlib.c b/dlls/winegstreamer/unixlib.c
+--- a/dlls/winegstreamer/unixlib.c
++++ b/dlls/winegstreamer/unixlib.c
+@@ -303,6 +303,8 @@
+
+     if (!gst_element_register_winegstreamerstepper(NULL))
+         GST_ERROR("Failed to register the stepper element");
++    if (!gst_element_register_rawaudioparse(NULL))
++        GST_ERROR("Failed to register the raw audio parser");
+
+     return STATUS_SUCCESS;
+ }
+diff -ruN a/dlls/winegstreamer/wg_parser.c b/dlls/winegstreamer/wg_parser.c
+--- a/dlls/winegstreamer/wg_parser.c
++++ b/dlls/winegstreamer/wg_parser.c
+@@ -946,6 +946,7 @@
+     }
+     else if (!strcmp(name, "audio/x-raw"))
+     {
++        const char *raw_audio_parse;
+         /* Currently our dsound can't handle 64-bit formats or all
+          * surround-sound configurations. Native dsound can't always handle
+          * 64-bit formats either. Add an audioconvert to allow changing bit
+@@ -953,6 +954,13 @@
+         if (!(element = create_element("audioconvert", "base"))
+                 || !append_element(parser->container, element, &first, &last))
+             return false;
++
++        if ((raw_audio_parse = getenv("RAW_AUDIO_PARSE")) && atoi(raw_audio_parse) == 1)
++        {
++            if (!(element = create_element("rawaudioparse", "winemediaconverter"))
++                    || !append_element(parser->container, element, &first, &last))
++                return false;
++        }
+
+         if (!link_src_to_element(pad, first) || !link_element_to_sink(last, stream->my_sink))
+             return false;
+diff -ruN a/dlls/winemac.drv/window.c b/dlls/winemac.drv/window.c
+--- a/dlls/winemac.drv/window.c
++++ b/dlls/winemac.drv/window.c
+@@ -71,6 +71,18 @@
+ }
+
+
++/* MapleStoryPort hack 23284 / 23364. */
++static BOOL is_maplestory_main_window(HWND hwnd)
++{
++    static const WCHAR maplestory_classW[] =
++        {'M','a','p','l','e','S','t','o','r','y','C','l','a','s','s',0};
++    WCHAR class[32];
++    UNICODE_STRING name = { .Buffer = class, .MaximumLength = sizeof(class) };
++
++    return NtUserGetClassName(hwnd, FALSE, &name) && !wcscmp(class, maplestory_classW);
++}
++
++
+ /* per-monitor DPI aware NtUserSetWindowPos call */
+ static BOOL set_window_pos(HWND hwnd, HWND after, INT x, INT y, INT cx, INT cy, UINT flags)
+ {
+@@ -287,6 +299,11 @@
+     macdrv_set_cocoa_parent_window(data->cocoa_window, owner_win);
+
+     wf = get_cocoa_window_features(data, style, ex_style);
++    if (is_maplestory_main_window(data->hwnd))
++    {
++        FIXME("hwnd %p is the main maplestory window; making it not resizable\n", data->hwnd);
++        wf.resizable = FALSE;
++    }
+     macdrv_set_cocoa_window_features(data->cocoa_window, &wf);
+
+     get_cocoa_window_state(data, style, ex_style, &state);
+@@ -2044,6 +2061,12 @@
+
+     TRACE("win %p\n", hwnd);
+
++    if (is_maplestory_main_window(hwnd))
++    {
++        FIXME("skipping size-move loop for MapleStory\n");
++        return;
++    }
++
+     if (style & (WS_DISABLED | WS_MAXIMIZE | WS_MINIMIZE)) return;
+     if (!(style & WS_VISIBLE)) return;
+
+@@ -2122,6 +2145,12 @@
+     struct macdrv_win_data *data;
+
+     TRACE("win %p\n", hwnd);
++
++    if (is_maplestory_main_window(hwnd))
++    {
++        FIXME("skipping size-move loop for MapleStory\n");
++        return;
++    }
+
+     if (!(data = get_win_data(hwnd))) return;
+     if (data->drag_event)

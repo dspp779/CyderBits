@@ -1,0 +1,20 @@
+--- a/dlls/winemac.drv/cocoa_app.m
++++ b/dlls/winemac.drv/cocoa_app.m
+@@ -294,6 +294,17 @@
+ 
+     - (void) transformProcessToForeground:(BOOL)activateIfTransformed
+     {
++        /* MapleStoryPort: BlackXchg is a transient anti-cheat helper. Letting it
++         * transform the shared Wine application steals foreground activation
++         * while MapleStory is creating its renderer window. */
++        if ([[NSProcessInfo processInfo].processName isEqualToString:@"BlackXchg.aes"] ||
++            [[NSRunningApplication currentApplication].executableURL.lastPathComponent
++                isEqualToString:@"BlackXchg.aes"])
++        {
++            NSLog(@"MapleStoryPort: not bringing BlackXchg.aes to the foreground");
++            return;
++        }
++
+         if ([NSApp activationPolicy] != NSApplicationActivationPolicyRegular)
+         {
+             NSMenu* mainMenu;

@@ -1,0 +1,20 @@
+--- a/dlls/wined3d/texture.c
++++ b/dlls/wined3d/texture.c
+@@ -766,7 +766,17 @@
+         if (!wined3d_texture_load_location(texture, i, context,
+                 srgb ? WINED3D_LOCATION_TEXTURE_SRGB : WINED3D_LOCATION_TEXTURE_RGB))
+             ERR("Failed to load location (srgb %#x).\n", srgb);
++    }
++
++    /* MapleStoryPort hack 23278: User-memory textures are used as shader
++     * resources. Reload them from sysmem on every use so updates made by the
++     * application are visible to the GPU. */
++    if (texture->sub_resources[0].user_memory)
++    {
++        wined3d_texture_invalidate_location(texture, 0, WINED3D_LOCATION_TEXTURE_RGB);
++        return;
+     }
++
+     texture->flags |= flag;
+ }
+ 

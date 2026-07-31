@@ -1,0 +1,2 @@
+# Do not whole-file reverse these when removing only S:
+dlls/winemac.drv/cocoa_app.m  # also W (BlackXchg / MapleStory edit-menu)

@@ -1,0 +1,9 @@
+--- a/dlls/ntdll/unix/sync.c
++++ b/dlls/ntdll/unix/sync.c
+@@ -2547,7 +2547,7 @@ NTSTATUS WINAPI NtYieldExecution(void)
+ {
+-#ifdef HAVE_SCHED_YIELD
++#if 0 /* MapleStoryPort: match OEM25; do not yield the host scheduler here. */
+ #ifdef RUSAGE_THREAD
+     struct rusage u1, u2;
+     int ret;

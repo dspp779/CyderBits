@@ -1,0 +1,112 @@
+--- a/dlls/dxgi/dxgi_private.h
++++ b/dlls/dxgi/dxgi_private.h
+@@ -208,6 +208,11 @@
+     struct wined3d_resource *wined3d_resource;
+     unsigned int subresource_idx;
+     HDC dc;
++
++    /* MapleStoryPort: DXGI producer side for winekmt_<handle> shared textures. */
++    HANDLE shared_kmt_handle;
++    HANDLE shared_file_mapping;
++    void *shared_sysmem;
+ };
+ 
+ HRESULT dxgi_resource_init(struct dxgi_resource *resource, IDXGIDevice *device,
+--- a/dlls/dxgi/resource.c
++++ b/dlls/dxgi/resource.c
+@@ -385,9 +385,83 @@
+ /* IDXGIResource methods */
+ static HRESULT STDMETHODCALLTYPE dxgi_resource_GetSharedHandle(IDXGIResource1 *iface, HANDLE *shared_handle)
+ {
+-    FIXME("iface %p, shared_handle %p stub!\n", iface, shared_handle);
++    struct dxgi_resource *resource = impl_from_IDXGIResource1(iface);
++    struct wined3d_resource_desc resource_desc;
++    static UINT_PTR free_handle = 0x40000000;
+ 
+-    return E_NOTIMPL;
++    FIXME("iface %p, shared_handle %p partial stub!\n", iface, shared_handle);
++
++    /* MapleStoryPort: produce winekmt_<handle> mappings for DwarfAxe consumers.
++     * Multiple calls return the same HANDLE. */
++
++    if (resource->shared_kmt_handle)
++    {
++        *shared_handle = resource->shared_kmt_handle;
++        return S_OK;
++    }
++
++    wined3d_resource_get_desc(resource->wined3d_resource, &resource_desc);
++
++    if (resource_desc.resource_type != WINED3D_RTYPE_TEXTURE_2D)
++        FIXME("Unhandled resource type %#x.\n", resource_desc.resource_type);
++
++    for (;;)
++    {
++        char name[64];
++        HANDLE h;
++        struct DECLSPEC_ALIGN(8)
++        {
++            UINT width;
++            UINT height;
++        } texture_metadata;
++
++        sprintf(name, "winekmt_%p", (void *)free_handle);
++
++        h = OpenFileMappingA(READ_CONTROL, FALSE, name);
++        if (h)
++        {
++            CloseHandle(h);
++            free_handle++;
++            continue;
++        }
++
++        h = CreateFileMappingA(INVALID_HANDLE_VALUE, NULL, PAGE_READWRITE, 0,
++                resource_desc.size + sizeof(texture_metadata), name);
++        if (!h)
++        {
++            WARN("CreateFileMapping failed\n");
++            return E_NOTIMPL;
++        }
++        resource->shared_kmt_handle = (HANDLE)free_handle;
++        free_handle++;
++        resource->shared_file_mapping = h;
++
++        resource->shared_sysmem = MapViewOfFile(resource->shared_file_mapping, FILE_MAP_ALL_ACCESS, 0, 0, 0);
++        if (!resource->shared_sysmem)
++        {
++            CloseHandle(resource->shared_file_mapping);
++            resource->shared_file_mapping = NULL;
++            resource->shared_kmt_handle = NULL;
++            WARN("MapViewOfFile failed\n");
++            return E_NOTIMPL;
++        }
++
++        texture_metadata.width = resource_desc.width;
++        texture_metadata.height = resource_desc.height;
++        memcpy(resource->shared_sysmem, &texture_metadata, sizeof(texture_metadata));
++        resource->shared_sysmem = (char *)resource->shared_sysmem + sizeof(texture_metadata);
++
++        wined3d_mutex_lock();
++        wined3d_texture_update_desc(wined3d_texture_from_resource(resource->wined3d_resource), 0,
++                resource->shared_sysmem, 0);
++        wined3d_mutex_unlock();
++
++        /* TODO: shared_file_mapping needs to be unmapped when the resource is released */
++        break;
++    }
++
++    *shared_handle = resource->shared_kmt_handle;
++    return S_OK;
+ }
+ 
+ static HRESULT STDMETHODCALLTYPE dxgi_resource_GetUsage(IDXGIResource1 *iface, DXGI_USAGE *usage)
+@@ -539,6 +613,9 @@
+     resource->device = device;
+     resource->wined3d_resource = wined3d_resource;
+     resource->dc = NULL;
++    resource->shared_kmt_handle = NULL;
++    resource->shared_file_mapping = NULL;
++    resource->shared_sysmem = NULL;
+     if (is_subresource)
+     {
+         resource->parent_resource = parent_resource;

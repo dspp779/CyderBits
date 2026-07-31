@@ -1,0 +1,6 @@
+# Do not whole-file reverse these when removing only P:
+# display-mode cache (still OEM when only reversing file cache / dbghelp / sync):
+dlls/wined3d/directx.c
+dlls/wined3d/wined3d_private.h
+include/wine/wined3d.h
+# Whole-file file.c also drops OEM APFS free-space (26350), not only 8 KiB cache.

@@ -1,0 +1,10 @@
+dlls/winemac.drv/window.c
+dlls/winemac.drv/keyboard.c
+dlls/winemac.drv/gdi.c
+dlls/winemac.drv/macdrv.h
+dlls/winemac.drv/mouse.c
+dlls/win32u/window.c
+dlls/win32u/defwnd.c
+dlls/win32u/ntuser_private.h
+dlls/win32u/message.c
+dlls/win32u/sysparams.c

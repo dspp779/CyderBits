@@ -1,0 +1,2 @@
+dlls/kernelbase/file.c
+dlls/kernelbase/loader.c

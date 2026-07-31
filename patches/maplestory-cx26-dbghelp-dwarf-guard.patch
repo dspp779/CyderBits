@@ -1,0 +1,29 @@
+--- a/dlls/dbghelp/dwarf.c
++++ b/dlls/dbghelp/dwarf.c
+@@ -1032,8 +1032,24 @@
+         case DW_OP_shr:         stack[stk-1] >>= stack[stk]; stk--; break;
+         case DW_OP_plus_uconst: stack[stk] += dwarf2_leb128_as_unsigned(ctx); break;
+         case DW_OP_shra:        stack[stk-1] = stack[stk-1] / (1 << stack[stk]); stk--; break;
+-        case DW_OP_div:         stack[stk-1] = stack[stk-1] / stack[stk]; stk--; break;
+-        case DW_OP_mod:         stack[stk-1] = stack[stk-1] % stack[stk]; stk--; break;
++        case DW_OP_div:
++            if (!stack[stk])
++            {
++                WARN("Invalid DWARF division by zero.\n");
++                return loc_err_internal;
++            }
++            stack[stk-1] = stack[stk-1] / stack[stk];
++            stk--;
++            break;
++        case DW_OP_mod:
++            if (!stack[stk])
++            {
++                WARN("Invalid DWARF modulo by zero.\n");
++                return loc_err_internal;
++            }
++            stack[stk-1] = stack[stk-1] % stack[stk];
++            stk--;
++            break;
+         case DW_OP_ge:          stack[stk-1] = (stack[stk-1] >= stack[stk]); stk--; break;
+         case DW_OP_gt:          stack[stk-1] = (stack[stk-1] >  stack[stk]); stk--; break;
+         case DW_OP_le:          stack[stk-1] = (stack[stk-1] <= stack[stk]); stk--; break;
