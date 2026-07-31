@@ -123,9 +123,14 @@ resolve_pinned_engine() {
 
 require_developer_id() {
   local id="${SIGN_IDENTITY:-$DEFAULT_RELEASE_IDENTITY}"
+  # A leftover SIGN_IDENTITY=- from test builds must not block release; fall back
+  # to the project Developer ID unless the caller passed --sign-identity.
   if [[ "$id" == "-" ]]; then
-    echo "release channel refuses SIGN_IDENTITY=- (use --channel test)" >&2
-    exit 1
+    if [[ -n "$SIGN_IDENTITY_OVERRIDE" ]]; then
+      echo "release channel refuses SIGN_IDENTITY=- (use --channel test)" >&2
+      exit 1
+    fi
+    id="$DEFAULT_RELEASE_IDENTITY"
   fi
   if ! security find-identity -v -p codesigning 2>/dev/null | grep -Fq "$id"; then
     echo "Developer ID identity not found in keychain: $id" >&2

@@ -92,11 +92,13 @@ SIGN_IDENTITY=- CYDER_APP_VERSION=0.9.0-dev \
 
 ## 正式通道
 
-事前：憑證與 `notarytool` profile（見簽署指南）。
+事前：本機已有 Developer ID（keychain）與 `notarytool` profile `cyder-notary`。
+憑證檔建議放在 gitignored 的 `auth/` 與 `.env`（鍵名見 `.env.example`）；細節見
+[`release-signing.zh-TW.md`](release-signing.zh-TW.md)。
 
 ```bash
 # 完整：建置 + Developer ID + 公證 + staple + Cyder.app.zip
-bash scripts/release-cyder.sh --channel release --version 0.9.1
+bash scripts/release-cyder.sh --channel release --version 0.9.0
 
 # 已有簽好的 App，只做公證／staple／zip
 bash scripts/release-cyder.sh --channel release --skip-build

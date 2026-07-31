@@ -17,24 +17,44 @@ Apple 公證(notarization),讓使用者下載後不會再看到 Gatekeeper 的�
 - macOS 13 以上,並安裝 Xcode Command Line Tools:`xcode-select --install`
 - 本 repo 的 clone
 - 引擎 tarball(見下方「取得引擎檔案」)
-- 向 團隊成員 索取以下四樣東西(**務必透過密碼管理器等安全管道傳遞,不要用 email 或即時通訊明文**):
+- 簽章／公證材料（見下一節；**勿提交進 git**）
 
-| 項目 | 說明 |
-|---|---|
-| `cyder-devid.p12` | 團隊簽章憑證與私鑰 |
-| `.p12` 密碼 | 匯入時使用 |
-| `AuthKey_XXXXXXXX.p8` | App Store Connect API 金鑰(公證用) |
-| Key ID 與 Issuer ID | 搭配 `.p8` 使用 |
+### 本機憑證擺放（建議）
+
+本專案約定把敏感檔放在 **gitignored** 的路徑（見 `.gitignore` 的 `auth/`、`.env`）：
+
+| 路徑 | 內容 |
+|------|------|
+| `auth/cert.p12`（或團隊提供的 `.p12`） | Developer ID 憑證＋私鑰 |
+| `auth/AuthKey_XXXXXXXX.p8` | App Store Connect API 金鑰 |
+| `.env` | 密碼與 Key／Issuer ID（僅本機） |
+
+`.env` 建議鍵名（範例見 `.env.example`）：
+
+```bash
+CYDER_P12_PASSWORD=…          # 匯入 .p12 用
+CYDER_Key_ID=…                # App Store Connect Key ID
+CYDER_Issuer_ID=…             # App Store Connect Issuer ID
+```
+
+向團隊索取時仍須走密碼管理器等安全管道；clone 後把檔案放到上述位置即可。
+`scripts/release-cyder.sh --channel release` 預設使用 keychain 內的
+Developer ID 與 notary profile `cyder-notary`（見下方一次性設定）。
 
 ## 一次性設定(只需做一次)
 
 ### 1. 匯入簽章憑證
 
+若 keychain 尚無 Developer ID（`security find-identity -v -p codesigning` 看不到），從本機檔匯入：
+
 ```bash
-security import cyder-devid.p12 \
+set -a && source .env && set +a
+security import auth/cert.p12 \
   -k ~/Library/Keychains/login.keychain-db \
-  -P '<p12 密碼>' -T /usr/bin/codesign
+  -P "$CYDER_P12_PASSWORD" -T /usr/bin/codesign
 ```
+
+（若檔名不是 `cert.p12`，改成實際路徑。）
 
 確認匯入成功:
 
@@ -53,14 +73,20 @@ Developer ID Application: <developer_id_application>
 
 ### 2. 儲存公證憑證
 
+若尚未建立 `cyder-notary` profile：
+
 ```bash
+set -a && source .env && set +a
 xcrun notarytool store-credentials cyder-notary \
-  --key /path/to/AuthKey_XXXXXXXX.p8 \
-  --key-id <KEY_ID> \
-  --issuer <ISSUER_ID>
+  --key auth/AuthKey_*.p8 \
+  --key-id "$CYDER_Key_ID" \
+  --issuer "$CYDER_Issuer_ID"
 ```
 
+（`--key` 請改成實際的 `auth/AuthKey_….p8` 路徑；shell glob 僅在單一符合時可用。）
+
 之後所有公證指令都用 `--keychain-profile cyder-notary`,不需要 Apple ID 密碼。
+可用 `xcrun notarytool history --keychain-profile cyder-notary` 確認 profile 可用。
 
 ### 3. 取得引擎檔案
 
@@ -71,6 +97,14 @@ xcrun notarytool store-credentials cyder-notary \
 
 ## 每次發佈流程
 
+建議用一鍵腳本（會做建置、簽署、公證、staple、發佈 zip）：
+
+```bash
+bash scripts/release-cyder.sh --channel release --version 0.9.0
+```
+
+或手做下列步驟。
+
 ### 1. 建置並簽章 Cyder.app
 
 ```bash
@@ -79,6 +113,7 @@ bash scripts/create-cyder-app.sh
 
 腳本預設就會用 Developer ID 簽章(含 hardened runtime 與安全時間戳,簽章時需要網路)。
 若只想做本機測試用的未簽章版本:`SIGN_IDENTITY=- bash scripts/create-cyder-app.sh`。
+（測試／正式通道差異見 [`release-pipeline.zh-TW.md`](release-pipeline.zh-TW.md)。）
 
 若需要重新打包引擎(而不是用現成 tarball),打包時也要帶上簽章身分,
 讓 tarball 內的所有 Mach-O 都有 Developer ID 簽章:

@@ -72,7 +72,8 @@ RES="$CONTENTS/Resources"
 
 PRESERVED_ICON=""
 if [[ -f "$APP/Contents/Resources/AppIcon.icns" ]]; then
-  PRESERVED_ICON="$(mktemp "${TMPDIR:-/tmp}/cyder-preserved-icon.XXXXXX.icns")"
+  # mktemp on macOS requires the X's at the end of the template.
+  PRESERVED_ICON="$(mktemp "${TMPDIR:-/tmp}/cyder-preserved-icon.XXXXXX")"
   cp "$APP/Contents/Resources/AppIcon.icns" "$PRESERVED_ICON"
 elif [[ -f "$OUT_DIR/Cyder_001.app/Contents/Resources/AppIcon.icns" ]]; then
   PRESERVED_ICON="$OUT_DIR/Cyder_001.app/Contents/Resources/AppIcon.icns"
@@ -150,7 +151,7 @@ if ! iconutil -c icns "$ICONSET" -o "$RES/AppIcon.icns"; then
   fi
 fi
 rm -rf "$ICON_WORK"
-if [[ "$PRESERVED_ICON" == "${TMPDIR:-/tmp}"/cyder-preserved-icon.*.icns ]]; then
+if [[ "$PRESERVED_ICON" == "${TMPDIR:-/tmp}"/cyder-preserved-icon.* ]]; then
   rm -f "$PRESERVED_ICON"
 fi
 [[ -f "$RES/AppIcon.icns" ]] || {
