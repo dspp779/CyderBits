@@ -156,6 +156,12 @@ debug/capture-wine-hang.sh 5
    引擎已加 `cyder-wineserver-pipe-end-disconnect-null-fd.patch`。
    若仍有 SEGV，讀 diag log 的 `SIGSEGV pid=`／`frame[`／`sym[`；若只見
    `fd_reselect_async: missing ops` 或 `pipe_end_disconnect: null fd` 則為已攔截路徑。
+   Soft-guard 後離場曾變 **wineserver 活著但 ~50% CPU 的 livelock**
+   （`hang-20260731-154434`）：根因是 sock 換 `fd` 後 sock-local async 佇列上的
+   weak `async->fd` 仍指向已釋放物件。引擎另加
+   `cyder-wineserver-sock-rebind-async-fd.patch`（`sock_rebind_async_fds`／
+   `async_queue_rebind_fd`，在 `accept_into_socket`／`init_socket` 釋放舊 fd
+   **之前**把 weak 指標改綁到新 fd）；null-ops soft-guard 仍保留作雙保險。
    重現時請用最容易卡的組合（例如 Sync 關閉 + DXVK），診斷層級建議「只記錄錯誤」。
    卡住後先跑 `debug/capture-wine-hang.sh`，再結束遊戲；**優先讀**
    `~/Library/Application Support/Cyder/bottles/shared/cyder-wineserver-diag.log`
@@ -170,11 +176,11 @@ debug/capture-wine-hang.sh 5
 | `docs/maplestory-classic-cx26-frame-walk-debug.md` | 先前 NTDLL frame-walk／登入卡住紀錄 |
 | `scripts/cyder_settings.swift` 等 | `sync` 診斷層級 |
 | `debug/capture-wine-hang.sh` | 凍結取樣（未進版控，見 `debug/`） |
-| `cyder-wine-engine`：`patches/cyder-wineserver-*.patch` | pseudo-fd／poll-slot／fd_reselect／pipe_end null-fd 修補與測試 |
+| `cyder-wine-engine`：`patches/cyder-wineserver-*.patch` | pseudo-fd／poll-slot／fd_reselect／sock-rebind／pipe_end null-fd 修補與測試 |
 
 ## 7. 一句話結論
 
-商城／進場凍結的共同終態是 **wineserver 無聲消失 → client 永久等在自持的 `wait_fd`**；目前可玩 workaround 是 **MSync + DXVK**，已確認 SIGSEGV 含 `fd_reselect_async` NULL `fd_ops` 與 `pipe_end_disconnect` NULL `fd`；引擎皆已 soft-guard，仍建議用易卡組合／離場驗證。
+商城／進場凍結的共同終態是 **wineserver 無聲消失 → client 永久等在自持的 `wait_fd`**；目前可玩 workaround 是 **MSync + DXVK**，已確認 SIGSEGV 含 `fd_reselect_async` NULL `fd_ops` 與 `pipe_end_disconnect` NULL `fd`；引擎已 soft-guard，並以 `sock-rebind-async-fd` 修 weak `async->fd`；仍建議用易卡組合／離場驗證。
 
 ## 8. 與 OEM-25「什麼 sync／後端都較穩」的對照
 
