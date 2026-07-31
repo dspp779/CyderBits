@@ -55,5 +55,7 @@ __pycache__/
 auth/
 
 .env
+AGENTS.override.md
+CLAUDE.local.md
 .worktrees/
 .superpowers/

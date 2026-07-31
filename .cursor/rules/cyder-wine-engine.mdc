@@ -1,0 +1,18 @@
+---
+description: Wine engine work lives in cyder-wine-engine — read its guides first
+alwaysApply: true
+---
+
+# Cyder Wine engine (sibling repo)
+
+Incremental Wine builds, engine patches, minOS, and packing are owned by
+`../cyder-wine-engine` (or `/Users/jjc/cyder-wine-engine`), not this Cyder app
+repo.
+
+Before engine / wineserver / ntdll / pack work:
+
+1. Prefer operating in the `cyder-wine-engine` checkout.
+2. Read `cyder-wine-engine/AGENTS.md` and
+   `cyder-wine-engine/docs/incremental-build-and-patches.md`.
+3. Do not ad-hoc rebuild host Mach-O without that repo’s `.env` / minOS 10.15
+   rules.
