@@ -78,6 +78,9 @@ enum CyderGraphicsHud: String, Codable, CaseIterable {
 enum CyderWineDiagnostics: String, Codable, CaseIterable {
     case quiet
     case errors
+    /// Wait diagnostics for freezes: logs the handles every wait blocks on, which
+    /// is what a deadlock needs, at a fraction of the unwind profile's volume.
+    case sync
     case unwind
 
     var wineDebug: String {
@@ -86,6 +89,8 @@ enum CyderWineDiagnostics: String, Codable, CaseIterable {
             return "-all"
         case .errors:
             return "-all,err+all,+timestamp,+pid,+tid"
+        case .sync:
+            return "-all,err+all,+timestamp,+pid,+tid,+sync"
         case .unwind:
             return "-all,+timestamp,+pid,+tid,+seh,+unwind"
         }

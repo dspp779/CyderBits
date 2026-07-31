@@ -150,6 +150,19 @@ assert_contains "$(cat "$TMP/errors-log-support/Logs/last-launch.log")" \
   "WINEDEBUG=-all,err+all,+timestamp,+pid,+tid" \
   "errors diagnostics should enable the bounded Wine error profile"
 
+# The sync profile is the freeze-diagnosis preset: errors plus wait tracing.
+CYDER_SUPPORT="$TMP/sync-log-support" \
+CYDER_SCRIPTS="$ROOT/scripts" \
+CYDER_TEST_ARGS="$TMP/sync-log-args" \
+CYDER_WINE_DIAGNOSTICS=sync \
+PATH="$TMP/fake-bin:$PATH" \
+  bash -c 'source "$1/scripts/cyder-common.sh"; cyder_init_paths "$1"; cyder_run_wine_exe "$2/wine" "$3"' \
+    _ "$ROOT" "$TMP/fake-bin" "$TMP/foreground-test.exe"
+assert test -L "$TMP/sync-log-support/Logs/last-launch.log"
+assert_contains "$(cat "$TMP/sync-log-support/Logs/last-launch.log")" \
+  "WINEDEBUG=-all,err+all,+timestamp,+pid,+tid,+sync" \
+  "sync diagnostics should enable wait tracing for freeze diagnosis"
+
 # Sync modes are mutually exclusive, and normal Cyder launches must not add
 # global DLL overrides now that those settings live in the prefix registry.
 CYDER_SUPPORT="$TMP/run-support" \

@@ -331,7 +331,7 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
     }
 
     private func makeDiagnosticsTab() -> NSTabViewItem {
-        wineDiagnostics.addItems(withTitles: ["安靜（預設）", "只記錄錯誤", "完整堆疊追蹤"])
+        wineDiagnostics.addItems(withTitles: ["安靜（預設）", "只記錄錯誤", "等待與凍結追蹤", "完整堆疊追蹤"])
         wineDiagnostics.target = self
         wineDiagnostics.action = #selector(wineDiagnosticsChanged)
 
@@ -347,7 +347,7 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
         return tab("除錯", rows: [
             row("Wine 診斷記錄", wineDiagnostics),
             diagnosticsWarning,
-            note("「只記錄錯誤」適合一般排障；「完整堆疊追蹤」會產生更多資料，僅供短時間重現 exception／unwind 問題。"),
+            note("「只記錄錯誤」適合一般排障；「等待與凍結追蹤」會記錄每次等待的物件，用於重現卡住／凍結；「完整堆疊追蹤」會產生更多資料，僅供短時間重現 exception／unwind 問題。"),
             export,
             note("只複製上次遊戲啟動的 Wine log；其他初始化或啟動錯誤可直接複製錯誤對話框中的診斷資訊。"),
             cleanup,
@@ -433,7 +433,8 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
         switch value.wineDiagnostics {
         case .quiet: wineDiagnostics.selectItem(at: 0)
         case .errors: wineDiagnostics.selectItem(at: 1)
-        case .unwind: wineDiagnostics.selectItem(at: 2)
+        case .sync: wineDiagnostics.selectItem(at: 2)
+        case .unwind: wineDiagnostics.selectItem(at: 3)
         }
         diagnosticsWarning.isHidden = value.wineDiagnostics == .quiet
         refreshGraphicsControls()
@@ -516,17 +517,23 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
         let selected: CyderWineDiagnostics
         switch wineDiagnostics.indexOfSelectedItem {
         case 1: selected = .errors
-        case 2: selected = .unwind
+        case 2: selected = .sync
+        case 3: selected = .unwind
         default: selected = .quiet
         }
         if selected != .quiet {
             let alert = NSAlert()
-            alert.messageText = selected == .unwind
-                ? "即將開啟高容量堆疊追蹤"
-                : "即將保存 Wine 錯誤記錄"
-            alert.informativeText = selected == .unwind
-                ? "完整堆疊追蹤可能快速產生數十 MB 以上的記錄，並改變遊戲時序。請只在短時間重現問題時使用。"
-                : "只記錄錯誤會保存每次遊戲啟動的 Wine 輸出，可能增加磁碟使用量。重現完成後請切回「安靜」並清理除錯記錄。"
+            switch selected {
+            case .unwind:
+                alert.messageText = "即將開啟高容量堆疊追蹤"
+                alert.informativeText = "完整堆疊追蹤可能快速產生數十 MB 以上的記錄，並改變遊戲時序。請只在短時間重現問題時使用。"
+            case .sync:
+                alert.messageText = "即將開啟等待與凍結追蹤"
+                alert.informativeText = "等待追蹤會記錄每次等待的物件，資料量明顯小於完整堆疊追蹤，但仍會持續寫入。請在重現卡住問題後切回「安靜」。"
+            default:
+                alert.messageText = "即將保存 Wine 錯誤記錄"
+                alert.informativeText = "只記錄錯誤會保存每次遊戲啟動的 Wine 輸出，可能增加磁碟使用量。重現完成後請切回「安靜」並清理除錯記錄。"
+            }
             alert.alertStyle = .warning
             alert.addButton(withTitle: "啟用")
             alert.addButton(withTitle: "取消")
@@ -534,7 +541,8 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
                 switch store.value.wineDiagnostics {
                 case .quiet: wineDiagnostics.selectItem(at: 0)
                 case .errors: wineDiagnostics.selectItem(at: 1)
-                case .unwind: wineDiagnostics.selectItem(at: 2)
+                case .sync: wineDiagnostics.selectItem(at: 2)
+                case .unwind: wineDiagnostics.selectItem(at: 3)
                 }
                 return
             }
@@ -682,7 +690,8 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
                 $0.dxvkHudFrametimes = dxvkHudFrametimes.state == .on
                 switch wineDiagnostics.indexOfSelectedItem {
                 case 1: $0.wineDiagnostics = .errors
-                case 2: $0.wineDiagnostics = .unwind
+                case 2: $0.wineDiagnostics = .sync
+                case 3: $0.wineDiagnostics = .unwind
                 default: $0.wineDiagnostics = .quiet
                 }
                 for profileID in deletedProfiles {

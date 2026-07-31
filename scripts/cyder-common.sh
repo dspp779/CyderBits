@@ -569,7 +569,7 @@ cyder_load_saved_settings() {
   case "${CYDER_FONT_PRESET-}" in songti|mingliu) keep_font=1 ;; esac
   case "${CYDER_FONT_SMOOTHING-}" in off|grayscale|cleartype-rgb|cleartype-bgr) keep_smoothing=1 ;; esac
   case "${CYDER_POWER_MODE-}" in normal|background) keep_power=1 ;; esac
-  case "${CYDER_WINE_DIAGNOSTICS-}" in quiet|errors|unwind) keep_diagnostics=1 ;; esac
+  case "${CYDER_WINE_DIAGNOSTICS-}" in quiet|errors|sync|unwind) keep_diagnostics=1 ;; esac
 
   export CYDER_MSYNC="${CYDER_MSYNC:-0}"
   export CYDER_ESYNC="${CYDER_ESYNC:-0}"
@@ -621,7 +621,7 @@ cyder_load_saved_settings() {
   if [[ "$keep_diagnostics" -eq 0 ]]; then
     value="$(plutil -extract wineDiagnostics raw -o - "$settings" 2>/dev/null || true)"
     case "$value" in
-      quiet|errors|unwind) export CYDER_WINE_DIAGNOSTICS="$value" ;;
+      quiet|errors|sync|unwind) export CYDER_WINE_DIAGNOSTICS="$value" ;;
       *) export CYDER_WINE_DIAGNOSTICS=quiet ;;
     esac
   fi
@@ -2121,6 +2121,10 @@ cyder_run_wine_exe() {
   case "$wine_diagnostics" in
     errors)
       wine_debug="-all,err+all,+timestamp,+pid,+tid"
+      capture_log=1
+      ;;
+    sync)
+      wine_debug="-all,err+all,+timestamp,+pid,+tid,+sync"
       capture_log=1
       ;;
     unwind)

@@ -62,7 +62,14 @@ struct CyderSettingsHarness {
         }
         precondition(store.environment["CYDER_WINE_DIAGNOSTICS"] == "errors")
         precondition(CyderWineDiagnostics.errors.wineDebug == "-all,err+all,+timestamp,+pid,+tid")
+        precondition(CyderWineDiagnostics.sync.wineDebug == "-all,err+all,+timestamp,+pid,+tid,+sync")
         precondition(CyderWineDiagnostics.unwind.wineDebug == "-all,+timestamp,+pid,+tid,+seh,+unwind")
+
+        try store.update { settings in
+            settings.wineDiagnostics = .sync
+        }
+        precondition(store.environment["CYDER_WINE_DIAGNOSTICS"] == "sync")
+        precondition(CyderSettings.sanitizedWineDiagnostics("sync") == .sync)
 
         var globalDxvk = CyderSettings()
         globalDxvk.graphicsBackend = .dxvk

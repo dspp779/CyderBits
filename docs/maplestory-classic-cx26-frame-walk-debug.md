@@ -764,20 +764,28 @@ trace 改變時序，並非新增 NULL guard 的功能回歸。
 正常退出」與「NGS 背景程序仍常駐」。Cyder 不應在一般退出時無條件強制停止 shared
 prefix 的 wineserver，否則可能連帶終止同一 bottle 中仍在執行的其他程式。
 
-目前較合理的基線是 None；MSync 暫時不應作為此遊戲的預設。NGS 常駐應視為獨立的
-程序清理問題，不要為此擴大 NTDLL frame-walk patch。
+> **2026-07-31 更新：** 商城進出／開始遊戲的凍結已確認為 wineserver 無聲死亡，
+> 實測唯一穩定組合為 **MSync + DXVK**。上述「基線宜關閉同步」結論已過時；請改以
+> [maplestory-classic-wineserver-hang.md](./maplestory-classic-wineserver-hang.md)
+> 為準。NGS 常駐仍應視為獨立的程序清理問題，不要為此擴大 NTDLL frame-walk patch。
 
 ### 8.6 診斷層級、記錄識別與 OEM 25 前景處理
 
-Cyder 偏好設定的「除錯 → Wine 診斷記錄」提供三種全域層級：
+Cyder 偏好設定的「除錯 → Wine 診斷記錄」提供四種全域層級：
 
 | 層級 | `WINEDEBUG` | 用途 |
 |------|-------------|------|
 | 安靜（預設） | `-all` | 正常遊玩；避免 trace 改變 NGS、商城與退出時序 |
 | 只記錄錯誤 | `-all,err+all,+timestamp,+pid,+tid` | 一般排障；自動保留本次 Wine launch log |
+| 等待與凍結追蹤 | `-all,err+all,+timestamp,+pid,+tid,+sync` | 重現卡住／凍結；記錄每次等待的 handle，資料量遠小於 unwind |
 | 完整堆疊追蹤 | `-all,+timestamp,+pid,+tid,+seh,+unwind` | 短時間重現 exception／unwind；資料量大且可能造成假性凍結 |
 
-`errors` 與 `unwind` 會自動開啟 Wine stdout/stderr 擷取；`quiet` 的一般啟動不建立
+死鎖類的凍結要選「等待與凍結追蹤」而不是「完整堆疊追蹤」：`+unwind` 的量會明顯改變
+時序，而 `+sync` 會在 log 尾端直接留下每支執行緒最後在等哪些物件，正是判斷死鎖需要的
+資訊；同時保留 `err+all`，才看得到 `RtlpWaitForCriticalSection` 的逾時訊息與 wineserver
+自身的診斷輸出。凍結當下請搭配 `debug/capture-wine-hang.sh` 取得各程序的執行緒狀態。
+
+`errors`、`sync` 與 `unwind` 會自動開啟 Wine stdout/stderr 擷取；`quiet` 的一般啟動不建立
 大量 Wine log。測試啟動仍會保留一份低輸出 launch preamble，方便確認設定。
 
 每份 launch log 會記錄實際解析 symlink 後的 runtime 與 prefix、engine `version`、
@@ -843,6 +851,7 @@ version 預設套用。
 | `tests/fixtures/ntdll-frame-walk-guard.c` | NULL entry 與不可讀 metadata 測試程式 |
 | `scripts/pack-engine-artifact.sh` | 引擎 strip、簽署、封裝與解壓後驗證 |
 | `docs/releases/v0.8.3.md` | Cyder 0.8.3 發佈摘要 |
+| `docs/maplestory-classic-wineserver-hang.md` | 商城／進場凍結與 wineserver 無聲死亡（Cyder007 後續） |
 
 ## 12. 結論
 
