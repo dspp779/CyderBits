@@ -36,6 +36,7 @@
 | `pack-engine-artifact.sh` | strip + bundle + sign + 預設 xz 最高壓縮比 → `engine-wine-x86_64-CX26-<winever>.tar.xz`；`--zstd` / `CYDER_ENGINE_FORMAT=zstd` 產出 `engine-CX26-<winever>.tar.zst` |
 | `cyder-copy-engine-artifact.sh` | 複製預建 artifact 進 app `Resources/` |
 | `create-cyder-app.sh` | `dist/Cyder.app`（`.exe` 啟動器 + engine artifact + bootstrap） |
+| `release-cyder.sh` | 測試／正式通道：建置、簽署、（正式）公證與 `Cyder.app.zip`；見 `docs/release-pipeline.zh-TW.md` |
 | `cyder_launcher.sh` | 解析 `.exe`、bootstrap `bottles/shared`、執行 Wine；`--ensure-engine-only` / `--bootstrap-only` / `--launch-exe` 是 Cyder GUI 的內部維護介面，不是 Cyder.app 公開 argv |
 | `cyder-winetricks.sh` | 以 Cyder engine 的 unattended CLI 安裝固定版 Winetricks 元件；目標為 SharedPrefix，供 Cyder 原生元件選擇器呼叫 |
 | `cyder_app_main.swift` | 編譯為 `Cyder.app/Contents/MacOS/Cyder`（Universal）；無 `.exe` 時顯示設定頁，有 `.exe` 時直接啟動 Wine，收到 same-prefix 的 `ActivatingAppPID` Foreground 通知後 activate 並退出 |
@@ -92,6 +93,7 @@ run-bluecg.sh
 | `tests/test-run-bluecg.sh` | `run-bluecg.sh` |
 | `tests/test-verify-bluecg.sh` | `verify-bluecg.sh` |
 | `tests/test-cyder-launcher.sh` | `cyder_launcher.sh --dry-run` |
+| `tests/test-release-cyder.sh` | `release-cyder.sh` 通道契約與 test dry-run |
 | `tests/test-cyder-game-launch-settings.sh` | stable EXE ID → per-game settings → fast registry/apply launch bridge |
 | `tests/test-cyderbits-app.sh` | CyderBits.app 是否內含 `cyder_common.py`、模組可載入 |
 | `tests/test-cyder-exe-association.sh` | `cyder-exe-association.swift status` |

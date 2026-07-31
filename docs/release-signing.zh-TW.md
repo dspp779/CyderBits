@@ -1,6 +1,11 @@
 # Cyder 發佈版建置、簽章與公證指南
 
-這份指南說明如何在自己的 Mac 上建置正式發佈版的 `Cyder.app`,完成 Developer ID 簽章與 Apple 公證(notarization),讓使用者下載後不會再看到 Gatekeeper 的「無法驗證開發者」警告。
+這份指南說明如何在自己的 Mac 上完成 **正式發佈通道** 的 Developer ID 簽章與
+Apple 公證(notarization),讓使用者下載後不會再看到 Gatekeeper 的「無法驗證開發者」警告。
+
+**測試版 vs 正式版的差異、引擎 pin、以及一鍵腳本** 見總流程：
+[`release-pipeline.zh-TW.md`](release-pipeline.zh-TW.md)
+（`bash scripts/release-cyder.sh --channel test|release`）。
 
 發佈需要兩個條件,缺一不可:
 

@@ -6,6 +6,11 @@
 
 ## 發布資訊
 
+| 文件 | 說明 |
+|------|------|
+| [release-pipeline.zh-TW.md](release-pipeline.zh-TW.md) | **測試／正式通道**、引擎 pin、`release-cyder.sh`、檢查清單 |
+| [release-signing.zh-TW.md](release-signing.zh-TW.md) | Developer ID 匯入、notary profile、手做公證步驟 |
+
 | 版本 | 文件 | 重點 |
 |------|------|------|
 | 0.9.0 | [繁中](releases/v0.9.0.md) · [English](releases/v0.9.0.en.md) | CX26.3 Cyder007、可匯出／清理壓縮診斷記錄、同步設定與引擎發布契約 |

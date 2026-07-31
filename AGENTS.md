@@ -18,6 +18,12 @@ Large trees (`build/`, `install/`, `tools/archives`, `.brew-x86`) may be
 symlinks into `cyder-wine-engine`; still run build/pack scripts from the engine
 repo so `.env` and scripts resolve correctly.
 
+## Cyder.app release channels
+
+- Test vs release (sign / notarize): `docs/release-pipeline.zh-TW.md`
+- Wrapper: `bash scripts/release-cyder.sh --channel test|release`
+- Signing credentials detail: `docs/release-signing.zh-TW.md`
+
 ## Multi-tool
 
 | Tool | This repo | Engine repo |
