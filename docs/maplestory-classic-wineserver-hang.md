@@ -142,7 +142,10 @@ debug/capture-wine-hang.sh 5
    - 收到 SIGTERM／SIGINT／SIGHUP／SIGQUIT 時印 `signum`、名稱、`si_pid`／`si_uid`；
    - `main_loop` 返回時印 `active_users`／`nb_users` 與 `running_processes`／`user_processes`／`shutdown_stage`；
    - stale poll slot 訊息升級為 `FATAL:` 並立即 `fflush`（仍不 abort）。
-   重現時請用最容易卡的組合（例如 Sync 關閉 + DXVK），診斷層級可用「安靜」或「只記錄錯誤」；卡住後結束程序再讀 launch log 尾端，找上述字串。
+   重現時請用最容易卡的組合（例如 Sync 關閉 + DXVK），診斷層級建議「只記錄錯誤」。
+   卡住後先跑 `debug/capture-wine-hang.sh`，再結束遊戲；**優先讀**
+   `~/Library/Application Support/Cyder/bottles/shared/cyder-wineserver-diag.log`
+   （不依賴 gzip launch log）。若需 flush gzip，只結束 Wine 程序、不要 SIGKILL gzip。
 3. **對照**：強制 wineserver 走 `poll()`（關閉 kqueue）後，用 Sync 關閉 + DXVK 重測。
 4. **補齊**：評估 `remove_poll_user()` 的同型 assert；引擎 patch 維護於 `cyder-wine-engine` 專案。
 
