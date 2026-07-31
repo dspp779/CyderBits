@@ -1,7 +1,11 @@
-# Build toolchain and outputs
+# Build toolchain and outputs (dirs or symlinks into cyder-wine-engine)
 .brew-x86/
+.brew-x86
 build/
+build
 install/
+install
+Cyder-last-game.log
 tests/tmp/
 logs/
 dist/
@@ -17,6 +21,7 @@ BlueCrossgateNew/
 
 # Archives under tools/ (tracked libarchive/ is the small exception)
 tools/archives/
+tools/archives
 
 # Local Wine debugging outputs
 tools/runtime/
