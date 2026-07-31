@@ -102,6 +102,12 @@ GRAP／NGS-X 檔案樹與產品含義見
 
 強制結束時 diag 仍見 teardown SEGV：本次 `pipe_end_disconnect`；稍早同 bottle 為 `add_completion` ← `release_job_process`。離場 hang 本身是 **GRAP 目錄列舉 ↔ wineserver 請求風暴**，不是這兩次崩潰。
 
+**2026-07-31 晚間引擎加固（本機 runtime 已換）：** `cyder-wine-engine` 加強
+`async_terminate` null-fd、`pipe_end_disconnect` 改 `free_async_queue`／`async_clear_weak_fd`、
+以及 `add_completion` 無效 port 防護，目標是讓 `wineserver -k`／強制清 session 較不易
+再 SIGSEGV。正式 GA 引擎包尚未重打包；驗證方式見
+[`classic-grap-ngs-x.md`](./games/maplestory/classic-grap-ngs-x.md) §6。
+
 ## 3. Sync × 圖形後端實測矩陣（2026-07-31）
 
 測試重點：進出商城、選角後開始遊戲。同一設定卡點可不固定；判定以 **wineserver 是否消失／畫面永久凍結** 為準。
