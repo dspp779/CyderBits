@@ -26,7 +26,7 @@ open dist/Cyder.app
 | 層級 | 最低版本 | 說明 |
 |------|----------|------|
 | **Cyder.app（plist）** | **10.15** | 與目前 CX26 Wine engine 對齊 |
-| **Swift 設定／遊戲庫 UI** | **11.0** | `CyderSwift`；10.15 僅保留 bash 選檔與啟動，不提供 Legacy progress／設定 UI |
+| **Swift 設定／遊戲庫 UI** | **11.0** | `CyderSwift`；10.15 首次安裝使用可見的 Terminal bootstrap，完成後保留 bash 選檔與啟動，不提供 Legacy progress／設定 UI |
 | **Wine engine（現行 artifact）** | **10.15** | `bin/wine`、`ntdll.so`、bundled runtime `.dylib`（含 `libMoltenVK.dylib`）皆為 minos ≤ 10.15 |
 | **Apple Silicon** | **11.0** | 需要 Rosetta 2 |
 
@@ -37,6 +37,11 @@ Engine 內嵌的 Homebrew runtime 庫（freetype／png／gnutls 鏈等）與 med
 ### MoltenVK wait-poll shim
 
 目前仍需在打包時嵌入 `tools/moltenvk-wait-poll/libMoltenVK.dylib`，以暫時避開 MoltenVK／DXVK 長時間執行時的 wait-related Mach Ports 問題。這是持續的打包目標，直到 MoltenVK 本身完成修復；使用者端只會套用 App 內的 prebuilt shim，不會要求 Xcode 或 Command Line Tools，也不會在 runtime 現場編譯。
+
+### Catalina 首次安裝
+
+macOS 10.15 不會載入 `CyderSwift`。首次開啟 Cyder 或在環境尚未完成時開啟 EXE，wrapper 會啟動 Terminal 執行 `cyder_launcher.sh --bootstrap-only`。Terminal 顯示目前安裝階段；同一時間只允許一個 bootstrap。成功後會重新開啟 Cyder 進入 bash 選檔流程，失敗時則保留 Terminal 並指出 `~/Library/Application Support/Cyder/Logs/bootstrap-error.log`。已完成初始化後，EXE 仍由 bash 直接呼叫 Wine，不會經過 Swift。
+
 ## 開啟 .exe
 
 單獨開啟 `Cyder.app`、確認設定後，會以載入階段文字依序顯示：**正在儲存設定…** → **正在準備遊戲執行元件…** → **正在準備遊戲環境…** → **正在套用新設定…**。之後從 Finder 開啟 `.exe` 會直接啟動，不顯示設定或準備視窗。
