@@ -1935,7 +1935,13 @@ cyder_load_game_settings() {
     unset CYDER_TEST_SETTINGS_REQUEST
   else
     [[ -f "$settings_file" ]] || return 0
-    game_json="$(/usr/bin/plutil -extract "perProfile.$profile_id" json -o - "$settings_file" 2>/dev/null)" || return 0
+    # Most EXEs use global settings and have no per-profile entry. Disable the
+    # inherited ERR trap only for this optional lookup so an expected miss does
+    # not report a false settings-apply failure.
+    game_json="$(
+      trap - ERR
+      /usr/bin/plutil -extract "perProfile.$profile_id" json -o - "$settings_file" 2>/dev/null
+    )" || return 0
   fi
   [[ -n "$game_json" ]] || return 0
   CYDER_GAME_SETTINGS_FOUND=1

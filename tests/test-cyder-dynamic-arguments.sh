@@ -51,6 +51,21 @@ for index in "${!expected[@]}"; do
   assert_eq "${actual[$index]}" "${expected[$index]}" "dynamic launch should preserve argv boundary $index"
 done
 
+# A settings file without this EXE's profile is the normal global-settings
+# fallback and must not be reported as a settings-apply error by the ERR trap.
+/usr/bin/plutil -create xml1 "$support/settings.json"
+/usr/bin/plutil -insert schemaVersion -integer 4 "$support/settings.json"
+/usr/bin/plutil -insert perProfile -dictionary "$support/settings.json"
+diagnostic_output="$(
+  CYDER_RUNTIME_ROOT="$runtime" \
+  CYDER_SUPPORT="$support" \
+  CYDER_TEST_ARGUMENT_LOG="$argument_log" \
+  CYDER_DIAGNOSTIC_VERBOSE=1 \
+    bash "$ROOT/scripts/cyder_launcher.sh" --launch-exe "$exe" 2>&1
+)"
+assert_not_contains "$diagnostic_output" 'diagnostic event=error' \
+  "a missing per-profile entry must silently fall back to global settings"
+
 # The shell launch backend must consume the same one-shot settings request that
 # the game-library Test button creates, without routing through Swift.
 request_dir="$support/launch-requests"

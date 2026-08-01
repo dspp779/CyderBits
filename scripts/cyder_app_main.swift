@@ -1047,6 +1047,10 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
                 "CYDER_WINE_DETACH": "1",
                 "CYDER_WINE_PID_FILE": pidURL.path,
                 "CYDER_SESSION_GUARD": "1",
+                // Always retain the quiet startup stream for Finder launches.
+                // If Wine exits before activation, last-launch.log is the only
+                // place its arch/dyld/frontend stderr can be diagnosed.
+                "CYDER_CAPTURE_WINE_LOG": "1",
             ]
         )
         guard result.succeeded else {
