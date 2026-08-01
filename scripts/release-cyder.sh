@@ -167,7 +167,7 @@ verify_release_app_contract() {
     echo "Release app requires native CyderSwift; shell fallback found." >&2
     exit 1
   }
-  /usr/bin/lipo -verify_arch x86_64 arm64 "$swift" >/dev/null || {
+  /usr/bin/lipo "$swift" -verify_arch x86_64 arm64 >/dev/null || {
     echo "Release CyderSwift is not universal (x86_64 + arm64)." >&2
     exit 1
   }
