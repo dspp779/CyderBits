@@ -93,6 +93,7 @@ bash scripts/sign-wine.sh
 ## 系統需求
 
 - **Cyder.app：** macOS 10.15+（`LSMinimumSystemVersion`）；遊戲庫／設定 UI 需 **11+**（10.15 首次安裝會顯示終端機，完成後以 bash 選檔／啟動）
+- **遊戲位置：** 建議放在 `~/Games`；Documents、Desktop、Downloads、雲端或外接磁碟可能只授權 EXE，卻阻擋同資料夾的 DLL
 - **開發／建置：** 建議 macOS 12+（日常開發建議 13+）
 - Apple Silicon + Rosetta 2（Wine 為 **x86_64** build；Apple Silicon 自 macOS 11+ 起需 Rosetta）
 - 磁碟需數 GB（原始碼、`.brew-x86`、build 產物；多數在 `.gitignore`）

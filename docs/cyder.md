@@ -54,6 +54,8 @@ macOS 10.15 不會載入 `CyderSwift`。首次開啟 Cyder 或在環境尚未完
 
 首次執行某 `.exe` 時會自動 bootstrap 共用 prefix（見下節），之後再開其他 `.exe` 不會重複安裝。
 
+建議將整個遊戲資料夾放在 `~/Games`。若 Wine 在顯示視窗前因 `c0000022` 無法載入同資料夾 DLL，且 EXE 位於 Documents、Desktop、Downloads、iCloud／CloudStorage 或 `/Volumes`，macOS 11+ 的 Cyder 會顯示專用提示。「打開 Games 資料夾」會在需要時建立 `~/Games` 並以 Finder 開啟；Cyder 不會自動搬移大型遊戲或改寫 launcher 路徑。
+
 Cyder **不會**自動將自己設為 `.exe` 預設程式；`Info.plist` 僅向系統宣告可開啟 Windows 執行檔（`LSHandlerRank: Alternate`），是否設為預設由使用者在 Finder 自行決定。設為預設後，Finder 中的 `.exe` 會使用 Cyder 的 `AppIcon` 作為文件類型圖示（仍為文件外觀，非 `.app` 獨立 squircle）。從 Finder **雙擊 `.exe`**（已設為預設）或拖放到 Cyder 時會直接啟動該檔（`Cyder.app` 內建 Swift 啟動器接收 open-document 事件）。
 
 開發／除錯時可用 `scripts/cyder-exe-association.swift handlers` 查詢 Launch Services 狀態；若先前誤將 `public.executable` 設為 Cyder，可用 `cleanup` 還原（見 `docs/scripts.md`）。
