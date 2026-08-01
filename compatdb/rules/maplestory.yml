@@ -1,0 +1,42 @@
+schema_version: 1
+
+rules:
+  - id: game.maplestory-classic.dxvk
+    description: >
+      Prefer DXVK for MapleStory Classic (Maplestory_Classic.exe). With Cyder
+      global graphics set to 預設/default, CompatDB selects DXVK; explicit
+      D3DMetal/DXVK/WineD3D (or 自動) App settings still override this rule.
+    priority: 100
+    enabled: true
+    stability: stable
+
+    applies_to:
+      platform: macos
+      engine_api: 1
+
+    match:
+      executable:
+        path_suffix: '\Maplestory_Classic.exe'
+
+    actions:
+      graphics_backend: dxvk
+
+    tests:
+      matches:
+        - name: Classic launcher selects DXVK under default App graphics
+          executable: 'C:\Games\MapleStory Classic\Maplestory_Classic.exe'
+          command_line:
+            - Maplestory_Classic.exe
+        - name: path casing does not matter for Classic EXE
+          executable: 'Z:\Users\jjc\games\tms_cw\maplestory_classic.exe'
+          command_line:
+            - maplestory_classic.exe
+      excludes:
+        - name: Taiwan retail MapleStory.exe is unchanged by Classic rule
+          executable: 'C:\MapleTest\MapleStory.exe'
+          command_line:
+            - MapleStory.exe
+        - name: unrelated Unity game remains unchanged
+          executable: 'C:\Games\Other\Game.exe'
+          command_line:
+            - Game.exe

@@ -20,8 +20,8 @@ expect_failure() {
 }
 
 python3 "$TOOL" validate "$RULES" >"$TEST_TMP/validate.txt"
-assert_contains "$(cat "$TEST_TMP/validate.txt")" "3 authoring rules, 2 enabled" \
-  "validation should include Steam and cnc-ddraw game rules"
+assert_contains "$(cat "$TEST_TMP/validate.txt")" "4 authoring rules, 3 enabled" \
+  "validation should include Steam, cnc-ddraw, and MapleStory Classic rules"
 
 python3 "$TOOL" compile "$RULES" -o "$TEST_TMP/first.cdb" >/dev/null
 python3 "$TOOL" compile "$RULES" -o "$TEST_TMP/second.cdb" >/dev/null
@@ -34,12 +34,16 @@ assert cmp -s \
   "$ROOT/compatdb/compiled/compatdb.cdb"
 
 inspection="$(python3 "$TOOL" inspect "$TEST_TMP/first.cdb" --json)"
-assert_contains "$inspection" '"rule_count": 2' \
+assert_contains "$inspection" '"rule_count": 3' \
   "only enabled rules should be emitted"
 assert_contains "$inspection" '"launcher.steam.webhelper.cef-gpu"' \
   "Steam WebHelper rule should be emitted"
 assert_contains "$inspection" '"game.richman-4.cnc-ddraw"' \
   "Richman 4 cnc-ddraw rule should be emitted"
+assert_contains "$inspection" '"game.maplestory-classic.dxvk"' \
+  "MapleStory Classic DXVK rule should be emitted"
+assert_contains "$inspection" '"graphics_backend": "dxvk"' \
+  "MapleStory Classic rule should select DXVK"
 if [[ "$inspection" == *"launcher.steam.client.macos-compositor"* ]]; then
   echo "disabled experimental Steam client rule was emitted" >&2
   exit 1
