@@ -127,8 +127,8 @@ assert_contains "$(cat "$TMP/run-support/Logs/last-launch.log")" "DXVK_HUD=" \
 assert_contains "$(cat "$TMP/run-support/Logs/last-launch.log")" "Wine diagnostics: quiet" \
   "captured launches should record the default quiet diagnostics profile"
 assert_contains "$(cat "$TMP/run-support/Logs/last-launch.log")" \
-  "WINEDEBUG=-all,err+module,+timestamp,+pid,+tid" \
-  "captured quiet launches should retain only module-loader errors"
+  "WINEDEBUG=-all" \
+  "captured quiet launches should not enable Wine tracing"
 assert_contains "$(cat "$TMP/run-support/Logs/last-launch.log")" "Engine version:" \
   "captured launches should record the actual engine identity"
 launch_log_count="$(find "$TMP/run-support/Logs" -maxdepth 1 -type f -name 'launch-*.log' | wc -l | tr -d ' ')"
@@ -174,7 +174,7 @@ assert_contains "$(cat "$TMP/sync-log-support/Logs/last-launch.log")" \
   "WINEDEBUG=-all,err+all,+timestamp,+pid,+tid,+sync" \
   "sync diagnostics should enable wait tracing for freeze diagnosis"
 
-# Full stack tracing still needs loader errors for actionable early exits.
+# Full stack tracing remains dedicated to exception and unwind diagnosis.
 CYDER_SUPPORT="$TMP/unwind-log-support" \
 CYDER_SCRIPTS="$ROOT/scripts" \
 CYDER_TEST_ARGS="$TMP/unwind-log-args" \
@@ -183,8 +183,8 @@ PATH="$TMP/fake-bin:$PATH" \
   bash -c 'source "$1/scripts/cyder-common.sh"; cyder_init_paths "$1"; cyder_run_wine_exe "$2/wine" "$3"' \
     _ "$ROOT" "$TMP/fake-bin" "$TMP/foreground-test.exe"
 assert_contains "$(cat "$TMP/unwind-log-support/Logs/last-launch.log")" \
-  "WINEDEBUG=-all,err+module,+timestamp,+pid,+tid,+seh,+unwind" \
-  "unwind diagnostics should retain module-loader errors"
+  "WINEDEBUG=-all,+timestamp,+pid,+tid,+seh,+unwind" \
+  "unwind diagnostics should match the settings UI profile"
 
 # Sync modes are mutually exclusive, and normal Cyder launches must not add
 # global DLL overrides now that those settings live in the prefix registry.
@@ -236,6 +236,57 @@ if ! kill -0 "$detached_pid" 2>/dev/null; then
 fi
 kill "$detached_pid" 2>/dev/null || true
 wait "$detached_pid" 2>/dev/null || true
+
+# The detached supervisor must reap Wine and atomically publish its exact
+# eight-bit POSIX wait status without relying on last-launch.log parsing.
+cat >"$TMP/fake-bin/wine-exit-53" <<'SH'
+#!/usr/bin/env bash
+exit 53
+SH
+chmod +x "$TMP/fake-bin/wine-exit-53"
+detach_result_file="$TMP/detached.result"
+CYDER_SUPPORT="$TMP/result-support" \
+CYDER_SCRIPTS="$ROOT/scripts" \
+CYDER_WINE_DETACH=1 \
+CYDER_WINE_PID_FILE="$TMP/result.pid" \
+CYDER_WINE_RESULT_FILE="$detach_result_file" \
+PATH="$TMP/fake-bin:$PATH" \
+  bash -c 'source "$1/scripts/cyder-common.sh"; cyder_init_paths "$1"; cyder_run_wine_exe "$2/wine-exit-53" "$3"' \
+    _ "$ROOT" "$TMP/fake-bin" "$TMP/foreground-test.exe"
+for _ in {1..50}; do
+  [[ -f "$detach_result_file" ]] && break
+  sleep 0.1
+done
+assert test -f "$detach_result_file"
+assert_contains "$(cat "$detach_result_file")" "schema=1" \
+  "detached result sidecars should be versioned"
+assert_contains "$(cat "$detach_result_file")" "exit_status=53" \
+  "detached result sidecars should preserve Wine's wait status"
+
+cat >"$TMP/fake-bin/wine-activates" <<'SH'
+#!/usr/bin/env bash
+sleep 0.2
+exit 0
+SH
+chmod +x "$TMP/fake-bin/wine-activates"
+activated_result="$TMP/activated.result"
+activated_marker="$TMP/activated.marker"
+CYDER_SUPPORT="$TMP/activated-support" \
+CYDER_SCRIPTS="$ROOT/scripts" \
+CYDER_WINE_DETACH=1 \
+CYDER_WINE_PID_FILE="$TMP/activated.pid" \
+CYDER_WINE_RESULT_FILE="$activated_result" \
+CYDER_WINE_ACTIVATED_FILE="$activated_marker" \
+PATH="$TMP/fake-bin:$PATH" \
+  bash -c 'source "$1/scripts/cyder-common.sh"; cyder_init_paths "$1"; cyder_run_wine_exe "$2/wine-activates" "$3"' \
+    _ "$ROOT" "$TMP/fake-bin" "$TMP/foreground-test.exe"
+: >"$activated_marker"
+for _ in {1..30}; do
+  [[ ! -e "$activated_marker" ]] && break
+  sleep 0.1
+done
+assert test ! -e "$activated_result"
+assert test ! -e "$activated_marker"
 
 # Per-game profile routing provisions a fresh bottle for the installed engine.
 profile_support="$TMP/profile-support"

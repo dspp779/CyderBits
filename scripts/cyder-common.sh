@@ -2183,6 +2183,8 @@ cyder_run_wine_exe() {
   local start_mode="${CYDER_WINE_START_MODE:-direct}"
   local detach="${CYDER_WINE_DETACH:-0}"
   local pid_file="${CYDER_WINE_PID_FILE:-}"
+  local result_file="${CYDER_WINE_RESULT_FILE:-}"
+  local activated_file="${CYDER_WINE_ACTIVATED_FILE:-}"
   local session_id=""
   cyder_wine_locale_exports
   local capture_log="${CYDER_CAPTURE_WINE_LOG:-0}"
@@ -2198,19 +2200,13 @@ cyder_run_wine_exe() {
       capture_log=1
       ;;
     unwind)
-      wine_debug="-all,err+module,+timestamp,+pid,+tid,+seh,+unwind"
+      wine_debug="-all,+timestamp,+pid,+tid,+seh,+unwind"
       capture_log=1
       ;;
     *)
       wine_diagnostics="quiet"
       ;;
   esac
-  # Finder launches retain a quiet startup log even when diagnostics are off.
-  # Keep module loader failures visible so macOS folder-denial errors can be
-  # distinguished from ordinary early game exits without enabling err+all.
-  if [[ "$capture_log" == 1 && "$wine_diagnostics" == quiet ]]; then
-    wine_debug="-all,err+module,+timestamp,+pid,+tid"
-  fi
   local engine_root canonical_prefix engine_version ntdll_sha256="unavailable"
   engine_root="$(cd "$(dirname "$wine_bin")/.." && pwd -P)"
   canonical_prefix="$(cd "$prefix" 2>/dev/null && pwd -P || printf '%s' "$prefix")"
@@ -2234,6 +2230,14 @@ cyder_run_wine_exe() {
   if [[ "$detach" == 1 && -n "$pid_file" ]]; then
     mkdir -p "$(dirname "$pid_file")"
     rm -f "$pid_file" "${pid_file}.tmp"
+    if [[ -n "$result_file" ]]; then
+      mkdir -p "$(dirname "$result_file")"
+      rm -f "$result_file" "${result_file}.tmp"
+    fi
+    if [[ -n "$activated_file" ]]; then
+      mkdir -p "$(dirname "$activated_file")"
+      rm -f "$activated_file"
+    fi
   fi
   cyder_exec_game() {
     if [[ "$start_mode" == "start" ]]; then
@@ -2349,26 +2353,57 @@ cyder_run_wine_exe() {
     }
     trap cyder_session_release_on_exit EXIT INT TERM
     if [[ "$detach" == 1 && -n "$pid_file" ]]; then
-      # Native Cyder only needs the Wine PID long enough to activate the Wine
-      # application.  The Wine process is intentionally asynchronous here;
-      # Finder-launched apps have no controlling Terminal, so no nohup is
-      # required. stdout/stderr are discarded unless diagnostic capture was
-      # explicitly enabled with CYDER_CAPTURE_WINE_LOG=1.
-      cyder_exec_game >>"$log_file" 2>&1 &
-      wine_pid=$!
-      printf '%s\n' "$wine_pid" >"${pid_file}.tmp"
-      mv -f "${pid_file}.tmp" "$pid_file"
-      if [[ -n "${session_id:-}" ]]; then
-        # The detached Wine process, rather than the short-lived wrapper,
-        # owns the runtime session.  A waiter removes the registry entry when
-        # Wine exits so a second incompatible launch remains blocked.
-        sed -i '' "s/^pid=.*/pid=$wine_pid/" "$session_id" 2>/dev/null || \
-          sed -i "s/^pid=.*/pid=$wine_pid/" "$session_id"
-        (
-          while kill -0 "$wine_pid" 2>/dev/null; do sleep 1; done
-          cyder_session_release "$prefix" "$session_id"
-        ) &
-        session_id=""
+      # A detached supervisor remains the Wine process' parent so it can reap
+      # the exact POSIX wait status.  PID and result files are per launch and
+      # atomically published; Swift never needs to parse the shared Wine log.
+      detached_session_id="${session_id:-}"
+      (
+        cyder_exec_game >>"$log_file" 2>&1 &
+        wine_pid=$!
+        printf '%s\n' "$wine_pid" >"${pid_file}.tmp"
+        mv -f "${pid_file}.tmp" "$pid_file"
+        if [[ -n "$detached_session_id" ]]; then
+          sed -i '' "s/^pid=.*/pid=$wine_pid/" "$detached_session_id" 2>/dev/null || \
+            sed -i "s/^pid=.*/pid=$wine_pid/" "$detached_session_id"
+        fi
+        wine_status=0
+        wait "$wine_pid" || wine_status=$?
+        if [[ -n "$result_file" ]]; then
+          {
+            printf 'schema=1\n'
+            printf 'pid=%s\n' "$wine_pid"
+            printf 'exit_status=%s\n' "$wine_status"
+          } >"${result_file}.tmp"
+          mv -f "${result_file}.tmp" "$result_file"
+          # Successful launches stop being observed after activation. Consume
+          # their sidecars here; briefly cover the exit/activation race.
+          if [[ -n "$activated_file" ]]; then
+            for _ in {1..10}; do
+              if [[ -e "$activated_file" ]]; then
+                rm -f "$result_file" "$activated_file"
+                break
+              fi
+              sleep 0.1
+            done
+          fi
+        fi
+        if [[ -n "$detached_session_id" ]]; then
+          cyder_session_release "$prefix" "$detached_session_id"
+          detached_session_id=""
+          session_id=""
+        fi
+      ) &
+      # The supervisor now owns both the Wine child and runtime session.
+      session_id=""
+      # Keep the launcher handshake synchronous: Swift reads the PID as soon
+      # as this function returns, while the later exit result stays async.
+      for _ in {1..100}; do
+        [[ -s "$pid_file" ]] && break
+        sleep 0.01
+      done
+      if [[ ! -s "$pid_file" ]]; then
+        echo "Detached Wine supervisor did not publish its PID." >&2
+        return 1
       fi
     else
       # CLI launches keep Wine in the foreground so the caller owns the game

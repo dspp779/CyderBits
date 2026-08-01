@@ -25,8 +25,12 @@ assert_contains "$source_text" '"CYDER_WINE_DETACH": "1"' \
   "the AppKit document relay must request a detached Bash launch"
 assert_contains "$source_text" '"CYDER_CAPTURE_WINE_LOG": "1"' \
   "Finder launches must retain startup stderr when Wine exits before activation"
-assert_contains "$source_text" 'launchLogShowsFolderAccessDenied()' \
-  "early Wine exits must detect protected-folder DLL access denial"
+assert_contains "$source_text" '"CYDER_WINE_RESULT_FILE": exitResultURL.path' \
+  "Finder launches must request a per-launch Wine result sidecar"
+assert_contains "$source_text" 'if exitStatus == 53' \
+  "protected-folder guidance must use Wine's captured wait status"
+assert_not_contains "$source_text" 'launchLogShowsFolderAccessDenied()' \
+  "protected-folder guidance must not parse the shared last-launch log"
 assert_contains "$source_text" 'code: "CYD-WIN-003"' \
   "protected-folder failures must use a dedicated actionable error"
 assert_contains "$source_text" 'alert.addButton(withTitle: "打開 Games 資料夾")' \

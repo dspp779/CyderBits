@@ -29,6 +29,8 @@ assert_contains "$ui" "makeDiagnosticsTab()" "preferences should provide a dedic
 assert_contains "$ui" "除錯" "diagnostics tab should be visibly labeled"
 assert_contains "$ui" "Wine 診斷記錄" "diagnostics tab should expose Wine diagnostics"
 assert_contains "$ui" "安靜（預設）" "Wine diagnostics should default to quiet"
+assert_contains "$ui" "啟動失敗仍會由程序退出碼判斷" \
+  "quiet diagnostics should explain that launch failure detection does not need Wine tracing"
 assert_contains "$ui" "完整堆疊追蹤" "Wine diagnostics should expose the unwind profile"
 assert_contains "$ui" "等待與凍結追蹤" "Wine diagnostics should expose the sync profile for freezes"
 assert_contains "$ui" "diagnosticsWarning.isHidden = value.wineDiagnostics == .quiet" "diagnostics warning should hide in quiet mode"

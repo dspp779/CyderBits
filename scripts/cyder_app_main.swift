@@ -1031,8 +1031,18 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             ))
         }
 
-        let pidURL = requestDirectory.appendingPathComponent("wine-\(UUID().uuidString).pid")
-        defer { try? FileManager.default.removeItem(at: pidURL) }
+        let launchID = UUID().uuidString
+        let pidURL = requestDirectory.appendingPathComponent("wine-\(launchID).pid")
+        let exitResultURL = requestDirectory.appendingPathComponent("wine-\(launchID).result")
+        let activatedURL = requestDirectory.appendingPathComponent("wine-\(launchID).activated")
+        var launchActivated = false
+        defer {
+            try? FileManager.default.removeItem(at: pidURL)
+            if !launchActivated {
+                try? FileManager.default.removeItem(at: exitResultURL)
+                try? FileManager.default.removeItem(at: activatedURL)
+            }
+        }
         var args = [context.launcher, "--engine-src", context.engineSrc, "--launch-exe", exe]
         if let launchArguments, !launchArguments.isEmpty {
             args.append("--")
@@ -1046,10 +1056,12 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             extraEnvironment: [
                 "CYDER_WINE_DETACH": "1",
                 "CYDER_WINE_PID_FILE": pidURL.path,
+                "CYDER_WINE_RESULT_FILE": exitResultURL.path,
+                "CYDER_WINE_ACTIVATED_FILE": activatedURL.path,
                 "CYDER_SESSION_GUARD": "1",
-                // Always retain the quiet startup stream for Finder launches.
-                // If Wine exits before activation, last-launch.log is the only
-                // place its arch/dyld/frontend stderr can be diagnosed.
+                // Always retain the quiet startup stream for optional manual
+                // diagnosis. UI classification uses the per-launch wait result
+                // below and does not depend on Wine log text.
                 "CYDER_CAPTURE_WINE_LOG": "1",
             ]
         )
@@ -1071,37 +1083,94 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         let deadline = Date().addingTimeInterval(30)
         while Date() < deadline {
             if activationWaiter.semaphore.wait(timeout: .now() + 0.2) == .success {
+                launchActivated = true
+                FileManager.default.createFile(atPath: activatedURL.path, contents: Data())
                 CyderDiagnostics.shared.enter(.wineActivation, detail: "notification-received")
                 return .success
             }
+            if let exitStatus = detachedWineExitStatus(at: exitResultURL) {
+                return earlyWineExitFailure(
+                    executablePath: exe,
+                    winePID: winePID,
+                    exitStatus: exitStatus,
+                    fallbackLogURL: result.logURL
+                )
+            }
             if winePID > 0, kill(winePID, 0) != 0 {
-                let executable = URL(fileURLWithPath: exe)
-                if let protectedLocation = protectedGameLocation(for: executable),
-                   launchLogShowsFolderAccessDenied() {
-                    let launchLog = CyderPaths.support
-                        .appendingPathComponent("Logs", isDirectory: true)
-                        .appendingPathComponent("last-launch.log")
-                    return .failure(CyderFailure(
-                        code: "CYD-WIN-003",
-                        stage: .wineSpawn,
-                        summary: "遊戲位於 macOS 可能限制存取的「\(protectedLocation)」。請將整個遊戲資料夾移到 ~/Games 後再試。",
-                        technicalDetails: "Wine could not load a sibling DLL with STATUS_ACCESS_DENIED (c0000022). Executable: \(executable.path)",
-                        logURL: launchLog
-                    ))
+                // The supervisor publishes the wait status immediately after
+                // reaping Wine. Allow a short scheduling window before falling
+                // back to the generic early-exit failure.
+                for _ in 0..<5 {
+                    if let exitStatus = detachedWineExitStatus(at: exitResultURL) {
+                        return earlyWineExitFailure(
+                            executablePath: exe,
+                            winePID: winePID,
+                            exitStatus: exitStatus,
+                            fallbackLogURL: result.logURL
+                        )
+                    }
+                    Thread.sleep(forTimeInterval: 0.1)
                 }
-                return .failure(CyderFailure(
-                    code: "CYD-WIN-002",
-                    stage: .wineSpawn,
-                    summary: "Wine 啟動後在顯示遊戲視窗前結束。",
-                    technicalDetails: "Detached Wine PID \(winePID) exited before activation.",
-                    logURL: result.logURL
-                ))
+                return earlyWineExitFailure(
+                    executablePath: exe,
+                    winePID: winePID,
+                    exitStatus: nil,
+                    fallbackLogURL: result.logURL
+                )
             }
         }
         CyderDiagnostics.shared.warning(
             "wine activation timed out after 30s pid=\(winePID); process remains detached"
         )
+        // Observation stops after the compatibility timeout; let the Bash
+        // supervisor consume the eventual sidecar just like an activation.
+        launchActivated = true
+        FileManager.default.createFile(atPath: activatedURL.path, contents: Data())
         return .success
+    }
+
+    private func detachedWineExitStatus(at resultURL: URL) -> Int32? {
+        guard let text = try? String(contentsOf: resultURL, encoding: .utf8) else {
+            return nil
+        }
+        for line in text.split(whereSeparator: { $0.isNewline }) {
+            guard line.hasPrefix("exit_status="),
+                  let value = Int32(line.dropFirst("exit_status=".count)) else {
+                continue
+            }
+            return value
+        }
+        return nil
+    }
+
+    private func earlyWineExitFailure(
+        executablePath: String,
+        winePID: Int32,
+        exitStatus: Int32?,
+        fallbackLogURL: URL
+    ) -> CyderLaunchOutcome {
+        let executable = URL(fileURLWithPath: executablePath)
+        if exitStatus == 53,
+           let protectedLocation = protectedGameLocation(for: executable) {
+            let launchLog = CyderPaths.support
+                .appendingPathComponent("Logs", isDirectory: true)
+                .appendingPathComponent("last-launch.log")
+            return .failure(CyderFailure(
+                code: "CYD-WIN-003",
+                stage: .wineSpawn,
+                summary: "遊戲位於 macOS 可能限制存取的「\(protectedLocation)」。請將整個遊戲資料夾移到 ~/Games 後再試。",
+                technicalDetails: "Wine exited before activation with status 53, which is consistent with truncated Windows status 0xC0000135. Executable: \(executable.path)",
+                logURL: FileManager.default.fileExists(atPath: launchLog.path) ? launchLog : fallbackLogURL
+            ))
+        }
+        let statusDetail = exitStatus.map(String.init) ?? "unavailable"
+        return .failure(CyderFailure(
+            code: "CYD-WIN-002",
+            stage: .wineSpawn,
+            summary: "Wine 啟動後在顯示遊戲視窗前結束。",
+            technicalDetails: "Detached Wine PID \(winePID) exited before activation (status: \(statusDetail)).",
+            logURL: fallbackLogURL
+        ))
     }
 
     private func protectedGameLocation(for executable: URL) -> String? {
@@ -1124,21 +1193,6 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             return "外接或網路磁碟"
         }
         return nil
-    }
-
-    private func launchLogShowsFolderAccessDenied() -> Bool {
-        let logURL = CyderPaths.support
-            .appendingPathComponent("Logs", isDirectory: true)
-            .appendingPathComponent("last-launch.log")
-        for _ in 0..<5 {
-            if let text = try? String(contentsOf: logURL, encoding: .utf8),
-               text.localizedCaseInsensitiveContains("failed (error c0000022)"),
-               text.localizedCaseInsensitiveContains("status c0000135") {
-                return true
-            }
-            Thread.sleep(forTimeInterval: 0.1)
-        }
-        return false
     }
 
     @objc private func wineAppWillActivate(_ notification: Notification) {

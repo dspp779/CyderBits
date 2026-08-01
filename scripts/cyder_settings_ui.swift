@@ -347,7 +347,7 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
         return tab("除錯", rows: [
             row("Wine 診斷記錄", wineDiagnostics),
             diagnosticsWarning,
-            note("「只記錄錯誤」適合一般排障；「等待與凍結追蹤」會記錄每次等待的物件，用於重現卡住／凍結；「完整堆疊追蹤」會產生更多資料，僅供短時間重現 exception／unwind 問題。"),
+            note("「安靜」不開啟 Wine trace，啟動失敗仍會由程序退出碼判斷；「只記錄錯誤」適合一般排障；「等待與凍結追蹤」用於重現卡住／凍結；「完整堆疊追蹤」僅供短時間重現 exception／unwind 問題。"),
             export,
             note("只複製上次遊戲啟動的 Wine log；其他初始化或啟動錯誤可直接複製錯誤對話框中的診斷資訊。"),
             cleanup,
