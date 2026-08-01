@@ -179,6 +179,16 @@ build_moltenvk_crossover() {
   echo "Fetching MoltenVK external dependencies (may need network)..."
   run bash -c "cd '$MOLTENVK_SRC' && ./fetchDependencies --macos --spirv-cross-root '$spirv_cross_cache'"
 
+  # CX tarball has no moltenvk .git; gen_moltenvk_rev_hdr.sh would otherwise
+  # bake the parent Cyder/engine commit into mvkRevString.
+  local pinned_mvk=""
+  if [[ "$DRY_RUN" -eq 1 ]]; then
+    echo "+ python3 $SCRIPT_DIR/pin-moltenvk-git-rev.py $MOLTENVK_SRC"
+  else
+    pinned_mvk="$(python3 "$SCRIPT_DIR/pin-moltenvk-git-rev.py" "$MOLTENVK_SRC")"
+    echo "MoltenVK rev string pinned to $pinned_mvk (not parent git HEAD)"
+  fi
+
   echo "Building MoltenVK (arch=$ARCHS) from CrossOver snapshot..."
   run arch -x86_64 env \
     DEVELOPER_DIR="$(xcode-select -p 2>/dev/null || true)" \
@@ -204,14 +214,9 @@ build_moltenvk_crossover() {
   run cp -p "$dylib" "$marker"
   run chmod 755 "$marker"
 
-  local mvk_version=""
-  if [[ -f "$MOLTENVK_SRC/MoltenVK/MoltenVK/API/mvk_config.h" ]]; then
-    mvk_version="$(grep -E 'MVK_VERSION_STRING' "$MOLTENVK_SRC/MoltenVK/MoltenVK/API/mvk_config.h" \
-      | head -1 | sed -E 's/.*"([^"]+)".*/\1/' || true)"
-  fi
   cat > "$GRAPHICS_INSTALL/version" <<EOF
 graphics crossover cx${CX_VERSION}
-moltenvk ${mvk_version:-crossover-snapshot}
+moltenvk ${pinned_mvk:-crossover-snapshot}
 arch ${ARCHS}
 source crossover-foss
 EOF

@@ -37,7 +37,7 @@
 
 ### 建置與共用
 
-- 以 CrossOver 25.0.1 來源樹中的 DXVK snapshot 建置（對外標稱為 1.10.3 系；實際字串可能為 `v0.7.0+`／CX 變體）。
+- 以 CrossOver 25.0.1 來源樹中的 DXVK snapshot 建置（`RELEASE`／log 字串為 `v1.10.3`；建置時由 `pin-dxvk-version.py` 釘死，避免吃到 Cyder app git tag）。
 - 建置產物：`d3d11.dll` / `dxgi.dll`（x86_64 + i386），**不含** d3d9/d3d10（維持現有 `build-dxvk.sh` 取捨）。
 - **同一組 DLL artifact** 安裝進：
   - `install/wine-cx26-x86_64/lib/dxvk/`

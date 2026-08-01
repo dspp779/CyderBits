@@ -108,6 +108,11 @@ find_glslang() {
 
 patch_dxvk_source() {
   local header="$SOURCE/src/d3d10/d3d10_interfaces.h"
+  local pinned_version=""
+  if [[ -f "$SOURCE/meson.build" && -f "$SOURCE/RELEASE" ]]; then
+    pinned_version="$(python3 "$SCRIPT_DIR/pin-dxvk-version.py" "$SOURCE")"
+    echo "DXVK version pinned to $pinned_version (from RELEASE; not parent git describe)"
+  fi
   [[ -f "$header" ]] || return 0
   python3 - "$header" <<'PY'
 from pathlib import Path
