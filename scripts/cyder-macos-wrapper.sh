@@ -49,9 +49,20 @@ cyder_catalina_environment_ready() {
 
 cyder_start_catalina_bootstrap() {
   local bootstrap="$SCRIPTS/cyder-catalina-bootstrap.command"
+  local support="${CYDER_SUPPORT:-$HOME/Library/Application Support/Cyder}"
+  local pending="$support/catalina-pending-launch"
   if [[ ! -x "$bootstrap" ]]; then
     /usr/bin/osascript -e 'display alert "Cyder 無法初始化" message "App 缺少 Catalina 初始化工具，請重新安裝 Cyder。" as warning' 2>/dev/null || true
     return 1
+  fi
+  mkdir -p "$support"
+  if (($# > 0)); then
+    local tmp="${pending}.tmp.$$"
+    umask 077
+    printf '%s\0' "$@" >"$tmp"
+    mv -f "$tmp" "$pending"
+  else
+    rm -f "$pending"
   fi
   /usr/bin/open -a Terminal "$bootstrap"
 }
@@ -82,7 +93,7 @@ done
 # Wine execution path shell-only on every supported macOS version.
 if [[ -n "$exe" ]]; then
   if ! cyder_macos_at_least 11 0 && ! cyder_catalina_environment_ready; then
-    cyder_start_catalina_bootstrap
+    cyder_start_catalina_bootstrap "$exe" "${game_args[@]}"
     exit $?
   fi
   if ((${#game_args[@]} > 0)); then

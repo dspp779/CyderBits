@@ -32,6 +32,12 @@ assert_contains "$catalina_bootstrap" 'catalina-bootstrap.lock' \
   "Catalina Terminal bootstrap must reject concurrent initialization"
 assert_contains "$catalina_bootstrap" '/usr/bin/open "$APP"' \
   "successful Catalina bootstrap must reopen Cyder"
+assert_contains "$wrapper" 'catalina-pending-launch' \
+  "Catalina must preserve the original first-run EXE request"
+assert_contains "$catalina_bootstrap" 'pending_args' \
+  "Catalina bootstrap must resume the pending EXE after setup"
+assert_contains "$catalina_bootstrap" '/usr/bin/open "$APP" --args' \
+  "Catalina bootstrap must pass the pending EXE back to the Bash wrapper"
 
 assert cyder_macos_at_least 10 15
 assert cyder_macos_at_least 10 0

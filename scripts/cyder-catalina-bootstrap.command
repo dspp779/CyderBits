@@ -9,6 +9,7 @@ APP="$(cd "$RES/../.." && pwd)"
 SUPPORT="${CYDER_SUPPORT:-$HOME/Library/Application Support/Cyder}"
 LOCK_DIR="$SUPPORT/catalina-bootstrap.lock"
 PROGRESS_FILE="$SUPPORT/catalina-bootstrap.progress"
+PENDING_LAUNCH="$SUPPORT/catalina-pending-launch"
 WORKER_PID=""
 
 mkdir -p "$SUPPORT" "$SUPPORT/Logs"
@@ -123,7 +124,22 @@ if [[ "$status" -eq 0 ]]; then
   echo
   echo "Cyder 初始化完成。"
   /usr/bin/osascript -e 'display alert "Cyder 初始化完成" message "Windows 遊戲執行環境已準備完成。" as informational' 2>/dev/null || true
-  /usr/bin/open "$APP" >/dev/null 2>&1 || true
+  pending_args=()
+  if [[ -f "$PENDING_LAUNCH" && ! -L "$PENDING_LAUNCH" ]]; then
+    while IFS= read -r -d '' value; do
+      pending_args+=("$value")
+    done <"$PENDING_LAUNCH"
+    rm -f "$PENDING_LAUNCH"
+  fi
+  pending_exe_lower=""
+  if ((${#pending_args[@]} > 0)); then
+    pending_exe_lower="$(printf '%s' "${pending_args[0]}" | tr '[:upper:]' '[:lower:]')"
+  fi
+  if [[ "$pending_exe_lower" == *.exe && -f "${pending_args[0]:-}" ]]; then
+    /usr/bin/open "$APP" --args "${pending_args[@]}" >/dev/null 2>&1 || true
+  else
+    /usr/bin/open "$APP" >/dev/null 2>&1 || true
+  fi
   exit 0
 fi
 
