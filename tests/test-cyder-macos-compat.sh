@@ -6,6 +6,8 @@ source "$ROOT/tests/assert.sh"
 source "$ROOT/scripts/cyder-macos-compat.sh"
 
 wrapper="$(cat "$ROOT/scripts/cyder-macos-wrapper.sh")"
+catalina_bootstrap="$(cat "$ROOT/scripts/cyder-catalina-bootstrap.command")"
+assert test -x "$ROOT/scripts/cyder-catalina-bootstrap.command"
 assert_contains "$wrapper" 'cyder_macos_at_least 11 0' \
   "wrapper must route no-argument macOS 11+ launches to CyderSwift"
 swift_gate_line="$(printf '%s\n' "$wrapper" | grep -n 'cyder_macos_at_least 11 0' | head -n 1 | cut -d: -f1)"
@@ -18,6 +20,18 @@ assert_contains "$wrapper" 'exec "$SCRIPTS/cyder_launcher.sh" --engine-src "$ENG
   "explicit EXE arguments must go directly to the Bash launcher"
 assert_not_contains "$wrapper" 'CyderLegacyUI.app' \
   "wrapper must not retain the removed Catalina applet"
+assert_contains "$wrapper" 'cyder_catalina_environment_ready' \
+  "Catalina must check readiness before selecting or launching an EXE"
+assert_contains "$wrapper" '/usr/bin/open -a Terminal "$bootstrap"' \
+  "Catalina first run must open the visible Terminal bootstrap"
+assert_contains "$catalina_bootstrap" '--bootstrap-only' \
+  "Catalina Terminal bootstrap must use the supported launcher action"
+assert_contains "$catalina_bootstrap" 'CYDER_PROGRESS_FILE' \
+  "Catalina Terminal bootstrap must display staged setup messages"
+assert_contains "$catalina_bootstrap" 'catalina-bootstrap.lock' \
+  "Catalina Terminal bootstrap must reject concurrent initialization"
+assert_contains "$catalina_bootstrap" '/usr/bin/open "$APP"' \
+  "successful Catalina bootstrap must reopen Cyder"
 
 assert cyder_macos_at_least 10 15
 assert cyder_macos_at_least 10 0

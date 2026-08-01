@@ -14,6 +14,8 @@ assert_contains "$build_script" 'cp "$SCRIPT_DIR/sign-wine.sh" "$RES/ogom-script
   "Cyder.app must bundle the runtime signing helper"
 assert_contains "$build_script" 'cp "$SCRIPT_DIR/cyder-macos-compat.sh" "$RES/ogom-scripts/"' \
   "Cyder.app must bundle the macOS compatibility helper"
+assert_contains "$build_script" 'cp "$SCRIPT_DIR/cyder-catalina-bootstrap.command" "$RES/ogom-scripts/"' \
+  "Cyder.app must bundle the visible Catalina first-run bootstrap"
 assert_not_contains "$build_script" 'CyderLegacyUI.app' \
   "Cyder.app must not package the removed Catalina applet"
 assert_contains "$build_script" 'cp "$SCRIPT_DIR/cyder-macos-wrapper.sh" "$MACOS/Cyder"' \

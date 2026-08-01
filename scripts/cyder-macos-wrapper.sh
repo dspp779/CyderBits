@@ -40,6 +40,22 @@ export CYDER_BUNDLE_ID="local.cyder.app"
 
 cyder_apply_moltenvk_os_floor
 
+cyder_catalina_environment_ready() {
+  # shellcheck source=cyder-common.sh
+  source "$SCRIPTS/cyder-common.sh"
+  cyder_init_paths "$RES"
+  cyder_engine_is_ready_for_launch
+}
+
+cyder_start_catalina_bootstrap() {
+  local bootstrap="$SCRIPTS/cyder-catalina-bootstrap.command"
+  if [[ ! -x "$bootstrap" ]]; then
+    /usr/bin/osascript -e 'display alert "Cyder 無法初始化" message "App 缺少 Catalina 初始化工具，請重新安裝 Cyder。" as warning' 2>/dev/null || true
+    return 1
+  fi
+  /usr/bin/open -a Terminal "$bootstrap"
+}
+
 exe=""
 game_args=()
 saw_separator=0
@@ -65,6 +81,10 @@ done
 # An explicit EXE is a launch request, never a request for native UI. Keep the
 # Wine execution path shell-only on every supported macOS version.
 if [[ -n "$exe" ]]; then
+  if ! cyder_macos_at_least 11 0 && ! cyder_catalina_environment_ready; then
+    cyder_start_catalina_bootstrap
+    exit $?
+  fi
   if ((${#game_args[@]} > 0)); then
     exec "$SCRIPTS/cyder_launcher.sh" --engine-src "$ENGINE_SRC" --launch-exe "$exe" -- "${game_args[@]}"
   fi
@@ -82,9 +102,10 @@ fi
 
 # Catalina/no-native-UI fallback: Bash with the minimal system file picker.
 if [[ -z "$exe" ]]; then
-  # shellcheck source=cyder-common.sh
-  source "$SCRIPTS/cyder-common.sh"
-  cyder_init_paths "$RES"
+  if ! cyder_catalina_environment_ready; then
+    cyder_start_catalina_bootstrap
+    exit $?
+  fi
   exe="$(cyder_choose_exe)"
 fi
 exec "$SCRIPTS/cyder_launcher.sh" --engine-src "$ENGINE_SRC" --launch-exe "$exe"
