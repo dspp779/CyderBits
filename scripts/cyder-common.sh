@@ -1217,6 +1217,31 @@ cyder_sign_installed_engine() {
   printf 'signed\n' >"$dest/.cyder-engine-signed"
 }
 
+# RC overlay: poll-based vkWaitSemaphores to avoid DXVK + MoltenVK Mach port leak.
+# Engine tarball stays clean; mutate extracted runtime only.
+cyder_ensure_moltenvk_wait_poll_shim() {
+  local dest="$1"
+  local helper="$CYDER_SCRIPTS/install-moltenvk-wait-poll-shim.sh"
+  local bundled=""
+  [[ -f "$helper" ]] || {
+    echo "moltenvk-wait-poll: skipped (helper missing)" >&2
+    return 0
+  }
+  if [[ -n "${CYDER_APP:-}" ]]; then
+    bundled="$CYDER_APP/Contents/Resources/tools/moltenvk-wait-poll/libMoltenVK.dylib"
+  fi
+  if [[ -z "$bundled" || ! -f "$bundled" ]]; then
+    if [[ -n "${CYDER_SCRIPTS:-}" && -f "$CYDER_SCRIPTS/../tools/moltenvk-wait-poll/libMoltenVK.dylib" ]]; then
+      bundled="$CYDER_SCRIPTS/../tools/moltenvk-wait-poll/libMoltenVK.dylib"
+    fi
+  fi
+  if [[ -n "$bundled" && -f "$bundled" ]]; then
+    bash "$helper" --engine "$dest" --bundled-shim "$bundled" || return $?
+  else
+    bash "$helper" --engine "$dest" || return $?
+  fi
+}
+
 cyder_ensure_shared_engine() {
   local engine_src="$1"
   local dest="$CYDER_ENGINES/$CYDER_ENGINE_NAME"
@@ -1234,6 +1259,7 @@ cyder_ensure_shared_engine() {
       if [[ ! -f "$dest/.cyder-engine-signed" ]]; then
         cyder_sign_installed_engine "$dest" || exit 1
       fi
+      cyder_ensure_moltenvk_wait_poll_shim "$dest" || exit 1
       echo "$dest"
       return 0
     fi
@@ -1276,6 +1302,7 @@ cyder_ensure_shared_engine() {
     rm -f "$dest/.cyder-engine-version"
   fi
   cyder_sign_installed_engine "$dest" || exit 1
+  cyder_ensure_moltenvk_wait_poll_shim "$dest" || exit 1
   echo "$dest"
 }
 

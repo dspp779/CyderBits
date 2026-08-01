@@ -8,7 +8,7 @@ unset HOMEBREW_PREFIX OGOM WINE_INSTALL ENTITLEMENTS_PLIST
 source "$SCRIPT_DIR/env-x86_64.sh"
 
 OUT_DIR="${OGOM}/dist"
-CYDER_APP_VERSION="${CYDER_APP_VERSION:-0.9.0}"
+CYDER_APP_VERSION="${CYDER_APP_VERSION:-0.9.1}"
 # Release identity by default; export SIGN_IDENTITY=- for an unsigned local build.
 SIGN_IDENTITY="${SIGN_IDENTITY:-Developer ID Application: Chun Ho Kwok (3U9565WWM2)}"
 if [[ "$SIGN_IDENTITY" == "-" ]]; then
@@ -159,7 +159,7 @@ fi
   exit 1
 }
 
-mkdir -p "$RES/ogom-scripts" "$RES/addons/libarchive" "$RES/tools/zstd" "$RES/tools/cabextract" "$RES/licenses" "$RES/CompatDB" "$RES/Components/cnc-ddraw/7.1.0.0"
+mkdir -p "$RES/ogom-scripts" "$RES/addons/libarchive" "$RES/tools/zstd" "$RES/tools/cabextract" "$RES/tools/moltenvk-wait-poll" "$RES/licenses" "$RES/CompatDB" "$RES/Components/cnc-ddraw/7.1.0.0"
 COMPATDB_COMPILED="$OGOM/compatdb/compiled/compatdb.cdb"
 [[ -f "$OGOM/scripts/cyder-compatdb.py" ]] || {
   echo "Missing CompatDB tool: scripts/cyder-compatdb.py" >&2
@@ -194,6 +194,7 @@ cp "$SCRIPT_DIR/cyder-winetricks.sh" "$RES/ogom-scripts/"
 cp "$SCRIPT_DIR/cyder-recipe.sh" "$RES/ogom-scripts/"
 cp "$SCRIPT_DIR/cyder-cnc-ddraw.sh" "$RES/ogom-scripts/"
 cp "$SCRIPT_DIR/install-dxvk-prefix.sh" "$RES/ogom-scripts/"
+cp "$SCRIPT_DIR/install-moltenvk-wait-poll-shim.sh" "$RES/ogom-scripts/"
 cp "$SCRIPT_DIR/cyder-oem-sync-dxvk.sh" "$RES/ogom-scripts/"
 cp "$OGOM/tools/winetricks/winetricks" "$RES/ogom-scripts/"
 cp "$OGOM/tools/winetricks/COPYING" "$RES/licenses/winetricks-COPYING"
@@ -221,6 +222,63 @@ cp "$OGOM/tools/cabextract/cabextract" "$RES/tools/cabextract/cabextract"
 if [[ -f "$OGOM/tools/cabextract/COPYING" ]]; then
   cp "$OGOM/tools/cabextract/COPYING" "$RES/licenses/cabextract-COPYING"
 fi
+
+# Prebuild MoltenVK wait-poll shim (RC overlay; does not bump engine label).
+echo "==> Building MoltenVK timeline-wait poll shim"
+MVK_SHIM_SRC="$OGOM/tools/cyder-mvk-timeline-wait-poll/cyder_mvk_timeline_wait_poll.m"
+MVK_SHIM_OUT="$RES/tools/moltenvk-wait-poll/libMoltenVK.dylib"
+MVK_SHIM_STAGE="$(mktemp -d "${TMPDIR:-/tmp}/cyder-mvk-shim.XXXXXX")"
+[[ -f "$MVK_SHIM_SRC" ]] || {
+  rm -rf "$MVK_SHIM_STAGE"
+  echo "Missing MoltenVK wait-poll source: $MVK_SHIM_SRC" >&2
+  exit 1
+}
+MVK_REAL=""
+if [[ -f "$HOME/.cyder/runtime/Engines/wine-x86_64/lib/wine/x86_64-unix/libMoltenVK.real.dylib" ]]; then
+  MVK_REAL="$HOME/.cyder/runtime/Engines/wine-x86_64/lib/wine/x86_64-unix/libMoltenVK.real.dylib"
+elif [[ -n "${CYDER_BUNDLED_ENGINE_ARCHIVE:-}" && -f "$CYDER_BUNDLED_ENGINE_ARCHIVE" ]]; then
+  echo "==> Extracting libMoltenVK.dylib from engine archive for shim link"
+  tar -xJf "$CYDER_BUNDLED_ENGINE_ARCHIVE" -C "$MVK_SHIM_STAGE" \
+    "wine-x86_64/lib/wine/x86_64-unix/libMoltenVK.dylib"
+  MVK_REAL="$MVK_SHIM_STAGE/wine-x86_64/lib/wine/x86_64-unix/libMoltenVK.dylib"
+elif [[ -f "$HOME/.cyder/runtime/Engines/wine-x86_64/lib/wine/x86_64-unix/libMoltenVK.dylib" ]] &&
+     ! otool -L "$HOME/.cyder/runtime/Engines/wine-x86_64/lib/wine/x86_64-unix/libMoltenVK.dylib" |
+       tail -n +3 | grep -q 'libMoltenVK.real.dylib'; then
+  MVK_REAL="$HOME/.cyder/runtime/Engines/wine-x86_64/lib/wine/x86_64-unix/libMoltenVK.dylib"
+fi
+[[ -f "${MVK_REAL:-}" ]] || {
+  rm -rf "$MVK_SHIM_STAGE"
+  echo "Missing libMoltenVK to link wait-poll shim against" >&2
+  exit 1
+}
+if otool -L "$MVK_REAL" 2>/dev/null | tail -n +3 | grep -q 'libMoltenVK.real.dylib'; then
+  rm -rf "$MVK_SHIM_STAGE"
+  echo "Refusing to link wait-poll shim against an existing shim: $MVK_REAL" >&2
+  exit 1
+fi
+cp -p "$MVK_REAL" "$MVK_SHIM_STAGE/libMoltenVK.real.dylib"
+install_name_tool -id '@loader_path/libMoltenVK.real.dylib' \
+  "$MVK_SHIM_STAGE/libMoltenVK.real.dylib"
+MVK_SDK="$(xcrun --sdk macosx --show-sdk-path)"
+arch -x86_64 clang -arch x86_64 \
+  -mmacosx-version-min="${MACOSX_DEPLOYMENT_TARGET:-10.15}" \
+  -isysroot "$MVK_SDK" \
+  -dynamiclib \
+  -o "$MVK_SHIM_OUT" \
+  "$MVK_SHIM_SRC" \
+  -Wl,-reexport_library,"$MVK_SHIM_STAGE/libMoltenVK.real.dylib" \
+  -install_name '@loader_path/libMoltenVK.dylib'
+install_name_tool -change "$MVK_SHIM_STAGE/libMoltenVK.real.dylib" \
+  '@loader_path/libMoltenVK.real.dylib' "$MVK_SHIM_OUT"
+strings -a "$MVK_SHIM_OUT" | grep -q 'cyder-moltenvk-timeline-wait-poll' || {
+  rm -rf "$MVK_SHIM_STAGE"
+  echo "Built wait-poll shim missing marker string" >&2
+  exit 1
+}
+cp "$MVK_SHIM_SRC" "$RES/tools/moltenvk-wait-poll/"
+chmod 755 "$MVK_SHIM_OUT"
+rm -rf "$MVK_SHIM_STAGE"
+
 cp "$SCRIPT_DIR/cyder-profile.sh" "$RES/ogom-scripts/"
 cp "$SCRIPT_DIR/cyder_create_game_app.py" "$RES/ogom-scripts/"
 cp "$SCRIPT_DIR/cyder_common.py" "$RES/ogom-scripts/"
@@ -234,6 +292,7 @@ chmod +x "$RES/ogom-scripts/cyder-winetricks.sh"
 chmod +x "$RES/ogom-scripts/cyder-recipe.sh"
 chmod +x "$RES/ogom-scripts/cyder-cnc-ddraw.sh"
 chmod +x "$RES/ogom-scripts/install-dxvk-prefix.sh"
+chmod +x "$RES/ogom-scripts/install-moltenvk-wait-poll-shim.sh"
 chmod +x "$RES/ogom-scripts/winetricks"
 chmod +x "$RES/ogom-scripts/cyder-profile.sh"
 chmod +x "$RES/ogom-scripts/cyder_create_game_app.py"
@@ -425,11 +484,12 @@ sign_macho() {
 # Sign nested helpers before the main executable / bundle (inside-out).
 sign_macho "$APP/Contents/Resources/tools/zstd/zstd"
 sign_macho "$APP/Contents/Resources/tools/cabextract/cabextract"
+sign_macho "$APP/Contents/Resources/tools/moltenvk-wait-poll/libMoltenVK.dylib"
 sign_macho "$APP/Contents/MacOS/CyderSwift"
 sign_macho "$APP/Contents/MacOS/Cyder"
 while IFS= read -r -d '' path; do
   case "$path" in
-    */MacOS/Cyder | */MacOS/CyderSwift | */tools/zstd/zstd | */tools/cabextract/cabextract) continue ;;
+    */MacOS/Cyder | */MacOS/CyderSwift | */tools/zstd/zstd | */tools/cabextract/cabextract | */tools/moltenvk-wait-poll/libMoltenVK.dylib) continue ;;
   esac
   sign_macho "$path"
 done < <(find "$APP/Contents" -type f -print0)
