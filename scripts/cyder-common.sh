@@ -967,7 +967,7 @@ cyder_diagnostic_stage() {
   fi
 }
 
-# Optional legacy UI helpers (version compare, MoltenVK OS floor, osascript progress).
+# Optional legacy UI helpers (version compare and MoltenVK OS floor).
 if [[ -n "${CYDER_SCRIPTS:-}" && -f "$CYDER_SCRIPTS/cyder-legacy-ui.sh" ]]; then
   # shellcheck source=cyder-legacy-ui.sh
   source "$CYDER_SCRIPTS/cyder-legacy-ui.sh"
@@ -977,7 +977,7 @@ elif [[ -f "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/cyder-legacy-ui.sh" ]]
 fi
 
 # UI-facing progress line for long bootstrap/provision work. Written atomically
-# so Cyder.app can poll CYDER_PROGRESS_FILE while the launcher runs.
+# so the modern Swift UI can update its stage text while the launcher runs.
 cyder_report_progress() {
   local message="$1"
   echo "$message" >&2
@@ -1238,7 +1238,11 @@ cyder_ensure_moltenvk_wait_poll_shim() {
   if [[ -n "$bundled" && -f "$bundled" ]]; then
     bash "$helper" --engine "$dest" --bundled-shim "$bundled" || return $?
   else
-    bash "$helper" --engine "$dest" || return $?
+    # The wait-poll overlay is optional, but runtime compilation is forbidden:
+    # end-user machines do not have Xcode / Command Line Tools. The app
+    # package must carry the prebuilt shim until the MoltenVK issue is fixed.
+    echo "moltenvk-wait-poll: skipped (prebuilt shim missing; App bundle has no shim)" >&2
+    return 0
   fi
 }
 

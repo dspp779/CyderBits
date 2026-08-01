@@ -740,10 +740,17 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
 
     private func ensureEnvironment(context: CyderLaunchContext) -> CyderFailure? {
         let state = environmentState(context: context)
+        let engineWine = CyderPaths.engine.appendingPathComponent("bin/wine")
+        let enginePresent = FileManager.default.isExecutableFile(atPath: engineWine.path)
 
-        if state.needsEngine {
+        // Always run ensure-engine-only when an engine tree exists (or needs
+        // install). Same-version upgrades (e.g. 0.9.0 → 0.9.1, Cyder007) still
+        // need RC overlays such as the MoltenVK wait-poll shim.
+        if state.needsEngine || enginePresent {
             CyderDiagnostics.shared.enter(.engineExtraction)
-            showSetup("正在準備遊戲執行元件…")
+            if state.needsEngine {
+                showSetup("正在準備遊戲執行元件…")
+            }
             let result = runLauncher(
                 context: context,
                 args: [context.launcher, "--engine-src", context.engineSrc, "--ensure-engine-only"],

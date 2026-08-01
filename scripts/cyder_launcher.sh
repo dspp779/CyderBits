@@ -542,6 +542,8 @@ if [[ "$LAUNCH_ONLY" -eq 1 ]]; then
   fi
   engine="$CYDER_ENGINES/$CYDER_ENGINE_NAME"
   wine="$engine/bin/wine"
+  # Same-version App upgrades still need RC overlays (MoltenVK wait-poll).
+  cyder_ensure_moltenvk_wait_poll_shim "$engine" || exit 1
   cyder_set_stage settings-apply
   cyder_prepare_game_launch_settings "$wine" "$engine" "$CYDER_SHARED_PREFIX" "$exe" || {
     settings_status=$?
