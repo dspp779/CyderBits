@@ -1,6 +1,6 @@
 import Foundation
 
-/// Exercises the same GPTK + graphics settings merge that `wineEnvironment` performs
+/// Exercises the GPTK + graphics settings merge used by the Bash launch contract
 /// before spawning Wine. Wine CompatDB runtime sets `CX_ACTIVE_GRAPHICS_BACKEND`
 /// inside `apply_graphics_backend()` after reading `CYDER_GRAPHICS_BACKEND`:
 /// - `dxvk` → active `dxvk`, DLL overrides `n,b`, prepend `lib/dxvk`

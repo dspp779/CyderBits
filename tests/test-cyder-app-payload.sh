@@ -6,12 +6,16 @@ source "$ROOT/tests/assert.sh"
 build_script="$(cat "$ROOT/scripts/create-cyder-app.sh")"
 common_script="$(cat "$ROOT/scripts/cyder-common.sh")"
 copy_script="$(cat "$ROOT/scripts/cyder-copy-engine-artifact.sh")"
+assert_contains "$build_script" 'arm64-apple-macosx11.0' \
+  "CyderSwift arm64 deployment target must support macOS 11"
+assert_contains "$build_script" 'x86_64-apple-macosx11.0' \
+  "CyderSwift x86_64 deployment target must support macOS 11"
 assert_contains "$build_script" 'cp "$SCRIPT_DIR/sign-wine.sh" "$RES/ogom-scripts/"' \
   "Cyder.app must bundle the runtime signing helper"
-assert_contains "$build_script" 'cp "$SCRIPT_DIR/cyder-legacy-ui.sh" "$RES/ogom-scripts/"' \
-  "Cyder.app must bundle legacy UI helpers for macOS < 12"
-assert_contains "$build_script" 'cp "$SCRIPT_DIR/cyder-legacy-ui.applescript" "$RES/ogom-scripts/"' \
-  "Cyder.app must bundle osascript progress UI for macOS < 12"
+assert_contains "$build_script" 'cp "$SCRIPT_DIR/cyder-macos-compat.sh" "$RES/ogom-scripts/"' \
+  "Cyder.app must bundle the macOS compatibility helper"
+assert_not_contains "$build_script" 'CyderLegacyUI.app' \
+  "Cyder.app must not package the removed Catalina applet"
 assert_contains "$build_script" 'cp "$SCRIPT_DIR/cyder-macos-wrapper.sh" "$MACOS/Cyder"' \
   "Cyder.app entrypoint must be the OS-version wrapper"
 assert_contains "$build_script" '<string>10.15</string>' \

@@ -1,6 +1,5 @@
 // Cyder.app entry — phased setup UI, then launch Windows EXE directly with Wine.
 import Cocoa
-import CryptoKit
 import Foundation
 import UniformTypeIdentifiers
 
@@ -31,7 +30,6 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
     private var openingGameLibrary = false
     private var environmentPreparationInProgress = false
     private var wineActivationWaiter: WineActivationWaiter?
-    private var pendingGameSettings: CyderExecutableSettings?
     private lazy var settingsController: CyderSettingsWindowController = {
         let controller = CyderSettingsWindowController()
         controller.onImmediateSave = { [weak self] registrySetting in
@@ -291,13 +289,9 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         }
         let environment = ProcessInfo.processInfo.environment
         openLibraryOnLaunch = environment["CYDER_OPEN_GAME_LIBRARY"] == "1"
-        if let requestPath = environment["CYDER_TEST_SETTINGS_REQUEST"], !requestPath.isEmpty {
-            if let data = try? Data(contentsOf: URL(fileURLWithPath: requestPath)),
-               let settings = try? JSONDecoder().decode(CyderExecutableSettings.self, from: data) {
-                pendingGameSettings = settings
-            }
-            try? FileManager.default.removeItem(atPath: requestPath)
-        }
+        // A test launch request is consumed by cyder_launcher.sh. Keeping the
+        // file intact here makes Bash the sole owner of effective launch
+        // settings and Wine environment construction.
 
         // Public argv contract: `Cyder [game.exe] [game argument ...]`.
         // Normally LaunchServices sends game.exe through openFiles and argv
@@ -917,13 +911,10 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         }
         let exeURL = URL(fileURLWithPath: exePaths[0])
         let profileStore = CyderProfileStore(root: CyderPaths.support)
-        var profileID: String?
         var prefix = CyderPaths.sharedBottle
         switch profileStore.resolve(executable: exeURL) {
-        case .uncreated(let id):
-            // The stable executable ID is also the key for settings when the
-            // game uses the shared bottle. A profile bottle is optional.
-            profileID = id
+        case .uncreated:
+            break
         case .damaged(let id, let reason):
             return .failure(CyderFailure(
                 code: "CYD-PRO-002",
@@ -933,7 +924,6 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
                 logURL: CyderDiagnostics.shared.sessionLogURL
             ))
         case .ready(let record):
-            profileID = record.profileId
             prefix = CyderPaths.support
                 .appendingPathComponent("bottles", isDirectory: true)
                 .appendingPathComponent(record.profileId, isDirectory: true)
@@ -947,39 +937,10 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
                 logURL: CyderDiagnostics.shared.sessionLogURL
             ))
         }
-        let gameSettings = pendingGameSettings
-            ?? profileID.flatMap { CyderSettingsStore.shared.value.perProfile[$0] }
-        if let profileID, let gameSettings {
-            showSetup("正在套用遊戲設定…")
-            var launchSettings = CyderSettingsStore.shared.environment(
-                profileID: profileID,
-                legacyBasename: nil,
-                override: gameSettings
-            )
-            launchSettings["WINEPREFIX"] = prefix.path
-            let applied = runLauncher(
-                context: context,
-                args: [context.launcher, "--apply-settings-prefix", prefix.path],
-                stage: .settingsApply,
-                operation: "apply-game-settings",
-                extraEnvironment: launchSettings
-            )
-            guard applied.succeeded else {
-                return .failure(failure(
-                    code: "CYD-GAM-002",
-                    stage: .settingsApply,
-                    summary: "套用遊戲個別設定時發生問題。",
-                    result: applied
-                ))
-            }
-        }
-        return runDirectWine(
+        return runWineThroughLauncher(
             context: context,
-            wine: wine,
             exe: exeURL.path,
-            profileID: profileID,
             prefix: prefix,
-            gameSettings: gameSettings,
             launchArguments: pendingLaunchArguments
         )
     }
@@ -1032,26 +993,17 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    /// Launch Wine directly through Apple's architecture selector, then wait
-    /// for CrossOver Wine to publish the actual foreground application PID in
-    /// WineAppWillActivateNotification.  The wrapper Process PID is not used
-    /// for activation. Wine continues independently after Cyder exits.
-    private func runDirectWine(
+    /// Relay a document-open request to the Bash launch backend. Bash owns
+    /// profile selection, saved/test settings, Wine environment construction,
+    /// logging, session guards, and the final Wine process spawn.
+    private func runWineThroughLauncher(
         context: CyderLaunchContext,
-        wine: URL,
         exe: String,
-        profileID: String?,
         prefix: URL,
-        gameSettings: CyderExecutableSettings?,
         launchArguments: [String]? = nil
     ) -> CyderLaunchOutcome {
-        let support = CyderPaths.support
-        let logDirectory = support.appendingPathComponent("Logs", isDirectory: true)
-        let prefixPath = prefix.path
-        let activationWaiter = WineActivationWaiter(prefix: prefixPath)
-        onMainThread {
-            wineActivationWaiter = activationWaiter
-        }
+        let activationWaiter = WineActivationWaiter(prefix: prefix.path)
+        onMainThread { wineActivationWaiter = activationWaiter }
         defer {
             onMainThread {
                 if wineActivationWaiter === activationWaiter {
@@ -1060,624 +1012,78 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             }
         }
 
-        CyderDiagnostics.shared.enter(.wineSpawn, detail: CyderDiagnostics.shared.redact(exe))
-        let process = Process()
-        let environment = wineEnvironment(
-            wine: wine,
-            support: support,
-            exe: exe,
-            profileID: profileID,
-            prefix: prefix,
-            gameSettings: gameSettings
+        let requestDirectory = CyderPaths.support.appendingPathComponent(
+            "launch-requests",
+            isDirectory: true
         )
-        let diagnosticLevel = CyderWineDiagnostics(
-            rawValue: environment["CYDER_WINE_DIAGNOSTICS"] ?? ""
-        ) ?? .quiet
-        // Test launches (override settings from the library "測試" button) always
-        // capture a CrossOver-style preamble + Wine stdout/stderr. Error and
-        // unwind diagnostics also imply capture; quiet play launches stay silent.
-        let captureWineLog = ProcessInfo.processInfo.environment["CYDER_CAPTURE_WINE_LOG"] == "1"
-            || gameSettings != nil
-            || ProcessInfo.processInfo.environment["CYDER_LAUNCH_KIND"] == "test"
-            || diagnosticLevel != .quiet
-        let launchLog = captureWineLog
-            ? CyderDiagnostics.shared.makeOperationLog("wine-launch").appendingPathExtension("gz")
-            : URL(fileURLWithPath: "/dev/null")
-        let diagnosticLog = captureWineLog ? launchLog : CyderDiagnostics.shared.sessionLogURL
-        let legacyLogs = [
-            logDirectory.appendingPathComponent("last-launch.log"),
-            logDirectory.appendingPathComponent("last-launch.log.gz"),
-            logDirectory.appendingPathComponent("last-launch.preamble.txt"),
-        ]
-        for legacyLog in legacyLogs {
-            try? FileManager.default.removeItem(at: legacyLog)
-        }
-        if captureWineLog {
-            FileManager.default.createFile(atPath: launchLog.path, contents: nil)
-            try? FileManager.default.createSymbolicLink(
-                at: legacyLogs[1],
-                withDestinationURL: launchLog
-            )
-        }
-
-        let engineRoot = wine.deletingLastPathComponent().deletingLastPathComponent()
-        let effectiveBackend = environment["CYDER_GRAPHICS_BACKEND"]
-        let isMapleStoryOEM = ProcessInfo.processInfo.environment["CYDER_OEM_FLAVOR"] == "maplestory"
-            || (environment["CYDER_OEM_FLAVOR"] == "maplestory")
-            || (environment["CYDER_ENGINE_NAME"] ?? "").range(
-                of: "maplestory.*oem",
-                options: .regularExpression
-            ) != nil
-        if isMapleStoryOEM, effectiveBackend == "dxvk" {
-            if !CyderSettings.provisionDxvkIntoPrefix(engineRoot: engineRoot, prefix: prefix) {
-                CyderDiagnostics.shared.warning("OEM DXVK prefix provision failed engine=\(engineRoot.path)")
-            }
-        }
-        let oemDxvkDllOverrides = (isMapleStoryOEM && effectiveBackend == "dxvk")
-            ? "d3d11,dxgi=n,b"
-            : nil
-        let savedGameArguments = CyderSettingsStore.shared.arguments(
-            profileID: profileID,
-            legacyBasename: nil,
-            override: gameSettings
-        )
-        // Only non-empty dynamic argv replaces saved / test-override arguments.
-        // An empty array (Cyder opened with only game.exe) must not wipe them.
-        let hasDynamicArguments = !(launchArguments ?? []).isEmpty
-        let gameArguments = hasDynamicArguments ? (launchArguments ?? []) : savedGameArguments
-        let compatibleGameArguments = steamCompatibilityArguments(
-            exe: exe,
-            arguments: gameArguments,
-            environment: environment
-        )
-        let argumentSource: String
-        if hasDynamicArguments {
-            argumentSource = "dynamic"
-        } else if gameSettings != nil {
-            argumentSource = "test-or-override"
-        } else {
-            argumentSource = "saved"
-        }
-        // Login tokens and account identifiers commonly arrive through argv.
-        // Preserve the real argv for Process, but never copy values into logs.
-        let diagnosticArguments = gameArguments.isEmpty
-            ? "(no game arguments)"
-            : "<\(gameArguments.count) game arguments redacted>"
-        let frontendArguments = wineFrontendArguments(wine: wine, dllOverrides: oemDxvkDllOverrides)
-        let wineCommandArguments = frontendArguments + [exe] + compatibleGameArguments
-        let powerMode = environment["CYDER_POWER_MODE"] ?? "normal"
-        let taskpolicy = findExecutable(named: "taskpolicy", environment: environment)
-        let hasTaskpolicy = taskpolicy != nil
-        var commandDescription: String
-        if powerMode == "background" {
-            guard let taskpolicy else {
-                return .failure(CyderFailure(
-                    code: "CYD-PWR-001",
-                    stage: .wineSpawn,
-                    summary: "無法使用省電模式啟動遊戲。",
-                    technicalDetails: "taskpolicy was not found in PATH. Select Standard energy mode and try again.",
-                    logURL: diagnosticLog
-                ))
-            }
-            process.executableURL = taskpolicy
-            process.arguments = ["-c", "background", "/usr/bin/arch", "-x86_64", wine.path] + wineCommandArguments
-            commandDescription = "\(taskpolicy.path) -c background /usr/bin/arch -x86_64 \(wine.path) \(frontendArguments.joined(separator: " ")) \(exe) \(diagnosticArguments)"
-        } else {
-            process.executableURL = URL(fileURLWithPath: "/usr/bin/arch")
-            process.arguments = ["-x86_64", wine.path] + wineCommandArguments
-            commandDescription = "/usr/bin/arch -x86_64 \(wine.path) \(frontendArguments.joined(separator: " ")) \(exe) \(diagnosticArguments)"
-        }
-        process.currentDirectoryURL = URL(fileURLWithPath: exe).deletingLastPathComponent()
-        process.environment = environment
-
-        let compressedWriter: CyderCompressedLogWriter?
-        let outputHandle: FileHandle
-        if captureWineLog {
-            do {
-                compressedWriter = try CyderCompressedLogWriter(outputURL: launchLog)
-                outputHandle = compressedWriter!.inputHandle
-            } catch {
-                return .failure(CyderFailure(
-                    code: "CYD-LOG-002",
-                    stage: .wineSpawn,
-                    summary: "無法建立 Wine 啟動記錄。",
-                    technicalDetails: "Unable to open compressed log \(launchLog.path): \(error)",
-                    logURL: CyderDiagnostics.shared.sessionLogURL
-                ))
-            }
-        } else {
-            compressedWriter = nil
-            guard let quietHandle = FileHandle(forWritingAtPath: "/dev/null") else {
-                return .failure(CyderFailure(
-                    code: "CYD-LOG-002",
-                    stage: .wineSpawn,
-                    summary: "無法建立 Wine 啟動記錄。",
-                    technicalDetails: "Unable to open /dev/null for quiet launch output.",
-                    logURL: CyderDiagnostics.shared.sessionLogURL
-                ))
-            }
-            outputHandle = quietHandle
-        }
-        let msyncEnabled = environment["CYDER_MSYNC"] == "1" || environment["WINEMSYNC"] == "1"
-        let esyncEnabled = environment["CYDER_ESYNC"] == "1" || environment["WINEESYNC"] == "1"
-        let launchKind = ProcessInfo.processInfo.environment["CYDER_LAUNCH_KIND"]
-            ?? (gameSettings == nil ? "play" : "test")
-        let extraEnvironment = (gameSettings?.environment ?? [:])
-            .keys.sorted()
-            .map { "  \($0)=<value redacted>" }
-            .joined(separator: "\n")
-        let timestamp = ISO8601DateFormatter().string(from: Date())
-        let canonicalEngine = engineRoot.resolvingSymlinksInPath().standardizedFileURL
-        let canonicalPrefix = prefix.resolvingSymlinksInPath().standardizedFileURL
-        let engineVersion = ((try? String(
-            contentsOf: canonicalEngine.appendingPathComponent("version"),
-            encoding: .utf8
-        )) ?? "unknown").trimmingCharacters(in: .whitespacesAndNewlines)
-        let ntdll = canonicalEngine.appendingPathComponent("lib/wine/x86_64-windows/ntdll.dll")
-        let ntdllSHA256 = fileSHA256(ntdll) ?? "unavailable"
-        // CrossOver-style preamble: command first, then bottle/sync/env, then Wine output.
-        let preamble = """
-        ***** \(timestamp)
-        Running command: "\(exe)"
-        Launch kind: \(launchKind)
-        Profile: \(profileID ?? "shared")
-        Runtime: \(canonicalEngine.path)
-        Prefix: \(canonicalPrefix.path)
-        Engine version: \(engineVersion.isEmpty ? "unknown" : engineVersion)
-        NTDLL SHA-256: \(ntdllSHA256)
-        Graphics backend: \(effectiveBackend ?? "default")
-        DXVK frame rate: \(environment["DXVK_FRAME_RATE"] ?? "<unset>")
-        DXVK HUD: \(environment["DXVK_HUD"] ?? "<unset>")
-        Metal HUD: \(environment["MTL_HUD_ENABLED"] ?? "<unset>")
-        Wine diagnostics: \(diagnosticLevel.rawValue)
-        MSync: \(msyncEnabled ? "Enabled" : "Disabled")
-        ESync: \(esyncEnabled ? "Enabled" : "Disabled")
-        Power mode: \(powerMode)
-        Argument source: \(argumentSource)
-        Extra environment variables: \(extraEnvironment.isEmpty ? "(null)" : "\n\(extraEnvironment)")
-        cwd: \((exe as NSString).deletingLastPathComponent)
-
-        Command:
-        \(commandDescription)
-
-        Effective Wine environment:
-          WINEPREFIX=\(environment["WINEPREFIX"] ?? "<unset>")
-          WINEMSYNC=\(environment["WINEMSYNC"] ?? "<unset>")
-          WINEESYNC=\(environment["WINEESYNC"] ?? "<unset>")
-          LANG=\(environment["LANG"] ?? "<unset>")
-          LC_ALL=\(environment["LC_ALL"] ?? "<unset>")
-          LC_CTYPE=\(environment["LC_CTYPE"] ?? "<unset>")
-          CYDER_MSYNC=\(environment["CYDER_MSYNC"] ?? "<unset>")
-          CYDER_ESYNC=\(environment["CYDER_ESYNC"] ?? "<unset>")
-          CYDER_DPI=\(environment["CYDER_DPI"] ?? "<unset>")
-          CYDER_RETINA_MODE=\(environment["CYDER_RETINA_MODE"] ?? "<unset>")
-          CYDER_FONT_PRESET=\(environment["CYDER_FONT_PRESET"] ?? "<unset>")
-          CYDER_GRAPHICS_BACKEND=\(environment["CYDER_GRAPHICS_BACKEND"] ?? "<unset>")
-          CYDER_WINE_DIAGNOSTICS=\(environment["CYDER_WINE_DIAGNOSTICS"] ?? "<unset>")
-          DXVK_FRAME_RATE=\(environment["DXVK_FRAME_RATE"] ?? "<unset>")
-          DXVK_HUD=\(environment["DXVK_HUD"] ?? "<unset>")
-          MTL_HUD_ENABLED=\(environment["MTL_HUD_ENABLED"] ?? "<unset>")
-          WINEDEBUG=\(environment["WINEDEBUG"] ?? "<unset>")
-          taskpolicy_available=\(hasTaskpolicy)
-
-        """
-        let redactedPreamble = CyderDiagnostics.shared.redact(preamble)
-        try? compressedWriter?.write(Data(redactedPreamble.utf8))
-        // Uncompressed sidecar so hang debugging can read backend/HUD/sync without
-        // waiting for gzip EOF (Wine clients still hold the compressor pipe open).
-        if captureWineLog {
-            var preambleURL = launchLog
-            if preambleURL.pathExtension == "gz" {
-                preambleURL = preambleURL.deletingPathExtension()
-            }
-            preambleURL = preambleURL
-                .deletingPathExtension()
-                .appendingPathExtension("preamble.txt")
-            try? redactedPreamble.write(to: preambleURL, atomically: true, encoding: .utf8)
-            let legacyPreamble = logDirectory.appendingPathComponent("last-launch.preamble.txt")
-            try? FileManager.default.removeItem(at: legacyPreamble)
-            try? FileManager.default.createSymbolicLink(
-                at: legacyPreamble,
-                withDestinationURL: preambleURL
-            )
-            CyderDiagnostics.shared.info(
-                "wine-launch-preamble path=\(CyderDiagnostics.shared.redact(preambleURL.path))"
-            )
-        }
-        process.standardOutput = outputHandle
-        process.standardError = outputHandle
-
-        let msync = msyncEnabled ? "1" : "0"
-        let esync = esyncEnabled ? "1" : "0"
-        CyderDiagnostics.shared.info(
-            "game-launch effective-settings profile=\(profileID ?? "shared") "
-                + "source=\(gameSettings == nil ? "saved" : "test-or-override") "
-                + "argument_source=\(argumentSource) argument_count=\(gameArguments.count) "
-                + "engine_version=\(engineVersion.isEmpty ? "unknown" : engineVersion) "
-                + "ntdll_sha256=\(ntdllSHA256) graphics=\(effectiveBackend ?? "default") "
-                + "dxvk_frame_rate=\(environment["DXVK_FRAME_RATE"] ?? "unset") "
-                + "dxvk_hud=\(environment["DXVK_HUD"] ?? "unset") "
-                + "mtl_hud=\(environment["MTL_HUD_ENABLED"] ?? "unset") "
-                + "diagnostics=\(diagnosticLevel.rawValue) msync=\(msync) esync=\(esync) "
-                + "power=\(powerMode) captureWineLog=\(captureWineLog) "
-                + "log=\(CyderDiagnostics.shared.redact(launchLog.path))"
-        )
-
         do {
-            try process.run()
-            CyderDiagnostics.shared.info("wine process started pid=\(process.processIdentifier)")
+            try FileManager.default.createDirectory(
+                at: requestDirectory,
+                withIntermediateDirectories: true
+            )
         } catch {
-            compressedWriter?.closeInput(waitForExit: true)
-            if compressedWriter == nil { try? outputHandle.close() }
             return .failure(CyderFailure(
                 code: "CYD-WIN-001",
                 stage: .wineSpawn,
-                summary: "無法啟動 Wine。",
+                summary: "無法建立 Wine 啟動工作目錄。",
                 technicalDetails: String(describing: error),
-                logURL: diagnosticLog
+                logURL: CyderDiagnostics.shared.sessionLogURL
             ))
         }
 
-        // Race Wine activation against an early process exit.  A living Wine
-        // process without an activation notification is only a warning because
-        // some console-style EXEs intentionally create no regular Cocoa window.
+        let pidURL = requestDirectory.appendingPathComponent("wine-\(UUID().uuidString).pid")
+        defer { try? FileManager.default.removeItem(at: pidURL) }
+        var args = [context.launcher, "--engine-src", context.engineSrc, "--launch-exe", exe]
+        if let launchArguments, !launchArguments.isEmpty {
+            args.append("--")
+            args.append(contentsOf: launchArguments)
+        }
+        let result = runLauncher(
+            context: context,
+            args: args,
+            stage: .wineSpawn,
+            operation: "wine-launch",
+            extraEnvironment: [
+                "CYDER_WINE_DETACH": "1",
+                "CYDER_WINE_PID_FILE": pidURL.path,
+                "CYDER_SESSION_GUARD": "1",
+            ]
+        )
+        guard result.succeeded else {
+            return .failure(failure(
+                code: "CYD-WIN-001",
+                stage: .wineSpawn,
+                summary: "Bash 無法啟動 Wine。",
+                result: result
+            ))
+        }
+
+        let winePID: Int32 = {
+            guard let text = try? String(contentsOf: pidURL, encoding: .utf8),
+                  let value = Int32(text.trimmingCharacters(in: .whitespacesAndNewlines)),
+                  value > 0 else { return 0 }
+            return value
+        }()
         let deadline = Date().addingTimeInterval(30)
         while Date() < deadline {
             if activationWaiter.semaphore.wait(timeout: .now() + 0.2) == .success {
                 CyderDiagnostics.shared.enter(.wineActivation, detail: "notification-received")
-                compressedWriter?.closeInput(waitForExit: false)
-                if compressedWriter == nil { try? outputHandle.close() }
                 return .success
             }
-            if !process.isRunning {
-                process.waitUntilExit()
-                compressedWriter?.closeInput(waitForExit: true)
-                if compressedWriter == nil { try? outputHandle.close() }
-                let reason: String
-                let code: String
-                if process.terminationReason == .uncaughtSignal {
-                    reason = "uncaught-signal \(process.terminationStatus)"
-                    code = "CYD-WIN-003"
-                } else {
-                    reason = "exit \(process.terminationStatus)"
-                    code = "CYD-WIN-002"
-                }
-                let tail = captureWineLog ? CyderDiagnostics.shared.tail(of: launchLog) : ""
+            if winePID > 0, kill(winePID, 0) != 0 {
                 return .failure(CyderFailure(
-                    code: code,
+                    code: "CYD-WIN-002",
                     stage: .wineSpawn,
-                    summary: process.terminationReason == .uncaughtSignal
-                        ? "Wine 因系統 signal 異常終止。"
-                        : "Wine 啟動後在顯示遊戲視窗前結束。",
-                    technicalDetails: tail.isEmpty ? "Wine terminated: \(reason)" : tail,
-                    exitCode: process.terminationStatus,
-                    terminationReason: reason,
-                    logURL: diagnosticLog
+                    summary: "Wine 啟動後在顯示遊戲視窗前結束。",
+                    technicalDetails: "Detached Wine PID \(winePID) exited before activation.",
+                    logURL: result.logURL
                 ))
             }
         }
-        compressedWriter?.closeInput(waitForExit: false)
-        if compressedWriter == nil { try? outputHandle.close() }
-        CyderDiagnostics.shared.warning("wine activation timed out after 30s pid=\(process.processIdentifier); process remains running")
-        return .success
-    }
-
-    private func steamCompatibilityArguments(
-        exe: String,
-        arguments: [String],
-        environment: [String: String]
-    ) -> [String] {
-        guard environment["CYDER_STEAM_COMPAT"] != "0",
-              URL(fileURLWithPath: exe).lastPathComponent.lowercased() == "steam.exe" else {
-            return arguments
-        }
-
-        // Steam's CEF DOM may remain interactive even when Wine's child-window
-        // compositor never presents its surface on macOS. The system compositor
-        // bypasses that path; Chromium's Windows sandbox is not available in Wine.
-        var result = arguments
-        for required in ["-system-composer", "-no-cef-sandbox"]
-            where !result.contains(required) {
-            result.append(required)
-        }
-        return result
-    }
-
-    private func wineEnvironment(
-        wine: URL,
-        support: URL,
-        exe: String,
-        profileID: String?,
-        prefix: URL,
-        gameSettings: CyderExecutableSettings?
-    ) -> [String: String] {
-        var environment = ProcessInfo.processInfo.environment
-        let processLocale = ["LC_ALL", "LANG", "LC_CTYPE"]
-            .compactMap { environment[$0] }
-            .first { !$0.isEmpty }
-        // Drop inherited graphics keys so "default" / non-dxvk really follow settings
-        // instead of a parent shell leaking CYDER_GRAPHICS_BACKEND / DXVK_FRAME_RATE.
-        environment.removeValue(forKey: "CYDER_GRAPHICS_BACKEND")
-        environment.removeValue(forKey: "CX_GRAPHICS_BACKEND")
-        environment.removeValue(forKey: "DXVK_FRAME_RATE")
-        environment.removeValue(forKey: "DXVK_HUD")
-        environment.removeValue(forKey: "MTL_HUD_ENABLED")
-        let engineRoot = wine.deletingLastPathComponent().deletingLastPathComponent()
-        for (key, value) in CyderSettingsStore.shared.environment(
-            profileID: profileID,
-            legacyBasename: nil,
-            override: gameSettings,
-            engineRoot: engineRoot
-        ) {
-            environment[key] = value
-        }
-        // CrossOver OEM cxcompatdb reads CX_GRAPHICS_BACKEND (not CYDER_*).
-        if let backend = environment["CYDER_GRAPHICS_BACKEND"] {
-            environment["CX_GRAPHICS_BACKEND"] = backend
-        }
-
-        environment["WINEPREFIX"] = prefix.path
-        environment["WINESERVER"] = engineRoot.appendingPathComponent("bin/wineserver").path
-        environment["CYDER_GRAPHICS_BACKENDS_ROOT"] = engineRoot.path
-        let gptkSource = CyderGptk.applyLaunchEnvironment(to: &environment, engineRoot: engineRoot)
-        CyderDiagnostics.shared.info(
-            "wine-environment graphics-backend=\(environment["CYDER_GRAPHICS_BACKEND"] ?? "default") "
-                + "cx-graphics-backend=\(environment["CX_GRAPHICS_BACKEND"] ?? "unset") "
-                + "hud=\(environment["DXVK_HUD"] ?? environment["MTL_HUD_ENABLED"] ?? "off") "
-                + "gptk-source=\(gptkSource)"
+        CyderDiagnostics.shared.warning(
+            "wine activation timed out after 30s pid=\(winePID); process remains detached"
         )
-        environment["PATH"] = engineRoot.appendingPathComponent("bin").path
-            + ":" + (environment["PATH"] ?? "/usr/bin:/bin")
-        let crossoverBottle = prefix.appendingPathComponent("cxbottle.conf").path
-        let crossoverTemplate = engineRoot
-            .appendingPathComponent("share/crossover/bottle_data/cxbottle.conf").path
-        let engineName = environment["CYDER_ENGINE_NAME"] ?? ""
-        let isMapleStoryOEM = environment["CYDER_OEM_FLAVOR"] == "maplestory"
-            || engineName.range(of: "maplestory.*oem", options: .regularExpression) != nil
-        let isCrossover = FileManager.default.fileExists(atPath: crossoverBottle)
-            || FileManager.default.fileExists(atPath: crossoverTemplate)
-            || isMapleStoryOEM
-        if isCrossover {
-            environment["CX_BOTTLE"] = prefix.path
-            environment["CX_ROOT"] = engineRoot.path
-            environment["WINEARCH"] = "win64"
-            syncCrossoverBottleGraphicsEnvironment(prefix: prefix, environment: environment)
-        }
-
-        if environment["CYDER_MSYNC"] == "1" {
-            environment["WINEMSYNC"] = "1"
-            environment.removeValue(forKey: "WINEESYNC")
-        } else if environment["CYDER_ESYNC"] == "1" {
-            environment["WINEESYNC"] = "1"
-            environment.removeValue(forKey: "WINEMSYNC")
-        } else {
-            environment.removeValue(forKey: "WINEMSYNC")
-            environment.removeValue(forKey: "WINEESYNC")
-        }
-
-        let locale = processLocale ?? resolvedWineLocale(environment: environment)
-        environment["LANG"] = locale
-        environment["LC_ALL"] = locale
-        environment["LC_CTYPE"] = locale
-        let diagnostics = CyderWineDiagnostics(
-            rawValue: environment["CYDER_WINE_DIAGNOSTICS"] ?? ""
-        ) ?? .quiet
-        environment["CYDER_WINE_DIAGNOSTICS"] = diagnostics.rawValue
-        environment["WINEDEBUG"] = diagnostics.wineDebug
-        configureCompatDBEnvironment(&environment, prefix: prefix)
-        return environment
-    }
-
-    private func configureCompatDBEnvironment(
-        _ environment: inout [String: String],
-        prefix: URL
-    ) {
-        guard environment["CYDER_COMPATDB"] != "0" else {
-            environment.removeValue(forKey: "CYDER_COMPATDB_PATH")
-            return
-        }
-        let allowUnsigned = environment["CYDER_COMPATDB_ALLOW_UNSIGNED"] == "1"
-        let bundled = Bundle.main.resourceURL?
-            .appendingPathComponent("CompatDB", isDirectory: true)
-            .appendingPathComponent("compatdb.cdb")
-        if environment["CYDER_COMPATDB_ALLOW_UNSIGNED"] == "1",
-           let explicit = environment["CYDER_COMPATDB_PATH"],
-           let expected = environment["CYDER_COMPATDB_SHA256"],
-           isCompatDBDigest(expected),
-           fileSHA256(URL(fileURLWithPath: explicit)) == expected {
-            return
-        }
-        environment.removeValue(forKey: "CYDER_COMPATDB_PATH")
-
-        let pin = prefix
-            .appendingPathComponent(".cyder-runtime", isDirectory: true)
-            .appendingPathComponent("compatdb.path")
-        if wineServerIsRunning(prefix: prefix),
-           let pinned = validatedCompatDBPin(
-               pin,
-               bundled: bundled,
-               allowUnsigned: allowUnsigned
-           ) {
-            environment["CYDER_COMPATDB_PATH"] = pinned.path
-            return
-        }
-
-        let runtimeRoot: URL
-        if let override = environment["CYDER_RUNTIME_ROOT"], !override.isEmpty {
-            runtimeRoot = URL(fileURLWithPath: override, isDirectory: true)
-        } else {
-            runtimeRoot = FileManager.default.homeDirectoryForCurrentUser
-                .appendingPathComponent(".cyder/runtime", isDirectory: true)
-        }
-        let compatRoot = runtimeRoot.appendingPathComponent("CompatDB", isDirectory: true)
-        let current = compatRoot.appendingPathComponent("current")
-        var selected: URL?
-        var selectedKind = "bundled"
-        var selectedDigest = ""
-        if allowUnsigned,
-           let value = try? String(contentsOf: current, encoding: .utf8)
-            .trimmingCharacters(in: .whitespacesAndNewlines),
-           isCompatDBDigest(value) {
-            let updated = compatRoot
-                .appendingPathComponent(value, isDirectory: true)
-                .appendingPathComponent("compatdb.cdb")
-            if fileSHA256(updated) == value {
-                selected = updated
-                selectedKind = "unsigned"
-                selectedDigest = value
-            }
-        }
-
-        if selected == nil,
-           let bundled,
-           FileManager.default.fileExists(atPath: bundled.path) {
-            selected = bundled
-        }
-        guard let selected else { return }
-        environment["CYDER_COMPATDB_PATH"] = selected.path
-
-        if FileManager.default.fileExists(atPath: prefix.path) {
-            let directory = pin.deletingLastPathComponent()
-            try? FileManager.default.createDirectory(
-                at: directory,
-                withIntermediateDirectories: true
-            )
-            let contents = """
-            kind=\(selectedKind)
-            sha256=\(selectedDigest)
-            path=\(selected.path)
-
-            """
-            try? contents.write(to: pin, atomically: true, encoding: .utf8)
-        }
-    }
-
-    private func isCompatDBDigest(_ value: String) -> Bool {
-        value.count == 64 && value.unicodeScalars.allSatisfy {
-            ($0.value >= 48 && $0.value <= 57) || ($0.value >= 97 && $0.value <= 102)
-        }
-    }
-
-    private func validatedCompatDBPin(
-        _ pin: URL,
-        bundled: URL?,
-        allowUnsigned: Bool
-    ) -> URL? {
-        guard let contents = try? String(contentsOf: pin, encoding: .utf8) else {
-            return nil
-        }
-        var fields: [String: String] = [:]
-        for line in contents.split(separator: "\n") {
-            let pair = line.split(separator: "=", maxSplits: 1).map(String.init)
-            if pair.count == 2 { fields[pair[0]] = pair[1] }
-        }
-        guard let kind = fields["kind"],
-              let path = fields["path"],
-              !path.contains("\n") else {
-            return nil
-        }
-        let candidate = URL(fileURLWithPath: path)
-        if kind == "bundled",
-           let bundled,
-           candidate.standardizedFileURL.path == bundled.standardizedFileURL.path,
-           FileManager.default.fileExists(atPath: candidate.path) {
-            return candidate
-        }
-        guard kind == "unsigned",
-              allowUnsigned,
-              let digest = fields["sha256"],
-              isCompatDBDigest(digest),
-              fileSHA256(candidate) == digest else {
-            return nil
-        }
-        return candidate
-    }
-
-    private func fileSHA256(_ file: URL) -> String? {
-        guard let data = try? Data(contentsOf: file, options: .mappedIfSafe) else {
-            return nil
-        }
-        return SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
-    }
-
-    private func wineServerIsRunning(prefix: URL) -> Bool {
-        guard let attributes = try? FileManager.default.attributesOfItem(atPath: prefix.path),
-              let device = (attributes[.systemNumber] as? NSNumber)?.uint64Value,
-              let inode = (attributes[.systemFileNumber] as? NSNumber)?.uint64Value else {
-            return false
-        }
-        let socket = "/tmp/.wine-\(getuid())/server-"
-            + String(device, radix: 16) + "-" + String(inode, radix: 16) + "/socket"
-        guard let socketAttributes = try? FileManager.default.attributesOfItem(atPath: socket)
-        else {
-            return false
-        }
-        return socketAttributes[.type] as? FileAttributeType == .typeSocket
-    }
-
-    /// CrossOver's `bin/wine` loads `[EnvironmentVariables]` from cxbottle.conf
-    /// after the process environment, so App graphics/HUD keys must be mirrored
-    /// into the bottle or they are overwritten/cleared.
-    private func syncCrossoverBottleGraphicsEnvironment(
-        prefix: URL,
-        environment: [String: String]
-    ) {
-        let conf = prefix.appendingPathComponent("cxbottle.conf")
-        guard var text = try? String(contentsOf: conf, encoding: .utf8) else { return }
-        let keys = [
-            "CX_GRAPHICS_BACKEND",
-            "DXVK_FRAME_RATE",
-            "DXVK_HUD",
-            "MTL_HUD_ENABLED",
-        ]
-        if !text.contains("[EnvironmentVariables]") {
-            text += "\n[EnvironmentVariables]\n"
-        }
-        for key in keys {
-            let pattern = #"^"\#(key)"\s*=\s*".*"$"#
-            if let value = environment[key], !value.isEmpty {
-                let line = "\"\(key)\" = \"\(value)\""
-                if let regex = try? NSRegularExpression(pattern: pattern, options: .anchorsMatchLines),
-                   regex.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)) != nil {
-                    text = regex.stringByReplacingMatches(
-                        in: text,
-                        range: NSRange(text.startIndex..., in: text),
-                        withTemplate: line
-                    )
-                } else if let range = text.range(of: "[EnvironmentVariables]") {
-                    let insertAt = text.index(range.upperBound, offsetBy: 0)
-                    text.insert(contentsOf: "\n\(line)", at: insertAt)
-                }
-            } else if let regex = try? NSRegularExpression(pattern: pattern + #"\n?"#, options: .anchorsMatchLines) {
-                text = regex.stringByReplacingMatches(
-                    in: text,
-                    range: NSRange(text.startIndex..., in: text),
-                    withTemplate: ""
-                )
-            }
-        }
-        try? text.write(to: conf, atomically: true, encoding: .utf8)
-    }
-
-    private func wineFrontendArguments(wine: URL, dllOverrides: String? = nil) -> [String] {
-        var args: [String] = []
-        if let override = ProcessInfo.processInfo.environment["CYDER_WINE_FRONTEND_ARGS"],
-           !override.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            args = override.split(whereSeparator: \.isWhitespace).map(String.init)
-        } else if let contents = try? String(contentsOf: wine, encoding: .utf8),
-                  let firstLine = contents.split(separator: "\n", maxSplits: 1).first,
-                  firstLine.contains("perl") {
-            args += ["--wait-children", "--enable-alt-loader", "macdrv"]
-        } else {
-            return []
-        }
-        if let dllOverrides, !dllOverrides.isEmpty, !args.contains("--dll") {
-            // CrossOver `wine --dll` must appear before frontend flags; the Perl
-            // wrapper otherwise treats it as the Windows command. OEM launchers
-            // always set CYDER_WINE_FRONTEND_ARGS, so merge overrides here.
-            args.insert(contentsOf: ["--dll", dllOverrides], at: 0)
-        }
-        return args
+        return .success
     }
 
     @objc private func wineAppWillActivate(_ notification: Notification) {

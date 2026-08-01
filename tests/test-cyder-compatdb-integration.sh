@@ -144,14 +144,10 @@ pin_without_gate="$(
 assert_eq "$pin_without_gate" "$TMP/repo/compatdb/compiled/compatdb.cdb" \
   "an active unsigned pin should still require developer mode"
 
-app="$(cat "$ROOT/scripts/cyder_app_main.swift")"
-assert_contains "$app" 'configureCompatDBEnvironment(&environment' \
-  "native launches should select the same CompatDB"
-assert_contains "$app" 'appendingPathComponent("CompatDB", isDirectory: true)' \
-  "native launches should support content-addressed updates and bundle fallback"
-assert_contains "$app" 'fileSHA256(candidate) == digest' \
-  "native session pins should be revalidated against their recorded digest"
-assert_contains "$app" '.typeSocket' \
-  "native wineserver detection should require a real Unix socket"
+common="$(cat "$ROOT/scripts/cyder-common.sh")"
+assert_contains "$common" 'cyder_configure_compatdb "$prefix"' \
+  "the Bash launch backend must select CompatDB for the final prefix"
+assert_contains "$common" 'CYDER_COMPATDB_PATH' \
+  "the Bash launch backend must export the selected CompatDB"
 
 echo "PASS test-cyder-compatdb-integration"

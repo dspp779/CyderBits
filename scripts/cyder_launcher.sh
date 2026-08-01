@@ -542,10 +542,22 @@ if [[ "$LAUNCH_ONLY" -eq 1 ]]; then
   fi
   engine="$CYDER_ENGINES/$CYDER_ENGINE_NAME"
   wine="$engine/bin/wine"
+  prefix="$CYDER_SHARED_PREFIX"
+  profile_script="$CYDER_SCRIPTS/cyder-profile.sh"
+  if [[ -x "$profile_script" ]]; then
+    profile_id="$(bash "$profile_script" id "$exe" 2>/dev/null || true)"
+    if [[ "$profile_id" =~ ^profile-[0-9a-f]{24}$ \
+       && ( -e "$CYDER_SUPPORT/profiles/$profile_id" || -e "$CYDER_SUPPORT/bottles/$profile_id" ) ]]; then
+      prefix="$(bash "$profile_script" resolve "$exe" "$CYDER_SUPPORT")" || {
+        echo "Cyder profile is damaged for: $exe" >&2
+        exit 2
+      }
+    fi
+  fi
   # Same-version App upgrades still need RC overlays (MoltenVK wait-poll).
   cyder_ensure_moltenvk_wait_poll_shim "$engine" || exit 1
   cyder_set_stage settings-apply
-  cyder_prepare_game_launch_settings "$wine" "$engine" "$CYDER_SHARED_PREFIX" "$exe" || {
+  cyder_prepare_game_launch_settings "$wine" "$engine" "$prefix" "$exe" || {
     settings_status=$?
     exit "$settings_status"
   }
@@ -554,9 +566,9 @@ if [[ "$LAUNCH_ONLY" -eq 1 ]]; then
   fi
   cyder_set_stage wine-launch
   if (( ${#CYDER_GAME_ARGUMENTS[@]} > 0 )); then
-    cyder_run_wine_exe "$wine" "$exe" "$CYDER_SHARED_PREFIX" "${CYDER_GAME_ARGUMENTS[@]}"
+    cyder_run_wine_exe "$wine" "$exe" "$prefix" "${CYDER_GAME_ARGUMENTS[@]}"
   else
-    cyder_run_wine_exe "$wine" "$exe" "$CYDER_SHARED_PREFIX"
+    cyder_run_wine_exe "$wine" "$exe" "$prefix"
   fi
   exit 0
 fi

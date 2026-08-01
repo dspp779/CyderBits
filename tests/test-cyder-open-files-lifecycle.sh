@@ -19,6 +19,12 @@ assert_contains "$source_text" "asyncAfter(deadline: .now() + 0.2)" \
   "settings-mode startup must allow the open-file event to arrive"
 assert_contains "$source_text" "if self.documentLaunchRequested" \
   "a late open-file request must suppress the settings completion"
+assert_contains "$source_text" "runWineThroughLauncher" \
+  "Finder document events must relay Wine launches to Bash"
+assert_contains "$source_text" '"CYDER_WINE_DETACH": "1"' \
+  "the AppKit document relay must request a detached Bash launch"
+assert_contains "$source_text" 'args: [context.launcher' \
+  "native operations must invoke the bundled Bash launcher"
 support_text="$(cat "$ROOT/scripts/cyder_launch_support.swift")"
 assert_contains "$source_text" "NSApp.setActivationPolicy(.accessory)" \
   "document launches must remain UI-capable without adding a Dock icon"

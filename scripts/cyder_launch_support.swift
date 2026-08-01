@@ -200,58 +200,6 @@ struct CyderLaunchContext {
     }
 }
 
-/// Streams Wine output through macOS's built-in gzip process so verbose
-/// diagnostics do not grow as quickly while the game is running.
-final class CyderCompressedLogWriter {
-    let inputHandle: FileHandle
-    private let inputPipe: Pipe
-    private let outputHandle: FileHandle
-    private let compressor: Process
-    private var didCloseInput = false
-
-    init(outputURL: URL) throws {
-        let manager = FileManager.default
-        manager.createFile(atPath: outputURL.path, contents: nil)
-        outputHandle = try FileHandle(forWritingTo: outputURL)
-        inputPipe = Pipe()
-        compressor = Process()
-        inputHandle = inputPipe.fileHandleForWriting
-        compressor.executableURL = URL(fileURLWithPath: "/usr/bin/gzip")
-        compressor.arguments = ["-c"]
-        compressor.standardInput = inputPipe.fileHandleForReading
-        compressor.standardOutput = outputHandle
-        do {
-            try compressor.run()
-        } catch {
-            try? outputHandle.close()
-            throw error
-        }
-    }
-
-    deinit {
-        closeInput(waitForExit: false)
-        try? outputHandle.close()
-    }
-
-    func write(_ data: Data) throws {
-        try inputHandle.write(contentsOf: data)
-    }
-
-    func closeInput(waitForExit: Bool) {
-        guard !didCloseInput else {
-            if waitForExit, compressor.isRunning {
-                compressor.waitUntilExit()
-            }
-            return
-        }
-        didCloseInput = true
-        try? inputHandle.close()
-        if waitForExit {
-            compressor.waitUntilExit()
-        }
-    }
-}
-
 func resolveEngineSrc(resourcePath: String) -> String {
     let archiveListFile = resourcePath + "/engine-archive.txt"
     if let archiveName = try? String(contentsOfFile: archiveListFile, encoding: .utf8) {
@@ -280,24 +228,6 @@ func resolveEngineSrc(resourcePath: String) -> String {
     return resourcePath + "/engine-payload"
 }
 
-func findExecutable(named name: String, environment: [String: String]) -> URL? {
-    var directories = (environment["PATH"] ?? "")
-        .split(separator: ":", omittingEmptySubsequences: true)
-        .map(String.init)
-    for fallback in ["/usr/local/bin", "/usr/bin", "/bin", "/usr/sbin", "/sbin"]
-        where !directories.contains(fallback) {
-        directories.append(fallback)
-    }
-    for directory in directories {
-        let candidate = URL(fileURLWithPath: directory, isDirectory: true)
-            .appendingPathComponent(name)
-        if FileManager.default.isExecutableFile(atPath: candidate.path) {
-            return candidate
-        }
-    }
-    return nil
-}
-
 func normalizeExePaths(_ paths: [String]) -> [String] {
     var out: [String] = []
     var seen: Set<String> = []
@@ -313,21 +243,4 @@ func normalizeExePaths(_ paths: [String]) -> [String] {
         }
     }
     return out
-}
-
-func resolvedWineLocale(environment: [String: String]) -> String {
-    for key in ["LC_ALL", "LANG"] {
-        if let value = environment[key], !value.isEmpty,
-           value != "C", value != "POSIX", value != "C.UTF-8" {
-            return value
-        }
-    }
-    let identifier = Locale.current.identifier.replacingOccurrences(of: "-", with: "_")
-    let lower = identifier.lowercased()
-    if lower.hasPrefix("zh_hant_tw") || lower == "zh_tw" { return "zh_TW.UTF-8" }
-    if lower.hasPrefix("zh_hant_hk") || lower == "zh_hk" { return "zh_HK.UTF-8" }
-    if lower.hasPrefix("zh_hans") || lower == "zh_cn" { return "zh_CN.UTF-8" }
-    if lower.hasPrefix("ja") { return "ja_JP.UTF-8" }
-    if lower.hasPrefix("ko") { return "ko_KR.UTF-8" }
-    return identifier.contains(".") ? identifier : "\(identifier).UTF-8"
 }

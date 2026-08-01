@@ -14,12 +14,15 @@ exe="$TMP/game.exe"
 argument_log="$TMP/arguments.log"
 
 mkdir -p "$engine/bin" "$support/bottles/shared"
-touch "$exe" "$support/bottles/shared/.cyder-bootstrap-v1"
+touch "$exe" "$support/bottles/shared/.cyder-bootstrap-v1" "$support/bottles/shared/user.reg"
 printf 'CX26.2.0-W11-Cyder003\n' >"$engine/version"
 
 cat >"$engine/bin/wine" <<'SH'
 #!/usr/bin/env bash
 printf '<%s>\n' "$@" >"$CYDER_TEST_ARGUMENT_LOG"
+if [[ -n "${CYDER_TEST_ENV_LOG:-}" ]]; then
+  printf 'prefix=%s\nmarker=%s\n' "${WINEPREFIX:-}" "${CYDER_TEST_MARKER:-}" >"$CYDER_TEST_ENV_LOG"
+fi
 SH
 chmod +x "$engine/bin/wine"
 
@@ -47,6 +50,49 @@ assert_eq "${#actual[@]}" "${#expected[@]}" "dynamic launch should preserve the 
 for index in "${!expected[@]}"; do
   assert_eq "${actual[$index]}" "${expected[$index]}" "dynamic launch should preserve argv boundary $index"
 done
+
+# The shell launch backend must consume the same one-shot settings request that
+# the game-library Test button creates, without routing through Swift.
+request_dir="$support/launch-requests"
+request="$request_dir/test-request.json"
+environment_log="$TMP/environment.log"
+mkdir -p "$request_dir"
+printf '%s\n' '{"arguments":["saved override","--flag"],"environment":{"CYDER_TEST_MARKER":"from-request"}}' >"$request"
+CYDER_RUNTIME_ROOT="$runtime" \
+CYDER_SUPPORT="$support" \
+CYDER_TEST_ARGUMENT_LOG="$argument_log" \
+CYDER_TEST_ENV_LOG="$environment_log" \
+CYDER_TEST_SETTINGS_REQUEST="$request" \
+  bash "$ROOT/scripts/cyder_launcher.sh" --launch-exe "$exe"
+assert test ! -e "$request"
+assert_contains "$(cat "$argument_log")" '<saved override>' \
+  "one-shot launch settings must supply saved arguments through Bash"
+assert_contains "$(cat "$environment_log")" 'marker=from-request' \
+  "one-shot launch settings must supply environment variables through Bash"
+
+# An existing independent profile must select its own bottle in the Bash path.
+profile_id="$(bash "$ROOT/scripts/cyder-profile.sh" id "$exe")"
+profile_bottle="$support/bottles/$profile_id"
+profile_metadata="$support/profiles/$profile_id"
+mkdir -p "$profile_bottle" "$profile_metadata"
+touch "$profile_bottle/user.reg"
+bash "$ROOT/scripts/cyder-profile.sh" metadata "$profile_metadata" "$profile_id" "$exe" golden
+CYDER_RUNTIME_ROOT="$runtime" \
+CYDER_SUPPORT="$support" \
+CYDER_TEST_ARGUMENT_LOG="$argument_log" \
+CYDER_TEST_ENV_LOG="$environment_log" \
+  bash "$ROOT/scripts/cyder_launcher.sh" --launch-exe "$exe"
+assert_contains "$(cat "$environment_log")" "prefix=$profile_bottle" \
+  "Bash launch must resolve and use an independent profile bottle"
+
+# Restore the credential-redaction fixture after the additional backend calls.
+CYDER_RUNTIME_ROOT="$runtime" \
+CYDER_SUPPORT="$support" \
+CYDER_TEST_ARGUMENT_LOG="$argument_log" \
+CYDER_CAPTURE_WINE_LOG=1 \
+  bash "$ROOT/scripts/cyder_launcher.sh" \
+    --launch-exe "$exe" -- \
+    'tw.login.maplestory.beanfun.com' '8484' 'BeanFun' 'T9 test account' '0123456789'
 
 launch_log="$(readlink "$support/Logs/last-launch.log")"
 launch_log="$support/Logs/$launch_log"
@@ -83,10 +129,10 @@ assert_contains "$app" 'pendingLaunchArguments = applicationArguments.isEmpty' \
 assert_contains "$app" 'CYDER_TEST_SETTINGS_REQUEST' "internal launch settings should use environment rather than argv"
 assert_contains "$app" 'CYDER_CAPTURE_WINE_LOG' "test launches should enable Wine log capture by default"
 assert_contains "$app" 'CYDER_LAUNCH_KIND' "test launches should mark launch kind for log headers"
-assert_contains "$app" 'Running command:' "Wine launch logs should include a CrossOver-style command header"
-assert_contains "$app" 'let hasDynamicArguments = !(launchArguments ?? []).isEmpty' \
-  "empty dynamic argv must not wipe test/saved game arguments"
-assert_contains "$app" '<\(gameArguments.count) game arguments redacted>' "native diagnostics should always redact arguments"
+common="$(cat "$ROOT/scripts/cyder-common.sh")"
+assert_contains "$common" 'Running command:' "Bash Wine logs should include a CrossOver-style command header"
+assert_contains "$common" 'game_args_text="<${#game_args[@]} game arguments redacted>"' \
+  "Bash diagnostics must always redact game arguments"
 
 # UI: command-line args field should be multiline like environment variables.
 library_ui="$(cat "$ROOT/scripts/cyder_game_library_ui.swift")"

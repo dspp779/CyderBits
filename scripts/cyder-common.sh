@@ -967,13 +967,13 @@ cyder_diagnostic_stage() {
   fi
 }
 
-# Optional legacy UI helpers (version compare and MoltenVK OS floor).
-if [[ -n "${CYDER_SCRIPTS:-}" && -f "$CYDER_SCRIPTS/cyder-legacy-ui.sh" ]]; then
-  # shellcheck source=cyder-legacy-ui.sh
-  source "$CYDER_SCRIPTS/cyder-legacy-ui.sh"
-elif [[ -f "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/cyder-legacy-ui.sh" ]]; then
-  # shellcheck source=cyder-legacy-ui.sh
-  source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/cyder-legacy-ui.sh"
+# Optional macOS compatibility helpers (version compare and MoltenVK OS floor).
+if [[ -n "${CYDER_SCRIPTS:-}" && -f "$CYDER_SCRIPTS/cyder-macos-compat.sh" ]]; then
+  # shellcheck source=cyder-macos-compat.sh
+  source "$CYDER_SCRIPTS/cyder-macos-compat.sh"
+elif [[ -f "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/cyder-macos-compat.sh" ]]; then
+  # shellcheck source=cyder-macos-compat.sh
+  source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/cyder-macos-compat.sh"
 fi
 
 # UI-facing progress line for long bootstrap/provision work. Written atomically
@@ -1909,14 +1909,34 @@ cyder_load_game_settings() {
   local exe="$1"
   local profile_script="$CYDER_SCRIPTS/cyder-profile.sh"
   local settings_file="$CYDER_SUPPORT/settings.json"
-  local profile_id game_json
+  local profile_id game_json launch_request="${CYDER_TEST_SETTINGS_REQUEST:-}"
   CYDER_GAME_ARGUMENTS=()
   CYDER_GAME_SETTINGS_FOUND=0
 
-  [[ -x "$profile_script" && -f "$settings_file" ]] || return 0
+  [[ -x "$profile_script" ]] || return 0
   profile_id="$(bash "$profile_script" id "$exe" 2>/dev/null)" || return 0
   [[ "$profile_id" =~ ^profile-[0-9a-f]{24}$ ]] || return 0
-  game_json="$(/usr/bin/plutil -extract "perProfile.$profile_id" json -o - "$settings_file" 2>/dev/null)" || return 0
+  if [[ -n "$launch_request" ]]; then
+    local request_dir expected_dir
+    [[ -f "$launch_request" && ! -L "$launch_request" ]] || {
+      echo "Invalid Cyder launch settings request: $launch_request" >&2
+      return 1
+    }
+    request_dir="$(cd "$(dirname "$launch_request")" && pwd -P)" || return 1
+    expected_dir="$CYDER_SUPPORT/launch-requests"
+    mkdir -p "$expected_dir"
+    expected_dir="$(cd "$expected_dir" && pwd -P)" || return 1
+    [[ "$request_dir" == "$expected_dir" ]] || {
+      echo "Cyder launch settings request is outside $expected_dir" >&2
+      return 1
+    }
+    game_json="$(/bin/cat "$launch_request")" || return 1
+    rm -f "$launch_request"
+    unset CYDER_TEST_SETTINGS_REQUEST
+  else
+    [[ -f "$settings_file" ]] || return 0
+    game_json="$(/usr/bin/plutil -extract "perProfile.$profile_id" json -o - "$settings_file" 2>/dev/null)" || return 0
+  fi
   [[ -n "$game_json" ]] || return 0
   CYDER_GAME_SETTINGS_FOUND=1
 
@@ -1937,6 +1957,19 @@ cyder_load_game_settings() {
             fontPreset) [[ "$value" == songti || "$value" == mingliu ]] && export CYDER_FONT_PRESET="$value" || true ;;
             fontSmoothing) case "$value" in off|grayscale|cleartype-rgb|cleartype-bgr) export CYDER_FONT_SMOOTHING="$value" ;; esac ;;
             powerMode) case "$value" in standard) export CYDER_POWER_MODE=normal ;; energySaving) export CYDER_POWER_MODE=background ;; esac ;;
+            graphicsBackend)
+              case "$value" in
+                wined3d|dxvk|d3dmetal)
+                  export CYDER_GRAPHICS_BACKEND="$value" CX_GRAPHICS_BACKEND="$value"
+                  ;;
+              esac
+              ;;
+            dxvkFrameRate)
+              case "$value" in
+                60|sixty) export DXVK_FRAME_RATE=60 ;;
+                unlimited) unset DXVK_FRAME_RATE ;;
+              esac
+              ;;
           esac
           ;;
         environment)
@@ -1948,7 +1981,7 @@ cyder_load_game_settings() {
       esac
     done < <(/usr/bin/ruby -rjson -e '
       rule = JSON.parse(STDIN.read)
-      %w[msync esync retinaMode dpi fontPreset fontSmoothing powerMode].each do |key|
+      %w[msync esync retinaMode dpi fontPreset fontSmoothing powerMode graphicsBackend dxvkFrameRate].each do |key|
         puts "setting\t#{key}\t#{rule[key]}" if rule.key?(key) && !rule[key].nil?
       end
       (rule["environment"] || {}).each { |key, value| puts "environment\t#{key}\t#{value}" }

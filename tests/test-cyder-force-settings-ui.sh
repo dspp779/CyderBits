@@ -5,6 +5,7 @@ source "$ROOT/tests/assert.sh"
 ui="$(cat "$ROOT/scripts/cyder_settings_ui.swift")"
 library_ui="$(cat "$ROOT/scripts/cyder_game_library_ui.swift")"
 app="$(cat "$ROOT/scripts/cyder_app_main.swift")"
+common="$(cat "$ROOT/scripts/cyder-common.sh")"
 assert_contains "$ui" "套用所有設定" "advanced tab should expose full apply button"
 assert_contains "$ui" "applyAllSettings" "full apply button should have a dedicated action"
 assert_contains "$ui" "Winetricks 元件…" "advanced tab should expose the native Winetricks component picker"
@@ -55,31 +56,21 @@ assert_contains "$(cat "$ROOT/scripts/cyder_settings.swift")" 'graphicsHud' "set
 assert_contains "$(cat "$ROOT/scripts/cyder_settings.swift")" 'dxvkHudFrametimes' "settings schema should persist DXVK frametimes preference"
 assert_contains "$(cat "$ROOT/scripts/cyder_settings.swift")" 'wineDiagnostics' "settings schema should persist Wine diagnostics"
 assert_contains "$(cat "$ROOT/scripts/cyder_settings.swift")" 'provisionDxvkIntoPrefix' "OEM DXVK should provision prefix DLLs"
-assert_contains "$app" 'environment["CX_GRAPHICS_BACKEND"] = backend' "CrossOver OEM needs CX_GRAPHICS_BACKEND"
-assert_contains "$app" 'dllOverrides: oemDxvkDllOverrides' "OEM DXVK launch should pass native dll overrides"
-assert_contains "$app" 'args.insert(contentsOf: ["--dll", dllOverrides], at: 0)' "OEM --dll must merge with CYDER_WINE_FRONTEND_ARGS"
-assert_contains "$app" '!args.contains("--dll")' "OEM --dll merge must not duplicate existing --dll"
-assert_contains "$app" '"d3d11,dxgi=n,b"' "OEM DXVK overrides should prefer native with builtin fallback"
-assert_contains "$(cat "$ROOT/scripts/cyder-common.sh")" 'cyder_oem_dxvk_dll_overrides' "shell launcher should expose OEM DXVK dll overrides helper"
-assert_contains "$(cat "$ROOT/scripts/cyder-common.sh")" 'args=(--dll "$dll_overrides" "${args[@]}")' "shell frontend args must prepend --dll overrides"
+assert_contains "$common" 'export CX_GRAPHICS_BACKEND=' "CrossOver OEM needs CX_GRAPHICS_BACKEND"
+assert_contains "$common" 'cyder_oem_dxvk_dll_overrides' "shell launcher should expose OEM DXVK dll overrides helper"
+assert_contains "$common" 'args=(--dll "$dll_overrides" "${args[@]}")' "shell frontend args must prepend --dll overrides"
+assert_contains "$common" 'd3d11,dxgi=n,b' "OEM DXVK overrides should prefer native with builtin fallback"
 assert_contains "$app" 'onStopAllWine' "settings stop-all Wine should wire to app delegate"
-assert_contains "$app" 'syncCrossoverBottleGraphicsEnvironment' "OEM bottle env must mirror HUD/backend keys"
 assert_contains "$(cat "$ROOT/scripts/cyder_gptk.swift")" 'ensureEngineAppleGptkLink' "GPTK should link into engine lib64 for cxcompatdb"
-assert_contains "$app" 'environment.removeValue(forKey: "DXVK_FRAME_RATE")' "launch env should clear inherited DXVK frame rate"
-assert_contains "$app" 'DXVK frame rate: \(environment["DXVK_FRAME_RATE"] ?? "<unset>")' \
-  "wine-launch preamble should record DXVK frame rate"
-assert_contains "$app" 'DXVK HUD: \(environment["DXVK_HUD"] ?? "<unset>")' \
-  "wine-launch preamble should record DXVK HUD"
-assert_contains "$app" 'DXVK_FRAME_RATE=\(environment["DXVK_FRAME_RATE"] ?? "<unset>")' \
+assert_contains "$common" 'unset DXVK_FRAME_RATE' "launch env should clear an unlimited DXVK frame rate"
+assert_contains "$common" 'DXVK frame rate: ${DXVK_FRAME_RATE:-<unset>}' \
+  "wine-launch log should record DXVK frame rate"
+assert_contains "$common" 'DXVK HUD: ${DXVK_HUD:-<unset>}' \
+  "wine-launch log should record DXVK HUD"
+assert_contains "$common" 'DXVK_FRAME_RATE=${DXVK_FRAME_RATE:-<unset>}' \
   "effective Wine env block should include DXVK_FRAME_RATE"
-assert_contains "$app" 'DXVK_HUD=\(environment["DXVK_HUD"] ?? "<unset>")' \
+assert_contains "$common" 'DXVK_HUD=${DXVK_HUD:-<unset>}' \
   "effective Wine env block should include DXVK_HUD"
-assert_contains "$app" 'appendingPathExtension("preamble.txt")' \
-  "wine-launch should write an uncompressed preamble sidecar for hang debugging"
-assert_contains "$app" 'last-launch.preamble.txt' \
-  "wine-launch should symlink the latest preamble beside last-launch.log.gz"
-assert_contains "$app" 'dxvk_frame_rate=\(environment["DXVK_FRAME_RATE"] ?? "unset")' \
-  "session effective-settings should include dxvk_frame_rate"
 assert_contains "$(cat "$ROOT/scripts/cyder_gptk.swift")" 'CYDER_ALLOW_TEST_HOOKS' "GPTK test override must require an allow flag"
 assert_contains "$(cat "$ROOT/scripts/pack-engine-artifact.sh")" 'apple_gptk' "engine pack must exclude/assert no apple_gptk"
 assert_contains "$(cat "$ROOT/scripts/cyder_settings.swift")" 'defaultGraphicsBackend' "OEM/default graphics backend should be product-aware"
@@ -171,22 +162,17 @@ assert_contains "$app" "openGameInDetachedCyder" "the library should delegate la
 assert_contains "$app" "createsNewApplicationInstance = true" "detached launches should not reuse the library process"
 assert_contains "$app" "gameLibraryController.window?.isVisible == true" "Finder opens should preserve an already visible library"
 assert_contains "$app" "if !documentLaunchRequested {" "detached game launches should not show the parent application's active-session warning"
-assert_contains "$app" "game-launch effective-settings" "launch diagnostics should record the effective game settings"
+assert_contains "$common" 'cyder_load_game_settings' "Bash should consume the game library's one-shot launch settings"
 assert_contains "$app" "開啟相關記錄" "failure dialog should use the specific related-log label"
 assert_contains "$app" "exportLastGameLog" "app should handle last-game log export"
 assert_contains "$app" "exportLastGameLog(to: destination)" "app should copy the selected game log directly"
 assert_contains "$app" "cleanDebugLogs" "app should handle debug-log cleanup"
-assert_contains "$app" "NTDLL SHA-256:" "launch diagnostics should identify the loaded NTDLL"
-assert_contains "$app" "Engine version:" "launch diagnostics should identify the engine build"
-assert_contains "$app" "game arguments redacted" "launch diagnostics should not persist login arguments"
+assert_contains "$common" "NTDLL SHA-256:" "launch diagnostics should identify the loaded NTDLL"
+assert_contains "$common" "Engine version:" "launch diagnostics should identify the engine build"
+assert_contains "$common" "game arguments redacted" "launch diagnostics should not persist login arguments"
 assert_contains "$app" 'Public argv contract: `Cyder [game.exe] [game argument ...]`' "native launches should accept an EXE without Cyder-specific options"
-assert_contains "$app" 'let hasDynamicArguments = !(launchArguments ?? []).isEmpty' "dynamic arguments should replace saved profile arguments for one launch"
-assert_contains "$app" 'let gameArguments = hasDynamicArguments ? (launchArguments ?? []) : savedGameArguments' "empty post-exe argv should keep saved profile arguments"
-wine_launch_region="$(sed -n '/private func runDirectWine/,/private func buildEnvironment/p' "$ROOT/scripts/cyder_app_main.swift")"
-if [[ "$wine_launch_region" == *"--session-acquire"* ]]; then
-  echo "ASSERT failed: native game launches must not reject a second game's settings session" >&2
-  exit 1
-fi
+assert_contains "$app" 'private func runWineThroughLauncher' "Swift document opens should relay to the Bash launcher"
+assert_not_contains "$app" 'private func runDirectWine' "Swift must not retain a direct Wine launch backend"
 launch_region="$(sed -n '/private func launchGameFromLibrary/,/@objc private func showSettingsModal/p' "$ROOT/scripts/cyder_app_main.swift")"
 if [[ "$launch_region" == *"scheduleRun()"* || "$launch_region" == *"pendingFiles"* || "$launch_region" == *"gameLibraryController.close()"* ]]; then
   echo "ASSERT failed: the library should only delegate a launch request" >&2
@@ -196,7 +182,6 @@ if [[ "$library_ui" == *"CYDERBITS // GAME LIBRARY"* || "$library_ui" == *"NSSpl
   echo "ASSERT failed: game library should not retain the branded header or a persistent settings pane" >&2
   exit 1
 fi
-common="$(cat "$ROOT/scripts/cyder-common.sh")"
 assert_contains "$common" "EXE launches never run a Wine registry client" "active prefixes should defer launch-time registry settings"
 assert_contains "$common" "Wine registry client is reserved" "Wine registry writes should be reserved for the explicit full-apply action"
 assert_contains "$common" 'CYDER_SESSION_GUARD:-0' "shell game launches should not enable the optional session guard by default"

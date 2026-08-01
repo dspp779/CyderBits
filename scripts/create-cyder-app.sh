@@ -175,9 +175,7 @@ python3 "$OGOM/scripts/cyder-compatdb.py" inspect "$RES/CompatDB/compatdb.cdb" >
 cp "$SCRIPT_DIR/cyder_launcher.sh" "$RES/ogom-scripts/"
 cp "$SCRIPT_DIR/cyder-common.sh" "$RES/ogom-scripts/"
 cp "$SCRIPT_DIR/cyder-ensure-rosetta.sh" "$RES/ogom-scripts/"
-cp "$SCRIPT_DIR/cyder-legacy-ui.sh" "$RES/ogom-scripts/"
-cp "$SCRIPT_DIR/cyder-legacy-ui.applescript" "$RES/ogom-scripts/"
-cp "$SCRIPT_DIR/cyder-legacy-progress.applescript" "$RES/ogom-scripts/"
+cp "$SCRIPT_DIR/cyder-macos-compat.sh" "$RES/ogom-scripts/"
 cp "$SCRIPT_DIR/env-x86_64.sh" "$RES/ogom-scripts/"
 cp "$SCRIPT_DIR/sign-wine.sh" "$RES/ogom-scripts/"
 cp "$SCRIPT_DIR/install-wine-mono.sh" "$RES/ogom-scripts/"
@@ -283,7 +281,7 @@ cp "$SCRIPT_DIR/cyder-profile.sh" "$RES/ogom-scripts/"
 cp "$SCRIPT_DIR/cyder_create_game_app.py" "$RES/ogom-scripts/"
 cp "$SCRIPT_DIR/cyder_common.py" "$RES/ogom-scripts/"
 chmod +x "$RES/ogom-scripts/cyder_launcher.sh"
-chmod +x "$RES/ogom-scripts/cyder-legacy-ui.sh"
+chmod +x "$RES/ogom-scripts/cyder-macos-compat.sh"
 chmod +x "$RES/ogom-scripts/sign-wine.sh"
 chmod +x "$RES/ogom-scripts/install-cyder-font-replacements.sh"
 chmod +x "$RES/ogom-scripts/cyder-apply-settings.sh"
@@ -334,12 +332,12 @@ fi
 # MacOSX.sdk module metadata out of sync while the versioned SDK is usable.
 SWIFT_SDK="$(cd "$SWIFT_SDK" && pwd -P)"
 echo "==> Swift SDK: $SWIFT_SDK"
-if swiftc "$SWIFT_OPTIMIZATION" -sdk "$SWIFT_SDK" -module-cache-path "$SWIFT_MODULE_CACHE" -target arm64-apple-macosx12.0 -o "$SWIFT_BUILD_DIR/Cyder-arm64" "${SWIFT_SOURCES[@]}" \
-  && swiftc "$SWIFT_OPTIMIZATION" -sdk "$SWIFT_SDK" -module-cache-path "$SWIFT_MODULE_CACHE" -target x86_64-apple-macosx12.0 -o "$SWIFT_BUILD_DIR/Cyder-x86_64" "${SWIFT_SOURCES[@]}" \
+if swiftc "$SWIFT_OPTIMIZATION" -sdk "$SWIFT_SDK" -module-cache-path "$SWIFT_MODULE_CACHE" -target arm64-apple-macosx11.0 -o "$SWIFT_BUILD_DIR/Cyder-arm64" "${SWIFT_SOURCES[@]}" \
+  && swiftc "$SWIFT_OPTIMIZATION" -sdk "$SWIFT_SDK" -module-cache-path "$SWIFT_MODULE_CACHE" -target x86_64-apple-macosx11.0 -o "$SWIFT_BUILD_DIR/Cyder-x86_64" "${SWIFT_SOURCES[@]}" \
   && lipo -create "$SWIFT_BUILD_DIR/Cyder-arm64" "$SWIFT_BUILD_DIR/Cyder-x86_64" -output "$MACOS/CyderSwift"; then
   chmod +x "$MACOS/CyderSwift"
   rm -rf "$SWIFT_BUILD_DIR"
-  echo "==> Compiled universal native CyderSwift (macOS 12+ UI)"
+  echo "==> Compiled universal native CyderSwift (macOS 11+ UI)"
 else
   rm -rf "$SWIFT_BUILD_DIR"
   echo "==> Warning: universal Swift build failed; CyderSwift falls back to shell launcher" >&2
@@ -379,8 +377,9 @@ LAUNCHER
   chmod +x "$MACOS/CyderSwift"
 fi
 
-# Always ship a bash entrypoint so macOS < 12 can fall back to osascript UI
-# (Swift CyderSwift requires 12.0). On 12+ the wrapper exec's CyderSwift.
+# Always ship a Bash entrypoint. Explicit EXE arguments go directly to Bash;
+# no-argument launches use CyderSwift on macOS 11+ and a minimal shell
+# choose-file fallback on Catalina.
 cp "$SCRIPT_DIR/cyder-macos-wrapper.sh" "$MACOS/Cyder"
 chmod +x "$MACOS/Cyder"
 

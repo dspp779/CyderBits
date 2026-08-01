@@ -29,3 +29,15 @@ assert_contains() {
     exit 1
   fi
 }
+
+assert_not_contains() {
+  local haystack="$1"
+  local needle="$2"
+  local message="$3"
+
+  if [[ "$haystack" == *"$needle"* ]]; then
+    echo "ASSERT_NOT_CONTAINS failed: $message" >&2
+    echo "  unexpected: $needle" >&2
+    exit 1
+  fi
+}
