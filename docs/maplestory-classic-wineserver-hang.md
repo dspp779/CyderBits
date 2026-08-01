@@ -17,6 +17,9 @@
 
 目前實測**唯一穩定組合**是 **MSync + DXVK**（可反覆進出商城 5–6 次以上）。其餘 sync × 圖形後端組合均曾出現 wineserver 死亡或等價僵屍狀態。
 
+CompatDB 規則 `game.maplestory-classic.dxvk`：當全域圖形為**預設**（`.default`，不強制後端）時，
+`Maplestory_Classic.exe` 會自動選 DXVK；若全域改為 **自動**／D3DMetal／DXVK／WineD3D，則以全域（或遊戲覆寫）為準。
+
 注意：DXVK 長跑另有 **Mach Ports 洩漏**（與本文件 wineserver 死亡不同根因），見
 [maplestory-classic-dxvk-ports-leak.md](./maplestory-classic-dxvk-ports-leak.md)。
 
