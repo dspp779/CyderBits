@@ -17,8 +17,9 @@ mkdir -p \
   "$PREFIX/drive_c/windows/syswow64"
 printf 'moltenvk\n' >"$ENGINE/lib/wine/x86_64-unix/libMoltenVK.dylib"
 for machine in x86_64-windows i386-windows; do
-  printf '%s-d3d11\n' "$machine" >"$ENGINE/lib/dxvk/$machine/d3d11.dll"
-  printf '%s-dxgi\n' "$machine" >"$ENGINE/lib/dxvk/$machine/dxgi.dll"
+  for module in d3d9 d3d10 d3d10_1 d3d10core d3d11 dxgi; do
+    printf '%s-%s\n' "$machine" "$module" >"$ENGINE/lib/dxvk/$machine/$module.dll"
+  done
 done
 ln -s "$TMP/do-not-modify" "$PREFIX/drive_c/windows/system32/d3d11.dll"
 printf 'sentinel\n' >"$TMP/do-not-modify"

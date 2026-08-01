@@ -64,6 +64,11 @@ struct CyderSettingsHarness {
         precondition(CyderWineDiagnostics.errors.wineDebug == "-all,err+all,+timestamp,+pid,+tid")
         precondition(CyderWineDiagnostics.sync.wineDebug == "-all,err+all,+timestamp,+pid,+tid,+sync")
         precondition(CyderWineDiagnostics.unwind.wineDebug == "-all,+timestamp,+pid,+tid,+seh,+unwind")
+        precondition(CyderSettings.isValidEnvironmentKey("GAME_TOKEN"))
+        precondition(!CyderSettings.isValidEnvironmentKey("WINEPREFIX"))
+        precondition(!CyderSettings.isValidEnvironmentKey("WINEDEBUG"))
+        precondition(!CyderSettings.isValidEnvironmentKey("DYLD_INSERT_LIBRARIES"))
+        precondition(!CyderSettings.isValidEnvironmentKey("CYDER_WINE_RESULT_FILE"))
 
         try store.update { settings in
             settings.wineDiagnostics = .sync

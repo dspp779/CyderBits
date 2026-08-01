@@ -627,6 +627,7 @@ cyder_load_saved_settings() {
   fi
   if [[ -z "${CYDER_GRAPHICS_BACKEND:-}" ]]; then
     value="$(plutil -extract graphicsBackend raw -o - "$settings" 2>/dev/null || true)"
+    export CYDER_GRAPHICS_PREFERENCE="${value:-default}"
     case "$value" in
       wined3d|dxvk|d3dmetal)
         export CYDER_GRAPHICS_BACKEND="$value"
@@ -645,6 +646,7 @@ cyder_load_saved_settings() {
           export CX_GRAPHICS_BACKEND="$CYDER_GRAPHICS_BACKEND"
         fi
         ;;
+      default|"") unset CYDER_GRAPHICS_BACKEND CX_GRAPHICS_BACKEND ;;
     esac
   fi
   if [[ "${CYDER_GRAPHICS_BACKEND:-}" == dxvk ]]; then
@@ -884,6 +886,111 @@ cyder_wine_is_crossover_frontend() {
   launcher_wine="$engine_root/MapleStory Launcher/wine"
   cyder_wine_is_perl_script "$launcher_wine" && return 0
   return 1
+}
+
+# Locate a user-provided GPTK without redistributing it in Cyder.app. A copy
+# installed from the Settings UI wins over CrossOver's bundled copy.
+cyder_gptk_root_is_valid() {
+  local root="$1"
+  [[ -r "$root/external/libd3dshared.dylib" && -d "$root/external/D3DMetal.framework" ]]
+}
+
+cyder_preferred_gptk_root() {
+  local installed="$CYDER_SUPPORT/runtime/apple_gptk"
+  local crossover="/Applications/CrossOver.app/Contents/SharedSupport/CrossOver/lib64/apple_gptk"
+  if cyder_gptk_root_is_valid "$installed"; then
+    printf '%s\n' "$installed"
+    return 0
+  fi
+  if cyder_gptk_root_is_valid "$crossover"; then
+    printf '%s\n' "$crossover"
+    return 0
+  fi
+  return 1
+}
+
+cyder_link_gptk_into_engine() {
+  local engine_root="$1" gptk_root="$2"
+  local lib64="$engine_root/lib64" link="$engine_root/lib64/apple_gptk"
+  cyder_gptk_root_is_valid "$gptk_root" || return 1
+  if [[ -L "$link" ]]; then
+    local resolved
+    resolved="$(cd "$(dirname "$link")" && cd "$(readlink "$link")" 2>/dev/null && pwd -P || true)"
+    [[ "$resolved" == "$(cd "$gptk_root" && pwd -P)" ]] && return 0
+    rm -f "$link"
+  elif [[ -e "$link" ]]; then
+    cyder_gptk_root_is_valid "$link"
+    return $?
+  fi
+  mkdir -p "$lib64"
+  ln -s "$gptk_root" "$link"
+  cyder_gptk_root_is_valid "$link"
+}
+
+cyder_apply_gptk_launch_environment() {
+  local engine_root="$1" gptk_root=""
+  # Do not retain stale paths inherited from a parent process when GPTK was
+  # removed or moved since the previous launch.
+  unset CYDER_GPTK_ROOT CX_APPLEGPTK_LIBD3DSHARED_PATH
+  gptk_root="$(cyder_preferred_gptk_root 2>/dev/null || true)"
+  [[ -n "$gptk_root" ]] || return 0
+  export CYDER_GPTK_ROOT="$gptk_root"
+  export CX_APPLEGPTK_LIBD3DSHARED_PATH="$gptk_root/external/libd3dshared.dylib"
+  if [[ -n "${DYLD_FRAMEWORK_PATH:-}" ]]; then
+    export DYLD_FRAMEWORK_PATH="$gptk_root/external:$DYLD_FRAMEWORK_PATH"
+  else
+    export DYLD_FRAMEWORK_PATH="$gptk_root/external"
+  fi
+  cyder_link_gptk_into_engine "$engine_root" "$gptk_root" || {
+    echo "Unable to link the selected GPTK into the Wine engine." >&2
+    return 1
+  }
+}
+
+# CrossOver's Perl frontend reloads [EnvironmentVariables] after the process
+# environment. Mirror Cyder's graphics choices so cxbottle.conf cannot clear or
+# replace the values selected for this launch.
+cyder_sync_crossover_graphics_environment() {
+  local prefix="$1" conf="$1/cxbottle.conf"
+  [[ -f "$conf" && ! -L "$conf" ]] || return 0
+  local tmp="${conf}.cyder-graphics.$$"
+  /usr/bin/awk \
+    -v backend="${CX_GRAPHICS_BACKEND:-}" \
+    -v frame_rate="${DXVK_FRAME_RATE:-}" \
+    -v dxvk_hud="${DXVK_HUD:-}" \
+    -v metal_hud="${MTL_HUD_ENABLED:-}" '
+    function emit() {
+      if (backend != "") print "\"CX_GRAPHICS_BACKEND\" = \"" backend "\""
+      if (frame_rate != "") print "\"DXVK_FRAME_RATE\" = \"" frame_rate "\""
+      if (dxvk_hud != "") print "\"DXVK_HUD\" = \"" dxvk_hud "\""
+      if (metal_hud != "") print "\"MTL_HUD_ENABLED\" = \"" metal_hud "\""
+    }
+    BEGIN { in_environment = 0; found = 0 }
+    /^\[EnvironmentVariables\]$/ {
+      print
+      emit()
+      in_environment = 1
+      found = 1
+      next
+    }
+    /^\[/ { in_environment = 0 }
+    in_environment && /^"(CX_GRAPHICS_BACKEND|DXVK_FRAME_RATE|DXVK_HUD|MTL_HUD_ENABLED)"[[:space:]]*=/ { next }
+    { print }
+    END {
+      if (!found) {
+        print ""
+        print "[EnvironmentVariables]"
+        emit()
+      }
+    }
+  ' "$conf" >"$tmp" || {
+    rm -f "$tmp"
+    return 1
+  }
+  # cxbottle.conf contains launch preferences rather than credentials. Keep a
+  # predictable mode with the BSD chmod shipped on every supported macOS.
+  chmod 644 "$tmp"
+  mv -f "$tmp" "$conf"
 }
 
 cyder_wine_frontend_args() {
@@ -1878,6 +1985,49 @@ cyder_ensure_font_replacements() {
 CYDER_GAME_ARGUMENTS=()
 CYDER_GAME_SETTINGS_FOUND=0
 
+cyder_game_environment_key_is_allowed() {
+  local key="$1"
+  [[ "$key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || return 1
+  case "$key" in
+    BASH_ENV|ENV|IFS|PATH|HOME|TMPDIR|SHELLOPTS|BASHOPTS|CDPATH|GLOBIGNORE) return 1 ;;
+    DYLD_*|LD_*) return 1 ;;
+    WINEPREFIX|WINESERVER|WINEARCH|WINEDEBUG|CX_ROOT|CX_BOTTLE|CX_APPLEGPTK_LIBD3DSHARED_PATH) return 1 ;;
+    CYDER_SUPPORT|CYDER_RUNTIME_ROOT|CYDER_ENGINES|CYDER_ENGINE_NAME|CYDER_ENGINE_SRC|CYDER_SCRIPTS|CYDER_APP) return 1 ;;
+    CYDER_WINE_*|CYDER_SESSION_*|CYDER_DIAGNOSTIC_*|CYDER_TEST_*|CYDER_RESULT_FILE|CYDER_PROGRESS_FILE) return 1 ;;
+    CYDER_GPTK_ROOT|CYDER_GRAPHICS_BACKENDS_ROOT|CYDER_GAME_ARGUMENTS) return 1 ;;
+  esac
+  return 0
+}
+
+cyder_resolve_effective_graphics_backend() {
+  local engine_root="$1"
+  local preference="${CYDER_GRAPHICS_PREFERENCE:-${CYDER_GRAPHICS_BACKEND:-default}}"
+  if cyder_is_maplestory_oem && [[ "$preference" == default ]]; then
+    preference=auto
+  fi
+  case "$preference" in
+    auto)
+      if declare -F cyder_macos_at_least >/dev/null 2>&1 \
+         && cyder_macos_at_least 14 0 \
+         && [[ -n "$(cyder_preferred_gptk_root 2>/dev/null || true)" ]]; then
+        export CYDER_GRAPHICS_BACKEND=d3dmetal CX_GRAPHICS_BACKEND=d3dmetal
+      elif [[ -r "$engine_root/lib/dxvk/x86_64-windows/d3d11.dll" ]] \
+           && { [[ -r "$engine_root/lib/wine/x86_64-unix/libMoltenVK.dylib" ]] \
+                || [[ -r "$engine_root/lib64/libMoltenVK.dylib" ]]; }; then
+        export CYDER_GRAPHICS_BACKEND=dxvk CX_GRAPHICS_BACKEND=dxvk
+      else
+        export CYDER_GRAPHICS_BACKEND=wined3d CX_GRAPHICS_BACKEND=wined3d
+      fi
+      ;;
+    default|"")
+      unset CYDER_GRAPHICS_BACKEND CX_GRAPHICS_BACKEND
+      ;;
+    wined3d|dxvk|d3dmetal)
+      export CYDER_GRAPHICS_BACKEND="$preference" CX_GRAPHICS_BACKEND="$preference"
+      ;;
+  esac
+}
+
 cyder_apply_steam_compatibility_arguments() {
   local exe="$1"
   shift
@@ -1966,7 +2116,12 @@ cyder_load_game_settings() {
             graphicsBackend)
               case "$value" in
                 wined3d|dxvk|d3dmetal)
+                  export CYDER_GRAPHICS_PREFERENCE="$value"
                   export CYDER_GRAPHICS_BACKEND="$value" CX_GRAPHICS_BACKEND="$value"
+                  ;;
+                auto|default)
+                  export CYDER_GRAPHICS_PREFERENCE="$value"
+                  unset CYDER_GRAPHICS_BACKEND CX_GRAPHICS_BACKEND
                   ;;
               esac
               ;;
@@ -1979,7 +2134,7 @@ cyder_load_game_settings() {
           esac
           ;;
         environment)
-          [[ "$key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] && export "$key=$value"
+          cyder_game_environment_key_is_allowed "$key" && export "$key=$value"
           ;;
         argument)
           CYDER_GAME_ARGUMENTS+=("$key")
@@ -2012,6 +2167,7 @@ cyder_prepare_game_launch_settings() {
   local prefix="$3"
   local exe="$4"
   cyder_load_game_settings "$exe"
+  cyder_resolve_effective_graphics_backend "$engine_root"
   [[ "$CYDER_GAME_SETTINGS_FOUND" -eq 1 ]] || return 0
 
   local prefix_was_running=0
@@ -2210,6 +2366,11 @@ cyder_run_wine_exe() {
   local engine_root canonical_prefix engine_version ntdll_sha256="unavailable"
   engine_root="$(cd "$(dirname "$wine_bin")/.." && pwd -P)"
   canonical_prefix="$(cd "$prefix" 2>/dev/null && pwd -P || printf '%s' "$prefix")"
+  cyder_apply_gptk_launch_environment "$engine_root" || return $?
+  if [[ -f "$prefix/cxbottle.conf" ]] || cyder_wine_is_crossover_frontend "$wine_bin"; then
+    export CX_BOTTLE="$prefix" CX_ROOT="$engine_root" WINEARCH=win64
+    cyder_sync_crossover_graphics_environment "$prefix" || return $?
+  fi
   engine_version="$(head -n 1 "$engine_root/version" 2>/dev/null || true)"
   if [[ "$capture_log" == 1 && -f "$engine_root/lib/wine/x86_64-windows/ntdll.dll" ]]; then
     ntdll_sha256="$(/usr/bin/shasum -a 256 \
@@ -2279,6 +2440,7 @@ cyder_run_wine_exe() {
     echo "Engine version: ${engine_version:-unknown}"
     echo "NTDLL SHA-256: $ntdll_sha256"
     echo "Graphics backend: ${CYDER_GRAPHICS_BACKEND:-default}"
+    echo "GPTK root: ${CYDER_GPTK_ROOT:-<unset>}"
     echo "DXVK frame rate: ${DXVK_FRAME_RATE:-<unset>}"
     echo "DXVK HUD: ${DXVK_HUD:-<unset>}"
     echo "Metal HUD: ${MTL_HUD_ENABLED:-<unset>}"
@@ -2304,6 +2466,7 @@ cyder_run_wine_exe() {
     echo "  CYDER_MSYNC=${CYDER_MSYNC:-0}"
     echo "  CYDER_ESYNC=${CYDER_ESYNC:-0}"
     echo "  CYDER_GRAPHICS_BACKEND=${CYDER_GRAPHICS_BACKEND:-<unset>}"
+    echo "  CYDER_GPTK_ROOT=${CYDER_GPTK_ROOT:-<unset>}"
     echo "  CYDER_WINE_DIAGNOSTICS=$wine_diagnostics"
     echo "  DXVK_FRAME_RATE=${DXVK_FRAME_RATE:-<unset>}"
     echo "  DXVK_HUD=${DXVK_HUD:-<unset>}"
@@ -2315,9 +2478,6 @@ cyder_run_wine_exe() {
   (
     export WINEPREFIX="$prefix" WINESERVER="$wineserver" WINEDEBUG="$wine_debug"
     export CYDER_GRAPHICS_BACKENDS_ROOT="$(cd "$(dirname "$wine_bin")/.." && pwd)"
-    if [[ -f "$CYDER_GRAPHICS_BACKENDS_ROOT/lib64/apple_gptk/external/libd3dshared.dylib" ]]; then
-      export CX_APPLEGPTK_LIBD3DSHARED_PATH="$CYDER_GRAPHICS_BACKENDS_ROOT/lib64/apple_gptk/external/libd3dshared.dylib"
-    fi
     overrides="$(cyder_oem_dxvk_dll_overrides 2>/dev/null || true)"
     if [[ -n "$overrides" ]]; then
       export CYDER_WINE_DLL_OVERRIDES="$overrides"

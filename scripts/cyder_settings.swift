@@ -451,7 +451,20 @@ struct CyderSettings: Codable {
     }
 
     static func isValidEnvironmentKey(_ value: String) -> Bool {
-        value.range(of: "^[A-Za-z_][A-Za-z0-9_]*$", options: .regularExpression) != nil
+        guard value.range(of: "^[A-Za-z_][A-Za-z0-9_]*$", options: .regularExpression) != nil else {
+            return false
+        }
+        let exactReserved: Set<String> = [
+            "BASH_ENV", "ENV", "IFS", "PATH", "HOME", "TMPDIR", "SHELLOPTS", "BASHOPTS",
+            "CDPATH", "GLOBIGNORE", "WINEPREFIX", "WINESERVER", "WINEARCH", "WINEDEBUG",
+            "CX_ROOT", "CX_BOTTLE", "CX_APPLEGPTK_LIBD3DSHARED_PATH", "CYDER_SUPPORT",
+            "CYDER_RUNTIME_ROOT", "CYDER_ENGINES", "CYDER_ENGINE_NAME", "CYDER_ENGINE_SRC",
+            "CYDER_SCRIPTS", "CYDER_APP", "CYDER_RESULT_FILE", "CYDER_PROGRESS_FILE",
+            "CYDER_GPTK_ROOT", "CYDER_GRAPHICS_BACKENDS_ROOT", "CYDER_GAME_ARGUMENTS",
+        ]
+        if exactReserved.contains(value) { return false }
+        return !["DYLD_", "LD_", "CYDER_WINE_", "CYDER_SESSION_", "CYDER_DIAGNOSTIC_", "CYDER_TEST_"]
+            .contains { value.hasPrefix($0) }
     }
 
     // Values are passed to Process.environment/arguments, never evaluated as

@@ -45,11 +45,11 @@ non_steam="$(
 assert_eq "$non_steam" '<-windowed>' \
   "non-Steam applications should not receive Steam compatibility arguments"
 
-app="$(cat "$ROOT/scripts/cyder_app_main.swift")"
-assert_contains "$app" 'steamCompatibilityArguments(' \
-  "native Cyder launches should apply the Steam compatibility profile"
-assert_contains "$app" '"-system-composer", "-no-cef-sandbox"' \
-  "native Cyder should use the same Steam compatibility arguments"
+common="$(cat "$ROOT/scripts/cyder-common.sh")"
+assert_contains "$common" 'cyder_apply_steam_compatibility_arguments "$exe"' \
+  "the Bash Wine launch path should apply the Steam compatibility profile"
+assert_contains "$common" 'for required in -system-composer -no-cef-sandbox' \
+  "the Bash launch path should own the verified Steam compatibility arguments"
 
 runtime_patch="$(cat "$ROOT/patches/cyder-compatdb-runtime.patch")"
 rules="$(cat "$ROOT/compatdb/rules/steam.yml")"

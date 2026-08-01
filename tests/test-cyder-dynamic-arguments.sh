@@ -21,7 +21,7 @@ cat >"$engine/bin/wine" <<'SH'
 #!/usr/bin/env bash
 printf '<%s>\n' "$@" >"$CYDER_TEST_ARGUMENT_LOG"
 if [[ -n "${CYDER_TEST_ENV_LOG:-}" ]]; then
-  printf 'prefix=%s\nmarker=%s\n' "${WINEPREFIX:-}" "${CYDER_TEST_MARKER:-}" >"$CYDER_TEST_ENV_LOG"
+  printf 'prefix=%s\nmarker=%s\n' "${WINEPREFIX:-}" "${GAME_TEST_MARKER:-}" >"$CYDER_TEST_ENV_LOG"
 fi
 SH
 chmod +x "$engine/bin/wine"
@@ -72,7 +72,7 @@ request_dir="$support/launch-requests"
 request="$request_dir/test-request.json"
 environment_log="$TMP/environment.log"
 mkdir -p "$request_dir"
-printf '%s\n' '{"arguments":["saved override","--flag"],"environment":{"CYDER_TEST_MARKER":"from-request"}}' >"$request"
+printf '%s\n' '{"arguments":["saved override","--flag"],"environment":{"GAME_TEST_MARKER":"from-request"}}' >"$request"
 CYDER_RUNTIME_ROOT="$runtime" \
 CYDER_SUPPORT="$support" \
 CYDER_TEST_ARGUMENT_LOG="$argument_log" \

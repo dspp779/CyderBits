@@ -91,6 +91,19 @@ override_result="$(
 assert_eq "$override_result" "0|1|0|96|mingliu|grayscale|background" \
   "explicit per-game environment should override global saved settings"
 
+reserved_environment_result="$(
+  bash -c '
+    source "$1/scripts/cyder-common.sh"
+    cyder_game_environment_key_is_allowed GAME_TOKEN
+    printf "safe "
+    for key in WINEPREFIX WINEDEBUG DYLD_INSERT_LIBRARIES CYDER_WINE_RESULT_FILE CYDER_SUPPORT; do
+      if cyder_game_environment_key_is_allowed "$key"; then printf "bad:%s " "$key"; fi
+    done
+  ' _ "$ROOT"
+)"
+assert_eq "$reserved_environment_result" "safe " \
+  "per-game environment must not override launcher transport, prefix, diagnostics, or loader keys"
+
 # EXE launches must never attach a Wine registry client to an active prefix,
 # regardless of the selected synchronization mode. Registry-backed display and
 # font changes remain saved and are applied on the next inactive launch.
@@ -115,16 +128,51 @@ CYDER_SCRIPTS="$TMP/scripts" CYDER_FORCE_SETTINGS=1 \
 assert_eq "$force_status" "99" \
   "explicit Apply All Settings should remain the only Wine registry-client path"
 
-# Native launches receive graphics settings from CyderSettingsStore. The Wine
-# environment must locate GPTK through CyderGptk.applyLaunchEnvironment(), never
-# through a fabricated engine-local apple_gptk tree.
-app_source="$(<"$ROOT/scripts/cyder_app_main.swift")"
-assert_contains "$app_source" "CyderGptk.applyLaunchEnvironment(to: &environment, engineRoot: engineRoot)" \
-  "native Wine environment should resolve GPTK through CyderGptk"
-if [[ "$app_source" == *"lib64/apple_gptk"* ]]; then
-  echo "ASSERT failed: native Wine environment must not invent an engine-local GPTK path" >&2
-  exit 1
-fi
+# Bash owns the Wine environment. It must preserve the GPTK contract that the
+# former Swift launch path provided and mirror graphics keys into cxbottle.conf.
+gptk_root="$TMP/support/runtime/apple_gptk"
+mkdir -p "$gptk_root/external/D3DMetal.framework"
+printf 'gptk\n' >"$gptk_root/external/libd3dshared.dylib"
+cat >"$TMP/support/bottles/shared/cxbottle.conf" <<'CONF'
+[Bottle]
+"WineArch" = "win64"
+[EnvironmentVariables]
+"CX_GRAPHICS_BACKEND" = "wined3d"
+"DXVK_HUD" = "old"
+[Other]
+"Keep" = "yes"
+CONF
+gptk_environment="$TMP/gptk-environment.log"
+CYDER_SUPPORT="$TMP/support" \
+  bash -c '
+    source "$1/scripts/cyder-common.sh"
+    export CX_GRAPHICS_BACKEND=d3dmetal DXVK_HUD=0 MTL_HUD_ENABLED=1
+    cyder_apply_gptk_launch_environment "$2/engine"
+    cyder_sync_crossover_graphics_environment "$2/support/bottles/shared"
+    printf "%s\n%s\n%s\n" "$CYDER_GPTK_ROOT" \
+      "$CX_APPLEGPTK_LIBD3DSHARED_PATH" "$DYLD_FRAMEWORK_PATH"
+  ' _ "$ROOT" "$TMP" >"$gptk_environment"
+assert_contains "$(cat "$gptk_environment")" "$gptk_root" \
+  "Bash launch environment should discover Cyder-installed GPTK"
+assert test -L "$TMP/engine/lib64/apple_gptk"
+crossover_conf="$(cat "$TMP/support/bottles/shared/cxbottle.conf")"
+assert_contains "$crossover_conf" '"CX_GRAPHICS_BACKEND" = "d3dmetal"' \
+  "CrossOver bottle metadata should receive the selected backend"
+assert_contains "$crossover_conf" '"MTL_HUD_ENABLED" = "1"' \
+  "CrossOver bottle metadata should receive the selected HUD"
+assert_not_contains "$crossover_conf" '"DXVK_HUD" = "old"' \
+  "CrossOver bottle metadata should not retain stale graphics values"
+auto_backend="$(
+  CYDER_SUPPORT="$TMP/support" bash -c '
+    source "$1/scripts/cyder-common.sh"
+    cyder_macos_at_least() { return 0; }
+    export CYDER_GRAPHICS_PREFERENCE=auto
+    cyder_resolve_effective_graphics_backend "$2/engine"
+    printf "%s" "$CYDER_GRAPHICS_BACKEND"
+  ' _ "$ROOT" "$TMP"
+)"
+assert_eq "$auto_backend" "d3dmetal" \
+  "Bash auto graphics cascade should prefer an available GPTK on macOS 14+"
 
 # Runtime harness: d3dmetal + fake GPTK root must emit CYDER_GPTK_ROOT,
 # CX_APPLEGPTK_LIBD3DSHARED_PATH, and DYLD_FRAMEWORK_PATH containing external/.
