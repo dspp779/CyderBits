@@ -7,10 +7,12 @@ source "$ROOT/tests/assert.sh"
 source_text="$(cat "$ROOT/scripts/cyder_app_main.swift")"
 assert_contains "$source_text" "application.reply(toOpenOrPrint: .success)" \
   "Finder open-file requests must receive a LaunchServices reply"
-assert_contains "$source_text" "openGameInDetachedCyder" \
-  "Finder requests received by a visible library must be delegated"
-assert_contains "$source_text" "createsNewApplicationInstance = true" \
-  "delegated requests must not reuse the library process"
+assert_contains "$source_text" "launchGameFromLibrary" \
+  "Finder requests received by a visible library must use the monitored launch path"
+assert_not_contains "$source_text" "createsNewApplicationInstance = true" \
+  "library launches must stay in the UI process so early failures can be presented"
+assert_contains "$source_text" "libraryLaunchInProgress" \
+  "the single Wine activation waiter must reject overlapping library startups"
 assert_contains "$source_text" "Association launch: EXE will arrive separately in openFiles" \
   "association launches should treat application argv exclusively as game arguments"
 assert_contains "$source_text" "documentLaunchRequested = true" \
@@ -29,6 +31,8 @@ assert_contains "$source_text" '"CYDER_WINE_RESULT_FILE": exitResultURL.path' \
   "Finder launches must request a per-launch Wine result sidecar"
 assert_contains "$source_text" 'if exitStatus == 53' \
   "protected-folder guidance must use Wine's captured wait status"
+assert_contains "$source_text" 'launchEnvironment: launchEnvironment' \
+  "game-library test settings must flow into the monitored Bash launch"
 assert_not_contains "$source_text" 'launchLogShowsFolderAccessDenied()' \
   "protected-folder guidance must not parse the shared last-launch log"
 assert_contains "$source_text" 'code: "CYD-WIN-003"' \

@@ -54,7 +54,7 @@ macOS 10.15 不會載入 `CyderSwift`。首次開啟 Cyder 或在環境尚未完
 
 首次執行某 `.exe` 時會自動 bootstrap 共用 prefix（見下節），之後再開其他 `.exe` 不會重複安裝。
 
-建議將整個遊戲資料夾放在 `~/Games`。macOS 11+ 的 Cyder 會以每次啟動專屬的結果檔取得 Wine wait status；若 Wine 在顯示視窗前以 `53` 結束（與截短的 Windows `0xC0000135` 一致），且 EXE 位於 Documents、Desktop、Downloads、iCloud／CloudStorage 或 `/Volumes`，就會顯示專用提示，不需解析 `last-launch.log`。「打開 Games 資料夾」會在需要時建立 `~/Games` 並以 Finder 開啟；Cyder 不會自動搬移大型遊戲或改寫 launcher 路徑。
+建議將整個遊戲資料夾放在 `~/Games`。macOS 11+ 的 Finder 與遊戲庫啟動會以每次啟動專屬的結果檔取得 Wine wait status；若 Wine 在顯示視窗前以 `53` 結束（與截短的 Windows `0xC0000135` 一致），且 EXE 位於 Documents、Desktop、Downloads、iCloud／CloudStorage 或 `/Volumes`，就會顯示專用提示，不需解析 `last-launch.log`。「打開 Games 資料夾」會在需要時建立 `~/Games` 並以 Finder 開啟；Cyder 不會自動搬移大型遊戲或改寫 launcher 路徑。Info.plist 的用途說明不會在 App 啟動時主動要求所有資料夾權限；只有使用者實際啟動位於該位置的遊戲、系統需要授權時，macOS 才會按需顯示提示。
 
 Cyder **不會**自動將自己設為 `.exe` 預設程式；`Info.plist` 僅向系統宣告可開啟 Windows 執行檔（`LSHandlerRank: Alternate`），是否設為預設由使用者在 Finder 自行決定。設為預設後，Finder 中的 `.exe` 會使用 Cyder 的 `AppIcon` 作為文件類型圖示（仍為文件外觀，非 `.app` 獨立 squircle）。從 Finder **雙擊 `.exe`**（已設為預設）或拖放到 Cyder 時會直接啟動該檔（`Cyder.app` 內建 Swift 啟動器接收 open-document 事件）。
 
@@ -253,7 +253,7 @@ Cyder 每次啟動都會建立小型 session 記錄，保存目前階段、shell
   sessions/                 # 每次啟動及各子程序的獨立記錄
   session-state.json        # 目前／上次 session 是否正常完成
   last-error.json           # 最近一次結構化錯誤
-  last-launch.log.gz        # 最近一次 Wine 啟動記錄的 gzip 連結
+  last-launch.log           # 最近一次 Wine 啟動記錄的連結
   bootstrap-error.log       # bootstrap 詳細錯誤（若有）
   engine-install.log        # engine 解壓與安裝記錄
 ```

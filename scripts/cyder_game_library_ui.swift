@@ -464,7 +464,7 @@ private final class CyderGameSettingsWindowController: NSWindowController, NSWin
     private var independent: Bool
 
     private let launchButton = NSButton()
-    private let launchHint = NSTextField(labelWithString: "使用目前選項啟動；測試會寫入 Logs/last-launch.log.gz（gzip 壓縮）")
+    private let launchHint = NSTextField(labelWithString: "使用目前選項啟動；測試會寫入 Logs/last-launch.log")
     private let removeProfileButton = NSButton()
     private let syncMode = NSPopUpButton()
     private let syncModeDescription = NSTextField(wrappingLabelWithString: "")

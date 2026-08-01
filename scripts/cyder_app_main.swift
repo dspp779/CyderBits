@@ -10,6 +10,11 @@ private enum CyderLaunchOutcome {
     case failure(CyderFailure)
 }
 
+private enum CyderPrefixResolution {
+    case success(URL)
+    case failure(CyderFailure)
+}
+
 private enum CyderFailureAction: Equatable {
     case close
     case rebuild
@@ -23,6 +28,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
     private var pendingLaunchArguments: [String]?
     private var didFinishLaunch = false
     private var didRunLauncher = false
+    private var libraryLaunchInProgress = false
     private var documentLaunchRequested = false
     private var openLibraryOnLaunch = false
     private var setupPanel: CyderSetupPanel?
@@ -243,7 +249,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         }
         if gameLibraryController.window?.isVisible == true {
             executableFiles.forEach {
-                openGameInDetachedCyder(URL(fileURLWithPath: $0))
+                launchGameFromLibrary(URL(fileURLWithPath: $0), settings: nil)
             }
             application.reply(toOpenOrPrint: .success)
             return
@@ -411,10 +417,10 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         let panel = NSSavePanel()
         panel.title = "匯出上次遊戲記錄"
         panel.message = "選擇要複製上次遊戲 Wine log 的位置。"
-        panel.nameFieldStringValue = "Cyder-last-game.log.gz"
+        panel.nameFieldStringValue = "Cyder-last-game.log"
         panel.canCreateDirectories = true
         if #available(macOS 11.0, *) {
-            panel.allowedContentTypes = [UTType(filenameExtension: "gz") ?? .data]
+            panel.allowedContentTypes = [UTType(filenameExtension: "log") ?? .plainText]
         }
         guard panel.runModal() == .OK, let destination = panel.url else { return }
 
@@ -504,19 +510,24 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func launchGameFromLibrary(_ executable: URL, settings: CyderExecutableSettings?) {
-        openGameInDetachedCyder(executable, settings: settings)
-    }
-
-    private func openGameInDetachedCyder(_ executable: URL, settings: CyderExecutableSettings? = nil) {
-        let arguments = [executable.path]
+        guard !libraryLaunchInProgress else {
+            showAlert("正在啟動另一個遊戲", "請等待目前的遊戲顯示視窗後再試一次。")
+            return
+        }
+        guard let resourcePath = Bundle.main.resourcePath else {
+            showAlert("無法啟動遊戲", "Cyder 缺少必要的 Resources 目錄。")
+            return
+        }
         var launchEnvironment: [String: String] = [:]
+        var request: URL?
         if let settings {
             do {
                 let requestDirectory = CyderPaths.support.appendingPathComponent("launch-requests", isDirectory: true)
                 try FileManager.default.createDirectory(at: requestDirectory, withIntermediateDirectories: true)
-                let request = requestDirectory.appendingPathComponent("test-\(UUID().uuidString).json")
-                try JSONEncoder.pretty.encode(settings).write(to: request, options: .atomic)
-                launchEnvironment["CYDER_TEST_SETTINGS_REQUEST"] = request.path
+                let requestURL = requestDirectory.appendingPathComponent("test-\(UUID().uuidString).json")
+                try JSONEncoder.pretty.encode(settings).write(to: requestURL, options: .atomic)
+                request = requestURL
+                launchEnvironment["CYDER_TEST_SETTINGS_REQUEST"] = requestURL.path
                 // Test launches always capture Wine output so the command line and
                 // effective sync/env settings are inspectable under Logs/.
                 launchEnvironment["CYDER_CAPTURE_WINE_LOG"] = "1"
@@ -526,16 +537,38 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
                 return
             }
         }
-        let configuration = NSWorkspace.OpenConfiguration()
-        configuration.activates = false
-        configuration.createsNewApplicationInstance = true
-        configuration.arguments = arguments
-        configuration.environment = launchEnvironment
-        NSWorkspace.shared.openApplication(
-            at: Bundle.main.bundleURL,
-            configuration: configuration,
-            completionHandler: nil
-        )
+        let context = CyderLaunchContext(resourcePath: resourcePath)
+        libraryLaunchInProgress = true
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            guard let self else { return }
+            defer { if let request { try? FileManager.default.removeItem(at: request) } }
+            let outcome: CyderLaunchOutcome
+            switch self.prefixForExecutable(executable) {
+            case .success(let prefix):
+                outcome = self.runWineThroughLauncher(
+                    context: context,
+                    exe: executable.path,
+                    prefix: prefix,
+                    launchEnvironment: launchEnvironment
+                )
+            case .failure(let failure):
+                outcome = .failure(failure)
+            }
+            DispatchQueue.main.async {
+                self.libraryLaunchInProgress = false
+                switch outcome {
+                case .success, .cancelled:
+                    break
+                case .environmentNotReady:
+                    self.showAlert(
+                        "遊戲尚未準備完成",
+                        "請先完成 Cyder 的環境準備，再重新啟動遊戲。"
+                    )
+                case .failure(let failure):
+                    self.presentFailure(failure)
+                }
+            }
+        }
     }
 
     @objc private func showSettingsModal() {
@@ -910,9 +943,23 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             return .environmentNotReady
         }
         let exeURL = URL(fileURLWithPath: exePaths[0])
+        switch prefixForExecutable(exeURL) {
+        case .success(let prefix):
+            return runWineThroughLauncher(
+                context: context,
+                exe: exeURL.path,
+                prefix: prefix,
+                launchArguments: pendingLaunchArguments
+            )
+        case .failure(let failure):
+            return .failure(failure)
+        }
+    }
+
+    private func prefixForExecutable(_ executable: URL) -> CyderPrefixResolution {
         let profileStore = CyderProfileStore(root: CyderPaths.support)
         var prefix = CyderPaths.sharedBottle
-        switch profileStore.resolve(executable: exeURL) {
+        switch profileStore.resolve(executable: executable) {
         case .uncreated:
             break
         case .damaged(let id, let reason):
@@ -937,12 +984,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
                 logURL: CyderDiagnostics.shared.sessionLogURL
             ))
         }
-        return runWineThroughLauncher(
-            context: context,
-            exe: exeURL.path,
-            prefix: prefix,
-            launchArguments: pendingLaunchArguments
-        )
+        return .success(prefix)
     }
 
     private func installWinetricks(_ verbs: [String]) {
@@ -1000,7 +1042,8 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         context: CyderLaunchContext,
         exe: String,
         prefix: URL,
-        launchArguments: [String]? = nil
+        launchArguments: [String]? = nil,
+        launchEnvironment: [String: String] = [:]
     ) -> CyderLaunchOutcome {
         let activationWaiter = WineActivationWaiter(prefix: prefix.path)
         onMainThread { wineActivationWaiter = activationWaiter }
@@ -1048,22 +1091,26 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             args.append("--")
             args.append(contentsOf: launchArguments)
         }
+        var wineLaunchEnvironment = launchEnvironment
+        // Internal transport and lifecycle keys always win over per-game
+        // environment values.
+        wineLaunchEnvironment.merge([
+            "CYDER_WINE_DETACH": "1",
+            "CYDER_WINE_PID_FILE": pidURL.path,
+            "CYDER_WINE_RESULT_FILE": exitResultURL.path,
+            "CYDER_WINE_ACTIVATED_FILE": activatedURL.path,
+            "CYDER_SESSION_GUARD": "1",
+            // Always retain the quiet startup stream for optional manual
+            // diagnosis. UI classification uses the per-launch wait result
+            // below and does not depend on Wine log text.
+            "CYDER_CAPTURE_WINE_LOG": "1",
+        ]) { _, internalValue in internalValue }
         let result = runLauncher(
             context: context,
             args: args,
             stage: .wineSpawn,
             operation: "wine-launch",
-            extraEnvironment: [
-                "CYDER_WINE_DETACH": "1",
-                "CYDER_WINE_PID_FILE": pidURL.path,
-                "CYDER_WINE_RESULT_FILE": exitResultURL.path,
-                "CYDER_WINE_ACTIVATED_FILE": activatedURL.path,
-                "CYDER_SESSION_GUARD": "1",
-                // Always retain the quiet startup stream for optional manual
-                // diagnosis. UI classification uses the per-launch wait result
-                // below and does not depend on Wine log text.
-                "CYDER_CAPTURE_WINE_LOG": "1",
-            ]
+            extraEnvironment: wineLaunchEnvironment
         )
         guard result.succeeded else {
             return .failure(failure(

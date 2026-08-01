@@ -132,6 +132,7 @@ assert_contains "$library_ui" "confirmButton.title = \"套用\"" "game settings 
 assert_contains "$library_ui" 'title: "\(game.displayName) 的啟動選項"' "game settings title should identify the selected game"
 assert_contains "$library_ui" "使用目前選項啟動" "test action should explain that it launches with the current draft"
 assert_contains "$library_ui" "last-launch.log" "test action should mention where launch logs are written"
+assert_not_contains "$library_ui" "last-launch.log.gz" "uncompressed launch logs must not be labeled as gzip"
 test_launch_region="$(sed -n '/@objc private func launchGame()/,/^    }/p' "$ROOT/scripts/cyder_game_library_ui.swift")"
 if [[ "$test_launch_region" == *"stopModal"* ]]; then
   echo "ASSERT failed: testing a game should keep its launch-options window open" >&2
@@ -160,13 +161,15 @@ if [[ "$context_block" == *"開啟遊戲"* || "$context_block" == *"NSMenuItem.s
 fi
 assert_contains "$app" "shouldOpenGameLibraryOnLaunch" "app should choose the library as the main entry when games exist"
 assert_contains "$app" "gameLibraryController.window?.isVisible != true" "preferences should not terminate while the library remains open"
-assert_contains "$app" "openGameInDetachedCyder" "the library should delegate launches to a detached Cyder instance"
-assert_contains "$app" "createsNewApplicationInstance = true" "detached launches should not reuse the library process"
+assert_contains "$app" "launchGameFromLibrary" "the library should launch through the monitored Bash relay"
+assert_contains "$app" "libraryLaunchInProgress" "the library should serialize the activation-monitoring window"
+assert_not_contains "$app" "createsNewApplicationInstance = true" "library launches should retain UI error reporting"
 assert_contains "$app" "gameLibraryController.window?.isVisible == true" "Finder opens should preserve an already visible library"
 assert_contains "$app" "if !documentLaunchRequested {" "detached game launches should not show the parent application's active-session warning"
 assert_contains "$common" 'cyder_load_game_settings' "Bash should consume the game library's one-shot launch settings"
 assert_contains "$app" "開啟相關記錄" "failure dialog should use the specific related-log label"
 assert_contains "$app" "exportLastGameLog" "app should handle last-game log export"
+assert_contains "$app" 'Cyder-last-game.log"' "exported launch logs should use the uncompressed .log extension"
 assert_contains "$app" "exportLastGameLog(to: destination)" "app should copy the selected game log directly"
 assert_contains "$app" "cleanDebugLogs" "app should handle debug-log cleanup"
 assert_contains "$common" "NTDLL SHA-256:" "launch diagnostics should identify the loaded NTDLL"
