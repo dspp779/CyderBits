@@ -27,8 +27,8 @@ Channels:
 
 Options:
   --channel CHANNEL       test | release (required)
-  --version VERSION       CFBundle version (test default: 0.9.2-dev;
-                          release default: 0.9.2 or CYDER_APP_VERSION)
+  --version VERSION       CFBundle version (test default: 0.9.3-dev;
+                          release default: 0.9.3 or CYDER_APP_VERSION)
   --engine-archive PATH   Bundle this engine tarball (else pinned config path)
   --sign-identity ID      codesign identity ('-' for ad-hoc). test defaults to
                           '-'; release defaults to Developer ID Application.
@@ -147,7 +147,30 @@ build_app() {
   fi
   cmd+=("$OUT_DIR")
   echo "==> Building Cyder.app (channel=$CHANNEL version=$CYDER_APP_VERSION)"
-  run env CYDER_APP_VERSION="$CYDER_APP_VERSION" SIGN_IDENTITY="$SIGN_IDENTITY" "${cmd[@]}"
+  run env CYDER_APP_VERSION="$CYDER_APP_VERSION" \
+    CYDER_REQUIRE_NATIVE_SWIFT="$([[ "$CHANNEL" == release ]] && echo 1 || echo 0)" \
+    SIGN_IDENTITY="$SIGN_IDENTITY" "${cmd[@]}"
+}
+
+verify_release_app_contract() {
+  local swift="$APP/Contents/MacOS/CyderSwift" actual_version
+  [[ -d "$APP" && -f "$swift" ]] || {
+    echo "Release app is incomplete: $APP" >&2
+    exit 1
+  }
+  actual_version="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP/Contents/Info.plist" 2>/dev/null || true)"
+  [[ "$actual_version" == "$CYDER_APP_VERSION" ]] || {
+    echo "Release app version mismatch: expected $CYDER_APP_VERSION, got ${actual_version:-missing}" >&2
+    exit 1
+  }
+  /usr/bin/file -b "$swift" | grep -q 'Mach-O' || {
+    echo "Release app requires native CyderSwift; shell fallback found." >&2
+    exit 1
+  }
+  /usr/bin/lipo -verify_arch x86_64 arm64 "$swift" >/dev/null || {
+    echo "Release CyderSwift is not universal (x86_64 + arm64)." >&2
+    exit 1
+  }
 }
 
 notarize_and_zip() {
@@ -194,7 +217,7 @@ case "$CHANNEL" in
     if [[ "$SIGN_IDENTITY" != "-" ]]; then
       echo "NOTE: test channel with non-adhoc SIGN_IDENTITY=$SIGN_IDENTITY (no notarization)"
     fi
-    CYDER_APP_VERSION="${APP_VERSION:-${CYDER_APP_VERSION:-0.9.2-dev}}"
+    CYDER_APP_VERSION="${APP_VERSION:-${CYDER_APP_VERSION:-0.9.3-dev}}"
     export CYDER_APP_VERSION
     if [[ "$SKIP_BUILD" -eq 1 ]]; then
       echo "test channel ignores --skip-build (nothing to notarize)" >&2
@@ -207,12 +230,13 @@ case "$CHANNEL" in
     if [[ -n "$SIGN_IDENTITY_OVERRIDE" ]]; then
       export SIGN_IDENTITY="$SIGN_IDENTITY_OVERRIDE"
     fi
-    require_developer_id
-    CYDER_APP_VERSION="${APP_VERSION:-${CYDER_APP_VERSION:-0.9.2}}"
+    CYDER_APP_VERSION="${APP_VERSION:-${CYDER_APP_VERSION:-0.9.3}}"
     export CYDER_APP_VERSION
-    if [[ "$CYDER_APP_VERSION" == *dev* || "$CYDER_APP_VERSION" == *-rc* ]]; then
-      echo "WARNING: release channel version looks like a pre-release: $CYDER_APP_VERSION" >&2
-    fi
+    [[ "$CYDER_APP_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || {
+      echo "Release channel requires a stable semantic version: $CYDER_APP_VERSION" >&2
+      exit 1
+    }
+    require_developer_id
     if [[ -z "$ENGINE_ARCHIVE" ]]; then
       if ! ENGINE_ARCHIVE="$(resolve_pinned_engine)"; then
         echo "Missing pinned engine archive (config/cyder-engine-archive.txt)." >&2
@@ -226,6 +250,7 @@ case "$CHANNEL" in
     else
       echo "==> Skipping build; using existing $APP"
     fi
+    verify_release_app_contract
     if [[ "$SKIP_NOTARIZE" -eq 1 ]]; then
       echo "==> Skipping notarization (--skip-notarize)"
       run codesign --verify --deep --strict --verbose=2 "$APP"

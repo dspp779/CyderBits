@@ -19,7 +19,7 @@ bash scripts/release-cyder.sh --channel release  # 正式發佈（含公證）
 | Engine | 可用 `--engine-archive` 指向 rc／本機 pack；可不改 pin | **必須**有 pinned archive（`config/cyder-engine-archive.txt`）或顯式傳入已驗證的 release tarball |
 | `SIGN_IDENTITY` | 預設 `-`（adhoc） | Developer ID + secure timestamp |
 | 公證 | 不做 | `notarytool` → `stapler` → **再**壓發佈 zip |
-| 預設 App 版本 | `0.9.0-dev`（可用 `--version` 改） | `0.9.0`（請用乾淨 semver） |
+| 預設 App 版本 | `0.9.3-dev`（可用 `--version` 改） | `0.9.3`（必須是乾淨 semver） |
 | Gatekeeper | 可能需右鍵「打開」 | `spctl` 顯示 Notarized Developer ID |
 | 可否當公開下載 | **否** | **是**（staple 後的 `Cyder.app.zip`） |
 
@@ -66,12 +66,12 @@ bash scripts/import-engine-release.sh \
 ## 測試／分支通道
 
 ```bash
-# 預設 adhoc、版本 0.9.0-dev、使用 pinned 或 create-cyder-app 預設引擎尋找邏輯
+# 預設 adhoc、版本 0.9.3-dev、使用 pinned 或 create-cyder-app 預設引擎尋找邏輯
 bash scripts/release-cyder.sh --channel test
 
 # 指定本機 rc 引擎與版本字串
 bash scripts/release-cyder.sh --channel test \
-  --version 0.9.1-branch-foo \
+  --version 0.9.3-branch-foo \
   --engine-archive /path/to/engine-wine-x86_64-….tar.xz
 
 # 測試通道若需暫時用 Developer ID 簽（仍不公證）:
@@ -84,7 +84,7 @@ bash scripts/release-cyder.sh --channel test \
 等價手做：
 
 ```bash
-SIGN_IDENTITY=- CYDER_APP_VERSION=0.9.0-dev \
+SIGN_IDENTITY=- CYDER_APP_VERSION=0.9.3-dev \
   bash scripts/create-cyder-app.sh
 ```
 
@@ -98,7 +98,7 @@ SIGN_IDENTITY=- CYDER_APP_VERSION=0.9.0-dev \
 
 ```bash
 # 完整：建置 + Developer ID + 公證 + staple + Cyder.app.zip
-bash scripts/release-cyder.sh --channel release --version 0.9.0
+bash scripts/release-cyder.sh --channel release --version 0.9.3
 
 # 已有簽好的 App，只做公證／staple／zip
 bash scripts/release-cyder.sh --channel release --skip-build
@@ -112,7 +112,7 @@ bash scripts/release-cyder.sh --channel release --skip-notarize
 1. 確認 keychain 有 Developer ID（拒絕 `SIGN_IDENTITY=-`）
 2. 確認 pinned engine 存在（或使用 `--engine-archive`）
 3. 呼叫 `create-cyder-app.sh`
-4. `codesign --verify --deep --strict`
+4. 確認版本字串、Universal native `CyderSwift`，再執行 `codesign --verify --deep --strict`
 5. `ditto` → `notarytool submit --wait` → `stapler staple` → 再 `ditto` 出 `dist/Cyder.app.zip`
 6. `spctl -a -vv`
 

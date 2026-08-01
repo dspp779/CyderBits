@@ -100,7 +100,7 @@ xcrun notarytool store-credentials cyder-notary \
 建議用一鍵腳本（會做建置、簽署、公證、staple、發佈 zip）：
 
 ```bash
-bash scripts/release-cyder.sh --channel release --version 0.9.0
+bash scripts/release-cyder.sh --channel release --version 0.9.3
 ```
 
 或手做下列步驟。

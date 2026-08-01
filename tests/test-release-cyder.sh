@@ -26,6 +26,14 @@ assert_contains "$script" '--sign-identity' \
   "pipeline should accept an explicit --sign-identity"
 assert_contains "$script" 'test channel with non-adhoc' \
   "test channel should warn when an explicit non-adhoc identity is used"
+assert_contains "$script" 'CYDER_REQUIRE_NATIVE_SWIFT' \
+  "release channel must fail closed when native Swift compilation fails"
+assert_contains "$script" 'verify_release_app_contract' \
+  "release channel must verify version and universal native CyderSwift"
+assert_contains "$script" 'requires a stable semantic version' \
+  "release channel must reject dev and rc version strings"
+assert_contains "$(cat "$ROOT/scripts/create-cyder-app.sh")" '0.9.3' \
+  "next App build must default to version 0.9.3"
 
 # Dry-run test channel should not require Developer ID or network.
 # Inherit a release-looking SIGN_IDENTITY to ensure test still forces ad-hoc.
@@ -35,5 +43,13 @@ out="$(
 )"
 assert_contains "$out" 'create-cyder-app.sh' "test dry-run should invoke create-cyder-app"
 assert_contains "$out" 'SIGN_IDENTITY=-' "test dry-run should force ad-hoc identity"
+
+set +e
+unstable_out="$(bash "$ROOT/scripts/release-cyder.sh" --channel release --version 0.9.3-rc1 --dry-run 2>&1)"
+unstable_status=$?
+set -e
+assert_eq "$unstable_status" "1" "release channel should reject a prerelease version before signing"
+assert_contains "$unstable_out" "requires a stable semantic version" \
+  "release rejection should explain the stable-version contract"
 
 echo "PASS test-release-cyder"

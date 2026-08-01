@@ -30,6 +30,10 @@ assert_contains "$build_script" '<key>NSDesktopFolderUsageDescription</key>' \
   "Info.plist must explain Desktop folder access"
 assert_contains "$build_script" '<key>NSDownloadsFolderUsageDescription</key>' \
   "Info.plist must explain Downloads folder access"
+assert_contains "$build_script" '<key>NSRemovableVolumesUsageDescription</key>' \
+  "Info.plist must explain on-demand removable-volume access"
+assert_contains "$build_script" '<key>NSNetworkVolumesUsageDescription</key>' \
+  "Info.plist must explain on-demand network-volume access"
 assert_contains "$build_script" '<key>CFBundleTypeIconFile</key>' \
   "Info.plist must declare a document icon for .exe"
 assert_contains "$build_script" '<key>UTImportedTypeDeclarations</key>' \

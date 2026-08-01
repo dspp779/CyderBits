@@ -8,7 +8,7 @@ unset HOMEBREW_PREFIX OGOM WINE_INSTALL ENTITLEMENTS_PLIST
 source "$SCRIPT_DIR/env-x86_64.sh"
 
 OUT_DIR="${OGOM}/dist"
-CYDER_APP_VERSION="${CYDER_APP_VERSION:-0.9.2}"
+CYDER_APP_VERSION="${CYDER_APP_VERSION:-0.9.3}"
 # Release identity by default; export SIGN_IDENTITY=- for an unsigned local build.
 SIGN_IDENTITY="${SIGN_IDENTITY:-Developer ID Application: Chun Ho Kwok (3U9565WWM2)}"
 if [[ "$SIGN_IDENTITY" == "-" ]]; then
@@ -349,6 +349,10 @@ if swiftc "$SWIFT_OPTIMIZATION" -sdk "$SWIFT_SDK" -module-cache-path "$SWIFT_MOD
   echo "==> Compiled universal native CyderSwift (macOS 11+ UI)"
 else
   rm -rf "$SWIFT_BUILD_DIR"
+  if [[ "${CYDER_REQUIRE_NATIVE_SWIFT:-0}" == 1 ]]; then
+    echo "==> Error: release build requires universal native CyderSwift" >&2
+    exit 1
+  fi
   echo "==> Warning: universal Swift build failed; CyderSwift falls back to shell launcher" >&2
   cat > "$MACOS/CyderSwift" <<LAUNCHER
 #!/bin/bash
@@ -427,6 +431,10 @@ cat > "$CONTENTS/Info.plist" <<PLIST
   <string>Cyder 需要讀取遊戲執行檔及同一資料夾內的 DLL 與資料檔案。</string>
   <key>NSDownloadsFolderUsageDescription</key>
   <string>Cyder 需要讀取遊戲執行檔及同一資料夾內的 DLL 與資料檔案。</string>
+  <key>NSRemovableVolumesUsageDescription</key>
+  <string>Cyder 只會在您啟動外接磁碟中的遊戲時，讀取該遊戲的執行檔、DLL 與資料檔案。</string>
+  <key>NSNetworkVolumesUsageDescription</key>
+  <string>Cyder 只會在您啟動網路磁碟中的遊戲時，讀取該遊戲的執行檔、DLL 與資料檔案。</string>
   <key>CFBundleDocumentTypes</key>
   <array>
     <dict>

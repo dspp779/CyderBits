@@ -13,6 +13,7 @@
 
 | 版本 | 文件 | 重點 |
 |------|------|------|
+| 0.9.3 | [繁中](releases/v0.9.3.md) | macOS 11 UI、Catalina Terminal 初始化、Bash 單一路徑、啟動錯誤與受保護資料夾提示 |
 | 0.9.2 | [繁中](releases/v0.9.2.md) | 同版引擎升級也會套用 MoltenVK wait-poll shim；其餘同 0.9.1 |
 | 0.9.1 | [繁中](releases/v0.9.1.md) | MoltenVK wait-poll shim overlay（DXVK Ports 洩漏）；引擎仍 Cyder007 |
 | 0.9.0 | [繁中](releases/v0.9.0.md) · [English](releases/v0.9.0.en.md) | CX26.3 Cyder007（wineserver／DXVK／minOS 10.15）、診斷 preamble、test／release 發佈通道 |
