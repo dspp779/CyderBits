@@ -1,17 +1,17 @@
 {
   "schemaVersion": 1,
-  "engineId": "cx26.3-w11-cyder007",
-  "versionLabel": "CX26.3.0-W11-Cyder007",
+  "engineId": "cx26.3-w11-cyder008",
+  "versionLabel": "CX26.3.0-W11-Cyder008",
   "base": {
     "crossover": "26.3.0",
     "wine": "11.0"
   },
   "hostArchitecture": "x86_64",
-  "windowsArchitectures": ["i386", "x86_64"],
-  "minimumCyderVersion": "0.8.3",
-  "ntdllSHA256": "1cad2a9cbd2213542376cd30ba392677997e0da2138f7d71315bff34fcb0a137",
-  "artifact": "engine-wine-x86_64-CX26-3-0-W11-Cyder007.tar.xz",
-  "artifactSHA256": "a9f1dab427ed3287d49910c001a2582f068f5808357a9bc0ef3247fdf7e73ec0",
+  "windowsArchitectures": [
+    "i386",
+    "x86_64"
+  ],
+  "minimumCyderVersion": "0.9.0",
   "patches": [
     "cyder-compatdb-runtime.patch",
     "wine-11.1-rtlwalkframechain-null-function.patch",
@@ -21,6 +21,12 @@
     "cyder-wineserver-exit-diagnostics.patch",
     "cyder-wineserver-fd-reselect-async-null-ops.patch",
     "cyder-wineserver-sock-rebind-async-fd.patch",
-    "cyder-wineserver-pipe-end-disconnect-null-fd.patch"
-  ]
+    "cyder-wineserver-async-terminate-null-fd.patch",
+    "cyder-wineserver-pipe-end-disconnect-null-fd.patch",
+    "cyder-wineserver-add-completion-guard.patch"
+  ],
+  "notes": "Cyder008 adds teardown hardening and the complete NTDLL frame-walk guard set. Packed and pinned for Cyder 0.9.3 after engine tests, minOS checks, signature verification, and archive round-trip validation.",
+  "ntdllSHA256": "a79ca2e2aab01fe809bfbb2499e374a731734fa1fa2fc32b0890a267c9030de4",
+  "artifact": "engine-wine-x86_64-CX26-3-0-W11-Cyder008.tar.xz",
+  "artifactSHA256": "9330a928c02a23a6fd9c2d6d67412552a1c51a178cd66a7a1dbb76508887c689"
 }

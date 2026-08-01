@@ -48,7 +48,7 @@ pack-engine-artifact.sh  ──►  import-engine-release.sh --apply
 
 ```bash
 # 見該 repo docs/incremental-build-and-patches.md
-CYDER_ENGINE_VERSION_LABEL='CX26.3.0-W11-Cyder007-rc1' \
+CYDER_ENGINE_VERSION_LABEL='CX26.3.0-W11-Cyder008-rc1' \
 SIGN_IDENTITY='Developer ID Application: …' \   # 正式引擎建議 Developer ID
   bash scripts/pack-engine-artifact.sh --xz --force
 ```

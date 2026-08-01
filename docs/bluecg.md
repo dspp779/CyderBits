@@ -97,7 +97,7 @@ bash scripts/create-bluecg-app.sh --link-prefix
 
 ## 已知問題
 
-- **視窗縮放黑屏（已由 A6 final 解決）**：Cyder 現行 engine 為 `CX26.3.0-W11-Cyder007`（含 A6 same-view backing sync）；原版／A2／A4 的歷史差異與 fallback 見 [bluecg-winemac-resize-black-screen.md](bluecg-winemac-resize-black-screen.md)。首版 A6 驗收 artifact（`CX26.2.0-W11-Cyder003`）見 [bluecg-winemac-a6-engine.md](bluecg-winemac-a6-engine.md)
+- **視窗縮放黑屏（已由 A6 final 解決）**：Cyder 現行 engine 為 `CX26.3.0-W11-Cyder008`（含 A6 same-view backing sync）；原版／A2／A4 的歷史差異與 fallback 見 [bluecg-winemac-resize-black-screen.md](bluecg-winemac-resize-black-screen.md)。首版 A6 驗收 artifact（`CX26.2.0-W11-Cyder003`）見 [bluecg-winemac-a6-engine.md](bluecg-winemac-a6-engine.md)
 - Sikarugir Wine 10 / CX24 在**無 RetinaMode** 下可平滑縮放；CX24 + 高 DPI 可滿版無黑邊
 - **無 A6 engine 時的迴避（GL 路徑）**：**進入遊戲世界前**調窗或 `Alt+Enter` 等比放到最大；進入後勿再改視窗大小（含 Alt+Enter）
 - **暫用（GDI registry）**：進入遊戲後仍可縮放不黑，但無線性過濾、縮放模糊；Retina + 高 DPI 僅改善靜態畫質，進遊戲前調準尺寸

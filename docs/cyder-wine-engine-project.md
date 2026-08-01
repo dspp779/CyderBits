@@ -42,15 +42,15 @@ Cyder 的 [`scripts/import-engine-release.sh`](../scripts/import-engine-release.
 驗證包含 sidecar schema、archive digest、archive 內的 `version`、embedded manifest，以及
 實際解出的 `ntdll.dll` digest。任一項不一致即停止，不會部分更新 pin。
 
-Cyder 0.9.0 已 pin `CX26.3.0-W11-Cyder007`（含 wineserver 修補、DXVK payload、host
+Cyder 0.9.3 已 pin `CX26.3.0-W11-Cyder008`（含完整 frame-walk／wineserver teardown
+防護、DXVK payload、host
 minOS ≤ 10.15）。匯入時已驗證 archive、sidecar、內嵌 manifest、版本與 packaged
 `ntdll.dll` digest；對外發布前仍必須完成 Developer ID 簽章、公證與遊戲 smoke test
 （見 [`release-pipeline.zh-TW.md`](release-pipeline.zh-TW.md)）。
 
-**下一版引擎候選 `CX26.3.0-W11-Cyder008`：** 引擎 tree 已標版本並加入 leave／強制結束
-teardown soft-guard（async／pipe／completion）；細節在引擎 repo
-`docs/wineserver-teardown-hardening-cyder008.md`。須先 `pack-engine-artifact` 再 pin
-進 Cyder，**目前 App 仍跑 Cyder007**。
+Cyder008 加入 leave／強制結束 teardown soft-guard（async／pipe／completion）；細節在
+引擎 repo `docs/wineserver-teardown-hardening-cyder008.md`。正式 archive 已由引擎 repo
+封裝並透過 manifest 契約匯入本專案。
 
 ## 保留相容副本
 
