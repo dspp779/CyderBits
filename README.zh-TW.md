@@ -73,7 +73,7 @@ bash scripts/run-bluecg.sh
 |---|---|---|
 | DirectDraw / GDI | **支援且已驗證** | BlueCG 使用 DirectDraw；預設路徑是 wined3d/OpenGL，GDI 是相容性 fallback。 |
 | wined3d / OpenGL | **目前預設** | BlueCG 驗證用 engine 含已測試的 `winemac.drv` same-view backing 修復，可支援 Retina/DPI resize。 |
-| Vulkan / MoltenVK | **目前封裝 engine 已包含** | x86_64 Wine 內含 `libMoltenVK.dylib`（macOS 10.15 minos）；這不是 BlueCG 的繪圖路徑。`pack-engine-artifact.sh` 預設保留 MoltenVK；從原始碼重建仍可用 `--without-vulkan`。 |
+| Vulkan / MoltenVK | **目前封裝 engine 已包含** | x86_64 Wine 內含 `libMoltenVK.dylib`（macOS 10.15 minos）；另外暫時打包 wait-poll shim，直到 MoltenVK 相關問題修復。這不是 BlueCG 的繪圖路徑。`pack-engine-artifact.sh` 預設保留 MoltenVK；從原始碼重建仍可用 `--without-vulkan`。 |
 | DXVK | **尚未整合** | 本 repo 沒有打包 DXVK runtime，也沒有遊戲驗證結果。 |
 | dxmt | **尚未整合** | 尚無 dxmt 建置、封裝或相容性結果。 |
 | D3DMetal | **不是產品 backend** | 只在歷史 source 實驗中被提及，尚未接入或驗證為 Cyder runtime 路徑。 |

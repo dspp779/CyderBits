@@ -222,6 +222,8 @@ if [[ -f "$OGOM/tools/cabextract/COPYING" ]]; then
 fi
 
 # Prebuild MoltenVK wait-poll shim (RC overlay; does not bump engine label).
+# This remains a required packaging target until the underlying MoltenVK issue
+# is fixed. The resulting dylib is the only shim source allowed at runtime.
 echo "==> Building MoltenVK timeline-wait poll shim"
 MVK_SHIM_SRC="$OGOM/tools/cyder-mvk-timeline-wait-poll/cyder_mvk_timeline_wait_poll.m"
 MVK_SHIM_OUT="$RES/tools/moltenvk-wait-poll/libMoltenVK.dylib"
@@ -271,6 +273,11 @@ install_name_tool -change "$MVK_SHIM_STAGE/libMoltenVK.real.dylib" \
 strings -a "$MVK_SHIM_OUT" | grep -q 'cyder-moltenvk-timeline-wait-poll' || {
   rm -rf "$MVK_SHIM_STAGE"
   echo "Built wait-poll shim missing marker string" >&2
+  exit 1
+}
+[[ -f "$MVK_SHIM_OUT" ]] || {
+  rm -rf "$MVK_SHIM_STAGE"
+  echo "MoltenVK wait-poll shim was not packaged: $MVK_SHIM_OUT" >&2
   exit 1
 }
 cp "$MVK_SHIM_SRC" "$RES/tools/moltenvk-wait-poll/"

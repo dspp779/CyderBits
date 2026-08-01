@@ -33,6 +33,10 @@ open dist/Cyder.app
 關掉 MoltenVK **不能**讓現行 engine 跑在 10.15 以下：Wine 本體也是 10.15。若未來以更低 `MACOSX_DEPLOYMENT_TARGET` 重建 Wine，runtime 會在 &lt;10.15 停用 `winevulkan`／MoltenVK，非 Vulkan 遊戲仍可嘗試啟動；理論下限接近 Wine configure 的 ~10.7（僅 Intel），實務仍受其他 dylib 與 Rosetta 限制。
 
 Engine 內嵌的 Homebrew runtime 庫（freetype／png／gnutls 鏈等）與 media stack（glib／gstreamer）皆以 `MACOSX_DEPLOYMENT_TARGET=10.15` **從原始碼**建置；不使用目前僅支援 macOS 14+ 的 brew bottles。`scripts/env-x86_64.sh` 的 `brew_x86_install_runtime` 會以 compiler wrapper 強制 `-mmacosx-version-min=10.15`；`bundle-wine-dylibs.sh` 會在打包後檢查 Mach-O `minos`，超過 10.15 即失敗。
+
+### MoltenVK wait-poll shim
+
+目前仍需在打包時嵌入 `tools/moltenvk-wait-poll/libMoltenVK.dylib`，以暫時避開 MoltenVK／DXVK 長時間執行時的 wait-related Mach Ports 問題。這是持續的打包目標，直到 MoltenVK 本身完成修復；使用者端只會套用 App 內的 prebuilt shim，不會要求 Xcode 或 Command Line Tools，也不會在 runtime 現場編譯。
 ## 開啟 .exe
 
 單獨開啟 `Cyder.app`、確認設定後，會以載入階段文字依序顯示：**正在儲存設定…** → **正在準備遊戲執行元件…** → **正在準備遊戲環境…** → **正在套用新設定…**。之後從 Finder 開啟 `.exe` 會直接啟動，不顯示設定或準備視窗。
