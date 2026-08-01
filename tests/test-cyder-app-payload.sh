@@ -22,6 +22,14 @@ assert_contains "$build_script" 'cp "$SCRIPT_DIR/cyder-macos-wrapper.sh" "$MACOS
   "Cyder.app entrypoint must be the OS-version wrapper"
 assert_contains "$build_script" '<string>10.15</string>' \
   "Info.plist LSMinimumSystemVersion must match the Wine engine floor"
+assert_contains "$build_script" '<key>CyderRecommendedGamesDirectory</key>' \
+  "Info.plist must declare the recommended ~/Games location"
+assert_contains "$build_script" '<key>NSDocumentsFolderUsageDescription</key>' \
+  "Info.plist must explain Documents folder access"
+assert_contains "$build_script" '<key>NSDesktopFolderUsageDescription</key>' \
+  "Info.plist must explain Desktop folder access"
+assert_contains "$build_script" '<key>NSDownloadsFolderUsageDescription</key>' \
+  "Info.plist must explain Downloads folder access"
 assert_contains "$build_script" '<key>CFBundleTypeIconFile</key>' \
   "Info.plist must declare a document icon for .exe"
 assert_contains "$build_script" '<key>UTImportedTypeDeclarations</key>' \

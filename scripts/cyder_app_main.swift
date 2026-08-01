@@ -1075,6 +1075,20 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
                 return .success
             }
             if winePID > 0, kill(winePID, 0) != 0 {
+                let executable = URL(fileURLWithPath: exe)
+                if let protectedLocation = protectedGameLocation(for: executable),
+                   launchLogShowsFolderAccessDenied() {
+                    let launchLog = CyderPaths.support
+                        .appendingPathComponent("Logs", isDirectory: true)
+                        .appendingPathComponent("last-launch.log")
+                    return .failure(CyderFailure(
+                        code: "CYD-WIN-003",
+                        stage: .wineSpawn,
+                        summary: "遊戲位於 macOS 可能限制存取的「\(protectedLocation)」。請將整個遊戲資料夾移到 ~/Games 後再試。",
+                        technicalDetails: "Wine could not load a sibling DLL with STATUS_ACCESS_DENIED (c0000022). Executable: \(executable.path)",
+                        logURL: launchLog
+                    ))
+                }
                 return .failure(CyderFailure(
                     code: "CYD-WIN-002",
                     stage: .wineSpawn,
@@ -1088,6 +1102,43 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             "wine activation timed out after 30s pid=\(winePID); process remains detached"
         )
         return .success
+    }
+
+    private func protectedGameLocation(for executable: URL) -> String? {
+        let resolved = executable.resolvingSymlinksInPath().standardizedFileURL.path
+        let home = FileManager.default.homeDirectoryForCurrentUser
+        let locations: [(String, URL)] = [
+            ("Documents", home.appendingPathComponent("Documents", isDirectory: true)),
+            ("Desktop", home.appendingPathComponent("Desktop", isDirectory: true)),
+            ("Downloads", home.appendingPathComponent("Downloads", isDirectory: true)),
+            ("iCloud Drive", home.appendingPathComponent("Library/Mobile Documents", isDirectory: true)),
+            ("Cloud Storage", home.appendingPathComponent("Library/CloudStorage", isDirectory: true)),
+        ]
+        for (name, directory) in locations {
+            let root = directory.resolvingSymlinksInPath().standardizedFileURL.path
+            if resolved == root || resolved.hasPrefix(root + "/") {
+                return name
+            }
+        }
+        if resolved == "/Volumes" || resolved.hasPrefix("/Volumes/") {
+            return "外接或網路磁碟"
+        }
+        return nil
+    }
+
+    private func launchLogShowsFolderAccessDenied() -> Bool {
+        let logURL = CyderPaths.support
+            .appendingPathComponent("Logs", isDirectory: true)
+            .appendingPathComponent("last-launch.log")
+        for _ in 0..<5 {
+            if let text = try? String(contentsOf: logURL, encoding: .utf8),
+               text.localizedCaseInsensitiveContains("failed (error c0000022)"),
+               text.localizedCaseInsensitiveContains("status c0000135") {
+                return true
+            }
+            Thread.sleep(forTimeInterval: 0.1)
+        }
+        return false
     }
 
     @objc private func wineAppWillActivate(_ notification: Notification) {
@@ -1243,6 +1294,10 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         allowsRebuild: Bool = false
     ) -> CyderFailureAction {
         CyderDiagnostics.shared.record(failure)
+        if failure.code == "CYD-WIN-003" {
+            presentProtectedGameFolderFailure(failure)
+            return .close
+        }
         var action: CyderFailureAction = .close
         onMainThread {
             let alert = NSAlert()
@@ -1290,6 +1345,43 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             }
         }
         return action
+    }
+
+    private func presentProtectedGameFolderFailure(_ failure: CyderFailure) {
+        onMainThread {
+            let alert = NSAlert()
+            alert.messageText = "無法讀取完整的遊戲資料夾"
+            alert.informativeText = failure.summary
+            alert.alertStyle = .warning
+            alert.addButton(withTitle: "打開 Games 資料夾")
+            alert.addButton(withTitle: "關閉")
+            alert.addButton(withTitle: "開啟相關記錄")
+            let response = runFrontmostAlert(
+                alert,
+                dockVisible: terminateWhenSettingsClose && !documentLaunchRequested
+            )
+            if response == .alertFirstButtonReturn {
+                openRecommendedGamesDirectory()
+            } else if response == .alertThirdButtonReturn {
+                let selected = failure.logURL ?? CyderDiagnostics.shared.sessionLogURL
+                NSWorkspace.shared.activateFileViewerSelecting([selected])
+            }
+        }
+    }
+
+    private func openRecommendedGamesDirectory() {
+        let configured = Bundle.main.object(forInfoDictionaryKey: "CyderRecommendedGamesDirectory") as? String
+        let configuredPath = configured.flatMap { $0.isEmpty ? nil : $0 } ?? "~/Games"
+        let relative = configuredPath
+            .replacingOccurrences(of: "~/", with: "")
+        let games = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(relative, isDirectory: true)
+        do {
+            try FileManager.default.createDirectory(at: games, withIntermediateDirectories: true)
+            NSWorkspace.shared.open(games)
+        } catch {
+            showAlert("無法建立 Games 資料夾", error.localizedDescription, style: .critical)
+        }
     }
 
     private func chooseExeOnMainThread() -> String? {

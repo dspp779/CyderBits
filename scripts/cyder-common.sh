@@ -2198,13 +2198,19 @@ cyder_run_wine_exe() {
       capture_log=1
       ;;
     unwind)
-      wine_debug="-all,+timestamp,+pid,+tid,+seh,+unwind"
+      wine_debug="-all,err+module,+timestamp,+pid,+tid,+seh,+unwind"
       capture_log=1
       ;;
     *)
       wine_diagnostics="quiet"
       ;;
   esac
+  # Finder launches retain a quiet startup log even when diagnostics are off.
+  # Keep module loader failures visible so macOS folder-denial errors can be
+  # distinguished from ordinary early game exits without enabling err+all.
+  if [[ "$capture_log" == 1 && "$wine_diagnostics" == quiet ]]; then
+    wine_debug="-all,err+module,+timestamp,+pid,+tid"
+  fi
   local engine_root canonical_prefix engine_version ntdll_sha256="unavailable"
   engine_root="$(cd "$(dirname "$wine_bin")/.." && pwd -P)"
   canonical_prefix="$(cd "$prefix" 2>/dev/null && pwd -P || printf '%s' "$prefix")"

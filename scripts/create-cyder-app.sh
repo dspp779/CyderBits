@@ -419,6 +419,14 @@ cat > "$CONTENTS/Info.plist" <<PLIST
   <string>10.15</string>
   <key>NSHighResolutionCapable</key>
   <true/>
+  <key>CyderRecommendedGamesDirectory</key>
+  <string>~/Games</string>
+  <key>NSDocumentsFolderUsageDescription</key>
+  <string>Cyder 需要讀取遊戲執行檔及同一資料夾內的 DLL 與資料檔案。</string>
+  <key>NSDesktopFolderUsageDescription</key>
+  <string>Cyder 需要讀取遊戲執行檔及同一資料夾內的 DLL 與資料檔案。</string>
+  <key>NSDownloadsFolderUsageDescription</key>
+  <string>Cyder 需要讀取遊戲執行檔及同一資料夾內的 DLL 與資料檔案。</string>
   <key>CFBundleDocumentTypes</key>
   <array>
     <dict>

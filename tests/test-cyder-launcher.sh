@@ -126,6 +126,9 @@ assert_contains "$(cat "$TMP/run-support/Logs/last-launch.log")" "DXVK_HUD=" \
   "captured launches should include DXVK_HUD in the effective env block"
 assert_contains "$(cat "$TMP/run-support/Logs/last-launch.log")" "Wine diagnostics: quiet" \
   "captured launches should record the default quiet diagnostics profile"
+assert_contains "$(cat "$TMP/run-support/Logs/last-launch.log")" \
+  "WINEDEBUG=-all,err+module,+timestamp,+pid,+tid" \
+  "captured quiet launches should retain only module-loader errors"
 assert_contains "$(cat "$TMP/run-support/Logs/last-launch.log")" "Engine version:" \
   "captured launches should record the actual engine identity"
 launch_log_count="$(find "$TMP/run-support/Logs" -maxdepth 1 -type f -name 'launch-*.log' | wc -l | tr -d ' ')"
@@ -170,6 +173,18 @@ assert test -L "$TMP/sync-log-support/Logs/last-launch.log"
 assert_contains "$(cat "$TMP/sync-log-support/Logs/last-launch.log")" \
   "WINEDEBUG=-all,err+all,+timestamp,+pid,+tid,+sync" \
   "sync diagnostics should enable wait tracing for freeze diagnosis"
+
+# Full stack tracing still needs loader errors for actionable early exits.
+CYDER_SUPPORT="$TMP/unwind-log-support" \
+CYDER_SCRIPTS="$ROOT/scripts" \
+CYDER_TEST_ARGS="$TMP/unwind-log-args" \
+CYDER_WINE_DIAGNOSTICS=unwind \
+PATH="$TMP/fake-bin:$PATH" \
+  bash -c 'source "$1/scripts/cyder-common.sh"; cyder_init_paths "$1"; cyder_run_wine_exe "$2/wine" "$3"' \
+    _ "$ROOT" "$TMP/fake-bin" "$TMP/foreground-test.exe"
+assert_contains "$(cat "$TMP/unwind-log-support/Logs/last-launch.log")" \
+  "WINEDEBUG=-all,err+module,+timestamp,+pid,+tid,+seh,+unwind" \
+  "unwind diagnostics should retain module-loader errors"
 
 # Sync modes are mutually exclusive, and normal Cyder launches must not add
 # global DLL overrides now that those settings live in the prefix registry.

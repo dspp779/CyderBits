@@ -25,6 +25,14 @@ assert_contains "$source_text" '"CYDER_WINE_DETACH": "1"' \
   "the AppKit document relay must request a detached Bash launch"
 assert_contains "$source_text" '"CYDER_CAPTURE_WINE_LOG": "1"' \
   "Finder launches must retain startup stderr when Wine exits before activation"
+assert_contains "$source_text" 'launchLogShowsFolderAccessDenied()' \
+  "early Wine exits must detect protected-folder DLL access denial"
+assert_contains "$source_text" 'code: "CYD-WIN-003"' \
+  "protected-folder failures must use a dedicated actionable error"
+assert_contains "$source_text" 'alert.addButton(withTitle: "打開 Games 資料夾")' \
+  "protected-folder failures must offer to open the recommended location"
+assert_contains "$source_text" 'FileManager.default.createDirectory(at: games' \
+  "the recommended Games directory must be created on demand"
 assert_contains "$source_text" 'args: [context.launcher' \
   "native operations must invoke the bundled Bash launcher"
 support_text="$(cat "$ROOT/scripts/cyder_launch_support.swift")"
