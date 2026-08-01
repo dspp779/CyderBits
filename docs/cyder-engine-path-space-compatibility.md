@@ -170,7 +170,7 @@ arch -x86_64 "$ENGINE/bin/wine" "$EXE"
 ## Cyder 原始碼對照點
 
 - [scripts/cyder-common.sh](../scripts/cyder-common.sh)：`cyder_run_wine_exe()` 設定 `WINEPREFIX`、`WINESERVER`、`PATH`。
-- [scripts/cyder_app_main.swift](../scripts/cyder_app_main.swift)：`wineEnvironment()` 建立 Finder 啟動時的 Wine 環境。
+- [scripts/cyder-common.sh](../scripts/cyder-common.sh)：建立 Finder／CLI 共用的 Wine 啟動環境。
 - [scripts/create-cyder-app.sh](../scripts/create-cyder-app.sh)：將 engine artifact 安裝至 Cyder 的 runtime 位置。
 - [docs/bluecg-winemac-a6-engine.md](bluecg-winemac-a6-engine.md)：A6-final engine 的版本與 artifact 資訊。
 

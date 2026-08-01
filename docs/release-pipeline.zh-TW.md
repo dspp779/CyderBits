@@ -125,7 +125,7 @@ bash scripts/release-cyder.sh --channel release --skip-notarize
 - [ ] App 版本字串正確（正式勿帶 `-dev`／誤用未宣告的 rc 當 GA）  
 - [ ] `codesign --verify --deep --strict`  
 - [ ] （正式）`stapler validate` 與 `spctl` → Notarized Developer ID  
-- [ ] 本機 smoke：啟動 `.exe`、必要時看 `last-launch.preamble.txt`  
+- [ ] 本機 smoke：啟動 `.exe`、必要時看 `last-launch.log`
 - [ ] Release notes：引擎 label、archive SHA-256、已知限制  
 
 ## OEM flavor

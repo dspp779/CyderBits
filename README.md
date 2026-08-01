@@ -97,7 +97,7 @@ bash scripts/sign-wine.sh
 
 ## Requirements
 
-- **Cyder.app:** macOS 10.15+ (`LSMinimumSystemVersion`); Game Library / settings UI on **12+** (10.15–11.x uses bash + osascript legacy UI)
+- **Cyder.app:** macOS 10.15+ (`LSMinimumSystemVersion`); Game Library / settings UI on **11+** (10.15 keeps only Bash file selection / launch)
 - **Development / build:** macOS 12+ recommended (13+ for day-to-day work)
 - Apple Silicon + Rosetta 2 (Wine is an **x86_64** build; Rosetta required on Apple Silicon from macOS 11+)
 - Several GB disk for Wine sources, `.brew-x86`, and build outputs (most paths are `.gitignore`d)

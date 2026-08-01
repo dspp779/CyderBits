@@ -26,7 +26,7 @@ open dist/Cyder.app
 | 層級 | 最低版本 | 說明 |
 |------|----------|------|
 | **Cyder.app（plist）** | **10.15** | 與目前 CX26 Wine engine 對齊 |
-| **Swift 設定／遊戲庫 UI** | **12.0** | `CyderSwift`；10.15–11.x 自動改走 bash + osascript 進度列（Retina 強制關閉） |
+| **Swift 設定／遊戲庫 UI** | **11.0** | `CyderSwift`；10.15 僅保留 bash 選檔與啟動，不提供 Legacy progress／設定 UI |
 | **Wine engine（現行 artifact）** | **10.15** | `bin/wine`、`ntdll.so`、bundled runtime `.dylib`（含 `libMoltenVK.dylib`）皆為 minos ≤ 10.15 |
 | **Apple Silicon** | **11.0** | 需要 Rosetta 2 |
 
@@ -35,7 +35,7 @@ open dist/Cyder.app
 Engine 內嵌的 Homebrew runtime 庫（freetype／png／gnutls 鏈等）與 media stack（glib／gstreamer）皆以 `MACOSX_DEPLOYMENT_TARGET=10.15` **從原始碼**建置；不使用目前僅支援 macOS 14+ 的 brew bottles。`scripts/env-x86_64.sh` 的 `brew_x86_install_runtime` 會以 compiler wrapper 強制 `-mmacosx-version-min=10.15`；`bundle-wine-dylibs.sh` 會在打包後檢查 Mach-O `minos`，超過 10.15 即失敗。
 ## 開啟 .exe
 
-單獨開啟 `Cyder.app`、確認設定後，會以進度列依序顯示：**正在儲存設定…** → **正在準備遊戲執行元件…** → **正在準備遊戲環境…** → **正在套用新設定…**。之後從 Finder 開啟 `.exe` 會直接啟動，不顯示設定或準備視窗。
+單獨開啟 `Cyder.app`、確認設定後，會以載入階段文字依序顯示：**正在儲存設定…** → **正在準備遊戲執行元件…** → **正在準備遊戲環境…** → **正在套用新設定…**。之後從 Finder 開啟 `.exe` 會直接啟動，不顯示設定或準備視窗。
 
 | 方式 | 操作 |
 |------|------|
@@ -196,13 +196,13 @@ Wine 的 macOS RetinaMode、DPI 與字體 registry 是整個 Wine session／bott
 
 直接由 Finder 打開 `.exe` 時，Cyder **不會**安裝、升級或重建環境。若 engine 不存在、版本不同或預設 bottle 尚未完成 bootstrap，只顯示提示，要求使用者先單獨開啟 `Cyder.app` 完成設定與環境建置。
 
-直接啟動 EXE 時不再顯示 loading 或執行額外的初始化流程；Universal Cyder 只在 Swift 內檢查 engine、版本與 bootstrap marker，然後直接以 `/usr/bin/arch -x86_64 wine` 啟動。Rosetta 也不在此路徑預先檢查，由 `arch -x86_64` 交給 macOS 處理。
+直接啟動 EXE 時不再顯示 loading 或執行額外的初始化流程；若 EXE 已在 argv，外層 wrapper 直接呼叫 `cyder_launcher.sh --launch-exe`。Finder 以 document event 傳入 EXE 時，Swift 只負責接收事件並轉交同一支 bash launcher；Wine 環境與最終 `/usr/bin/arch -x86_64 wine` 呼叫都由 bash 負責。Rosetta 不在此路徑預先檢查，由 `arch -x86_64` 交給 macOS 處理。
 
 正式啟動路徑不設定 `WINEDLLOVERRIDES`。DLL 相容性設定存放在 prefix Registry；目前僅為 `bluecg.exe` 設定 `HKCU\Software\Wine\AppDefaults\bluecg.exe\DllOverrides` 的 `ddraw=native,builtin`，不影響 BlueLauncher 或其他 EXE。
 
-Finder 啟動時，Cyder 會在呼叫 `/usr/bin/arch` 前監聽 CrossOver Wine 的 `WineAppWillActivateNotification`。收到與 `bottles/shared` 相同、且 `ActivatingAppPID` 已登記為 `regular/Foreground` 的通知後，macOS 14 以上會由 Cyder 先讓出焦點，再透過 cooperative activation 將所有 Wine 視窗帶到前方；macOS 12、13 則使用舊版 activation API 作為相容 fallback。送出一次 activation 後 Cyder 隨即退出；wrapper PID 不參與 activation，也不搜尋 process tree 或視窗 owner。若 Wine 未發出通知，隱藏 launcher最多等待 30 秒；Wine 仍在執行時只記錄 warning，不誤判為失敗。若 Wine 在顯示視窗前退出或被 signal 終止，Cyder 會顯示錯誤代碼與結束狀態。一般啟動不保存 Wine stdout／stderr；需要追查 Wine 問題時，可在偏好設定「除錯」tab 開啟 Wine 診斷記錄。非安靜模式會以 macOS 內建 gzip 串流保存為 `.log.gz`，降低高重複錯誤造成的磁碟成長。
+Finder document event 啟動時，Swift relay 會在呼叫 bash 前監聽 CrossOver Wine 的 `WineAppWillActivateNotification`。收到與目標 prefix 相同、且 `ActivatingAppPID` 已登記為 `regular/Foreground` 的通知後，macOS 14 以上會由 Cyder 先讓出焦點，再透過 cooperative activation 將所有 Wine 視窗帶到前方；macOS 11–13 使用舊版 activation API。Wine PID 由 bash 透過 `CYDER_WINE_PID_FILE` 回報；Swift 不組裝 Wine 環境也不直接建立 Wine process。若 Wine 未發出通知，relay 最多等待 30 秒；Wine 仍在執行時只記錄 warning。
 
-命令列直接呼叫 `cyder_launcher.sh` 時仍以前景模式執行，方便腳本等待遊戲結束；只有 Universal Cyder 的 Finder EXE 入口會使用 Swift 直接啟動的分離模式。
+命令列直接呼叫 `cyder_launcher.sh` 時仍以前景模式執行，方便腳本等待遊戲結束；Finder document event relay 會設定 `CYDER_WINE_DETACH=1`，由 bash 使用分離模式啟動。
 
 EXE 模式會將 Cyder activation policy 設為 `prohibited`，所以 Dock 不會留下 Cyder 圖示。CX26 的 Wine Mac driver 會嘗試從 EXE 資源讀取應用程式圖示；若遊戲沒有可用的 Windows 圖示，Dock 可能顯示 Wine 的預設圖示。
 
