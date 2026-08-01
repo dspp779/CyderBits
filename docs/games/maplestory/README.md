@@ -12,7 +12,8 @@ Wine/OEM runtime 的相容性契約。
 OEM MoltenVK、dbghelp、kernelbase `.msf`、**整包 G**，且自行編譯引擎請用 `C:\MapleTest`。
 CX26 對應契約見
 [OEM CX25 修補總覽 §11.2](oem-cx25-maplestory-patches.md#112-cx26-forward-port-契約) 與
-[MapleStoryPort ↔ CX26](maplestoryport-cx26-port.md)。
+[MapleStoryPort ↔ CX26](maplestoryport-cx26-port.md)。經典版 DXVK 長跑另見
+[Ports 洩漏](../../maplestory-classic-dxvk-ports-leak.md)。
 
 ## 已完成結果
 
@@ -73,6 +74,8 @@ wineserver 往返或 host `sched_yield`），bisect 已判定對無 OTP 畫面**
 - [DXVK vs D3DMetal（本機筆記）](maplestory-dxvk-vs-d3dmetal.md)
 - [經典版 CX26 wineserver 凍結](../../maplestory-classic-wineserver-hang.md)
 - [經典版 CX26 frame-walk／登入卡住](../../maplestory-classic-cx26-frame-walk-debug.md)
+- [經典版 DXVK + MoltenVK Ports 洩漏](../../maplestory-classic-dxvk-ports-leak.md)：DXVK 長跑 Mach
+  Ports 暴增；timeline-wait poll patch／shim／App overlay
 - [經典版 GRAP／NGS-X 插件盤點](classic-grap-ngs-x.md)：`Plugins/x86_64/grap*` 靜態盤點、與離場 livelock／Dock 殘留的關係
 
 ## OTP 專案的介面邊界

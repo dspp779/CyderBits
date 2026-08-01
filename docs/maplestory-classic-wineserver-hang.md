@@ -17,6 +17,9 @@
 
 目前實測**唯一穩定組合**是 **MSync + DXVK**（可反覆進出商城 5–6 次以上）。其餘 sync × 圖形後端組合均曾出現 wineserver 死亡或等價僵屍狀態。
 
+注意：DXVK 長跑另有 **Mach Ports 洩漏**（與本文件 wineserver 死亡不同根因），見
+[maplestory-classic-dxvk-ports-leak.md](./maplestory-classic-dxvk-ports-leak.md)。
+
 ## 2. 症狀與機制（已確認）
 
 ### 2.1 現場證據
@@ -108,7 +111,20 @@ GRAP／NGS-X 檔案樹與產品含義見
 `docs/wineserver-teardown-hardening-cyder008.md`）。本機 runtime 已換過修補後的
 wineserver；**正式 GA 仍為 Cyder007**，待 `pack-engine-artifact` 產出並 pin 後才算進 App。
 
-同晚實玩離開**未卡住**，但離場 hang 本就不穩定重現，**不能**據此宣告 livelock 已解。
+同晚稍早實玩離開曾**未卡住**，但離場 hang 本就不穩定重現，**不能**據此宣告 livelock 已解。
+
+**2026-07-31 ~20:05 再重現（已確認 patch 在 live wineserver）：**
+
+| 項目 | 值 |
+|------|-----|
+| 設定 | **MSync + DXVK**（可玩基線組合仍可踩 livelock） |
+| wineserver | ~48% CPU；`req_get_directory_entries` |
+| grap-core64.aes | ~54% CPU；`NtQueryDirectoryObject` |
+| 二進位 | runtime wineserver **含** Cyder008 teardown 字串／`async_clear_weak_fd`（與 `cyder-wine-engine/install` SHA 相同）；App 封裝標籤仍為 Cyder007 |
+| diag | `diag start pid=` 與 live PID 一致；**本次 hang 無新 SIGSEGV** |
+
+採樣與結論：`debug/hang-20260731-200537/analysis.txt`。  
+→ teardown soft-guard **不能**消掉此 livelock；下一步仍是 session 清 grap／產品清理，而非重做 pipe／completion patch。
 
 ## 3. Sync × 圖形後端實測矩陣（2026-07-31）
 
@@ -207,7 +223,8 @@ debug/capture-wine-hang.sh 5
 | `docs/maplestory-classic-cx26-frame-walk-debug.md` | 先前 NTDLL frame-walk／登入卡住紀錄 |
 | `scripts/cyder_settings.swift` 等 | `sync` 診斷層級 |
 | `debug/capture-wine-hang.sh` | 凍結取樣（未進版控，見 `debug/`） |
-| `debug/hang-20260731-182944-leave-game/` | 0.9.0 離開遊戲 livelock（sample + `analysis.txt`） |
+| `debug/hang-20260731-182944-leave-game/` | 0.9.0 離開遊戲 livelock（sample + `analysis.txt`；D3DMetal、sync-off） |
+| `debug/hang-20260731-200537/` | 同型 livelock；**MSync+DXVK**；live wineserver 已含 Cyder008 teardown markers |
 | `docs/games/maplestory/classic-grap-ngs-x.md` | 經典版 GRAP／NGS-X 插件靜態盤點與處理建議 |
 | `cyder-wine-engine`：`patches/cyder-wineserver-*.patch` | pseudo-fd／poll-slot／fd_reselect／sock-rebind／pipe_end null-fd 修補與測試 |
 

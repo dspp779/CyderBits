@@ -144,9 +144,11 @@ grap64.dll  (NGS-X Init / Run)
 ## 7. 後續驗證清單
 
 - [x] 引擎 teardown soft-guard（async／pipe／completion）→ Cyder008 候選（2026-07-31）
+- [x] **2026-07-31 ~20:05**：MSync+DXVK 離場 livelock 再重現；live wineserver **已含**
+      Cyder008 markers（`debug/hang-20260731-200537`）→ 證明 livelock ≠ 缺 patch
 - [ ] 開啟適度 Wine process／loaddll log，截一輪從進遊戲到正常離開（或卡住）的 spawn 序
 - [ ] 確認 Wine 下是否出現 `BlackCat`／`.sys`／service install 相關失敗（不要求修驅動）
-- [ ] 對照 MSync+DXVK 與 D3DMetal+sync-off 的離場：core 是否同樣 `NtQueryDirectoryObject` 風暴
+- [ ] 對照更多後端／sync 的離場：directory 風暴是否一律出現（已見 sync-off+D3DMetal 與 MSync+DXVK）
 - [ ] Cyder session 清理 prototype：逾時後只殺本 bottle／本輪 grap 樹，驗證下次啟動 NGS-X 是否較穩
 - [ ] （可選）macdrv 是否把 NGService 推成 Dock app；能否在不破壞 AC 的前提下減少前景污染
 - [ ] Cyder008 pack + App pin 後，重複「離開／強制停止 Wine」並確認 diag 無 teardown SIGSEGV
