@@ -8,6 +8,7 @@ cyder_write_app_engine_metadata() {
   local version_label="$3"
   printf '%s\n' "$version_label" >"$res_dir/engine-version.txt"
   printf '%s\n' "$(basename "$archive_path")" >"$res_dir/engine-archive.txt"
+  shasum -a 256 "$archive_path" | awk '{print $1}' >"$res_dir/engine-artifact-sha256.txt"
 }
 
 copy_engine_artifact_into_app() {

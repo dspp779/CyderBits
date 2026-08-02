@@ -32,6 +32,7 @@ cyder_write_app_engine_metadata() {
   local res_dir="$1" archive_path="$2" version_label="$3"
   printf '%s\n' "$version_label" >"$res_dir/engine-version.txt"
   printf '%s\n' "$(basename "$archive_path")" >"$res_dir/engine-archive.txt"
+  shasum -a 256 "$archive_path" | awk '{print $1}' >"$res_dir/engine-artifact-sha256.txt"
 }
 cyder_write_app_engine_metadata "$RES" "$ENGINE_TAR" "$ENGINE_VERSION_LABEL"
 
@@ -57,6 +58,7 @@ assert_contains "$CYDER_ENGINE_SRC" ".tar.xz" "default engine src should be xz t
 dest="$(cyder_ensure_shared_engine "$CYDER_ENGINE_SRC")"
 assert test -x "$dest/bin/wine"
 assert test -f "$dest/version"
+assert test -f "$dest/.cyder-engine-artifact-sha256"
 assert_contains "$(cat "$dest/version")" "crossover 26.2.0" "installed engine should record version file"
 [[ ! -f "$dest/.cyder-engine-version" ]] || {
   echo "ASSERT failed: legacy version marker should not be written" >&2
@@ -69,6 +71,25 @@ assert_contains "$(cat "$dest/version")" "crossover 26.2.0" "installed engine sh
 
 output="$(cyder_ensure_shared_engine "$CYDER_ENGINE_SRC" 2>&1)"
 assert_contains "$output" "Shared engine present" "second install should skip extract"
+
+# A rebuilt test artifact may retain the public Cyder008 label. Its payload
+# fingerprint must still refresh the engine without discarding the compatible
+# shared prefix.
+printf '%s\n' '#!/bin/sh' 'echo refreshed-wine-stub' >"$STAGE/bin/wine"
+chmod +x "$STAGE/bin/wine"
+(
+  cd "$TMP/stage"
+  tar -cf - wine-x86_64 | xz -c >"$ENGINE_TAR"
+)
+cyder_write_app_engine_metadata "$RES" "$ENGINE_TAR" "$ENGINE_VERSION_LABEL"
+mkdir -p "$CYDER_SHARED_PREFIX"
+printf 'ok\n' >"$CYDER_SHARED_PREFIX/.cyder-bootstrap-v1"
+output="$(cyder_ensure_shared_engine "$CYDER_ENGINE_SRC" 2>&1)"
+assert_contains "$output" "Refreshing shared engine artifact" \
+  "same-label artifact changes should refresh the installed engine"
+assert test -f "$CYDER_SHARED_PREFIX/.cyder-bootstrap-v1"
+assert_contains "$(cat "$dest/bin/wine")" "refreshed-wine-stub" \
+  "same-label refresh should install the new payload"
 
 # Bootstrap/rebuild resolution must trust matching sidecar files instead of
 # opening the large bundled archive again. Corrupting the fixture proves that

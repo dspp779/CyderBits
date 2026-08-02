@@ -320,6 +320,37 @@ cyder_bundled_engine_version() {
   cyder_read_engine_version "$here" 2>/dev/null || true
 }
 
+cyder_read_bundled_engine_artifact_sha() {
+  local resources="$1"
+  local value=""
+  [[ -f "$resources/engine-artifact-sha256.txt" ]] || return 1
+  value="$(tr -d '[:space:]' <"$resources/engine-artifact-sha256.txt")"
+  [[ "$value" =~ ^[0-9a-f]{64}$ ]] || return 1
+  printf '%s\n' "$value"
+}
+
+cyder_bundled_engine_artifact_sha_from_src() {
+  local engine_src="$1"
+  local bundled_src=""
+  [[ -n "${CYDER_OGOM:-}" ]] || return 1
+  bundled_src="$(cyder_default_engine_src "$CYDER_OGOM" 2>/dev/null || true)"
+  [[ -n "$bundled_src" ]] || return 1
+  engine_src="$(cyder_abs_path "$engine_src")"
+  bundled_src="$(cyder_abs_path "$bundled_src")"
+  [[ "$engine_src" == "$bundled_src" ]] || return 1
+  cyder_read_bundled_engine_artifact_sha "$CYDER_OGOM"
+}
+
+cyder_installed_engine_artifact_sha() {
+  local engine_root="$1"
+  local marker="$engine_root/.cyder-engine-artifact-sha256"
+  local value=""
+  [[ -f "$marker" ]] || return 1
+  value="$(tr -d '[:space:]' <"$marker")"
+  [[ "$value" =~ ^[0-9a-f]{64}$ ]] || return 1
+  printf '%s\n' "$value"
+}
+
 cyder_resolve_libarchive_src() {
   if [[ -n "${CYDER_LIBARCHIVE_SRC:-}" && -d "$CYDER_LIBARCHIVE_SRC/bin" ]]; then
     printf '%s\n' "$CYDER_LIBARCHIVE_SRC"
@@ -682,6 +713,7 @@ cyder_engine_needs_install() {
   local dest="$CYDER_ENGINES/$CYDER_ENGINE_NAME"
   local marker="$dest/bin/wine"
   local bundled_version="" installed_version=""
+  local bundled_sha="" installed_sha=""
 
   engine_src="$(cyder_abs_path "$engine_src")"
   bundled_version="$(cyder_bundled_engine_version_from_src "$engine_src" 2>/dev/null || true)"
@@ -695,6 +727,11 @@ cyder_engine_needs_install() {
      ! cyder_engine_versions_equal "$installed_version" "$bundled_version"; then
     return 0
   fi
+  bundled_sha="$(cyder_bundled_engine_artifact_sha_from_src "$engine_src" 2>/dev/null || true)"
+  if [[ -n "$bundled_sha" ]]; then
+    installed_sha="$(cyder_installed_engine_artifact_sha "$dest" 2>/dev/null || true)"
+    [[ "$installed_sha" == "$bundled_sha" ]] || return 0
+  fi
   return 1
 }
 
@@ -703,12 +740,20 @@ cyder_engine_needs_install() {
 # that need cyder_bundled_engine_version_from_src().
 cyder_engine_is_ready_for_launch() {
   local engine="$CYDER_ENGINES/$CYDER_ENGINE_NAME"
-  local expected installed
+  local expected installed expected_sha installed_sha
   cyder_validate_runtime_path || return 1
   [[ -x "$engine/bin/wine" && -f "$CYDER_BOOTSTRAP_MARKER" ]] || return 1
   expected="$(cyder_bundled_engine_version "$CYDER_OGOM" 2>/dev/null || true)"
   installed="$(cyder_read_installed_engine_version "$engine" 2>/dev/null || true)"
-  [[ -z "$expected" ]] || cyder_engine_versions_equal "$installed" "$expected"
+  if [[ -n "$expected" ]] && ! cyder_engine_versions_equal "$installed" "$expected"; then
+    return 1
+  fi
+  expected_sha="$(cyder_read_bundled_engine_artifact_sha "$CYDER_OGOM" 2>/dev/null || true)"
+  if [[ -n "$expected_sha" ]]; then
+    installed_sha="$(cyder_installed_engine_artifact_sha "$engine" 2>/dev/null || true)"
+    [[ "$installed_sha" == "$expected_sha" ]] || return 1
+  fi
+  return 0
 }
 
 # Resolve the installed engine without opening the bundled archive when the
@@ -717,7 +762,7 @@ cyder_engine_is_ready_for_launch() {
 cyder_resolve_shared_engine() {
   local engine_src="$1"
   local engine="$CYDER_ENGINES/$CYDER_ENGINE_NAME"
-  local bundled_src="" expected="" installed=""
+  local bundled_src="" expected="" installed="" expected_sha="" installed_sha=""
   engine_src="$(cyder_abs_path "$engine_src")"
   bundled_src="$(cyder_default_engine_src "$CYDER_OGOM" 2>/dev/null || true)"
   if [[ -n "$bundled_src" ]]; then
@@ -726,7 +771,10 @@ cyder_resolve_shared_engine() {
   if [[ -n "$bundled_src" && "$engine_src" == "$bundled_src" && -x "$engine/bin/wine" ]]; then
     expected="$(cyder_bundled_engine_version "$CYDER_OGOM" 2>/dev/null || true)"
     installed="$(cyder_read_installed_engine_version "$engine" 2>/dev/null || true)"
-    if [[ -n "$expected" ]] && cyder_engine_versions_equal "$installed" "$expected"; then
+    expected_sha="$(cyder_read_bundled_engine_artifact_sha "$CYDER_OGOM" 2>/dev/null || true)"
+    installed_sha="$(cyder_installed_engine_artifact_sha "$engine" 2>/dev/null || true)"
+    if [[ -n "$expected" ]] && cyder_engine_versions_equal "$installed" "$expected" &&
+       { [[ -z "$expected_sha" ]] || [[ "$installed_sha" == "$expected_sha" ]]; }; then
       cyder_migrate_legacy_layout || return $?
       if [[ ! -f "$engine/.cyder-engine-signed" ]]; then
         cyder_sign_installed_engine "$engine" || return $?
@@ -1313,63 +1361,45 @@ cyder_sign_installed_engine() {
   printf 'signed\n' >"$dest/.cyder-engine-signed"
 }
 
-# RC overlay: poll-based vkWaitSemaphores to avoid DXVK + MoltenVK Mach port leak.
-# Engine tarball stays clean; mutate extracted runtime only.
-cyder_ensure_moltenvk_wait_poll_shim() {
-  local dest="$1"
-  local helper="$CYDER_SCRIPTS/install-moltenvk-wait-poll-shim.sh"
-  local bundled=""
-  [[ -f "$helper" ]] || {
-    echo "moltenvk-wait-poll: skipped (helper missing)" >&2
-    return 0
-  }
-  if [[ -n "${CYDER_APP:-}" ]]; then
-    bundled="$CYDER_APP/Contents/Resources/tools/moltenvk-wait-poll/libMoltenVK.dylib"
-  fi
-  if [[ -z "$bundled" || ! -f "$bundled" ]]; then
-    if [[ -n "${CYDER_SCRIPTS:-}" && -f "$CYDER_SCRIPTS/../tools/moltenvk-wait-poll/libMoltenVK.dylib" ]]; then
-      bundled="$CYDER_SCRIPTS/../tools/moltenvk-wait-poll/libMoltenVK.dylib"
-    fi
-  fi
-  if [[ -n "$bundled" && -f "$bundled" ]]; then
-    bash "$helper" --engine "$dest" --bundled-shim "$bundled" || return $?
-  else
-    # The wait-poll overlay is optional, but runtime compilation is forbidden:
-    # end-user machines do not have Xcode / Command Line Tools. The app
-    # package must carry the prebuilt shim until the MoltenVK issue is fixed.
-    echo "moltenvk-wait-poll: skipped (prebuilt shim missing; App bundle has no shim)" >&2
-    return 0
-  fi
-}
-
 cyder_ensure_shared_engine() {
   local engine_src="$1"
   local dest="$CYDER_ENGINES/$CYDER_ENGINE_NAME"
   local marker="$dest/bin/wine"
   local bundled_version="" installed_version=""
+  local bundled_sha="" installed_sha="" same_version=0
   engine_src="$(cyder_abs_path "$engine_src")"
   cyder_migrate_legacy_layout || exit 1
 
   bundled_version="$(cyder_bundled_engine_version_from_src "$engine_src" 2>/dev/null || true)"
+  bundled_sha="$(cyder_bundled_engine_artifact_sha_from_src "$engine_src" 2>/dev/null || true)"
   if [[ -f "$marker" ]]; then
     installed_version="$(cyder_read_installed_engine_version "$dest" 2>/dev/null || true)"
-    if [[ -z "$bundled_version" ]] ||
+    installed_sha="$(cyder_installed_engine_artifact_sha "$dest" 2>/dev/null || true)"
+    if [[ -n "$bundled_version" ]] &&
        cyder_engine_versions_equal "$installed_version" "$bundled_version"; then
+      same_version=1
+    fi
+    if [[ -z "$bundled_version" ]] ||
+       { [[ "$same_version" -eq 1 ]] &&
+         { [[ -z "$bundled_sha" ]] || [[ "$installed_sha" == "$bundled_sha" ]]; }; }; then
       echo "Shared engine present: $dest" >&2
       if [[ ! -f "$dest/.cyder-engine-signed" ]]; then
         cyder_sign_installed_engine "$dest" || exit 1
       fi
-      cyder_ensure_moltenvk_wait_poll_shim "$dest" || exit 1
       echo "$dest"
       return 0
     fi
-    echo "Upgrading shared engine ($installed_version -> $bundled_version) -> $dest" >&2
-    cyder_reset_shared_prefix
-    # Stale pristine/golden templates belong to the previous engine; drop them
-    # until the 1.0.0 template mechanism returns.
-    if [[ -e "$CYDER_SUPPORT/templates" ]]; then
-      echo "Removing stale template bottles: $CYDER_SUPPORT/templates" >&2
-      cyder_remove_path "$CYDER_SUPPORT/templates"
+    if [[ "$same_version" -eq 1 ]]; then
+      echo "Refreshing shared engine artifact ($bundled_version) -> $dest" >&2
+    else
+      echo "Upgrading shared engine ($installed_version -> $bundled_version) -> $dest" >&2
+      cyder_reset_shared_prefix
+      # Stale pristine/golden templates belong to the previous engine; drop them
+      # until the 1.0.0 template mechanism returns.
+      if [[ -e "$CYDER_SUPPORT/templates" ]]; then
+        echo "Removing stale template bottles: $CYDER_SUPPORT/templates" >&2
+        cyder_remove_path "$CYDER_SUPPORT/templates"
+      fi
     fi
   else
     echo "Installing shared engine -> $dest" >&2
@@ -1402,7 +1432,9 @@ cyder_ensure_shared_engine() {
     rm -f "$dest/.cyder-engine-version"
   fi
   cyder_sign_installed_engine "$dest" || exit 1
-  cyder_ensure_moltenvk_wait_poll_shim "$dest" || exit 1
+  if [[ -n "$bundled_sha" ]]; then
+    printf '%s\n' "$bundled_sha" >"$dest/.cyder-engine-artifact-sha256"
+  fi
   echo "$dest"
 }
 

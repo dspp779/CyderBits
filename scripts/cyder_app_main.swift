@@ -771,8 +771,8 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         let enginePresent = FileManager.default.isExecutableFile(atPath: engineWine.path)
 
         // Always run ensure-engine-only when an engine tree exists (or needs
-        // install). Same-version upgrades (e.g. 0.9.0 → 0.9.1, Cyder007) still
-        // need RC overlays such as the MoltenVK wait-poll shim.
+        // install). The shell also compares the artifact fingerprint so an
+        // updated same-label test engine is refreshed before launch.
         if state.needsEngine || enginePresent {
             CyderDiagnostics.shared.enter(.engineExtraction)
             if state.needsEngine {
@@ -1299,7 +1299,22 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         else {
             return true
         }
-        return !engineVersionsEqual(installed, bundled)
+        if !engineVersionsEqual(installed, bundled) {
+            return true
+        }
+        let resources = URL(fileURLWithPath: context.engineVersionFile).deletingLastPathComponent()
+        let bundledFingerprintFile = resources.appendingPathComponent("engine-artifact-sha256.txt")
+        guard let bundledFingerprint = try? String(contentsOf: bundledFingerprintFile, encoding: .utf8)
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+            !bundledFingerprint.isEmpty
+        else {
+            return false
+        }
+        let installedFingerprintFile = installedFile.deletingLastPathComponent()
+            .appendingPathComponent(".cyder-engine-artifact-sha256")
+        let installedFingerprint = try? String(contentsOf: installedFingerprintFile, encoding: .utf8)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return installedFingerprint != bundledFingerprint
     }
 
     /// Packaging metadata historically used either a display label

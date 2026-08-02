@@ -87,10 +87,18 @@ assert_contains "$build_script" 'codesign --verify --deep --strict --verbose=2 "
   "Cyder.app packaging must strictly verify the final signed bundle"
 assert_contains "$copy_script" 'xattr -c "$dest_archive"' \
   "engine archive payload must not retain quarantine from the source"
+assert_contains "$copy_script" 'engine-artifact-sha256.txt' \
+  "engine payload must include a fingerprint for same-label refreshes"
+assert_not_contains "$build_script" 'moltenvk-wait-poll' \
+  "Cyder.app must not build or bundle the engine-owned MoltenVK shim"
+assert_not_contains "$common_script" 'cyder_ensure_moltenvk_wait_poll_shim' \
+  "runtime must not mutate the installed engine with an App overlay"
 assert_contains "$common_script" 'if [[ ! -f "$dest/.cyder-engine-signed" ]]' \
   "existing engines must be signed once before launch"
 assert_contains "$common_script" "printf 'signed\\n' >\"\$dest/.cyder-engine-signed\"" \
   "successful engine signing must leave a marker"
+assert_contains "$common_script" '.cyder-engine-artifact-sha256' \
+  "installed engine must retain the bundled artifact fingerprint"
 
 assert test -x "$ROOT/tools/winetricks/winetricks"
 assert test -x "$ROOT/tools/zstd/zstd"

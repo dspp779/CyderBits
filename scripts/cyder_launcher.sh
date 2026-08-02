@@ -554,8 +554,6 @@ if [[ "$LAUNCH_ONLY" -eq 1 ]]; then
       }
     fi
   fi
-  # Same-version App upgrades still need RC overlays (MoltenVK wait-poll).
-  cyder_ensure_moltenvk_wait_poll_shim "$engine" || exit 1
   cyder_set_stage settings-apply
   cyder_prepare_game_launch_settings "$wine" "$engine" "$prefix" "$exe" || {
     settings_status=$?
