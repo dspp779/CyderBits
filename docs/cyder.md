@@ -36,7 +36,7 @@ Engine 內嵌的 Homebrew runtime 庫（freetype／png／gnutls 鏈等）與 med
 
 ### MoltenVK wait-poll shim
 
-目前仍需在打包時嵌入 `tools/moltenvk-wait-poll/libMoltenVK.dylib`，以暫時避開 MoltenVK／DXVK 長時間執行時的 wait-related Mach Ports 問題。這是持續的打包目標，直到 MoltenVK 本身完成修復；使用者端只會套用 App 內的 prebuilt shim，不會要求 Xcode 或 Command Line Tools，也不會在 runtime 現場編譯。
+Cyder008 引擎包已內含 MoltenVK wait-poll shim 與原始 dylib 配對，以避開 DXVK 長時間執行時的 wait-related Mach Ports 問題。Cyder.app 不再另外建置或注入 shim，使用者端也不需要 Xcode 或 Command Line Tools。
 
 ### Catalina 首次安裝
 

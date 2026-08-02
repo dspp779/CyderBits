@@ -2,7 +2,7 @@
 
 > 建立日期：2026-07-13
 
-> **現行 Cyder 封裝 engine：** `CX26.3.0-W11-Cyder007`（`config/cyder-engine-version.txt`；artifact 路徑見 `config/cyder-engine-archive.txt`）。以下描述首版 A6 在 CrossOver 26.2.0 上的驗收 artifact（`CX26.2.0-W11-Cyder003`），patch 與驗收結論仍適用於 Cyder007。
+> **現行 Cyder 封裝 engine：** `CX26.3.0-W11-Cyder008`（`config/cyder-engine-version.txt`；artifact 路徑見 `config/cyder-engine-archive.txt`），已在 `cyder-wine-engine/patches/a6-final-same-view-backing-sync.patch` 正式登記 A6。以下描述首版 A6 在 CrossOver 26.2.0 上的驗收 artifact（`CX26.2.0-W11-Cyder003`），patch 與驗收結論仍適用。
 
 ## 發行識別
 

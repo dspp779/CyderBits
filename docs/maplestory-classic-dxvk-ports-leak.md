@@ -66,7 +66,7 @@ Ports 洩漏。
 | 正式 patch | `patches/cyder-moltenvk-timeline-wait-poll.patch` | 改 `MVKSync.mm`；需 Xcode 重編 `libMoltenVK.dylib` |
 | 等價 shim | `tools/cyder-mvk-timeline-wait-poll/` | Apple clang x86_64 re-export；攔截 `vkWaitSemaphores*` |
 | 本機安裝 | `tools/cyder-mvk-timeline-wait-poll/install-shim.sh` | `--install-runtime` 寫入 Cyder engine tree；`--undo` 還原 |
-| App RC 契約 | `docs/moltenvk-timeline-wait-poll-app-overlay.md` | 不 bump 引擎版號；ensure 後注入；正式 MoltenVK 進包後移除 |
+| 舊 App RC 契約 | `docs/moltenvk-timeline-wait-poll-app-overlay.md` | 歷史注入方案；Cyder008 起已移除 |
 | 重建腳本 | `scripts/rebuild-moltenvk-cyder-patches.sh` | 套用含 timeline-wait 在內的 Cyder MoltenVK patches |
 
 Shim 目錄布局（runtime）：
@@ -106,7 +106,7 @@ bash tools/cyder-mvk-timeline-wait-poll/install-shim.sh --undo --install-runtime
 - [ ] D3DMetal／WineD3D 仍可啟動（回歸）。
 - [ ] shim `minos` ≤ 10.15（`otool -l`）。
 
-有完整 Xcode 時：優先把 patch 編進引擎 MoltenVK，發新引擎包後拿掉 shim／App overlay。
+Cyder008 已把 shim/real 配對放進引擎 artifact，並移除 App overlay；有完整 Xcode 時仍可優先把 patch 編進引擎 MoltenVK，改為單一正式 dylib。
 
 ## 6. 產品狀態（RC）
 

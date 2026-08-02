@@ -13,7 +13,7 @@
 
 | 版本 | 文件 | 重點 |
 |------|------|------|
-| 0.9.3 | [繁中](releases/v0.9.3.md) | macOS 11 UI、Catalina Terminal 初始化、Bash 單一路徑、啟動錯誤與受保護資料夾提示 |
+| 0.9.3 | [繁中](releases/v0.9.3.md) | Cyder008（A6、free_async_queue、MoltenVK shim）、macOS 11 UI、Bash 單一路徑與啟動錯誤提示 |
 | 0.9.2 | [繁中](releases/v0.9.2.md) | 同版引擎升級也會套用 MoltenVK wait-poll shim；其餘同 0.9.1 |
 | 0.9.1 | [繁中](releases/v0.9.1.md) | MoltenVK wait-poll shim overlay（DXVK Ports 洩漏）；引擎仍 Cyder007 |
 | 0.9.0 | [繁中](releases/v0.9.0.md) · [English](releases/v0.9.0.en.md) | CX26.3 Cyder007（wineserver／DXVK／minOS 10.15）、診斷 preamble、test／release 發佈通道 |
@@ -40,7 +40,7 @@
 | [bluecg-winemac-resize-black-screen.md](bluecg-winemac-resize-black-screen.md) | 開發 / 追蹤 | BlueCG 視窗縮放黑屏的背景、A6 正式解法矩陣與歷史調查 |
 | [bluecg-winemac-runtime-comparison.md](bluecg-winemac-runtime-comparison.md) | 開發 / 比較 | baseline、A2、A4、A6 的功能／畫質／風險矩陣 |
 | [bluecg-winemac-experiments.md](bluecg-winemac-experiments.md) | 開發 / 歷史 | A1–A6-R5 的逐步實驗與失敗邊界 |
-| [bluecg-winemac-a6-engine.md](bluecg-winemac-a6-engine.md) | 開發 / 發布 | A6 最終 patch、Cyder003 驗收 artifact（現行 Cyder 為 Cyder007） |
+| [bluecg-winemac-a6-engine.md](bluecg-winemac-a6-engine.md) | 開發 / 發布 | A6 最終 patch、Cyder003 驗收 artifact（現行 Cyder008 已正式納入） |
 | [bluecg-winemac-a2-engine.md](bluecg-winemac-a2-engine.md) | 開發 / 歷史 | A2 guard-only artifact；非 Retina 對照 |
 | [scripts.md](scripts.md) | 開發者 | `scripts/` 腳本一覽與依賴關係 |
 

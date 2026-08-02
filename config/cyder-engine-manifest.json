@@ -14,6 +14,7 @@
   "minimumCyderVersion": "0.9.0",
   "patches": [
     "cyder-compatdb-runtime.patch",
+    "a6-final-same-view-backing-sync.patch",
     "wine-11.1-rtlwalkframechain-null-function.patch",
     "cyder-ntdll-frame-walk-page-fault-guard.patch",
     "cyder-wineserver-sock-reselect-pseudo-fd.patch",
@@ -22,11 +23,12 @@
     "cyder-wineserver-fd-reselect-async-null-ops.patch",
     "cyder-wineserver-sock-rebind-async-fd.patch",
     "cyder-wineserver-async-terminate-null-fd.patch",
+    "cyder-wineserver-free-async-queue-null-fd.patch",
     "cyder-wineserver-pipe-end-disconnect-null-fd.patch",
     "cyder-wineserver-add-completion-guard.patch"
   ],
-  "notes": "Cyder008 adds teardown hardening and the complete NTDLL frame-walk guard set. Packed and pinned for Cyder 0.9.3 after engine tests, minOS checks, signature verification, and archive round-trip validation.",
+  "notes": "Cyder008 includes the A6 same-view backing-sync fix, the MoltenVK wait-poll shim, teardown hardening (including free_async_queue null-fd after pipe_end_disconnect soft-guard), and the complete NTDLL frame-walk guard set.",
   "ntdllSHA256": "a79ca2e2aab01fe809bfbb2499e374a731734fa1fa2fc32b0890a267c9030de4",
   "artifact": "engine-wine-x86_64-CX26-3-0-W11-Cyder008.tar.xz",
-  "artifactSHA256": "9330a928c02a23a6fd9c2d6d67412552a1c51a178cd66a7a1dbb76508887c689"
+  "artifactSHA256": "65748c68d432ddda099bb2507aeaac616ce39005bdbd72c0baad6eb94b593dac"
 }
