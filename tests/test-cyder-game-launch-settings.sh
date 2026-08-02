@@ -166,13 +166,13 @@ auto_backend="$(
   CYDER_SUPPORT="$TMP/support" bash -c '
     source "$1/scripts/cyder-common.sh"
     cyder_macos_at_least() { return 0; }
-    export CYDER_GRAPHICS_PREFERENCE=auto
+    export CYDER_GRAPHICS_PREFERENCE=auto CYDER_GRAPHICS_HUD_PREFERENCE=metal
     cyder_resolve_effective_graphics_backend "$2/engine"
-    printf "%s" "$CYDER_GRAPHICS_BACKEND"
+    printf "%s|%s|%s" "$CYDER_GRAPHICS_BACKEND" "$MTL_HUD_ENABLED" "$DXVK_HUD"
   ' _ "$ROOT" "$TMP"
 )"
-assert_eq "$auto_backend" "d3dmetal" \
-  "Bash auto graphics cascade should prefer an available GPTK on macOS 14+"
+assert_eq "$auto_backend" "d3dmetal|1|0" \
+  "Bash auto graphics cascade should prefer GPTK and apply the saved Metal HUD"
 
 # Runtime harness: d3dmetal + fake GPTK root must emit CYDER_GPTK_ROOT,
 # CX_APPLEGPTK_LIBD3DSHARED_PATH, and DYLD_FRAMEWORK_PATH containing external/.

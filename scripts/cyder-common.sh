@@ -649,27 +649,16 @@ cyder_load_saved_settings() {
       default|"") unset CYDER_GRAPHICS_BACKEND CX_GRAPHICS_BACKEND ;;
     esac
   fi
-  if [[ "${CYDER_GRAPHICS_BACKEND:-}" == dxvk ]]; then
-    local hud_value show_frametimes
-    value="$(plutil -extract dxvkFrameRate raw -o - "$settings" 2>/dev/null || true)"
-    [[ "$value" == sixty ]] && export DXVK_FRAME_RATE=60
-    hud_value="$(plutil -extract graphicsHud raw -o - "$settings" 2>/dev/null || true)"
-    show_frametimes=1
-    value="$(plutil -extract dxvkHudFrametimes raw -o - "$settings" 2>/dev/null || true)"
-    [[ "$value" == "false" || "$value" == "0" ]] && show_frametimes=0
-    unset MTL_HUD_ENABLED
-    case "$hud_value" in
-      dxvk)
-        if (( show_frametimes )); then
-          export DXVK_HUD=fps,frametimes
-        else
-          export DXVK_HUD=fps
-        fi
-        ;;
-      metal) export MTL_HUD_ENABLED=1 ;;
-      off) export DXVK_HUD=0 ;;
-    esac
-  fi
+  value="$(plutil -extract dxvkFrameRate raw -o - "$settings" 2>/dev/null || true)"
+  case "$value" in sixty|unlimited) export CYDER_DXVK_FRAME_RATE_PREFERENCE="$value" ;; esac
+  value="$(plutil -extract graphicsHud raw -o - "$settings" 2>/dev/null || true)"
+  case "$value" in off|metal|dxvk) export CYDER_GRAPHICS_HUD_PREFERENCE="$value" ;; esac
+  value="$(plutil -extract dxvkHudFrametimes raw -o - "$settings" 2>/dev/null || true)"
+  case "$value" in
+    true|1) export CYDER_DXVK_HUD_FRAMETIMES=1 ;;
+    false|0) export CYDER_DXVK_HUD_FRAMETIMES=0 ;;
+  esac
+  cyder_apply_graphics_runtime_preferences
 }
 
 cyder_find_taskpolicy() {
@@ -1994,7 +1983,7 @@ cyder_game_environment_key_is_allowed() {
     WINEPREFIX|WINESERVER|WINEARCH|WINEDEBUG|CX_ROOT|CX_BOTTLE|CX_APPLEGPTK_LIBD3DSHARED_PATH) return 1 ;;
     CYDER_SUPPORT|CYDER_RUNTIME_ROOT|CYDER_ENGINES|CYDER_ENGINE_NAME|CYDER_ENGINE_SRC|CYDER_SCRIPTS|CYDER_APP) return 1 ;;
     CYDER_WINE_*|CYDER_SESSION_*|CYDER_DIAGNOSTIC_*|CYDER_TEST_*|CYDER_RESULT_FILE|CYDER_PROGRESS_FILE) return 1 ;;
-    CYDER_GPTK_ROOT|CYDER_GRAPHICS_BACKENDS_ROOT|CYDER_GAME_ARGUMENTS) return 1 ;;
+    CYDER_GPTK_ROOT|CYDER_GRAPHICS_*|CYDER_GAME_ARGUMENTS) return 1 ;;
   esac
   return 0
 }
@@ -2024,6 +2013,40 @@ cyder_resolve_effective_graphics_backend() {
       ;;
     wined3d|dxvk|d3dmetal)
       export CYDER_GRAPHICS_BACKEND="$preference" CX_GRAPHICS_BACKEND="$preference"
+      ;;
+  esac
+  cyder_apply_graphics_runtime_preferences
+}
+
+cyder_apply_graphics_runtime_preferences() {
+  local preference="${CYDER_GRAPHICS_PREFERENCE:-${CYDER_GRAPHICS_BACKEND:-default}}"
+  local backend="${CYDER_GRAPHICS_BACKEND:-default}"
+  local hud="${CYDER_GRAPHICS_HUD_PREFERENCE:-off}"
+
+  unset DXVK_FRAME_RATE DXVK_HUD MTL_HUD_ENABLED
+  if [[ "$backend" == dxvk ]] \
+     && { [[ "$preference" == dxvk ]] || cyder_is_maplestory_oem; } \
+     && [[ "${CYDER_DXVK_FRAME_RATE_PREFERENCE:-sixty}" == sixty ]]; then
+    export DXVK_FRAME_RATE=60
+  fi
+
+  case "$hud" in
+    metal)
+      export MTL_HUD_ENABLED=1 DXVK_HUD=0
+      ;;
+    dxvk)
+      if [[ "$preference" == dxvk ]]; then
+        if [[ "${CYDER_DXVK_HUD_FRAMETIMES:-1}" == 0 ]]; then
+          export DXVK_HUD=fps
+        else
+          export DXVK_HUD=fps,frametimes
+        fi
+      else
+        export DXVK_HUD=0
+      fi
+      ;;
+    off|*)
+      export DXVK_HUD=0
       ;;
   esac
 }
@@ -2127,8 +2150,8 @@ cyder_load_game_settings() {
               ;;
             dxvkFrameRate)
               case "$value" in
-                60|sixty) export DXVK_FRAME_RATE=60 ;;
-                unlimited) unset DXVK_FRAME_RATE ;;
+                60|sixty) export CYDER_DXVK_FRAME_RATE_PREFERENCE=sixty ;;
+                unlimited) export CYDER_DXVK_FRAME_RATE_PREFERENCE=unlimited ;;
               esac
               ;;
           esac
@@ -2439,6 +2462,7 @@ cyder_run_wine_exe() {
     echo "Prefix: $canonical_prefix"
     echo "Engine version: ${engine_version:-unknown}"
     echo "NTDLL SHA-256: $ntdll_sha256"
+    echo "Graphics preference: ${CYDER_GRAPHICS_PREFERENCE:-default}"
     echo "Graphics backend: ${CYDER_GRAPHICS_BACKEND:-default}"
     echo "GPTK root: ${CYDER_GPTK_ROOT:-<unset>}"
     echo "DXVK frame rate: ${DXVK_FRAME_RATE:-<unset>}"

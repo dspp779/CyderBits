@@ -110,6 +110,28 @@ JSON
   assert_eq "$DXVK_HUD" "fps" "shell settings loader should allow DXVK HUD without frametimes"
 )
 
+# Metal HUD is independent of a manual DXVK selection. In particular, the
+# generic "default" backend leaves CompatDB in charge but must still inject the
+# user's Metal HUD request.
+cat >"$SETTINGS_DIR/settings.json" <<'JSON'
+{
+  "schemaVersion": 7,
+  "graphicsBackend": "default",
+  "dxvkFrameRate": "unlimited",
+  "graphicsHud": "metal",
+  "dxvkHudFrametimes": false
+}
+JSON
+(
+  export CYDER_SUPPORT="$SETTINGS_DIR"
+  export CYDER_GRAPHICS_BACKEND=
+  unset CYDER_GRAPHICS_PREFERENCE DXVK_FRAME_RATE DXVK_HUD MTL_HUD_ENABLED
+  cyder_load_saved_settings
+  assert_eq "$CYDER_GRAPHICS_PREFERENCE" "default" "shell loader should retain the saved preference"
+  assert_eq "$MTL_HUD_ENABLED" "1" "Metal HUD should apply with the default backend"
+  assert_eq "$DXVK_HUD" "0" "Metal HUD should disable the DXVK HUD"
+)
+
 # Engine / bottle name overrides stay under the shared roots.
 (
   export CYDER_ENGINE_NAME=maplestory-oem25

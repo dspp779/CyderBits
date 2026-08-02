@@ -463,7 +463,7 @@ struct CyderSettings: Codable {
             "CYDER_GPTK_ROOT", "CYDER_GRAPHICS_BACKENDS_ROOT", "CYDER_GAME_ARGUMENTS",
         ]
         if exactReserved.contains(value) { return false }
-        return !["DYLD_", "LD_", "CYDER_WINE_", "CYDER_SESSION_", "CYDER_DIAGNOSTIC_", "CYDER_TEST_"]
+        return !["DYLD_", "LD_", "CYDER_WINE_", "CYDER_SESSION_", "CYDER_DIAGNOSTIC_", "CYDER_TEST_", "CYDER_GRAPHICS_"]
             .contains { value.hasPrefix($0) }
     }
 
