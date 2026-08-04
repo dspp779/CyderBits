@@ -6,7 +6,7 @@ struct CyderSettingsHarness {
         let path = URL(fileURLWithPath: CommandLine.arguments[1])
         let store = CyderSettingsStore(url: path)
         let profileID = "profile-0123456789abcdef01234567"
-        precondition(store.value.schemaVersion == 7)
+        precondition(store.value.schemaVersion == 8)
         precondition(store.value.graphicsBackend == .default)
         precondition(store.value.dxvkFrameRate == .sixty)
         precondition(store.value.graphicsHud == .off)
@@ -54,7 +54,7 @@ struct CyderSettingsHarness {
         let environment = profile["environment"] as! [String: Any]
         precondition(environment["NOT VALID"] == nil)
         let reloaded = CyderSettingsStore(url: path)
-        precondition(reloaded.value.schemaVersion == 7)
+        precondition(reloaded.value.schemaVersion == 8)
         precondition(reloaded.value.revision == 1)
 
         try store.update { settings in

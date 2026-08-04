@@ -79,7 +79,24 @@ assert_contains "$(cat "$ROOT/scripts/cyder_settings.swift")" 'defaultGraphicsBa
 assert_contains "$ui" 'saveImmediately(registrySetting: "dpi")' "DPI changes should invoke only the DPI sed path"
 assert_contains "$ui" 'saveImmediately(registrySetting: "display")' "Retina changes should invoke Retina and linked DPI paths"
 assert_contains "$ui" 'saveImmediately(registrySetting: "smoothing")' "smoothing changes should invoke the smoothing sed path"
-assert_contains "$ui" 'saveImmediately(registrySetting: "font")' "font changes should invoke the section rename sed path"
+assert_contains "$ui" '細明體取代' "global UI should label MingLiU replacement"
+assert_contains "$ui" '宋體取代' "global UI should label Songti replacement"
+settings_swift="$(cat "$ROOT/scripts/cyder_settings.swift")"
+assert_contains "$settings_swift" '蘋方' "settings should offer PingFang title"
+assert_contains "$settings_swift" '"pingfang"' "settings should list pingfang id"
+assert_not_contains "$settings_swift" '微軟正黑體' "settings should not offer retired JhengHei title"
+assert_not_contains "$settings_swift" '"heiti"' "settings should not list retired heiti id"
+assert_contains "$ui" 'cyderFontTargetTitles' "UI should use shared font target titles"
+assert_contains "$library_ui" 'cyderFontTargetTitles' "game UI should use shared font target titles"
+assert_contains "$ui" 'rebuildGraphicsHudMenu(selecting: value.graphicsHud)' \
+  "reset-all should restore graphics HUD from defaults (off)"
+assert_contains "$settings_swift" 'var retinaMode = false' "Retina default off in settings model"
+assert_contains "$ui" 'saveImmediately(registrySetting: "font-mingliu")' \
+  "MingLiU popup should fast-apply mingliu family"
+assert_contains "$ui" 'saveImmediately(registrySetting: "font-songti")' \
+  "Songti popup should fast-apply songti family"
+assert_contains "$library_ui" '細明體取代' "game settings should label MingLiU replacement"
+assert_contains "$library_ui" '宋體取代' "game settings should label Songti replacement"
 if [[ "$ui" == *'NSButton(title: "確認"'* ]]; then
   echo "ASSERT failed: settings UI should not have a confirm button" >&2
   exit 1

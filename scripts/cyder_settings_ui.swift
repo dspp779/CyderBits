@@ -61,7 +61,8 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
     private let syncModeDescription = NSTextField(wrappingLabelWithString: "")
     private let retina = NSSwitch()
     private let dpi = NSPopUpButton()
-    private let font = NSPopUpButton()
+    private let fontMingLiu = NSPopUpButton()
+    private let fontSongti = NSPopUpButton()
     private let smoothing = NSPopUpButton()
     private let graphicsBackend = NSPopUpButton()
     private let dxvkFrameRate = NSPopUpButton()
@@ -82,7 +83,8 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
     private let executableRetina = NSSwitch()
     private let executableDpi = NSPopUpButton()
     private let executablePowerMode = NSPopUpButton()
-    private let executableFont = NSPopUpButton()
+    private let executableFontMingLiu = NSPopUpButton()
+    private let executableFontSongti = NSPopUpButton()
     private let executableSmoothing = NSPopUpButton()
     private let executableEnvironment = NSTextField()
     private let executableArguments = NSTextField()
@@ -248,19 +250,19 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
     }
 
     private func makeFontsTab() -> NSTabViewItem {
-        font.addItems(withTitles: [
-            cyderDefaultFontPreset() == "songti"
-                ? "宋體（Songti TC，預設）" : "宋體（Songti TC）",
-            cyderDefaultFontPreset() == "mingliu"
-                ? "細明體（MingLiU，預設）" : "細明體（MingLiU）",
-        ])
-        font.target = self
-        font.action = #selector(fontChanged)
+        for popup in [fontMingLiu, fontSongti] {
+            popup.addItems(withTitles: cyderFontTargetTitles)
+        }
+        fontMingLiu.target = self
+        fontMingLiu.action = #selector(fontMingLiuChanged)
+        fontSongti.target = self
+        fontSongti.action = #selector(fontSongtiChanged)
         smoothing.addItems(withTitles: ["關閉", "灰階", "ClearType RGB"])
         smoothing.target = self
         smoothing.action = #selector(smoothingChanged)
         return tab("字體", rows: [
-            row("Windows 預設字體", font),
+            row("細明體取代", fontMingLiu),
+            row("宋體取代", fontSongti),
             note("Cyder 只設定 Wine 的字體替代規則，不會自動安裝受授權保護的字型。"),
             row("字體平滑", smoothing),
         ])
@@ -423,7 +425,8 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
         retina.state = value.retinaMode ? .on : .off
         let dpiValues = [96, 120, 144, 168, 192, 240]
         dpi.selectItem(at: dpiValues.firstIndex(of: value.dpi) ?? 4)
-        font.selectItem(at: value.fontPreset == "mingliu" ? 1 : 0)
+        fontMingLiu.selectItem(at: cyderFontTargetIndex(value.fontMingLiuTarget))
+        fontSongti.selectItem(at: cyderFontTargetIndex(value.fontSongtiTarget))
         let smoothingValues = ["off", "grayscale", "cleartype-rgb"]
         smoothing.selectItem(at: smoothingValues.firstIndex(of: value.fontSmoothing) ?? 2)
         graphicsBackend.selectItem(at: graphicsBackendIndex(value.graphicsBackend))
@@ -682,7 +685,8 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
                 $0.esync = mode == .esync
                 $0.retinaMode = retina.state == .on
                 $0.dpi = dpiValues[max(0, dpi.indexOfSelectedItem)]
-                $0.fontPreset = font.indexOfSelectedItem == 1 ? "mingliu" : "songti"
+                $0.fontMingLiuTarget = cyderFontTarget(at: fontMingLiu.indexOfSelectedItem)
+                $0.fontSongtiTarget = cyderFontTarget(at: fontSongti.indexOfSelectedItem)
                 $0.fontSmoothing = smoothingValues[max(0, smoothing.indexOfSelectedItem)]
                 $0.graphicsBackend = graphicsBackendValue
                 $0.dxvkFrameRate = dxvkFrameRate.indexOfSelectedItem == 1 ? .unlimited : .sixty
@@ -713,8 +717,8 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
         }
     }
 
-    @objc private func fontChanged() {
-        if font.indexOfSelectedItem == 1 {
+    @objc private func fontMingLiuChanged() {
+        if fontMingLiu.indexOfSelectedItem == 0 {
             let alert = NSAlert()
             alert.messageText = "使用細明體前需要先安裝字型"
             alert.informativeText = "請先在 macOS「字體簿」安裝細明體，或將合法取得的 MingLiU 字型安裝到目前的 Wine 環境。Cyder 只切換字體設定，不會提供或自動安裝細明體。"
@@ -722,10 +726,14 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
             alert.addButton(withTitle: "我知道了")
             alert.addButton(withTitle: "取消")
             if alert.runModal() == .alertSecondButtonReturn {
-                font.selectItem(at: 0)
+                fontMingLiu.selectItem(at: cyderFontTargetIndex(store.value.fontMingLiuTarget))
             }
         }
-        saveImmediately(registrySetting: "font")
+        saveImmediately(registrySetting: "font-mingliu")
+    }
+
+    @objc private func fontSongtiChanged() {
+        saveImmediately(registrySetting: "font-songti")
     }
 
     private var supportsD3DMetalOS: Bool {
@@ -940,8 +948,8 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
         executableSettingChanged()
     }
 
-    @objc private func executableFontChanged() {
-        if executableFont.indexOfSelectedItem == 1 {
+    @objc private func executableFontMingLiuChanged() {
+        if executableFontMingLiu.indexOfSelectedItem == 0 {
             let alert = NSAlert()
             alert.messageText = "使用細明體前需要先安裝字型"
             alert.informativeText = "請先在 macOS「字體簿」安裝細明體，或將合法取得的 MingLiU 字型安裝到目前的 Wine 環境。Cyder 只切換字體設定，不會提供或自動安裝細明體。"
@@ -949,9 +957,17 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
             alert.addButton(withTitle: "我知道了")
             alert.addButton(withTitle: "取消")
             if alert.runModal() == .alertSecondButtonReturn {
-                executableFont.selectItem(at: 0)
+                executableFontMingLiu.selectItem(at: cyderFontTargetIndex(
+                    profileDrafts[selectedProfileID ?? ""]?.fontMingLiuTarget
+                        ?? defaultExecutableSettings().fontMingLiuTarget
+                        ?? cyderDefaultMingLiuFontTarget()
+                ))
             }
         }
+        executableSettingChanged()
+    }
+
+    @objc private func executableFontSongtiChanged() {
         executableSettingChanged()
     }
 
@@ -994,7 +1010,8 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
         rule.retinaMode = value.retinaMode
         rule.dpi = value.dpi
         rule.powerMode = "standard"
-        rule.fontPreset = value.fontPreset
+        rule.fontMingLiuTarget = value.fontMingLiuTarget
+        rule.fontSongtiTarget = value.fontSongtiTarget
         rule.fontSmoothing = value.fontSmoothing
         return rule
     }
@@ -1009,7 +1026,8 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
         rule.retinaMode = executableRetina.state == .on
         rule.dpi = dpiValues[max(0, executableDpi.indexOfSelectedItem)]
         rule.powerMode = ["standard", "energySaving"][max(0, executablePowerMode.indexOfSelectedItem)]
-        rule.fontPreset = executableFont.indexOfSelectedItem == 1 ? "mingliu" : "songti"
+        rule.fontMingLiuTarget = cyderFontTarget(at: executableFontMingLiu.indexOfSelectedItem)
+        rule.fontSongtiTarget = cyderFontTarget(at: executableFontSongti.indexOfSelectedItem)
         rule.fontSmoothing = ["off", "grayscale", "cleartype-rgb"][max(0, executableSmoothing.indexOfSelectedItem)]
         rule.environment = executableEnvironment.stringValue
             .split(separator: ";", omittingEmptySubsequences: true)
@@ -1048,10 +1066,15 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
             msync: rule.msync ?? defaults.msync ?? false,
             esync: rule.esync ?? defaults.esync ?? false
         ).rawValue)
-        executableRetina.state = (rule.retinaMode ?? defaults.retinaMode ?? true) ? .on : .off
-        executableDpi.selectItem(at: dpiValues.firstIndex(of: rule.dpi ?? defaults.dpi ?? 192) ?? 4)
+        executableRetina.state = (rule.retinaMode ?? defaults.retinaMode ?? false) ? .on : .off
+        executableDpi.selectItem(at: dpiValues.firstIndex(of: rule.dpi ?? defaults.dpi ?? 96) ?? 0)
         executablePowerMode.selectItem(at: rule.powerMode == "energySaving" ? 1 : 0)
-        executableFont.selectItem(at: rule.fontPreset == "mingliu" ? 1 : 0)
+        executableFontMingLiu.selectItem(at: cyderFontTargetIndex(
+            rule.fontMingLiuTarget ?? defaults.fontMingLiuTarget ?? cyderDefaultMingLiuFontTarget()
+        ))
+        executableFontSongti.selectItem(at: cyderFontTargetIndex(
+            rule.fontSongtiTarget ?? defaults.fontSongtiTarget ?? "songti"
+        ))
         let smoothingValues = ["off", "grayscale", "cleartype-rgb"]
         executableSmoothing.selectItem(at: smoothingValues.firstIndex(of: rule.fontSmoothing ?? defaults.fontSmoothing ?? "cleartype-rgb") ?? 2)
         executableEnvironment.stringValue = rule.environment
@@ -1103,7 +1126,8 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
         executableRetina.isEnabled = enabled
         executableDpi.isEnabled = enabled
         executablePowerMode.isEnabled = enabled
-        executableFont.isEnabled = enabled
+        executableFontMingLiu.isEnabled = enabled
+        executableFontSongti.isEnabled = enabled
         executableSmoothing.isEnabled = enabled
         executableEnvironment.isEnabled = enabled
         executableArguments.isEnabled = enabled
@@ -1113,7 +1137,8 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
             executableRetina.state = .off
             executableDpi.selectItem(at: 4)
             executablePowerMode.selectItem(at: 0)
-            executableFont.selectItem(at: 0)
+            executableFontMingLiu.selectItem(at: cyderFontTargetIndex(cyderDefaultMingLiuFontTarget()))
+            executableFontSongti.selectItem(at: cyderFontTargetIndex("songti"))
             executableSmoothing.selectItem(at: 2)
             executableEnvironment.stringValue = ""
             executableArguments.stringValue = ""
@@ -1130,14 +1155,20 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
         alert.addButton(withTitle: "取消")
         guard alert.runModal() == .alertFirstButtonReturn else { return }
         let value = CyderSettings.defaults
+        let dpiValues = [96, 120, 144, 168, 192, 240]
         syncMode.selectItem(at: CyderSyncMode(msync: value.msync, esync: value.esync ?? false).rawValue)
         updateSyncModeDescription()
         retina.state = value.retinaMode ? .on : .off
-        dpi.selectItem(at: 4)
-        font.selectItem(at: 0)
+        dpi.selectItem(at: dpiValues.firstIndex(of: value.dpi) ?? 0)
+        fontMingLiu.selectItem(at: cyderFontTargetIndex(value.fontMingLiuTarget))
+        fontSongti.selectItem(at: cyderFontTargetIndex(value.fontSongtiTarget))
         smoothing.selectItem(at: 2)
         graphicsBackend.selectItem(at: 0)
         dxvkFrameRate.selectItem(at: 0)
+        rebuildGraphicsHudMenu(selecting: value.graphicsHud)
+        dxvkHudFrametimes.state = value.dxvkHudFrametimes ? .on : .off
+        wineDiagnostics.selectItem(at: 0)
+        diagnosticsWarning.isHidden = true
         refreshGraphicsControls()
         saveImmediately(registrySetting: "all")
     }
@@ -1178,7 +1209,8 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
         let smoothingValues = ["off", "grayscale", "cleartype-rgb"]
         return value.retinaMode != (retina.state == .on)
             || value.dpi != dpiValues[max(0, dpi.indexOfSelectedItem)]
-            || value.fontPreset != (font.indexOfSelectedItem == 1 ? "mingliu" : "songti")
+            || value.fontMingLiuTarget != cyderFontTarget(at: fontMingLiu.indexOfSelectedItem)
+            || value.fontSongtiTarget != cyderFontTarget(at: fontSongti.indexOfSelectedItem)
             || value.fontSmoothing != smoothingValues[max(0, smoothing.indexOfSelectedItem)]
     }
 
@@ -1203,5 +1235,13 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
             }
         }
         return false
+    }
+
+    private func cyderFontTargetIndex(_ target: String) -> Int {
+        cyderFontTargetIDs.firstIndex(of: target) ?? 1
+    }
+
+    private func cyderFontTarget(at index: Int) -> String {
+        cyderFontTargetIDs[max(0, min(index, cyderFontTargetIDs.count - 1))]
     }
 }

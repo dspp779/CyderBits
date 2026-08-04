@@ -2,6 +2,11 @@
 # Apply validated Cyder UI settings to the active shared Wine prefix.
 set -euo pipefail
 
+_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=cyder-common.sh
+source "$_SCRIPT_DIR/cyder-common.sh"
+unset _SCRIPT_DIR
+
 WINE_INSTALL="${WINE_INSTALL:-}"
 WINEPREFIX="${WINEPREFIX:-}"
 [[ -n "$WINE_INSTALL" && -x "$WINE_INSTALL/bin/wine" ]] || {
@@ -15,15 +20,25 @@ WINEPREFIX="${WINEPREFIX:-}"
 
 WINE=(arch -x86_64 "$WINE_INSTALL/bin/wine")
 STATE_FILE="${CYDER_SETTINGS_STATE_FILE:-$WINEPREFIX/.cyder-settings-applied.tsv}"
-retina="${CYDER_RETINA_MODE:-1}"
-dpi="${CYDER_DPI:-192}"
-font="${CYDER_FONT_PRESET:-songti}"
+retina="${CYDER_RETINA_MODE:-0}"
+dpi="${CYDER_DPI:-96}"
 smoothing="${CYDER_FONT_SMOOTHING:-cleartype-rgb}"
 
 [[ "$retina" == 0 || "$retina" == 1 ]] || retina=1
 [[ "$dpi" =~ ^[0-9]+$ ]] && (( dpi >= 72 && dpi <= 480 )) || dpi=192
-case "$font" in songti|mingliu) ;; *) font=songti ;; esac
 case "$smoothing" in off|grayscale|cleartype-rgb|cleartype-bgr) ;; *) smoothing=cleartype-rgb ;; esac
+
+mingliu_target="${CYDER_FONT_MINGLIU_TARGET:-}"
+songti_target="${CYDER_FONT_SONGTI_TARGET:-}"
+if [[ -z "$mingliu_target" || -z "$songti_target" ]]; then
+  legacy="${CYDER_FONT_PRESET:-songti}"
+  { read -r _def_ming; read -r _def_song; } < <(cyder_migrate_font_targets_from_preset "$legacy")
+  mingliu_target="${mingliu_target:-$_def_ming}"
+  songti_target="${songti_target:-$_def_song}"
+  unset _def_ming _def_song
+fi
+cyder_font_target_is_valid "$mingliu_target" || mingliu_target="$(cyder_detect_default_mingliu_target)"
+cyder_font_target_is_valid "$songti_target" || songti_target=songti
 
 case "$smoothing" in
   off)
@@ -75,15 +90,15 @@ delete_reg_if_changed() {
     state_update "$key" absent
   fi
 }
-move_key_if_present() {
-  local state="$1" desired="$2" source="$3" target="$4"
-  if [[ "${CYDER_FORCE_SETTINGS:-0}" != 1 ]] && [[ "$(state_value "$state" 2>/dev/null || true)" == "$desired" ]]; then
-    return 0
-  fi
-  if "${WINE[@]}" reg copy "$source" "$target" /s /f 2>/dev/null; then
-    "${WINE[@]}" reg delete "$source" /f
-  fi
-  state_update "$state" "$desired"
+face_for() {
+  # Strip trailing newline from shared helper for wine reg /d values.
+  cyder_font_face_for_target "$1" | tr -d '\n'
+}
+font_ledger_line() {
+  local name="$1" key="font-$name" value
+  value="$(state_value "$key" 2>/dev/null || true)"
+  [[ -n "$value" ]] || return 0
+  printf 'font-%s\t%s\n' "$name" "$value"
 }
 
 if [[ "$retina" == 1 ]]; then
@@ -97,22 +112,38 @@ apply_reg_if_changed smoothing-type "$smooth_type" add 'HKCU\Control Panel\Deskt
 apply_reg_if_changed smoothing-gamma "$gamma" add 'HKCU\Control Panel\Desktop' /v FontSmoothingGamma /t REG_DWORD /d "$gamma" /f
 apply_reg_if_changed smoothing-orientation "$orientation" add 'HKCU\Control Panel\Desktop' /v FontSmoothingOrientation /t REG_DWORD /d "$orientation" /f
 
-if [[ "$font" == songti ]]; then
-  face='Songti TC'
-  font_key='HKCU\Software\Wine\Fonts\Replacements'
-  move_key_if_present font-section active \
-    'HKCU\Software\Wine\Fonts\Replacements(disabled)' "$font_key"
-else
-  face='MingLiU'
-  font_key='HKCU\Software\Wine\Fonts\Replacements(disabled)'
-  move_key_if_present font-section disabled \
-    'HKCU\Software\Wine\Fonts\Replacements' "$font_key"
+font_key='HKCU\Software\Wine\Fonts\Replacements'
+ming_face="$(face_for "$mingliu_target")"
+song_face="$(face_for "$songti_target")"
+
+disabled_state="$(state_value font-disabled-section 2>/dev/null || true)"
+legacy_section="$(state_value font-section 2>/dev/null || true)"
+if [[ "${CYDER_FORCE_SETTINGS:-0}" == 1 ]] || [[ "$disabled_state" == disabled ]] || [[ "$legacy_section" == disabled ]]; then
+  "${WINE[@]}" reg delete 'HKCU\Software\Wine\Fonts\Replacements(disabled)' /f 2>/dev/null || true
+  state_update font-disabled-section absent
 fi
-for name in MingLiU PMingLiU 細明體 新細明體 SimSun NSimSun 'MS Shell Dlg' 'MS Shell Dlg 2' 'Microsoft Sans Serif'; do
-  apply_reg_if_changed "font-$name" "$face" add "$font_key" /v "$name" /t REG_SZ /d "$face" /f
+
+for name in MingLiU PMingLiU 細明體 新細明體 'MS Shell Dlg' 'MS Shell Dlg 2' 'Microsoft Sans Serif'; do
+  if [[ "$mingliu_target" == mingliu ]]; then
+    delete_reg_if_changed "font-$name" "$font_key" /v "$name" /f
+  else
+    apply_reg_if_changed "font-$name" "$ming_face" add "$font_key" /v "$name" /t REG_SZ /d "$ming_face" /f
+  fi
 done
-apply_reg_if_changed font-at-PMingLiU "@$face" add "$font_key" /v @PMingLiU /t REG_SZ /d "@$face" /f
-apply_reg_if_changed font-at-細明體 "@$face" add "$font_key" /v @細明體 /t REG_SZ /d "@$face" /f
+for name in @PMingLiU @細明體; do
+  if [[ "$mingliu_target" == mingliu ]]; then
+    delete_reg_if_changed "font-$name" "$font_key" /v "$name" /f
+  else
+    apply_reg_if_changed "font-$name" "@$ming_face" add "$font_key" /v "$name" /t REG_SZ /d "@$ming_face" /f
+  fi
+done
+
+for name in SimSun NSimSun 宋体 新宋体; do
+  apply_reg_if_changed "font-$name" "$song_face" add "$font_key" /v "$name" /t REG_SZ /d "$song_face" /f
+done
+for name in @SimSun @宋体; do
+  apply_reg_if_changed "font-$name" "@$song_face" add "$font_key" /v "$name" /t REG_SZ /d "@$song_face" /f
+done
 
 state_dir="$(dirname "$STATE_FILE")"
 mkdir -p "$state_dir"
@@ -128,18 +159,23 @@ state_tmp="$(mktemp "${STATE_FILE}.XXXXXX")"
   printf 'smoothing-type\t%s\n' "$smooth_type"
   printf 'smoothing-gamma\t%s\n' "$gamma"
   printf 'smoothing-orientation\t%s\n' "$orientation"
-  printf 'font\t%s\n' "$font"
-  if [[ "$font" == songti ]]; then
-    printf 'font-section\tactive\n'
-  else
-    printf 'font-section\tdisabled\n'
-  fi
-  for name in MingLiU PMingLiU 細明體 新細明體 SimSun NSimSun 'MS Shell Dlg' 'MS Shell Dlg 2' 'Microsoft Sans Serif'; do
-    printf 'font-%s\t%s\n' "$name" "$face"
+  printf 'font-mingliu-target\t%s\n' "$mingliu_target"
+  printf 'font-songti-target\t%s\n' "$songti_target"
+  disabled_ledger="$(state_value font-disabled-section 2>/dev/null || true)"
+  [[ -n "$disabled_ledger" ]] && printf 'font-disabled-section\t%s\n' "$disabled_ledger"
+  for name in MingLiU PMingLiU 細明體 新細明體 'MS Shell Dlg' 'MS Shell Dlg 2' 'Microsoft Sans Serif'; do
+    font_ledger_line "$name"
   done
-  printf 'font-at-PMingLiU\t@%s\n' "$face"
-  printf 'font-at-細明體\t@%s\n' "$face"
+  for name in @PMingLiU @細明體; do
+    font_ledger_line "$name"
+  done
+  for name in SimSun NSimSun 宋体 新宋体; do
+    font_ledger_line "$name"
+  done
+  for name in @SimSun @宋体; do
+    font_ledger_line "$name"
+  done
 } >"$state_tmp"
 mv -f "$state_tmp" "$STATE_FILE"
 
-echo "Applied Cyder settings: Retina=$retina DPI=$dpi font=$font smoothing=$smoothing"
+echo "Applied Cyder settings: Retina=$retina DPI=$dpi mingliu=$mingliu_target songti=$songti_target smoothing=$smoothing"

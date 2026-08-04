@@ -27,8 +27,8 @@ Channels:
 
 Options:
   --channel CHANNEL       test | release (required)
-  --version VERSION       CFBundle version (test default: 0.9.3-dev;
-                          release default: 0.9.3 or CYDER_APP_VERSION)
+  --version VERSION       CFBundle version (test default: 0.9.4-dev;
+                          release default: 0.9.4 or CYDER_APP_VERSION)
   --engine-archive PATH   Bundle this engine tarball (else pinned config path)
   --sign-identity ID      codesign identity ('-' for ad-hoc). test defaults to
                           '-'; release defaults to Developer ID Application.
@@ -217,7 +217,7 @@ case "$CHANNEL" in
     if [[ "$SIGN_IDENTITY" != "-" ]]; then
       echo "NOTE: test channel with non-adhoc SIGN_IDENTITY=$SIGN_IDENTITY (no notarization)"
     fi
-    CYDER_APP_VERSION="${APP_VERSION:-${CYDER_APP_VERSION:-0.9.3-dev}}"
+    CYDER_APP_VERSION="${APP_VERSION:-${CYDER_APP_VERSION:-0.9.4-dev}}"
     export CYDER_APP_VERSION
     if [[ "$SKIP_BUILD" -eq 1 ]]; then
       echo "test channel ignores --skip-build (nothing to notarize)" >&2
@@ -230,7 +230,7 @@ case "$CHANNEL" in
     if [[ -n "$SIGN_IDENTITY_OVERRIDE" ]]; then
       export SIGN_IDENTITY="$SIGN_IDENTITY_OVERRIDE"
     fi
-    CYDER_APP_VERSION="${APP_VERSION:-${CYDER_APP_VERSION:-0.9.3}}"
+    CYDER_APP_VERSION="${APP_VERSION:-${CYDER_APP_VERSION:-0.9.4}}"
     export CYDER_APP_VERSION
     [[ "$CYDER_APP_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || {
       echo "Release channel requires a stable semantic version: $CYDER_APP_VERSION" >&2

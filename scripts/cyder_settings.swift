@@ -38,8 +38,24 @@ func cyderSystemProvidesMingLiU() -> Bool {
 }
 
 /// Prefer MingLiU when present; otherwise Songti TC (always available on macOS).
-func cyderDefaultFontPreset() -> String {
+func cyderDefaultMingLiuFontTarget() -> String {
     cyderSystemProvidesMingLiU() ? "mingliu" : "songti"
+}
+
+/// Shared font replacement target ids (order matches UI titles).
+let cyderFontTargetIDs: [String] = [
+    "mingliu", "songti", "pingfang",
+]
+
+let cyderFontTargetTitles: [String] = [
+    "細明體", "宋體", "蘋方",
+]
+
+func cyderSanitizeFontTarget(_ raw: String?, fallback: String) -> String {
+    guard let raw, cyderFontTargetIDs.contains(raw) else {
+        return fallback
+    }
+    return raw
 }
 
 enum CyderProduct {
@@ -180,11 +196,19 @@ struct CyderExecutableSettings: Codable {
     var esync: Bool?
     var retinaMode: Bool?
     var dpi: Int?
-    var fontPreset: String?
+    var fontMingLiuTarget: String?
+    var fontSongtiTarget: String?
     var fontSmoothing: String?
     var powerMode: String?
     var graphicsBackend: CyderGraphicsBackend?
     var dxvkFrameRate: CyderDxvkFrameRate?
+
+    enum CodingKeys: String, CodingKey {
+        case arguments, environment, msync, esync, retinaMode, dpi
+        case fontMingLiuTarget, fontSongtiTarget, fontSmoothing, powerMode
+        case graphicsBackend, dxvkFrameRate
+        case fontPreset
+    }
 
     init() {}
 
@@ -195,7 +219,8 @@ struct CyderExecutableSettings: Codable {
         esync: Bool? = nil,
         retinaMode: Bool? = nil,
         dpi: Int? = nil,
-        fontPreset: String? = nil,
+        fontMingLiuTarget: String? = nil,
+        fontSongtiTarget: String? = nil,
         fontSmoothing: String? = nil,
         powerMode: String? = nil,
         graphicsBackend: CyderGraphicsBackend? = nil,
@@ -207,7 +232,8 @@ struct CyderExecutableSettings: Codable {
         self.esync = esync
         self.retinaMode = retinaMode
         self.dpi = dpi
-        self.fontPreset = fontPreset
+        self.fontMingLiuTarget = fontMingLiuTarget
+        self.fontSongtiTarget = fontSongtiTarget
         self.fontSmoothing = fontSmoothing
         self.powerMode = powerMode
         self.graphicsBackend = graphicsBackend
@@ -222,7 +248,18 @@ struct CyderExecutableSettings: Codable {
         esync = try values.decodeIfPresent(Bool.self, forKey: .esync)
         retinaMode = try values.decodeIfPresent(Bool.self, forKey: .retinaMode)
         dpi = try values.decodeIfPresent(Int.self, forKey: .dpi)
-        fontPreset = try values.decodeIfPresent(String.self, forKey: .fontPreset)
+        let legacyPreset = try values.decodeIfPresent(String.self, forKey: .fontPreset)
+        let migrated = CyderSettings.migrateFontTargets(preset: legacyPreset)
+        if let value = try values.decodeIfPresent(String.self, forKey: .fontMingLiuTarget) {
+            fontMingLiuTarget = cyderSanitizeFontTarget(value, fallback: cyderDefaultMingLiuFontTarget())
+        } else if legacyPreset != nil {
+            fontMingLiuTarget = migrated.0
+        }
+        if let value = try values.decodeIfPresent(String.self, forKey: .fontSongtiTarget) {
+            fontSongtiTarget = cyderSanitizeFontTarget(value, fallback: "songti")
+        } else if legacyPreset != nil {
+            fontSongtiTarget = migrated.1
+        }
         fontSmoothing = try values.decodeIfPresent(String.self, forKey: .fontSmoothing)
         powerMode = try values.decodeIfPresent(String.self, forKey: .powerMode)
         graphicsBackend = CyderSettings.sanitizedOptionalGraphicsBackend(
@@ -232,19 +269,37 @@ struct CyderExecutableSettings: Codable {
             try values.decodeIfPresent(String.self, forKey: .dxvkFrameRate)
         )
     }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(arguments, forKey: .arguments)
+        try container.encode(environment, forKey: .environment)
+        try container.encodeIfPresent(msync, forKey: .msync)
+        try container.encodeIfPresent(esync, forKey: .esync)
+        try container.encodeIfPresent(retinaMode, forKey: .retinaMode)
+        try container.encodeIfPresent(dpi, forKey: .dpi)
+        try container.encodeIfPresent(fontMingLiuTarget, forKey: .fontMingLiuTarget)
+        try container.encodeIfPresent(fontSongtiTarget, forKey: .fontSongtiTarget)
+        try container.encodeIfPresent(fontSmoothing, forKey: .fontSmoothing)
+        try container.encodeIfPresent(powerMode, forKey: .powerMode)
+        try container.encodeIfPresent(graphicsBackend, forKey: .graphicsBackend)
+        try container.encodeIfPresent(dxvkFrameRate, forKey: .dxvkFrameRate)
+    }
 }
 
 struct CyderSettings: Codable {
-    // Schema 7 adds wineDiagnostics. Schema 6 adds dxvkHudFrametimes. Schema 5 adds graphicsHud.
+    // Schema 8 replaces fontPreset with fontMingLiuTarget/fontSongtiTarget. Schema 7 adds wineDiagnostics.
+    // Schema 6 adds dxvkHudFrametimes. Schema 5 adds graphicsHud.
     // Schema 4 adds graphics backend and DXVK frame rate. Schema 3 adds profile-keyed overrides. Keep perExecutable as a
     // legacy basename fallback; never infer a profile from a basename.
-    var schemaVersion = 7
+    var schemaVersion = 8
     var revision = 0
     var msync = false
     var esync: Bool? = false
-    var retinaMode = true
-    var dpi = 192
-    var fontPreset = cyderDefaultFontPreset()
+    var retinaMode = false
+    var dpi = 96
+    var fontMingLiuTarget = cyderDefaultMingLiuFontTarget()
+    var fontSongtiTarget = "songti"
     var fontSmoothing = "cleartype-rgb"
     var graphicsBackend: CyderGraphicsBackend = CyderProduct.defaultGraphicsBackend
     var dxvkFrameRate: CyderDxvkFrameRate = .sixty
@@ -256,24 +311,53 @@ struct CyderSettings: Codable {
 
     static var defaults: CyderSettings { CyderSettings() }
 
+    enum CodingKeys: String, CodingKey {
+        case schemaVersion, revision, msync, esync, retinaMode, dpi
+        case fontMingLiuTarget, fontSongtiTarget, fontSmoothing
+        case graphicsBackend, dxvkFrameRate, graphicsHud, dxvkHudFrametimes, wineDiagnostics
+        case perExecutable, perProfile
+        case fontPreset
+    }
+
+    static func migrateFontTargets(preset: String?) -> (String, String) {
+        switch preset {
+        case "mingliu":
+            return ("mingliu", "songti")
+        case "songti":
+            return ("songti", "songti")
+        default:
+            return (cyderDefaultMingLiuFontTarget(), "songti")
+        }
+    }
+
     init() {
-        fontPreset = cyderDefaultFontPreset()
+        fontMingLiuTarget = cyderDefaultMingLiuFontTarget()
+        fontSongtiTarget = "songti"
         graphicsBackend = CyderProduct.defaultGraphicsBackend
     }
 
     init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
         let version = try values.decodeIfPresent(Int.self, forKey: .schemaVersion) ?? 1
-        guard version <= 7 else { throw DecodingError.dataCorruptedError(
+        guard version <= 8 else { throw DecodingError.dataCorruptedError(
             forKey: .schemaVersion, in: values, debugDescription: "unsupported settings schema \(version)"
         ) }
-        schemaVersion = 7
+        schemaVersion = 8
         revision = try values.decodeIfPresent(Int.self, forKey: .revision) ?? 0
         msync = try values.decodeIfPresent(Bool.self, forKey: .msync) ?? false
         esync = try values.decodeIfPresent(Bool?.self, forKey: .esync) ?? false
-        retinaMode = try values.decodeIfPresent(Bool.self, forKey: .retinaMode) ?? true
-        dpi = try values.decodeIfPresent(Int.self, forKey: .dpi) ?? 192
-        fontPreset = try values.decodeIfPresent(String.self, forKey: .fontPreset) ?? cyderDefaultFontPreset()
+        retinaMode = try values.decodeIfPresent(Bool.self, forKey: .retinaMode) ?? false
+        dpi = try values.decodeIfPresent(Int.self, forKey: .dpi) ?? 96
+        let legacyPreset = try values.decodeIfPresent(String.self, forKey: .fontPreset)
+        let migrated = Self.migrateFontTargets(preset: legacyPreset)
+        fontMingLiuTarget = cyderSanitizeFontTarget(
+            try values.decodeIfPresent(String.self, forKey: .fontMingLiuTarget) ?? migrated.0,
+            fallback: cyderDefaultMingLiuFontTarget()
+        )
+        fontSongtiTarget = cyderSanitizeFontTarget(
+            try values.decodeIfPresent(String.self, forKey: .fontSongtiTarget) ?? migrated.1,
+            fallback: "songti"
+        )
         fontSmoothing = try values.decodeIfPresent(String.self, forKey: .fontSmoothing) ?? "cleartype-rgb"
         graphicsBackend = Self.sanitizedGraphicsBackend(
             try values.decodeIfPresent(String.self, forKey: .graphicsBackend)
@@ -298,7 +382,8 @@ struct CyderSettings: Codable {
             result[item.key] = Self.sanitized(item.value)
         }
         dpi = min(480, max(72, dpi))
-        if !["songti", "mingliu"].contains(fontPreset) { fontPreset = "songti" }
+        fontMingLiuTarget = cyderSanitizeFontTarget(fontMingLiuTarget, fallback: cyderDefaultMingLiuFontTarget())
+        fontSongtiTarget = cyderSanitizeFontTarget(fontSongtiTarget, fallback: "songti")
         if !["off", "grayscale", "cleartype-rgb", "cleartype-bgr"].contains(fontSmoothing) {
             fontSmoothing = "cleartype-rgb"
         }
@@ -306,6 +391,26 @@ struct CyderSettings: Codable {
         if graphicsHud == .dxvk && graphicsBackend != .dxvk {
             graphicsHud = .off
         }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(schemaVersion, forKey: .schemaVersion)
+        try container.encode(revision, forKey: .revision)
+        try container.encode(msync, forKey: .msync)
+        try container.encode(esync, forKey: .esync)
+        try container.encode(retinaMode, forKey: .retinaMode)
+        try container.encode(dpi, forKey: .dpi)
+        try container.encode(fontMingLiuTarget, forKey: .fontMingLiuTarget)
+        try container.encode(fontSongtiTarget, forKey: .fontSongtiTarget)
+        try container.encode(fontSmoothing, forKey: .fontSmoothing)
+        try container.encode(graphicsBackend, forKey: .graphicsBackend)
+        try container.encode(dxvkFrameRate, forKey: .dxvkFrameRate)
+        try container.encode(graphicsHud, forKey: .graphicsHud)
+        try container.encode(dxvkHudFrametimes, forKey: .dxvkHudFrametimes)
+        try container.encode(wineDiagnostics, forKey: .wineDiagnostics)
+        try container.encode(perExecutable, forKey: .perExecutable)
+        try container.encode(perProfile, forKey: .perProfile)
     }
 
     static func sanitizedGraphicsBackend(_ raw: String?) -> CyderGraphicsBackend {
@@ -484,8 +589,13 @@ struct CyderSettings: Codable {
         }
         result.arguments = value.arguments.filter { isSafeLaunchValue($0) }
         if let dpi = value.dpi { result.dpi = min(480, max(72, dpi)) }
-        if let preset = value.fontPreset, !["songti", "mingliu"].contains(preset) {
-            result.fontPreset = nil
+        if let target = value.fontMingLiuTarget,
+           !cyderFontTargetIDs.contains(target) {
+            result.fontMingLiuTarget = nil
+        }
+        if let target = value.fontSongtiTarget,
+           !cyderFontTargetIDs.contains(target) {
+            result.fontSongtiTarget = nil
         }
         if let smoothing = value.fontSmoothing,
            !["off", "grayscale", "cleartype-rgb", "cleartype-bgr"].contains(smoothing) {
@@ -522,7 +632,7 @@ final class CyderSettingsStore {
         do {
             let data = try Data(contentsOf: url)
             let decoded = try JSONDecoder().decode(CyderSettings.self, from: data)
-            guard decoded.schemaVersion <= 7 else {
+            guard decoded.schemaVersion <= 8 else {
                 CyderDiagnostics.shared.warning("unsupported settings schema=\(decoded.schemaVersion); using defaults")
                 value = .defaults
                 return
@@ -538,7 +648,7 @@ final class CyderSettingsStore {
         CyderDiagnostics.shared.enter(.settingsSave)
         var next = value
         work(&next)
-        next.schemaVersion = 7
+        next.schemaVersion = 8
         next.perProfile = next.perProfile.reduce(into: [:]) { result, item in
             guard CyderSettings.isValidProfileID(item.key) else { return }
             result[item.key] = CyderSettings.sanitized(item.value)
@@ -563,7 +673,8 @@ final class CyderSettingsStore {
             "CYDER_ESYNC": (value.esync ?? false) ? "1" : "0",
             "CYDER_RETINA_MODE": value.retinaMode ? "1" : "0",
             "CYDER_DPI": String(value.dpi),
-            "CYDER_FONT_PRESET": value.fontPreset,
+            "CYDER_FONT_MINGLIU_TARGET": value.fontMingLiuTarget,
+            "CYDER_FONT_SONGTI_TARGET": value.fontSongtiTarget,
             "CYDER_FONT_SMOOTHING": value.fontSmoothing,
             "CYDER_POWER_MODE": "normal",
             "CYDER_WINE_DIAGNOSTICS": value.wineDiagnostics.rawValue,
@@ -615,7 +726,8 @@ final class CyderSettingsStore {
         if let v = rule.esync { result["CYDER_ESYNC"] = v ? "1" : "0" }
         if let v = rule.retinaMode { result["CYDER_RETINA_MODE"] = v ? "1" : "0" }
         if let v = rule.dpi { result["CYDER_DPI"] = String(min(480, max(72, v))) }
-        if let v = rule.fontPreset { result["CYDER_FONT_PRESET"] = v }
+        if let v = rule.fontMingLiuTarget { result["CYDER_FONT_MINGLIU_TARGET"] = v }
+        if let v = rule.fontSongtiTarget { result["CYDER_FONT_SONGTI_TARGET"] = v }
         if let v = rule.fontSmoothing { result["CYDER_FONT_SMOOTHING"] = v }
         if let v = rule.powerMode { result["CYDER_POWER_MODE"] = v == "energySaving" ? "background" : "normal" }
         result.merge(rule.environment.filter { CyderSettings.isValidEnvironmentKey($0.key) }) { _, override in override }

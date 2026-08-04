@@ -21,6 +21,10 @@ cyder_crossover_version() {
 }
 
 # Prefer MingLiU when the Mac already has it; otherwise Songti TC.
+cyder_detect_default_mingliu_target() {
+  cyder_detect_default_font_preset
+}
+
 cyder_detect_default_font_preset() {
   local dir item lower
   if command -v fc-list >/dev/null 2>&1; then
@@ -43,6 +47,66 @@ cyder_detect_default_font_preset() {
     done < <(find "$dir" -maxdepth 2 -type f 2>/dev/null || true)
   done
   printf 'songti\n'
+}
+
+cyder_font_target_is_valid() {
+  case "$1" in
+    mingliu|songti|pingfang) return 0 ;;
+  esac
+  return 1
+}
+
+# Wine Fonts\\Replacements face name for a target id.
+cyder_font_face_for_target() {
+  case "$1" in
+    mingliu) printf 'MingLiU\n' ;;
+    songti) printf 'Songti TC\n' ;;
+    pingfang) printf 'PingFang TC\n' ;;
+    *) printf 'Songti TC\n' ;;
+  esac
+}
+
+# Map legacy fontPreset to mingliu/songti target pair (stdout: two lines).
+cyder_migrate_font_targets_from_preset() {
+  case "${1:-}" in
+    mingliu) printf '%s\n' mingliu songti ;;
+    songti) printf '%s\n' songti songti ;;
+    *) printf '%s\n' "$(cyder_detect_default_mingliu_target)" songti ;;
+  esac
+}
+
+cyder_apply_font_targets_from_settings() {
+  local settings="$1"
+  local keep_mingliu="${2:-0}"
+  local keep_songti="${3:-0}"
+  local value preset migrated_ming migrated_song
+
+  if [[ "$keep_mingliu" -eq 0 ]]; then
+    value="$(plutil -extract fontMingLiuTarget raw -o - "$settings" 2>/dev/null || true)"
+    if cyder_font_target_is_valid "$value"; then
+      export CYDER_FONT_MINGLIU_TARGET="$value"
+    fi
+  fi
+  if [[ "$keep_songti" -eq 0 ]]; then
+    value="$(plutil -extract fontSongtiTarget raw -o - "$settings" 2>/dev/null || true)"
+    if cyder_font_target_is_valid "$value"; then
+      export CYDER_FONT_SONGTI_TARGET="$value"
+    fi
+  fi
+
+  if [[ "$keep_mingliu" -eq 0 && -z "${CYDER_FONT_MINGLIU_TARGET:-}" ]] \
+    || [[ "$keep_songti" -eq 0 && -z "${CYDER_FONT_SONGTI_TARGET:-}" ]]; then
+    preset="$(plutil -extract fontPreset raw -o - "$settings" 2>/dev/null || true)"
+    case "$preset" in songti|mingliu)
+      IFS=$'\n' read -r migrated_ming migrated_song \
+        < <(cyder_migrate_font_targets_from_preset "$preset")
+      [[ "$keep_mingliu" -eq 0 && -z "${CYDER_FONT_MINGLIU_TARGET:-}" ]] \
+        && export CYDER_FONT_MINGLIU_TARGET="$migrated_ming"
+      [[ "$keep_songti" -eq 0 && -z "${CYDER_FONT_SONGTI_TARGET:-}" ]] \
+        && export CYDER_FONT_SONGTI_TARGET="$migrated_song"
+      ;;
+    esac
+  fi
 }
 
 cyder_engine_version_label_trim() {
@@ -592,21 +656,27 @@ cyder_load_saved_settings() {
   # currently selected game's overrides; reloading the global settings file
   # here used to replace Retina=0/DPI=96 with the global Retina=1/DPI=192.
   local keep_msync=0 keep_esync=0 keep_retina=0 keep_dpi=0
-  local keep_font=0 keep_smoothing=0 keep_power=0 keep_diagnostics=0
+  local keep_mingliu=0 keep_songti=0 keep_smoothing=0 keep_power=0 keep_diagnostics=0
   case "${CYDER_MSYNC-}" in 0|1) keep_msync=1 ;; esac
   case "${CYDER_ESYNC-}" in 0|1) keep_esync=1 ;; esac
   case "${CYDER_RETINA_MODE-}" in 0|1) keep_retina=1 ;; esac
   if [[ "${CYDER_DPI-}" =~ ^[0-9]+$ ]] && (( CYDER_DPI >= 72 && CYDER_DPI <= 480 )); then keep_dpi=1; fi
-  case "${CYDER_FONT_PRESET-}" in songti|mingliu) keep_font=1 ;; esac
+  cyder_font_target_is_valid "${CYDER_FONT_MINGLIU_TARGET-}" && keep_mingliu=1
+  cyder_font_target_is_valid "${CYDER_FONT_SONGTI_TARGET-}" && keep_songti=1
+  case "${CYDER_FONT_PRESET-}" in songti|mingliu)
+    [[ "$keep_mingliu" -eq 0 && "$keep_songti" -eq 0 ]] && keep_mingliu=1 && keep_songti=1
+    ;;
+  esac
   case "${CYDER_FONT_SMOOTHING-}" in off|grayscale|cleartype-rgb|cleartype-bgr) keep_smoothing=1 ;; esac
   case "${CYDER_POWER_MODE-}" in normal|background) keep_power=1 ;; esac
   case "${CYDER_WINE_DIAGNOSTICS-}" in quiet|errors|sync|unwind) keep_diagnostics=1 ;; esac
 
   export CYDER_MSYNC="${CYDER_MSYNC:-0}"
   export CYDER_ESYNC="${CYDER_ESYNC:-0}"
-  export CYDER_RETINA_MODE="${CYDER_RETINA_MODE:-1}"
-  export CYDER_DPI="${CYDER_DPI:-192}"
-  export CYDER_FONT_PRESET="${CYDER_FONT_PRESET:-$(cyder_detect_default_font_preset)}"
+  export CYDER_RETINA_MODE="${CYDER_RETINA_MODE:-0}"
+  export CYDER_DPI="${CYDER_DPI:-96}"
+  export CYDER_FONT_MINGLIU_TARGET="${CYDER_FONT_MINGLIU_TARGET:-$(cyder_detect_default_mingliu_target)}"
+  export CYDER_FONT_SONGTI_TARGET="${CYDER_FONT_SONGTI_TARGET:-songti}"
   export CYDER_FONT_SMOOTHING="${CYDER_FONT_SMOOTHING:-cleartype-rgb}"
   export CYDER_POWER_MODE="${CYDER_POWER_MODE:-normal}"
   export CYDER_WINE_DIAGNOSTICS="${CYDER_WINE_DIAGNOSTICS:-quiet}"
@@ -630,9 +700,8 @@ cyder_load_saved_settings() {
     value="$(plutil -extract dpi raw -o - "$settings" 2>/dev/null || true)"
     [[ "$value" =~ ^[0-9]+$ ]] && export CYDER_DPI="$value"
   fi
-  if [[ "$keep_font" -eq 0 ]]; then
-    value="$(plutil -extract fontPreset raw -o - "$settings" 2>/dev/null || true)"
-    [[ "$value" == songti || "$value" == mingliu ]] && export CYDER_FONT_PRESET="$value"
+  if [[ "$keep_mingliu" -eq 0 || "$keep_songti" -eq 0 ]]; then
+    cyder_apply_font_targets_from_settings "$settings" "$keep_mingliu" "$keep_songti"
   fi
   if [[ "$keep_smoothing" -eq 0 ]]; then
     value="$(plutil -extract fontSmoothing raw -o - "$settings" 2>/dev/null || true)"
@@ -2165,7 +2234,16 @@ cyder_load_game_settings() {
             esync) case "$value" in true) export CYDER_ESYNC=1 ;; false) export CYDER_ESYNC=0 ;; esac ;;
             retinaMode) case "$value" in true) export CYDER_RETINA_MODE=1 ;; false) export CYDER_RETINA_MODE=0 ;; esac ;;
             dpi) [[ "$value" =~ ^[0-9]+$ ]] && (( value >= 72 && value <= 480 )) && export CYDER_DPI="$value" || true ;;
-            fontPreset) [[ "$value" == songti || "$value" == mingliu ]] && export CYDER_FONT_PRESET="$value" || true ;;
+            fontMingLiuTarget) cyder_font_target_is_valid "$value" && export CYDER_FONT_MINGLIU_TARGET="$value" || true ;;
+            fontSongtiTarget) cyder_font_target_is_valid "$value" && export CYDER_FONT_SONGTI_TARGET="$value" || true ;;
+            fontPreset)
+              case "$value" in songti|mingliu)
+                IFS=$'\n' read -r _ming _song < <(cyder_migrate_font_targets_from_preset "$value")
+                export CYDER_FONT_MINGLIU_TARGET="$_ming"
+                export CYDER_FONT_SONGTI_TARGET="$_song"
+                ;;
+              esac
+              ;;
             fontSmoothing) case "$value" in off|grayscale|cleartype-rgb|cleartype-bgr) export CYDER_FONT_SMOOTHING="$value" ;; esac ;;
             powerMode) case "$value" in standard) export CYDER_POWER_MODE=normal ;; energySaving) export CYDER_POWER_MODE=background ;; esac ;;
             graphicsBackend)
@@ -2197,7 +2275,7 @@ cyder_load_game_settings() {
       esac
     done < <(/usr/bin/ruby -rjson -e '
       rule = JSON.parse(STDIN.read)
-      %w[msync esync retinaMode dpi fontPreset fontSmoothing powerMode graphicsBackend dxvkFrameRate].each do |key|
+      %w[msync esync retinaMode dpi fontMingLiuTarget fontSongtiTarget fontPreset fontSmoothing powerMode graphicsBackend dxvkFrameRate].each do |key|
         puts "setting\t#{key}\t#{rule[key]}" if rule.key?(key) && !rule[key].nil?
       end
       (rule["environment"] || {}).each { |key, value| puts "environment\t#{key}\t#{value}" }

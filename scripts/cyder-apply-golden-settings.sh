@@ -27,12 +27,16 @@ REGEDIT4
 "FontSmoothingOrientation"=dword:00000001
 
 [HKEY_CURRENT_USER\Software\Wine\Fonts\Replacements]
+"SimSun"="Songti TC"
+"NSimSun"="Songti TC"
+"宋体"="Songti TC"
+"新宋体"="Songti TC"
+"@SimSun"="@Songti TC"
+"@宋体"="@Songti TC"
 "MingLiU"="Songti TC"
 "PMingLiU"="Songti TC"
 "細明體"="Songti TC"
 "新細明體"="Songti TC"
-"SimSun"="Songti TC"
-"NSimSun"="Songti TC"
 "MS Shell Dlg"="Songti TC"
 "MS Shell Dlg 2"="Songti TC"
 "Microsoft Sans Serif"="Songti TC"
@@ -46,5 +50,5 @@ EOF
 echo "regedit /s $regfile" >&2
 "${WINE[@]}" regedit /s "$regfile"
 
-printf 'schema=2\nretina=0\ndpi=96\nfont=songti\nsmoothing=cleartype-rgb\nddraw=native,builtin\n' \
+printf 'schema=2\nretina=0\ndpi=96\nfontMingLiu=songti\nfontSongti=songti\nsmoothing=cleartype-rgb\nddraw=native,builtin\n' \
   >"$WINEPREFIX/.cyder-golden-baseline-v2"

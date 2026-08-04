@@ -20,7 +20,8 @@ profile_id="$(bash "$TMP/scripts/cyder-profile.sh" id "$exe")"
     "esync" => true,
     "retinaMode" => false,
     "dpi" => 96,
-    "fontPreset" => "mingliu",
+    "fontMingLiuTarget" => "mingliu",
+    "fontSongtiTarget" => "songti",
     "fontSmoothing" => "grayscale",
     "powerMode" => "energySaving",
     "graphicsBackend" => "d3dmetal",
@@ -35,9 +36,10 @@ profile_id="$(bash "$TMP/scripts/cyder-profile.sh" id "$exe")"
 cat >"$TMP/scripts/cyder-edit-user-reg.sh" <<'SH'
 #!/usr/bin/env bash
 set -euo pipefail
-printf '%s|%s|%s|%s|%s|%s|%s\n' \
+printf '%s|%s|%s|%s|%s|%s|%s|%s\n' \
   "${CYDER_MSYNC:-}" "${CYDER_ESYNC:-}" "${CYDER_RETINA_MODE:-}" \
-  "${CYDER_DPI:-}" "${CYDER_FONT_PRESET:-}" "${CYDER_FONT_SMOOTHING:-}" \
+  "${CYDER_DPI:-}" "${CYDER_FONT_MINGLIU_TARGET:-}" "${CYDER_FONT_SONGTI_TARGET:-}" \
+  "${CYDER_FONT_SMOOTHING:-}" \
   "${CYDER_POWER_MODE:-}" >"$CYDER_TEST_SETTINGS_LOG"
 SH
 chmod +x "$TMP/scripts/cyder-edit-user-reg.sh"
@@ -68,7 +70,7 @@ CYDER_TEST_WINESERVER_LOG="$TMP/wineserver.log" \
 
 result="$(cat "$TMP/result.log")"
 assert_eq "$result" "1|--windowed|two words" "game settings should be loaded by stable EXE ID"
-assert_eq "$(cat "$TMP/settings.log")" "0|1|0|96|mingliu|grayscale|background" \
+assert_eq "$(cat "$TMP/settings.log")" "0|1|0|96|mingliu|songti|grayscale|background" \
   "fast registry settings should receive per-game values"
 assert_contains "$(cat "$TMP/wineserver.log")" "$TMP/support/bottles/shared|-k" \
   "per-game settings should stop the shared wineserver after editing"
@@ -78,17 +80,19 @@ assert_contains "$(cat "$TMP/wineserver.log")" "$TMP/support/bottles/shared|-k" 
 # startup, otherwise a saved Retina-off/DPI-96 rule silently becomes 1/192.
 override_result="$(
   CYDER_SUPPORT="$TMP/support" CYDER_RETINA_MODE=0 CYDER_DPI=96 \
-    CYDER_MSYNC=0 CYDER_ESYNC=1 CYDER_FONT_PRESET=mingliu \
+    CYDER_MSYNC=0 CYDER_ESYNC=1 CYDER_FONT_MINGLIU_TARGET=mingliu \
+    CYDER_FONT_SONGTI_TARGET=songti \
     CYDER_FONT_SMOOTHING=grayscale CYDER_POWER_MODE=background \
     bash -c '
       source "$1/scripts/cyder-common.sh"
       cyder_load_saved_settings
-      printf "%s|%s|%s|%s|%s|%s|%s" \
+      printf "%s|%s|%s|%s|%s|%s|%s|%s" \
         "$CYDER_MSYNC" "$CYDER_ESYNC" "$CYDER_RETINA_MODE" "$CYDER_DPI" \
-        "$CYDER_FONT_PRESET" "$CYDER_FONT_SMOOTHING" "$CYDER_POWER_MODE"
+        "$CYDER_FONT_MINGLIU_TARGET" "$CYDER_FONT_SONGTI_TARGET" \
+        "$CYDER_FONT_SMOOTHING" "$CYDER_POWER_MODE"
     ' _ "$ROOT"
 )"
-assert_eq "$override_result" "0|1|0|96|mingliu|grayscale|background" \
+assert_eq "$override_result" "0|1|0|96|mingliu|songti|grayscale|background" \
   "explicit per-game environment should override global saved settings"
 
 reserved_environment_result="$(

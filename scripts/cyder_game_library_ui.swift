@@ -473,7 +473,8 @@ private final class CyderGameSettingsWindowController: NSWindowController, NSWin
     private let power = NSPopUpButton()
     private let graphicsBackend = NSPopUpButton()
     private let dxvkFrameRate = NSPopUpButton()
-    private let font = NSPopUpButton()
+    private let fontMingLiu = NSPopUpButton()
+    private let fontSongti = NSPopUpButton()
     private let smoothing = NSPopUpButton()
     private let environment = CyderPlaceholderTextView()
     private let arguments = CyderPlaceholderTextView()
@@ -529,7 +530,8 @@ private final class CyderGameSettingsWindowController: NSWindowController, NSWin
         let powerValue = rule?.powerMode ?? "standard"
         let graphicsBackendValue = rule?.graphicsBackend
         let dxvkFrameRateValue = rule?.dxvkFrameRate
-        let fontValue = rule?.fontPreset ?? global.fontPreset
+        let mingLiuValue = rule?.fontMingLiuTarget ?? global.fontMingLiuTarget
+        let songtiValue = rule?.fontSongtiTarget ?? global.fontSongtiTarget
         let smoothingValue = rule?.fontSmoothing ?? global.fontSmoothing
         syncMode.selectItem(at: CyderSyncMode(msync: msyncValue, esync: esyncValue).rawValue)
         updateSyncModeDescription()
@@ -539,7 +541,8 @@ private final class CyderGameSettingsWindowController: NSWindowController, NSWin
         graphicsBackend.selectItem(at: graphicsBackendIndex(graphicsBackendValue))
         dxvkFrameRate.selectItem(at: dxvkFrameRateValue == .unlimited ? 2 : dxvkFrameRateValue == .sixty ? 1 : 0)
         refreshGraphicsControls()
-        font.selectItem(at: fontValue == "mingliu" ? 1 : 0)
+        fontMingLiu.selectItem(at: cyderFontTargetIndex(mingLiuValue))
+        fontSongti.selectItem(at: cyderFontTargetIndex(songtiValue))
         smoothing.selectItem(at: smoothingValues.firstIndex(of: smoothingValue) ?? 2)
         environment.string = (rule?.environment ?? [:]).sorted { $0.key < $1.key }
             .map { "\($0.key)=\($0.value)" }
@@ -591,12 +594,9 @@ private final class CyderGameSettingsWindowController: NSWindowController, NSWin
         dxvkFrameRate.addItems(withTitles: ["跟隨全域", "60", "不限制"])
         dxvkFrameRate.target = self
         dxvkFrameRate.action = #selector(dxvkFrameRateChanged)
-        font.addItems(withTitles: [
-            cyderDefaultFontPreset() == "songti"
-                ? "宋體（Songti TC，預設）" : "宋體（Songti TC）",
-            cyderDefaultFontPreset() == "mingliu"
-                ? "細明體（MingLiU，預設）" : "細明體（MingLiU）",
-        ])
+        for popup in [fontMingLiu, fontSongti] {
+            popup.addItems(withTitles: cyderFontTargetTitles)
+        }
         smoothing.addItems(withTitles: ["關閉", "灰階", "ClearType RGB"])
         for textView in [environment, arguments] {
             textView.isRichText = false
@@ -647,7 +647,8 @@ private final class CyderGameSettingsWindowController: NSWindowController, NSWin
             row("能源模式", power, information: "省電模式會降低程序優先級，可能減少耗電但造成遊戲卡頓。"),
             row("圖形轉譯", graphicsBackend, information: "選「跟隨全域」會使用 Cyder 偏好設定的圖形後端。"),
             row("限制幀率", dxvkFrameRate, information: "僅在手動選擇 DXVK 時可用；「跟隨全域」會使用偏好設定。"),
-            row("遊戲字體", font, information: "選擇 Wine 的字體替代方案；細明體需要系統已安裝對應字型。"),
+            row("細明體取代", fontMingLiu, information: "細明體組取代目標；選細明體表示不強制取代，需系統已安裝 MingLiU。"),
+            row("宋體取代", fontSongti, information: "宋體組取代目標；選宋體時仍會寫入 Songti TC 以確保可讀性。"),
             row("字體平滑", smoothing, information: "控制 Windows 字體平滑方式。"),
             row(
                 "環境變數",
@@ -740,7 +741,7 @@ private final class CyderGameSettingsWindowController: NSWindowController, NSWin
     }
 
     private func setControlsEnabled(_ enabled: Bool) {
-        [syncMode, retina, dpi, power, graphicsBackend, dxvkFrameRate, font, smoothing].forEach { $0.isEnabled = enabled }
+        [syncMode, retina, dpi, power, graphicsBackend, dxvkFrameRate, fontMingLiu, fontSongti, smoothing].forEach { $0.isEnabled = enabled }
         environment.isEditable = enabled
         arguments.isEditable = enabled
         settingViews.forEach { $0.alphaValue = enabled ? 1 : 0.52 }
@@ -819,7 +820,8 @@ private final class CyderGameSettingsWindowController: NSWindowController, NSWin
         rule.powerMode = power.indexOfSelectedItem == 1 ? "energySaving" : "standard"
         rule.graphicsBackend = graphicsBackendOverride
         rule.dxvkFrameRate = dxvkFrameRateOverride
-        rule.fontPreset = font.indexOfSelectedItem == 1 ? "mingliu" : "songti"
+        rule.fontMingLiuTarget = cyderFontTarget(at: fontMingLiu.indexOfSelectedItem)
+        rule.fontSongtiTarget = cyderFontTarget(at: fontSongti.indexOfSelectedItem)
         rule.fontSmoothing = smoothingValues[max(0, smoothing.indexOfSelectedItem)]
         rule.environment = parseEnvironment(environment.string)
         // Newlines in the multiline field are treated as whitespace separators.
@@ -1098,10 +1100,19 @@ private final class CyderGameSettingsWindowController: NSWindowController, NSWin
             esync: value.esync ?? false,
             retinaMode: value.retinaMode,
             dpi: value.dpi,
-            fontPreset: value.fontPreset,
+            fontMingLiuTarget: value.fontMingLiuTarget,
+            fontSongtiTarget: value.fontSongtiTarget,
             fontSmoothing: value.fontSmoothing,
             powerMode: "standard"
         )
+    }
+
+    private func cyderFontTargetIndex(_ target: String) -> Int {
+        cyderFontTargetIDs.firstIndex(of: target) ?? 1
+    }
+
+    private func cyderFontTarget(at index: Int) -> String {
+        cyderFontTargetIDs[max(0, min(index, cyderFontTargetIDs.count - 1))]
     }
 }
 
