@@ -6,7 +6,7 @@
 
 **Run legacy Windows games on Mac — DirectDraw & GDI first.**
 
-The validated path is classic 2D Win32 graphics: **DirectDraw → Wine wined3d/OpenGL** and GDI. The current packaged `CX26.3.0-W11-Cyder008` engine also contains an x86_64 **MoltenVK** runtime for Wine Vulkan (repacking defaults to `VULKAN_MODE=with` + `VULKAN_SOURCE=existing`), but BlueCG does not use Vulkan, DXVK, dxmt, or D3DMetal.
+The validated path is classic 2D Win32 graphics: **DirectDraw → Wine wined3d/OpenGL** and GDI. The current packaged `CX26.3.0-W11-Cyder009` engine also contains an x86_64 **MoltenVK** runtime for Wine Vulkan (repacking defaults to `VULKAN_MODE=with` + `VULKAN_SOURCE=existing`), but BlueCG does not use Vulkan, DXVK, dxmt, or D3DMetal.
 
 CyderBits builds CrossOver-based Wine on Apple Silicon and ships two tools: **Cyder** — a one-click `.exe` launcher — and **CyderBits** — a packager that wraps `.exe` files as double-clickable macOS `.app` bundles.
 

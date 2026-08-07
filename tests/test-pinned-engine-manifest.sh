@@ -17,9 +17,11 @@ assert_eq "$(plutil -extract artifact raw -o - "$manifest")" \
   "$(basename "$archive")" \
   "pinned manifest and archive path should agree"
 assert_contains "$(cat "$manifest")" "cyder-wineserver-free-async-queue-null-fd.patch" \
-  "pinned Cyder008 manifest should include the latest free_async_queue guard"
+  "pinned Cyder009 manifest should include the latest free_async_queue guard"
 assert_contains "$(cat "$manifest")" "a6-final-same-view-backing-sync.patch" \
-  "pinned Cyder008 manifest should include the final A6 backing-sync patch"
+  "pinned Cyder009 manifest should include the final A6 backing-sync patch"
+assert_contains "$(cat "$manifest")" "cyder-ntdll-qdo-optnone-NtQueryDirectoryObject.patch" \
+  "pinned Cyder009 manifest should include the QDO optnone bandage"
 
 if [[ ! -f "$archive" ]]; then
   echo "SKIP pinned engine payload checks: $archive is not present"
