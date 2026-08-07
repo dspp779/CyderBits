@@ -17,10 +17,10 @@ cat >"$regfile" <<'EOF'
 REGEDIT4
 
 [HKEY_CURRENT_USER\Software\Wine\Mac Driver]
-"RetinaMode"="n"
+"RetinaMode"="y"
 
 [HKEY_CURRENT_USER\Control Panel\Desktop]
-"LogPixels"=dword:00000060
+"LogPixels"=dword:000000c0
 "FontSmoothing"="2"
 "FontSmoothingType"=dword:00000002
 "FontSmoothingGamma"=dword:00000578
@@ -50,5 +50,5 @@ EOF
 echo "regedit /s $regfile" >&2
 "${WINE[@]}" regedit /s "$regfile"
 
-printf 'schema=2\nretina=0\ndpi=96\nfontMingLiu=songti\nfontSongti=songti\nsmoothing=cleartype-rgb\nddraw=native,builtin\n' \
+printf 'schema=2\nretina=1\ndpi=192\nfontMingLiu=songti\nfontSongti=songti\nsmoothing=cleartype-rgb\nddraw=native,builtin\n' \
   >"$WINEPREFIX/.cyder-golden-baseline-v2"

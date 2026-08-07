@@ -21,5 +21,5 @@ Invalid / retired ids (`jhenghei`, `lihei`, `ligothic`, `lantinghei`, `heiti`, �
 
 ## Defaults (related)
 
-- `retinaMode` default **false**; DPI default **96**
+- `retinaMode` default **true**; DPI default **192** (as of 0.9.5)
 - `graphicsHud` default **off**; reset-all must rebuild HUD menu to 關閉 before save

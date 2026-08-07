@@ -90,7 +90,7 @@ assert_contains "$ui" 'cyderFontTargetTitles' "UI should use shared font target 
 assert_contains "$library_ui" 'cyderFontTargetTitles' "game UI should use shared font target titles"
 assert_contains "$ui" 'rebuildGraphicsHudMenu(selecting: value.graphicsHud)' \
   "reset-all should restore graphics HUD from defaults (off)"
-assert_contains "$settings_swift" 'var retinaMode = false' "Retina default off in settings model"
+assert_contains "$settings_swift" 'var retinaMode = true' "Retina default on in settings model"
 assert_contains "$ui" 'saveImmediately(registrySetting: "font-mingliu")' \
   "MingLiU popup should fast-apply mingliu family"
 assert_contains "$ui" 'saveImmediately(registrySetting: "font-songti")' \

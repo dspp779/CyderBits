@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Mac high-resolution mode for a Wine prefix (CrossOver-like).
-# Default OFF (RetinaMode value removed, 96 DPI). Use --on for RetinaMode=y + LogPixels=192.
+# Cyder product default is ON (RetinaMode=y + LogPixels=192 via golden/settings).
+# This helper defaults OFF without args; use --on for RetinaMode=y + LogPixels=192.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

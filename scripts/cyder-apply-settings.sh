@@ -20,8 +20,8 @@ WINEPREFIX="${WINEPREFIX:-}"
 
 WINE=(arch -x86_64 "$WINE_INSTALL/bin/wine")
 STATE_FILE="${CYDER_SETTINGS_STATE_FILE:-$WINEPREFIX/.cyder-settings-applied.tsv}"
-retina="${CYDER_RETINA_MODE:-0}"
-dpi="${CYDER_DPI:-96}"
+retina="${CYDER_RETINA_MODE:-1}"
+dpi="${CYDER_DPI:-192}"
 smoothing="${CYDER_FONT_SMOOTHING:-cleartype-rgb}"
 
 [[ "$retina" == 0 || "$retina" == 1 ]] || retina=1

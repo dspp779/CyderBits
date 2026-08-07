@@ -69,8 +69,8 @@ rm -f "$TMP/prefix/.cyder-settings-applied.tsv"
 unset CYDER_RETINA_MODE CYDER_DPI CYDER_FONT_PRESET CYDER_FONT_MINGLIU_TARGET CYDER_FONT_SONGTI_TARGET CYDER_FONT_SMOOTHING
 bash "$ROOT/scripts/cyder-apply-settings.sh" >/dev/null
 defaults="$(cat "$CYDER_TEST_WINE_LOG")"
-assert_contains "$defaults" "RetinaMode /t REG_SZ /d n" "Retina should default off"
-assert_contains "$defaults" "LogPixels /t REG_DWORD /d 96" "DPI should default to 96"
+assert_contains "$defaults" "RetinaMode /t REG_SZ /d y" "Retina should default on"
+assert_contains "$defaults" "LogPixels /t REG_DWORD /d 192" "DPI should default to 192"
 assert_contains "$defaults" "FontSmoothing /t REG_SZ /d 2" "font antialiasing should default on"
 assert_contains "$defaults" "FontSmoothingType /t REG_DWORD /d 2" "font smoothing should default to RGB ClearType"
 

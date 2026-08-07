@@ -12,8 +12,8 @@ USER_REG="$WINEPREFIX/user.reg"
 SETTING="${CYDER_FAST_SETTING:-all}"
 [[ -f "$USER_REG" ]] || { echo "user.reg is missing: $USER_REG" >&2; exit 1; }
 
-retina="${CYDER_RETINA_MODE:-0}"
-dpi="${CYDER_DPI:-96}"
+retina="${CYDER_RETINA_MODE:-1}"
+dpi="${CYDER_DPI:-192}"
 smoothing="${CYDER_FONT_SMOOTHING:-cleartype-rgb}"
 
 mingliu_target="${CYDER_FONT_MINGLIU_TARGET:-}"

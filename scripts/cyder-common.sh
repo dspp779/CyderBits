@@ -673,8 +673,8 @@ cyder_load_saved_settings() {
 
   export CYDER_MSYNC="${CYDER_MSYNC:-0}"
   export CYDER_ESYNC="${CYDER_ESYNC:-0}"
-  export CYDER_RETINA_MODE="${CYDER_RETINA_MODE:-0}"
-  export CYDER_DPI="${CYDER_DPI:-96}"
+  export CYDER_RETINA_MODE="${CYDER_RETINA_MODE:-1}"
+  export CYDER_DPI="${CYDER_DPI:-192}"
   export CYDER_FONT_MINGLIU_TARGET="${CYDER_FONT_MINGLIU_TARGET:-$(cyder_detect_default_mingliu_target)}"
   export CYDER_FONT_SONGTI_TARGET="${CYDER_FONT_SONGTI_TARGET:-songti}"
   export CYDER_FONT_SMOOTHING="${CYDER_FONT_SMOOTHING:-cleartype-rgb}"
