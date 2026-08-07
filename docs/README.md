@@ -13,6 +13,8 @@
 
 | 版本 | 文件 | 重點 |
 |------|------|------|
+| 0.9.5 | [繁中](releases/v0.9.5.md) | Cyder009（QDO optnone）、高解析度預設開啟、啟動檢查文案 |
+| 0.9.4 | [繁中](releases/v0.9.4.md) | 雙字體取代選項收斂、顯示相關預設值修正 |
 | 0.9.3 | [繁中](releases/v0.9.3.md) | Cyder008（A6、free_async_queue、MoltenVK shim）、macOS 11 UI、Bash 單一路徑與啟動錯誤提示 |
 | 0.9.2 | [繁中](releases/v0.9.2.md) | 同版引擎升級也會套用 MoltenVK wait-poll shim；其餘同 0.9.1 |
 | 0.9.1 | [繁中](releases/v0.9.1.md) | MoltenVK wait-poll shim overlay（DXVK Ports 洩漏）；引擎仍 Cyder007 |

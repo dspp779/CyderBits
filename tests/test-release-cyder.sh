@@ -34,8 +34,8 @@ assert_contains "$script" '/usr/bin/lipo "$swift" -verify_arch x86_64 arm64' \
   "release channel must pass the input file before lipo verification options"
 assert_contains "$script" 'requires a stable semantic version' \
   "release channel must reject dev and rc version strings"
-assert_contains "$(cat "$ROOT/scripts/create-cyder-app.sh")" '0.9.4' \
-  "next App build must default to version 0.9.4"
+assert_contains "$(cat "$ROOT/scripts/create-cyder-app.sh")" '0.9.5' \
+  "next App build must default to version 0.9.5"
 
 # Dry-run test channel should not require Developer ID or network.
 # Inherit a release-looking SIGN_IDENTITY to ensure test still forces ad-hoc.
