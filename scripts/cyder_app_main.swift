@@ -885,7 +885,14 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             return
         }
         let context = CyderLaunchContext(resourcePath: resourcePath)
-        showSetup("正在準備遊戲環境…")
+        let state = environmentState(context: context)
+        // Already-initialized installs still probe engine fingerprint + health;
+        // avoid implying a full bootstrap when markers are already present.
+        if state.needsEngine || state.needsBootstrap {
+            showSetup("正在準備遊戲環境…")
+        } else {
+            showSetup("正在檢查遊戲環境…")
+        }
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             guard let self else { return }
             let preparationFailure = self.ensureEnvironment(context: context)
