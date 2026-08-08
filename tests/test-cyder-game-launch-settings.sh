@@ -24,7 +24,7 @@ profile_id="$(bash "$TMP/scripts/cyder-profile.sh" id "$exe")"
     "fontSongtiTarget" => "songti",
     "fontSmoothing" => "grayscale",
     "powerMode" => "energySaving",
-    "graphicsBackend" => "d3dmetal",
+    "graphicsBackend" => "dxmt",
     "dxvkFrameRate" => "unlimited",
     "environment" => {"TEST_GAME_SETTING" => "yes"},
     "arguments" => ["--windowed", "two words"]
@@ -65,11 +65,13 @@ CYDER_TEST_WINESERVER_LOG="$TMP/wineserver.log" \
     CYDER_SCRIPTS="$2/scripts"
     CYDER_SHARED_PREFIX="$2/support/bottles/shared"
     cyder_prepare_game_launch_settings "$2/engine/bin/wine" "$2/engine" "$CYDER_SHARED_PREFIX" "$3"
-    printf "%s|%s|%s\n" "$CYDER_GAME_SETTINGS_FOUND" "${CYDER_GAME_ARGUMENTS[0]}" "${CYDER_GAME_ARGUMENTS[1]}"
+    printf "%s|%s|%s|%s|%s\n" "$CYDER_GAME_SETTINGS_FOUND" "${CYDER_GAME_ARGUMENTS[0]}" "${CYDER_GAME_ARGUMENTS[1]}" \
+      "${CYDER_GRAPHICS_BACKEND:-}" "${CX_GRAPHICS_BACKEND:-}"
   ' _ "$ROOT" "$TMP" "$exe" >"$TMP/result.log"
 
 result="$(cat "$TMP/result.log")"
-assert_eq "$result" "1|--windowed|two words" "game settings should be loaded by stable EXE ID"
+assert_eq "$result" "1|--windowed|two words|dxmt|dxmt" \
+  "game settings should be loaded by stable EXE ID and wire the dxmt backend"
 assert_eq "$(cat "$TMP/settings.log")" "0|1|0|96|mingliu|songti|grayscale|background" \
   "fast registry settings should receive per-game values"
 assert_contains "$(cat "$TMP/wineserver.log")" "$TMP/support/bottles/shared|-k" \
@@ -166,17 +168,47 @@ assert_contains "$crossover_conf" '"MTL_HUD_ENABLED" = "1"' \
   "CrossOver bottle metadata should receive the selected HUD"
 assert_not_contains "$crossover_conf" '"DXVK_HUD" = "old"' \
   "CrossOver bottle metadata should not retain stale graphics values"
-auto_backend="$(
+dxmt_backend="$(
   CYDER_SUPPORT="$TMP/support" bash -c '
     source "$1/scripts/cyder-common.sh"
-    cyder_macos_at_least() { return 0; }
-    export CYDER_GRAPHICS_PREFERENCE=auto CYDER_GRAPHICS_HUD_PREFERENCE=metal
+    export CYDER_GRAPHICS_PREFERENCE=dxmt CYDER_GRAPHICS_HUD_PREFERENCE=metal
     cyder_resolve_effective_graphics_backend "$2/engine"
     printf "%s|%s|%s" "$CYDER_GRAPHICS_BACKEND" "$MTL_HUD_ENABLED" "$DXVK_HUD"
   ' _ "$ROOT" "$TMP"
 )"
-assert_eq "$auto_backend" "d3dmetal|1|0" \
-  "Bash auto graphics cascade should prefer GPTK and apply the saved Metal HUD"
+assert_eq "$dxmt_backend" "dxmt|1|0" \
+  "Bash graphics resolve should honor an explicit dxmt preference and apply the saved Metal HUD"
+
+# A stale "auto" preference (from a pre-dxmt settings.json) must no longer
+# cascade to a concrete backend now that the auto cascade is gone.
+legacy_auto_backend="$(
+  CYDER_SUPPORT="$TMP/support" bash -c '
+    source "$1/scripts/cyder-common.sh"
+    cyder_macos_at_least() { return 0; }
+    export CYDER_GRAPHICS_PREFERENCE=auto
+    cyder_resolve_effective_graphics_backend "$2/engine"
+    printf "%s" "${CYDER_GRAPHICS_BACKEND:-<unset>}"
+  ' _ "$ROOT" "$TMP"
+)"
+assert_eq "$legacy_auto_backend" "<unset>" \
+  "a leftover auto preference must not cascade to a concrete backend"
+
+# A leftover per-game "auto" graphicsBackend (pre-dxmt settings.json) must be
+# treated as "default" rather than kept as a clearing preference.
+mkdir -p "$TMP/support/launch-requests"
+auto_request="$TMP/support/launch-requests/auto-request.json"
+printf '%s' '{"graphicsBackend":"auto"}' >"$auto_request"
+auto_game_result="$(
+  CYDER_SUPPORT="$TMP/support" CYDER_SCRIPTS="$TMP/scripts" \
+    CYDER_TEST_SETTINGS_REQUEST="$auto_request" \
+    bash -c '
+      source "$1/scripts/cyder-common.sh"
+      cyder_load_game_settings "$2"
+      printf "%s|%s" "$CYDER_GRAPHICS_PREFERENCE" "${CYDER_GRAPHICS_BACKEND:-<unset>}"
+    ' _ "$ROOT" "$exe"
+)"
+assert_eq "$auto_game_result" "default|<unset>" \
+  "a leftover per-game auto graphicsBackend should be treated as default"
 
 # Runtime harness: d3dmetal + fake GPTK root must emit CYDER_GPTK_ROOT,
 # CX_APPLEGPTK_LIBD3DSHARED_PATH, and DYLD_FRAMEWORK_PATH containing external/.

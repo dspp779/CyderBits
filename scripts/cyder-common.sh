@@ -729,22 +729,9 @@ cyder_load_saved_settings() {
     value="$(plutil -extract graphicsBackend raw -o - "$settings" 2>/dev/null || true)"
     export CYDER_GRAPHICS_PREFERENCE="${value:-default}"
     case "$value" in
-      wined3d|dxvk|d3dmetal)
+      wined3d|dxvk|dxmt|d3dmetal)
         export CYDER_GRAPHICS_BACKEND="$value"
         export CX_GRAPHICS_BACKEND="$value"
-        ;;
-      auto)
-        if cyder_is_maplestory_oem; then
-          local engine_root="$CYDER_ENGINES/$CYDER_ENGINE_NAME"
-          if [[ -f "$engine_root/lib64/apple_gptk/external/libd3dshared.dylib" ]]; then
-            export CYDER_GRAPHICS_BACKEND=d3dmetal
-          elif [[ -f "$engine_root/lib/dxvk/x86_64-windows/d3d11.dll" ]]; then
-            export CYDER_GRAPHICS_BACKEND=dxvk
-          else
-            export CYDER_GRAPHICS_BACKEND=wined3d
-          fi
-          export CX_GRAPHICS_BACKEND="$CYDER_GRAPHICS_BACKEND"
-        fi
         ;;
       default|"") unset CYDER_GRAPHICS_BACKEND CX_GRAPHICS_BACKEND ;;
     esac
@@ -2092,27 +2079,11 @@ cyder_game_environment_key_is_allowed() {
 cyder_resolve_effective_graphics_backend() {
   local engine_root="$1"
   local preference="${CYDER_GRAPHICS_PREFERENCE:-${CYDER_GRAPHICS_BACKEND:-default}}"
-  if cyder_is_maplestory_oem && [[ "$preference" == default ]]; then
-    preference=auto
-  fi
   case "$preference" in
-    auto)
-      if declare -F cyder_macos_at_least >/dev/null 2>&1 \
-         && cyder_macos_at_least 14 0 \
-         && [[ -n "$(cyder_preferred_gptk_root 2>/dev/null || true)" ]]; then
-        export CYDER_GRAPHICS_BACKEND=d3dmetal CX_GRAPHICS_BACKEND=d3dmetal
-      elif [[ -r "$engine_root/lib/dxvk/x86_64-windows/d3d11.dll" ]] \
-           && { [[ -r "$engine_root/lib/wine/x86_64-unix/libMoltenVK.dylib" ]] \
-                || [[ -r "$engine_root/lib64/libMoltenVK.dylib" ]]; }; then
-        export CYDER_GRAPHICS_BACKEND=dxvk CX_GRAPHICS_BACKEND=dxvk
-      else
-        export CYDER_GRAPHICS_BACKEND=wined3d CX_GRAPHICS_BACKEND=wined3d
-      fi
-      ;;
     default|"")
       unset CYDER_GRAPHICS_BACKEND CX_GRAPHICS_BACKEND
       ;;
-    wined3d|dxvk|d3dmetal)
+    wined3d|dxvk|dxmt|d3dmetal)
       export CYDER_GRAPHICS_BACKEND="$preference" CX_GRAPHICS_BACKEND="$preference"
       ;;
   esac
@@ -2251,12 +2222,14 @@ cyder_load_game_settings() {
             powerMode) case "$value" in standard) export CYDER_POWER_MODE=normal ;; energySaving) export CYDER_POWER_MODE=background ;; esac ;;
             graphicsBackend)
               case "$value" in
-                wined3d|dxvk|d3dmetal)
+                wined3d|dxvk|dxmt|d3dmetal)
                   export CYDER_GRAPHICS_PREFERENCE="$value"
                   export CYDER_GRAPHICS_BACKEND="$value" CX_GRAPHICS_BACKEND="$value"
                   ;;
-                auto|default)
-                  export CYDER_GRAPHICS_PREFERENCE="$value"
+                default|auto)
+                  # A leftover "auto" (pre-dxmt settings.json) is treated as
+                  # "default" rather than kept as a distinct preference.
+                  export CYDER_GRAPHICS_PREFERENCE=default
                   unset CYDER_GRAPHICS_BACKEND CX_GRAPHICS_BACKEND
                   ;;
               esac
