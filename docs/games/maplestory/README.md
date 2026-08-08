@@ -1,6 +1,6 @@
 # 台灣楓之谷在 macOS 的 CrossOver 相容性研究
 
-最後更新：2026-07-23
+最後更新：2026-08-08
 
 **想直接在 Mac 上玩：** 請看 [macOS 玩家教學](macos-player-guide.md)。
 
@@ -36,13 +36,13 @@ Mac 的實測，已把最小條件縮小為：
 可將遊戲留在 Documents，由 Wine 經 `Z:` 執行。**自行編譯 OEM／CX26 source** 進世界請改用
 bottle 內 `C:\MapleTest`（APFS clone）；Documents `Z:` 在 source 上易出現「遊戲檔案損毀」。
 
-## 與《新楓之谷：經典版》CX26 的關係（2026-07-31）
+## 與《新楓之谷：經典版》CX26 的關係（2026-08-08）
 
 OEM-25（Wine 10／CrossOver OEM runtime）實測對同步機制與圖形後端較不敏感；經典版在
 `CX26.3.0-W11-Cyder007` 曾因 **wineserver 無聲消失／SEGV** 在商城進出凍結。
-**Cyder 0.9.0** 的 Cyder007 已含 async fd rebind、soft-guard 與 diag；建議仍用
-**MSync + DXVK 或 D3DMetal**（勿依賴 WineD3D）。兩邊不是同一引擎、同一 hang 形狀，
-**不能**把 OEM「什麼 sync 都能玩」直接外推到經典版。
+**Cyder008** 加固 teardown；**Cyder009**（Cyder 0.9.5）另以 QDO `optnone` 緩解離場
+`grap-core64` busy-loop。建議仍用 **MSync + DXVK 或 D3DMetal**（勿依賴 WineD3D）。
+兩邊不是同一引擎、同一 hang 形狀，**不能**把 OEM「什麼 sync 都能玩」直接外推到經典版。
 
 OEM 文件裡與 wineserver／排程最相關、且曾被明確分類的項目是**效能 workaround**（降低
 wineserver 往返或 host `sched_yield`），bisect 已判定對無 OTP 畫面**非必要**；它們也
@@ -77,6 +77,8 @@ wineserver 往返或 host `sched_yield`），bisect 已判定對無 OTP 畫面**
 - [經典版 DXVK + MoltenVK Ports 洩漏](../../maplestory-classic-dxvk-ports-leak.md)：DXVK 長跑 Mach
   Ports 暴增；timeline-wait poll patch／shim／App overlay
 - [經典版 GRAP／NGS-X 插件盤點](classic-grap-ngs-x.md)：`Plugins/x86_64/grap*` 靜態盤點、與離場 livelock／Dock 殘留的關係
+- [經典版 NGS-X／GRAP 架構](maplestory-classic-ngs-x-grap-architecture.md)：元件角色、IPC、啟動流程
+- [grap-core64 離場殘留分析](grap-core64-residual-process-analysis.md)：QDO／`get_directory_entries` livelock、Cyder009 bandage
 
 ## OTP 專案的介面邊界
 

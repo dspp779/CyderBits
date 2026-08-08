@@ -1,12 +1,15 @@
 # 經典版 GRAP／NGS-X 插件盤點（初步）
 
-最後更新：2026-07-31  
+最後更新：2026-08-08  
 遊戲路徑範例：`…/Maplestory_Classic_Data/Plugins/x86_64/`  
 相關：
 
-- 離開遊戲 livelock：[`debug/hang-20260731-182944-leave-game/analysis.txt`](../../../debug/hang-20260731-182944-leave-game/analysis.txt)
+- 架構詳析：[`maplestory-classic-ngs-x-grap-architecture.md`](maplestory-classic-ngs-x-grap-architecture.md)
+- 離場殘留／QDO：[`grap-core64-residual-process-analysis.md`](grap-core64-residual-process-analysis.md)
+- 離開遊戲 livelock 取樣：[`debug/hang-20260731-182944-leave-game/analysis.txt`](../../../debug/hang-20260731-182944-leave-game/analysis.txt)
 - wineserver／離場總覽：[`maplestory-classic-wineserver-hang.md`](../../maplestory-classic-wineserver-hang.md) §2.5
 - 舊版（V280／OEM）BlackCipher lifecycle：[`launch-lifecycle-and-anticheat.md`](launch-lifecycle-and-anticheat.md)
+- 引擎 A/B：`cyder-wine-engine/docs/grap-core-qdo-ab-findings.md`
 
 **範圍：** 靜態檔案盤點、字串／PDB、與 Cyder hang 取樣對照。  
 **不做：** 停用、修改、繞過防作弊；不逆向還原協定。
@@ -23,8 +26,12 @@
 **「Nexon Game Security」**。
 
 離場卡住時高 CPU 的是 **`grap-core64.aes`**（約 55%），不是 `grap64.dll`。
-core 忙於 `NtQueryDirectoryObject` → wineserver `req_get_directory_entries`；
-主遊戲多半在 wait。詳見 hang analysis。
+core 忙於 `NtQueryDirectoryObject`（QDO）→ wineserver `req_get_directory_entries`；
+主遊戲多半在 wait。殘留稳态鎖定 Wine 虛擬 HID 滑鼠 symlink（`VID_845E`）。
+詳見 hang analysis 與 [`grap-core64-residual-process-analysis.md`](grap-core64-residual-process-analysis.md)。
+
+**Cyder 0.9.5／Cyder009** 已以 QDO `optnone` bandage 緩解 livelock（非語意修補）；
+Cyder008 teardown soft-guard 仍負責強制結束時的 wineserver SEGV。
 
 ## 2. 目錄與元件
 
@@ -117,10 +124,13 @@ grap64.dll  (NGS-X Init / Run)
 3. **離開卡住／Dock 殘留** 屬同一 lifecycle 問題：主程式結束或卡死後，
    `grap-core`／`NGService`／communicator 未收斂。
 4. **強制結束 session 時** 曾踩 wineserver teardown SEGV
-   （`pipe_end_disconnect`／`add_completion`）。**Cyder008 候選**已含對應 soft-guard
+   （`pipe_end_disconnect`／`add_completion`）。**Cyder008** 已含 soft-guard
    （引擎 `docs/wineserver-teardown-hardening-cyder008.md`）；產品 session 清理仍應並行。
-5. 可玩設定仍見 [`maplestory-classic-wineserver-hang.md`](../../maplestory-classic-wineserver-hang.md)：
-   建議 **MSync + DXVK 或 D3DMetal**；離場 livelock 在 sync 關／開皆曾出現。
+5. **離場 QDO livelock：** teardown soft-guard **不能**消掉；**Cyder009**
+   （`NtQueryDirectoryObject` `optnone`）已驗證可乾淨退出。見
+   [`grap-core64-residual-process-analysis.md`](grap-core64-residual-process-analysis.md)。
+6. 可玩設定仍見 [`maplestory-classic-wineserver-hang.md`](../../maplestory-classic-wineserver-hang.md)：
+   建議 **MSync + DXVK 或 D3DMetal**；離場 livelock 在 sync 關／開皆曾出現（Cyder009 前）。
 
 ## 6. 建議處理（產品優先）
 
@@ -130,29 +140,32 @@ grap64.dll  (NGS-X Init / Run)
 | P0 | 離開逾時清理 | 遊戲內結束後若 N 秒仍卡（或主程式已退、helper 仍在），grace 後 TERM→KILL **本輪** PID |
 | P0 | 啟動前殘留檢查 | 發現上次 grap／NGS 殘留則提示或一鍵清理（對齊 Nexon 官方「殘留害下次 init」） |
 | P1 | UX | 「結束遊戲殘留程序」；Dock 上 Nexon Game Security 發呆時可對應同一清理 |
-| P1 | 引擎 | teardown SEGV soft-guard → **Cyder008**（已入引擎 tree；待 pack／pin） |
+| P1 | 引擎 teardown SEGV soft-guard | **Cyder008**（已出貨） |
+| P1 | 引擎 QDO livelock bandage | **Cyder009**／Cyder 0.9.5（`optnone`；非語意修補） |
 | P2 | 診斷 | 一輪 `WINEDEBUG=+process,+loaddll`（或 Cyder「只記錄錯誤」以上）對照誰 spawn core／NGService、BlackCat 載入失敗字樣 |
+| P2 | 語意根因 | HID／`\??` 目錄物件保真度 vs NGS 外層條件（見 residual 分析 §16） |
 | 不做 | 卸載／patch GRAP | 超出相容性範圍 |
 
 ### 6.1 現有 Cyder 能力（缺口）
 
 - 啟動已帶 `--wait-children`（避免主程式早退就拆 session）——對「主程式還在、離場卡死」**不夠**。
 - 設定 UI 有對整瓶執行 `wineserver -k` 的停止手段——能清殘留，但是**整 bottle 粗暴結束**；
-  Cyder007 曾在此路徑 SIGSEGV，Cyder008 候選加固 teardown。仍不是「只清 grap／NGS」的產品路徑。
+  Cyder007 曾在此路徑 SIGSEGV，Cyder008 已加固 teardown。仍不是「只清 grap／NGS」的產品路徑。
 - **尚無**依遊戲 session 追蹤 grap-core／NGService、離場逾時自動清理、或啟動前殘留檢查。
+  （Cyder009 緩解了 QDO busy-loop，但 session 清理仍是產品後備。）
 
 ## 7. 後續驗證清單
 
-- [x] 引擎 teardown soft-guard（async／pipe／completion）→ Cyder008 候選（2026-07-31）
+- [x] 引擎 teardown soft-guard（async／pipe／completion）→ **Cyder008**
 - [x] **2026-07-31 ~20:05**：MSync+DXVK 離場 livelock 再重現；live wineserver **已含**
-      Cyder008 markers（`debug/hang-20260731-200537`）→ 證明 livelock ≠ 缺 patch
+      Cyder008 markers（`debug/hang-20260731-200537`）→ 證明 livelock ≠ 缺 teardown patch
+- [x] **2026-08-07～08**：QDO A/B → `-O2` heisenbug；殘留 payload = Wine HID 滑鼠 symlink；
+      **Cyder009** `optnone` bandage 出貨（Cyder 0.9.5）
 - [ ] 開啟適度 Wine process／loaddll log，截一輪從進遊戲到正常離開（或卡住）的 spawn 序
 - [ ] 確認 Wine 下是否出現 `BlackCat`／`.sys`／service install 相關失敗（不要求修驅動）
-- [ ] 對照更多後端／sync 的離場：directory 風暴是否一律出現（已見 sync-off+D3DMetal 與 MSync+DXVK）
 - [ ] Cyder session 清理 prototype：逾時後只殺本 bottle／本輪 grap 樹，驗證下次啟動 NGS-X 是否較穩
 - [ ] （可選）macdrv 是否把 NGService 推成 Dock app；能否在不破壞 AC 的前提下減少前景污染
-- [ ] Cyder008 pack + App pin 後，重複「離開／強制停止 Wine」並確認 diag 無 teardown SIGSEGV
-
+- [ ] （可選）語意層：對照 Windows HID／device-interface 目錄列舉，或實驗調整 `VID_845E` symlink
 ## 8. 取樣指令（重現離場 hang 時）
 
 ```bash

@@ -1,6 +1,16 @@
 # `grap-core64.aes` 遊戲退出後殘留與 Wine 高 CPU 問題分析
 
-> 本文件專門整理 MapleStory Classic 結束後，`grap-core64.aes` 未正常退出、Wine / wineserver 長時間持續 CPU，以及 `NtQueryDirectoryObject` / `get_directory_entries` busy-loop 的分析結果。
+最後更新：2026-08-08  
+狀態：**Cyder009 已出貨窄範圍 bandage**（見 §18）；語意層 HID／目錄物件根因仍開放。
+
+> 本文件專門整理 MapleStory Classic 結束後，`grap-core64.aes` 未正常退出、Wine / wineserver 長時間持續 CPU，以及 `NtQueryDirectoryObject`（縮寫 **QDO**）／`get_directory_entries` busy-loop 的分析結果。
+
+相關文件：
+
+- 架構盤點：[`maplestory-classic-ngs-x-grap-architecture.md`](maplestory-classic-ngs-x-grap-architecture.md)
+- 插件速覽：[`classic-grap-ngs-x.md`](classic-grap-ngs-x.md)
+- wineserver／離場總覽：[`../../maplestory-classic-wineserver-hang.md`](../../maplestory-classic-wineserver-hang.md) §2.5
+- 引擎 A/B 與 Cyder009：`cyder-wine-engine/docs/grap-core-qdo-ab-findings.md`、`cyder-wine-engine/docs/cyder009-release.md`
 
 ## 1. 問題現象
 
@@ -565,64 +575,58 @@ grap-core enters post-game state
            grap-core never exits
 ```
 
-## 16. 目前最重要的下一個診斷
+## 16. 診斷結果摘要（2026-08-07～08）
 
-**已落地（CX26 engine）：**
-`cyder-wine-engine` 的
-`patches/cyder-ntdll-query-directory-object-trace.patch`（說明見
-`cyder-wine-engine/docs/grap-core-qdo-trace.md`）。設 `CYDER_QDO_TRACE=1` 即可在
-stderr 取得 rate-limited 的 `restart`／`ctx_in`／`ctx_out`；勿再開全量
-`WINEDEBUG=+server`。
+完整 A/B 矩陣見引擎文件
+`cyder-wine-engine/docs/grap-core-qdo-ab-findings.md`。要點如下。
 
-不需要再開全量：
+### 16.1 殘留熱路徑已鎖定
 
-```text
-WINEDEBUG=+server
-```
+殘留稳态（GDE trace，stock `-O2` ntdll）：
 
-因為會產生 GB 級 log。
-
-更有效的是直接在 Wine `NtQueryDirectoryObject()` 入口與返回處 trace：
-
-```c
-WARN(
-    "NtQueryDirectoryObject h=%p single=%u restart=%u "
-    "ctx_in=%lu size=%lu\n",
-    handle,
-    single_entry,
-    restart,
-    context ? *context : ~0u,
-    size
-);
-```
-
-server call 後：
-
-```c
-WARN(
-    "NtQueryDirectoryObject ret=%08lx ctx_out=%lu ret_size=%lu\n",
-    status,
-    context ? *context : ~0u,
-    ret_size ? *ret_size : 0
-);
-```
-
-只需要取得十幾到幾十筆：
+| 欄位 | 值 |
+|------|-----|
+| wineserver request | `get_directory_entries` |
+| `index` | **永遠 `0`** |
+| `max_count` | `1` |
+| `count` | `1` |
+| entry | Wine 虛擬 HID **滑鼠** symlink |
 
 ```text
-single
-restart
-context_in
-context_out
-status
+HID#VID_845E&PID_0001#…#{378de44c-56ef-11d1-bc8c-00a0c91405dd}
 ```
 
-即可區分：
+- GUID `{378de44c-…}` = `GUID_DEVINTERFACE_HID`
+- `VID_845E`／`PID_0001` 來自 Wine `winebus.sys` 虛擬滑鼠（非實體 USB）
 
-1. GRAP 每次 `RestartScan=TRUE`
-2. GRAP 每次自己 reset Context
-3. Wine Context 沒前進
-4. directory enumeration 正常，bug 在更外層 GRAP condition
+同一 session 稍早的其他 directory handle 可正常前進 index；殘留階段只卡在上述 HID 目錄 handle。
+
+### 16.2 Heisenbug：與 `-O2` codegen 強相關
+
+| 變更 | 離場結果 |
+|------|----------|
+| stock `-O2` `NtQueryDirectoryObject` | 殘留 ~17W |
+| 同原始碼 `-O0` | 乾淨退出 |
+| 僅在 QDO 加 `__attribute__((optnone))` | 乾淨退出 |
+| 死碼多參數 `fprintf`（TRACE 關） | 乾淨退出 |
+| `usleep(100)` | 仍殘留（只變慢） |
+| 只換 wineserver／teardown soft-guard | 仍殘留 |
+
+→ **不是**「任何減速都能讓 NGS 收工」；也**不是** Cyder008 teardown patch 能消掉的問題。
+
+### 16.3 Context A/B（能觀察到的部分）
+
+- 乾淨路徑（optnone／I/O bandage 開）：幾乎沒有 `restart=1`；同一類 handle 上 **Context 會前進**。
+- 真殘留路徑：wineserver 側永遠 `index=0`。
+- 多數「觀察用」ntdll 變體本身就會弄掉 heisenbug，**無法**在真殘留下穩定 dump `restart`／`ctx_in`（SIGUSR1 會被 Wine 當 thread-suspend；memonly ring 被 DCE）。
+
+**工作模型：** livelock payload = 列舉 Wine 虛擬 HID 滑鼠 symlink；stock `-O2` 時卡在 `index=0`；QDO 被「擾動」後 NGS 能走完 Context 並退出。仍無法實證拆開「NGS 故意重掃」vs「ntdll marshalling 沒前進」。
+
+### 16.4 可選診斷工具（勿當產品修補）
+
+- QDO TRACE：`cyder-wine-engine/docs/grap-core-qdo-trace.md`（`CYDER_QDO_TRACE=1`）
+- GDE TRACE：experimental wineserver patch（殘留擷取）
+- **勿**再開全量 `WINEDEBUG=+server`（GB 級 log）
 
 ## 17. 不建議的修法
 
@@ -638,39 +642,55 @@ index=0 → 強制 index++
 針對 grap-core throttle NtQueryDirectoryObject
 ```
 
+或：
+
+```text
+把死碼 fprintf／全 ntdll -O0 當正式修補出貨
+```
+
 原因：
 
 - `RestartScan=TRUE` 時 index 0 可能完全合法
-- 會改變 Windows API semantics
-- 可能破壞其他 application
-- 會把 generic compatibility 問題變成 game-specific workaround
+- 會改變 Windows API semantics 或變成 game-specific hack
+- 死碼 I/O 不是可維護的產品解
 
-正確方向應先確認：
+語意層正確方向仍是：
 
 ```text
-NT API input
-→ Wine ntdll translation
-→ wineserver index
-→ Context output
+NT API input → Wine ntdll → wineserver index → Context output
 ```
 
-是否與 Windows 一致。
+與 Windows／HID 目錄內容對照；或產品層 session 清理（最後手段）。
 
-## 18. 目前結論
+## 18. 產品／引擎現況與結論
 
-目前證據支持：
+### 18.1 已出貨（Cyder 0.9.5／引擎 Cyder009）
 
-1. MapleStory 本體能正常退出
-2. Game PID 已從 Wine/WMI namespace 正常消失
-3. `grap-core64.aes` 仍殘留
-4. 殘留期間 Wine / wineserver 長時間高 CPU
-5. `grap-core` thread 會高速重複 `NtQueryDirectoryObject → get_directory_entries(index=0,max_count=1)`
-6. 同一 directory handle 只 `open_directory()` 一次，之後反覆 query index 0
-7. busy-loop 與 post-game lifecycle 時間高度相關
-8. Wine 過去確實有 `NtQueryDirectoryObject` 相容性 issue
-9. 目前尚不能確認根因是 Wine `Context` bug、GRAP `RestartScan`，或 GRAP outer-loop condition
-10. 下一個最關鍵證據是 `RestartScan` + `Context in/out`
+窄範圍 bandage（**非**語意修補）：
 
-目前最精確的問題描述：
+```text
+patches/cyder-ntdll-qdo-optnone-NtQueryDirectoryObject.patch
+```
 
-> **`grap-core64.aes` 在 MapleStory Classic 結束後進入無法完成的 post-game state，其中一個 thread 對 NT Object Manager directory 執行高速、無等待、永遠從 index 0 開始的 single-entry enumeration，造成 Wine/wineserver 持續高 CPU，並使 GRAP core 長時間無法退出。**
+只對 `NtQueryDirectoryObject` 標 `__attribute__((optnone))`；預設套用於 CX26 建置；marker `cyder QDO optnone`。  
+實測可消掉離場 grap／wineserver busy-loop；**不是** HID／`\??` 目錄物件保真度修正。
+
+Cyder008 teardown soft-guard 仍保留（防強制結束時 wineserver SEGV），與本 livelock **正交**。
+
+### 18.2 仍開放
+
+1. **語意根因**：虛擬 HID symlink 列舉為何在 stock `-O2` 卡住。
+2. **產品 session 清理**：主程式結束後追蹤／逾時清理 grap／NGS PID（最後手段 UX）。
+3. 既有 bottle 若仍殘留舊行為：確認 runtime 已是 Cyder009（或含 optnone marker 的 ntdll）。
+
+### 18.3 證據結論（更新後）
+
+1. MapleStory 本體能正常退出；Game PID 從 Wine/WMI 消失。
+2. 殘留的是 `grap-core64.aes`，熱路徑為 **QDO → `get_directory_entries(index=0)`**。
+3. 殘留 payload 鎖定 **Wine 虛擬 HID 滑鼠** symlink（`VID_845E`）。
+4. 現象與 `-O2` codegen／layout（含 Rosetta）強相關；teardown soft-guard 無法消掉。
+5. Cyder009 `optnone` bandage 已驗證可乾淨退出；語意修補與產品 session 清理仍待做。
+
+最精確的問題描述：
+
+> **`grap-core64.aes` 在 MapleStory Classic 結束後進入無法完成的 post-game state，對 Wine 虛擬 HID 裝置介面目錄做高速、無等待、永遠從 index 0 開始的 single-entry `NtQueryDirectoryObject` enumeration，造成 Wine/wineserver 持續高 CPU。Cyder009 以 QDO `optnone` 作為 codegen bandage 緩解；根因仍可能是 ntdll marshalling heisenbug、NGS 外層條件，或 HID 目錄保真度差異。**

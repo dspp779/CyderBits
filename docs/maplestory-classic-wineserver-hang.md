@@ -105,29 +105,38 @@ GRAP／NGS-X 檔案樹與產品含義見
 [`docs/games/maplestory/classic-grap-ngs-x.md`](./games/maplestory/classic-grap-ngs-x.md)
 （`grap64.dll` 進程內入口；高 CPU 的是獨立 process `grap-core64.aes`；Dock 名
 「Nexon Game Security」來自 NGService／communicator）。
+架構詳析：[`maplestory-classic-ngs-x-grap-architecture.md`](./games/maplestory/maplestory-classic-ngs-x-grap-architecture.md)；
+離場 QDO／殘留：[`grap-core64-residual-process-analysis.md`](./games/maplestory/grap-core64-residual-process-analysis.md)。
 
 強制結束時 diag 仍見 teardown SEGV：本次 `pipe_end_disconnect`；稍早同 bottle 為 `add_completion` ← `release_job_process`。離場 hang 本身是 **GRAP 目錄列舉 ↔ wineserver 請求風暴**，不是這兩次崩潰。
 
-**2026-07-31 晚間引擎加固 → 下一版 `Cyder008`：** `cyder-wine-engine` 已提交
+**2026-07-31 晚間引擎加固 → `Cyder008`：** `cyder-wine-engine` 已提交
 `async_terminate` null-fd、`pipe_end_disconnect`→`free_async_queue`／`async_clear_weak_fd`、
 `add_completion` 無效 port 防護（引擎文件
-`docs/wineserver-teardown-hardening-cyder008.md`）。本機 runtime 已換過修補後的
-wineserver；**正式 GA 仍為 Cyder007**，待 `pack-engine-artifact` 產出並 pin 後才算進 App。
+`docs/wineserver-teardown-hardening-cyder008.md`）。
 
 同晚稍早實玩離開曾**未卡住**，但離場 hang 本就不穩定重現，**不能**據此宣告 livelock 已解。
 
-**2026-07-31 ~20:05 再重現（已確認 patch 在 live wineserver）：**
+**2026-07-31 ~20:05 再重現（已確認 Cyder008 patch 在 live wineserver）：**
 
 | 項目 | 值 |
 |------|-----|
 | 設定 | **MSync + DXVK**（可玩基線組合仍可踩 livelock） |
 | wineserver | ~48% CPU；`req_get_directory_entries` |
 | grap-core64.aes | ~54% CPU；`NtQueryDirectoryObject` |
-| 二進位 | runtime wineserver **含** Cyder008 teardown 字串／`async_clear_weak_fd`（與 `cyder-wine-engine/install` SHA 相同）；App 封裝標籤仍為 Cyder007 |
+| 二進位 | runtime wineserver **含** Cyder008 teardown 字串／`async_clear_weak_fd` |
 | diag | `diag start pid=` 與 live PID 一致；**本次 hang 無新 SIGSEGV** |
 
 採樣與結論：`debug/hang-20260731-200537/analysis.txt`。  
-→ teardown soft-guard **不能**消掉此 livelock；下一步仍是 session 清 grap／產品清理，而非重做 pipe／completion patch。
+→ teardown soft-guard **不能**消掉此 livelock。
+
+**2026-08-07～08／Cyder009（已出貨於 Cyder 0.9.5）：**
+
+- 殘留 payload 鎖定 Wine 虛擬 HID 滑鼠 symlink（`VID_845E`）；熱路徑仍為 QDO ↔ GDE。
+- 現象與 `NtQueryDirectoryObject` 的 `-O2` codegen heisenbug 強相關。
+- 引擎預設套用 `__attribute__((optnone))` 於該函式（marker `cyder QDO optnone`）→ 實測乾淨退出。
+- **非** HID 語意修補；產品 session 清理仍建議作為 UX 後備。
+- 細節：[`grap-core64-residual-process-analysis.md`](./games/maplestory/grap-core64-residual-process-analysis.md)、`cyder-wine-engine/docs/grap-core-qdo-ab-findings.md`。
 
 ## 3. Sync × 圖形後端實測矩陣（2026-07-31）
 

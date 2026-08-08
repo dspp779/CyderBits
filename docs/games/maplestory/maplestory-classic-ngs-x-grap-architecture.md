@@ -1,6 +1,15 @@
 # MapleStory Classic NGS-X / GRAP 反作弊架構分析
 
+最後更新：2026-08-08
+
 > 本文件整理目前透過 PE 靜態分析、PDB 路徑、Imports/Strings 與 Wine/CrossOver runtime log 所得到的 NGS-X / GRAP 架構。分析目的為相容性研究與系統行為理解，不涉及停用、繞過或偽造反作弊機制。
+
+相關文件：
+
+- 離場殘留／QDO livelock：[`grap-core64-residual-process-analysis.md`](grap-core64-residual-process-analysis.md)
+- 插件目錄速覽：[`classic-grap-ngs-x.md`](classic-grap-ngs-x.md)
+- wineserver／離場總覽：[`../../maplestory-classic-wineserver-hang.md`](../../maplestory-classic-wineserver-hang.md)
+- 引擎 QDO A/B：`cyder-wine-engine/docs/grap-core-qdo-ab-findings.md`
 
 ## 1. 已知識別資訊
 
@@ -702,4 +711,29 @@ GRAP session active
 
 > NGS-X / GRAP 的核心 user-mode 架構在 CrossOver/Wine 中具備高度可執行性。
 
-目前最大的相容性問題集中於 **遊戲退出後的 GRAP teardown / post-game lifecycle**，另見 `grap-core64-residual-process-analysis.md`。
+### 11.1 離場殘留（已緩解、根因開放）
+
+最大相容性問題曾集中於 **遊戲退出後的 GRAP teardown / post-game lifecycle**：
+
+- `grap-core64.aes` 殘留 + wineserver 高 CPU
+- 熱路徑：`NtQueryDirectoryObject`（QDO）→ `get_directory_entries(index=0)`
+- 殘留 payload：Wine 虛擬 HID 滑鼠 symlink（`VID_845E`／`GUID_DEVINTERFACE_HID`）
+
+詳見 [`grap-core64-residual-process-analysis.md`](grap-core64-residual-process-analysis.md)。
+
+| 層級 | 狀態（2026-08-08） |
+|------|-------------------|
+| Cyder008 teardown soft-guard | 防強制結束 SEGV；**不能**消掉 QDO livelock |
+| Cyder009 QDO `optnone` | **已 pin／出貨**（Cyder 0.9.5）；codegen bandage，非 HID 語意修補 |
+| 產品 session PID 清理 | 仍建議（最後手段 UX） |
+| HID／目錄物件保真度 | 開放 |
+
+### 11.2 元件角色速查
+
+| 元件 | 角色 | 離場相關 |
+|------|------|----------|
+| `grap64.dll` | 進程內 NGS-X ABI／bootstrap | 低 CPU；非 busy-loop 主體 |
+| `grap-communicator64.aes` | game-side IPC client | pipe client → `grap-core64\2982` |
+| `grap-core64.aes` | 獨立掃描引擎 | **離場高 CPU 主體** |
+| `NGService.exe` | privileged broker／Dock「Nexon Game Security」 | 可隨 session 殘留 |
+| `BlackCat64.sys` | 可選 kernel path | macOS／Wine 未觀察到載入 |
