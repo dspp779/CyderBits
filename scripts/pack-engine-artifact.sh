@@ -125,6 +125,19 @@ if [[ -e "$ENGINE_TREE/lib64/apple_gptk" ]] ||
   exit 1
 fi
 cyder_write_engine_version_file "$ENGINE_TREE" "$ENGINE_VERSION_LABEL"
+
+# Fail closed: DXMT is a first-class graphics backend for this engine.
+for _dxmt_file in \
+  lib/dxmt/x86_64-windows/d3d11.dll \
+  lib/dxmt/x86_64-windows/dxgi.dll \
+  lib/dxmt/x86_64-unix/winemetal.so; do
+  if [[ ! -f "$ENGINE_TREE/$_dxmt_file" ]]; then
+    echo "Refusing to pack engine without $_dxmt_file (run scripts/fetch-dxmt.sh)" >&2
+    exit 1
+  fi
+done
+unset _dxmt_file
+
 bash "$SCRIPT_DIR/strip-wine-install.sh" "$ENGINE_TREE"
 # Preserve MoltenVK already in the install tree (VULKAN_SOURCE=existing only
 # seeds it when VULKAN_MODE=with; default without would orphan-delete it).
