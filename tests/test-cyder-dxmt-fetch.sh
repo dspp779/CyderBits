@@ -115,6 +115,44 @@ assert_contains "$(cat "$E6/lib/dxmt/i386-windows/dxgi.dll")" "existing-dxgi-32"
 assert_contains "$(cat "$E6/lib/dxmt/version")" "existing-version" \
   "fetch must not replace version pin when payload is incomplete"
 
+# Tarball with x86_64 d3d11 but missing x86_64 dxgi must fail before replacing a good install.
+STAGE_NO64DXGI="$TMP/stage-no64dxgi"
+mkdir -p \
+  "$STAGE_NO64DXGI/x86_64-windows" \
+  "$STAGE_NO64DXGI/i386-windows" \
+  "$STAGE_NO64DXGI/x86_64-unix"
+printf 'd3d11\n' >"$STAGE_NO64DXGI/x86_64-windows/d3d11.dll"
+printf 'd3d11-32\n' >"$STAGE_NO64DXGI/i386-windows/d3d11.dll"
+printf 'dxgi-32\n' >"$STAGE_NO64DXGI/i386-windows/dxgi.dll"
+printf 'so\n' >"$STAGE_NO64DXGI/x86_64-unix/winemetal.so"
+(
+  cd "$STAGE_NO64DXGI"
+  tar -czf "$TMP/no-x86_64-dxgi.tar.gz" .
+)
+NO_X86_64_DXGI_SHA="$(shasum -a 256 "$TMP/no-x86_64-dxgi.tar.gz" | awk '{print $1}')"
+E7="$TMP/engine7"
+mkdir -p \
+  "$E7/lib/dxmt/x86_64-windows" \
+  "$E7/lib/dxmt/i386-windows" \
+  "$E7/lib/dxmt/x86_64-unix"
+printf 'existing-d3d11\n' >"$E7/lib/dxmt/x86_64-windows/d3d11.dll"
+printf 'existing-dxgi\n' >"$E7/lib/dxmt/x86_64-windows/dxgi.dll"
+printf 'existing-d3d11-32\n' >"$E7/lib/dxmt/i386-windows/d3d11.dll"
+printf 'existing-dxgi-32\n' >"$E7/lib/dxmt/i386-windows/dxgi.dll"
+printf 'existing-so\n' >"$E7/lib/dxmt/x86_64-unix/winemetal.so"
+printf 'existing-version\n' >"$E7/lib/dxmt/version"
+if CYDER_DXMT_SHA256="$NO_X86_64_DXGI_SHA" bash "$SCRIPT" --engine "$E7" --tarball "$TMP/no-x86_64-dxgi.tar.gz" 2>"$TMP/no-x86_64-dxgi.err"; then
+  echo "expected failure for tarball missing x86_64 dxgi" >&2
+  exit 1
+fi
+assert_contains "$(cat "$TMP/no-x86_64-dxgi.err")" "x86_64-windows/dxgi.dll" \
+  "fetch must reject tarball missing x86_64 dxgi"
+assert test -f "$E7/lib/dxmt/x86_64-windows/dxgi.dll"
+assert_contains "$(cat "$E7/lib/dxmt/x86_64-windows/dxgi.dll")" "existing-dxgi" \
+  "fetch must not replace good lib/dxmt when x86_64 dxgi payload is incomplete"
+assert_contains "$(cat "$E7/lib/dxmt/version")" "existing-version" \
+  "fetch must not replace version pin when x86_64 dxgi payload is incomplete"
+
 # Dry-run with --tarball must not mutate engine; command echoes go to stderr only.
 E5="$TMP/engine5"
 mkdir -p "$E5"

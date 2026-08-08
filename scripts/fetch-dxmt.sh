@@ -84,14 +84,40 @@ verify_sha256() {
   fi
 }
 
+payload_complete() {
+  local dir="$1"
+  [[ -f "$dir/x86_64-windows/d3d11.dll" ]] || return 1
+  [[ -f "$dir/x86_64-windows/dxgi.dll" ]] || return 1
+  [[ -f "$dir/i386-windows/d3d11.dll" ]] || return 1
+  [[ -f "$dir/i386-windows/dxgi.dll" ]] || return 1
+  [[ -f "$dir/x86_64-unix/winemetal.so" ]] || return 1
+  return 0
+}
+
+payload_incomplete_error() {
+  local dir="$1"
+  local rel
+  for rel in \
+    x86_64-windows/d3d11.dll \
+    x86_64-windows/dxgi.dll \
+    i386-windows/d3d11.dll \
+    i386-windows/dxgi.dll \
+    x86_64-unix/winemetal.so
+  do
+    if [[ ! -f "$dir/$rel" ]]; then
+      echo "DXMT payload missing required $rel (product needs both i386 and x86_64)" >&2
+      return 0
+    fi
+  done
+}
+
 find_payload_root() {
   local extract_dir="$1"
   local winemetal parent
 
   while IFS= read -r -d '' winemetal; do
     parent="$(cd "$(dirname "$winemetal")/.." && pwd -P)"
-    if [[ -f "$parent/x86_64-windows/d3d11.dll" && -f "$parent/x86_64-windows/dxgi.dll" \
-      && -f "$parent/i386-windows/d3d11.dll" && -f "$parent/i386-windows/dxgi.dll" ]]; then
+    if payload_complete "$parent"; then
       printf '%s\n' "$parent"
       return 0
     fi
@@ -112,17 +138,11 @@ find_payload_root() {
 
     local d3d11_32_path i386_src
     d3d11_32_path="$(find "$extract_dir" -path '*/i386-windows/d3d11.dll' -print -quit 2>/dev/null || true)"
-    if [[ -z "$d3d11_32_path" ]]; then
-      echo "DXMT payload missing required i386-windows/d3d11.dll (product needs both i386 and x86_64)" >&2
-      return 1
+    if [[ -n "$d3d11_32_path" ]]; then
+      i386_src="$(cd "$(dirname "$d3d11_32_path")" && pwd -P)"
+      mkdir -p "$stage/i386-windows"
+      cp -R "$i386_src/." "$stage/i386-windows/"
     fi
-    i386_src="$(cd "$(dirname "$d3d11_32_path")" && pwd -P)"
-    if [[ ! -f "$i386_src/dxgi.dll" ]]; then
-      echo "DXMT payload missing required i386-windows/dxgi.dll (product needs both i386 and x86_64)" >&2
-      return 1
-    fi
-    mkdir -p "$stage/i386-windows"
-    cp -R "$i386_src/." "$stage/i386-windows/"
 
     local license_path
     while IFS= read -r -d '' license_path; do
@@ -130,8 +150,12 @@ find_payload_root() {
       break
     done < <(find "$extract_dir" \( -iname 'LICENSE' -o -iname 'LICENSE.*' \) -type f -print0 2>/dev/null)
 
-    printf '%s\n' "$stage"
-    return 0
+    if payload_complete "$stage"; then
+      printf '%s\n' "$stage"
+      return 0
+    fi
+    payload_incomplete_error "$stage" || true
+    return 1
   fi
 
   echo "Could not locate DXMT payload under $extract_dir" >&2
@@ -156,6 +180,10 @@ ensure_winemetal_layout() {
 install_dxmt_into_engine() {
   local dest="$1" payload="$2"
   [[ "$dest" == /* ]] || { echo "Engine path must be absolute: $dest" >&2; return 1; }
+  if ! payload_complete "$payload"; then
+    payload_incomplete_error "$payload" || true
+    return 1
+  fi
   run mkdir -p "$dest/lib/dxmt"
   run rm -rf "$dest/lib/dxmt"
   run mkdir -p "$dest/lib/dxmt"
@@ -175,11 +203,7 @@ sha256 ${DXMT_SHA256}
 EOF"
   fi
   if (( ! DRY_RUN )); then
-    [[ -f "$dest/lib/dxmt/x86_64-windows/d3d11.dll" ]] || return 1
-    [[ -f "$dest/lib/dxmt/x86_64-windows/dxgi.dll" ]] || return 1
-    [[ -f "$dest/lib/dxmt/i386-windows/d3d11.dll" ]] || return 1
-    [[ -f "$dest/lib/dxmt/i386-windows/dxgi.dll" ]] || return 1
-    [[ -f "$dest/lib/dxmt/x86_64-unix/winemetal.so" ]] || return 1
+    payload_complete "$dest/lib/dxmt" || return 1
   fi
 }
 
@@ -214,19 +238,10 @@ verify_sha256 "$archive" "$DXMT_SHA256"
 
 TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/cyder-dxmt-extract.XXXXXX")"
 extract_dir="$TMP_DIR/extract"
-run mkdir -p "$extract_dir"
-if (( DRY_RUN )); then
-  run tar -xzf "$archive" -C "$extract_dir"
-else
-  tar -xzf "$archive" -C "$extract_dir"
-fi
+mkdir -p "$extract_dir"
+tar -xzf "$archive" -C "$extract_dir"
 
-payload_root=""
-if (( DRY_RUN )); then
-  payload_root="$extract_dir"
-else
-  payload_root="$(find_payload_root "$extract_dir")"
-fi
+payload_root="$(find_payload_root "$extract_dir")"
 
 targets=("$ENGINE")
 if ((${#ALSO_ENGINES[@]} > 0)); then
