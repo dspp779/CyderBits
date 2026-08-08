@@ -290,6 +290,7 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
         graphicsBackend.target = self
         graphicsBackend.action = #selector(graphicsBackendChanged)
         updateD3DMetalMenuItemAvailability()
+        updateDxmtMenuItemAvailability()
         dxvkFrameRate.addItems(withTitles: ["60", "不限制"])
         dxvkFrameRate.target = self
         dxvkFrameRate.action = #selector(dxvkFrameRateChanged)
@@ -831,19 +832,17 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
         supportsD3DMetalOS && CyderGptk.preferredSource() != nil
     }
 
+    private var canSelectDxmt: Bool {
+        supportsD3DMetalOS && CyderGraphicsCapabilities.current().hasDxmt
+    }
+
     private var graphicsBackendTitles: [String] {
-        if CyderProduct.isMapleStoryOEM {
-            return ["自動", "D3DMetal", "DXVK", "WineD3D"]
-        }
-        return ["預設", "自動", "D3DMetal", "DXVK", "WineD3D"]
+        return ["預設", "D3DMetal", "DXMT", "DXVK", "WineD3D"]
     }
 
-    private var d3dMetalMenuIndex: Int {
-        CyderProduct.isMapleStoryOEM ? 1 : 2
-    }
-
+    // Index map (shared by OEM and official): 0 default, 1 d3dmetal, 2 dxmt, 3 dxvk, 4 wined3d.
     private func updateD3DMetalMenuItemAvailability() {
-        guard let item = graphicsBackend.item(at: d3dMetalMenuIndex) else { return }
+        guard let item = graphicsBackend.item(at: 1) else { return }
         item.isEnabled = canSelectD3DMetal
         if !supportsD3DMetalOS {
             item.toolTip = "需要 macOS 14+"
@@ -854,18 +853,22 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
         }
     }
 
-    private var graphicsBackendValue: CyderGraphicsBackend {
-        if CyderProduct.isMapleStoryOEM {
-            switch graphicsBackend.indexOfSelectedItem {
-            case 1: return canSelectD3DMetal ? .d3dmetal : .auto
-            case 2: return .dxvk
-            case 3: return .wined3d
-            default: return .auto
-            }
+    private func updateDxmtMenuItemAvailability() {
+        guard let item = graphicsBackend.item(at: 2) else { return }
+        item.isEnabled = canSelectDxmt
+        if !supportsD3DMetalOS {
+            item.toolTip = "需要 macOS 14+"
+        } else if !CyderGraphicsCapabilities.current().hasDxmt {
+            item.toolTip = "需要引擎內建 DXMT"
+        } else {
+            item.toolTip = nil
         }
+    }
+
+    private var graphicsBackendValue: CyderGraphicsBackend {
         switch graphicsBackend.indexOfSelectedItem {
-        case 1: return .auto
-        case 2: return canSelectD3DMetal ? .d3dmetal : .default
+        case 1: return canSelectD3DMetal ? .d3dmetal : .default
+        case 2: return canSelectDxmt ? .dxmt : .default
         case 3: return .dxvk
         case 4: return .wined3d
         default: return .default
@@ -873,18 +876,10 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
     }
 
     private func graphicsBackendIndex(_ value: CyderGraphicsBackend) -> Int {
-        if CyderProduct.isMapleStoryOEM {
-            switch value {
-            case .auto, .default: return 0
-            case .d3dmetal: return canSelectD3DMetal ? 1 : 0
-            case .dxvk: return 2
-            case .wined3d: return 3
-            }
-        }
         switch value {
         case .default: return 0
-        case .auto: return 1
-        case .d3dmetal: return canSelectD3DMetal ? 2 : 0
+        case .d3dmetal: return canSelectD3DMetal ? 1 : 0
+        case .dxmt: return canSelectDxmt ? 2 : 0
         case .dxvk: return 3
         case .wined3d: return 4
         }
@@ -926,12 +921,13 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
 
     private func refreshGraphicsControls() {
         updateD3DMetalMenuItemAvailability()
+        updateDxmtMenuItemAvailability()
         CyderGptk.syncEngineLink()
         let backend = graphicsBackendValue
         let showFrameRate = backend == .dxvk
         let showDxvkFrametimes = backend == .dxvk
         let enableDxvkFrametimes = graphicsHudValue == .dxvk
-        let showGptkControls = backend != .dxvk && backend != .wined3d
+        let showGptkControls = backend != .dxvk && backend != .wined3d && backend != .dxmt
         dxvkFrameRate.isHidden = !showFrameRate
         (dxvkFrameRate.superview as? NSStackView)?.isHidden = !showFrameRate
         dxvkHudFrametimes.isHidden = !showDxvkFrametimes
@@ -939,9 +935,9 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
         (dxvkHudFrametimes.superview as? NSStackView)?.isHidden = !showDxvkFrametimes
         graphicsHelp.stringValue = switch backend {
         case .default: "帶入預載的遊戲專屬設定；多數遊戲建議使用。"
-        case .auto: "依本機能力自動選擇：有 GPTK 用 D3DMetal，否則 DXVK，再否則 WineD3D。"
         case .wined3d: "使用 Wine 內建 Direct3D；相容性較廣，但效能通常較差。"
         case .dxvk: "使用 DXVK 將 Direct3D 轉為 Vulkan，再由 MoltenVK 轉為 Metal。"
+        case .dxmt: "使用 DXMT 將 Direct3D 直接轉為 Metal；需要 macOS 14+ 與引擎內建 DXMT。"
         case .d3dmetal: "使用 Apple D3DMetal／GPTK；需要 macOS 14+ 與可用的 GPTK。"
         }
         gptkNote.stringValue = "D3DMetal 可使用本機 CrossOver 內附的 GPTK，或自行從 Apple 下載並安裝；若兩者皆有，Cyder 優先使用已安裝版本。"

@@ -1009,19 +1009,17 @@ private final class CyderGameSettingsWindowController: NSWindowController, NSWin
         supportsD3DMetalOS && CyderGptk.preferredSource() != nil
     }
 
+    private var canSelectDxmt: Bool {
+        supportsD3DMetalOS && CyderGraphicsCapabilities.current().hasDxmt
+    }
+
     private var graphicsBackendTitles: [String] {
-        if CyderProduct.isMapleStoryOEM {
-            return ["跟隨全域", "自動", "D3DMetal", "DXVK", "WineD3D"]
-        }
-        return ["跟隨全域", "預設", "自動", "D3DMetal", "DXVK", "WineD3D"]
+        return ["跟隨全域", "預設", "D3DMetal", "DXMT", "DXVK", "WineD3D"]
     }
 
-    private var d3dMetalMenuIndex: Int {
-        CyderProduct.isMapleStoryOEM ? 2 : 3
-    }
-
+    // Index map (shared by OEM and official): 0 nil/follow, 1 default, 2 d3dmetal, 3 dxmt, 4 dxvk, 5 wined3d.
     private func updateD3DMetalMenuItemAvailability() {
-        guard let item = graphicsBackend.item(at: d3dMetalMenuIndex) else { return }
+        guard let item = graphicsBackend.item(at: 2) else { return }
         item.isEnabled = canSelectD3DMetal
         if !supportsD3DMetalOS {
             item.toolTip = "需要 macOS 14+"
@@ -1032,20 +1030,23 @@ private final class CyderGameSettingsWindowController: NSWindowController, NSWin
         }
     }
 
-    private var graphicsBackendOverride: CyderGraphicsBackend? {
-        if CyderProduct.isMapleStoryOEM {
-            switch graphicsBackend.indexOfSelectedItem {
-            case 1: return .auto
-            case 2: return canSelectD3DMetal ? .d3dmetal : .auto
-            case 3: return .dxvk
-            case 4: return .wined3d
-            default: return nil
-            }
+    private func updateDxmtMenuItemAvailability() {
+        guard let item = graphicsBackend.item(at: 3) else { return }
+        item.isEnabled = canSelectDxmt
+        if !supportsD3DMetalOS {
+            item.toolTip = "需要 macOS 14+"
+        } else if !CyderGraphicsCapabilities.current().hasDxmt {
+            item.toolTip = "需要引擎內建 DXMT"
+        } else {
+            item.toolTip = nil
         }
+    }
+
+    private var graphicsBackendOverride: CyderGraphicsBackend? {
         switch graphicsBackend.indexOfSelectedItem {
         case 1: return .default
-        case 2: return .auto
-        case 3: return canSelectD3DMetal ? .d3dmetal : nil
+        case 2: return canSelectD3DMetal ? .d3dmetal : nil
+        case 3: return canSelectDxmt ? .dxmt : nil
         case 4: return .dxvk
         case 5: return .wined3d
         default: return nil
@@ -1062,18 +1063,10 @@ private final class CyderGameSettingsWindowController: NSWindowController, NSWin
 
     private func graphicsBackendIndex(_ value: CyderGraphicsBackend?) -> Int {
         guard let value else { return 0 }
-        if CyderProduct.isMapleStoryOEM {
-            switch value {
-            case .auto, .default: return 1
-            case .d3dmetal: return canSelectD3DMetal ? 2 : 0
-            case .dxvk: return 3
-            case .wined3d: return 4
-            }
-        }
         switch value {
         case .default: return 1
-        case .auto: return 2
-        case .d3dmetal: return canSelectD3DMetal ? 3 : 0
+        case .d3dmetal: return canSelectD3DMetal ? 2 : 0
+        case .dxmt: return canSelectDxmt ? 3 : 0
         case .dxvk: return 4
         case .wined3d: return 5
         }
@@ -1081,6 +1074,7 @@ private final class CyderGameSettingsWindowController: NSWindowController, NSWin
 
     private func refreshGraphicsControls() {
         updateD3DMetalMenuItemAvailability()
+        updateDxmtMenuItemAvailability()
         let preference = graphicsBackendOverride ?? settingsStore.value.graphicsBackend
         let showFrameRate: Bool
         if let override = graphicsBackendOverride {
