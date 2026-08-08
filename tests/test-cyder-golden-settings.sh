@@ -23,6 +23,16 @@ log="$(cat "$CYDER_TEST_REG_LOG")"
 assert_contains "$log" 'regedit /s' "Golden should apply baseline with a single regedit import"
 assert_contains "$log" 'DllOverrides' "Golden should set ddraw override"
 assert_contains "$log" '"ddraw"="native,builtin"' "Golden should set ddraw native,builtin"
+assert_contains "$log" '"quartz"="native,builtin"' \
+  "Golden should include CrossOver WineDllOverridesReg quartz"
+assert_contains "$log" '"msi"="builtin"' \
+  "Golden should include CrossOver WineDllOverridesRegNT msi=builtin"
+assert_contains "$log" '"wininet"="builtin"' \
+  "Golden should include CrossOver WineDllOverridesRegNT wininet=builtin"
+assert_contains "$log" '"vcruntime140_1"="native,builtin"' \
+  "Golden should prefer native VC++ 2015-2022 vcruntime140_1"
+assert_contains "$log" '"msvcp140"="native,builtin"' \
+  "Golden should prefer native VC++ msvcp140"
 assert_contains "$log" 'FontSmoothingType"=dword:00000002' \
   "Golden should use RGB ClearType globally"
 assert_contains "$log" '"RetinaMode"="y"' "Golden should enable Retina explicitly"
@@ -32,5 +42,9 @@ if [[ "$log" == *'AppDefaults\BlueLauncher.exe\Control Panel\Desktop'* ]]; then
   exit 1
 fi
 assert test -f "$TMP/prefix/.cyder-golden-baseline-v2"
+marker="$(cat "$TMP/prefix/.cyder-golden-baseline-v2")"
+assert_contains "$marker" 'schema=3' "Golden marker should record schema 3"
+assert_contains "$marker" 'dllOverrides=crossover-win10+vc140' \
+  "Golden marker should record crossover-win10+vc140 overrides"
 
 echo "PASS test-cyder-golden-settings"
