@@ -48,9 +48,47 @@ CYDER_DXMT_SHA256="$GOOD_SHA" CYDER_DXMT_VERSION=v0.80-test \
 for eng in "$E2" "$E3"; do
   assert test -f "$eng/lib/dxmt/x86_64-windows/d3d11.dll"
   assert test -f "$eng/lib/dxmt/x86_64-windows/dxgi.dll"
+  assert test -f "$eng/lib/dxmt/i386-windows/d3d11.dll"
+  assert test -f "$eng/lib/dxmt/i386-windows/dxgi.dll"
   assert test -f "$eng/lib/dxmt/x86_64-unix/winemetal.so"
   assert_contains "$(cat "$eng/lib/dxmt/version")" "v0.80" "version pin file must record DXMT version"
   assert_contains "$(cat "$eng/lib/dxmt/version")" "$GOOD_SHA" "version pin file must record checksum"
 done
+
+# Tarball without i386 must fail closed.
+STAGE64="$TMP/stage64"
+mkdir -p \
+  "$STAGE64/x86_64-windows" \
+  "$STAGE64/x86_64-unix"
+printf 'd3d11\n' >"$STAGE64/x86_64-windows/d3d11.dll"
+printf 'dxgi\n' >"$STAGE64/x86_64-windows/dxgi.dll"
+printf 'so\n' >"$STAGE64/x86_64-unix/winemetal.so"
+(
+  cd "$STAGE64"
+  tar -czf "$TMP/no-i386.tar.gz" .
+)
+NO_I386_SHA="$(shasum -a 256 "$TMP/no-i386.tar.gz" | awk '{print $1}')"
+E4="$TMP/engine4"
+mkdir -p "$E4"
+if CYDER_DXMT_SHA256="$NO_I386_SHA" bash "$SCRIPT" --engine "$E4" --tarball "$TMP/no-i386.tar.gz" 2>"$TMP/no-i386.err"; then
+  echo "expected failure for tarball missing i386" >&2
+  exit 1
+fi
+assert_contains "$(cat "$TMP/no-i386.err")" "i386" "fetch must reject tarball without i386 payload"
+assert test ! -e "$E4/lib/dxmt/x86_64-unix/winemetal.so"
+
+# Dry-run with --tarball must not mutate engine; command echoes go to stderr only.
+E5="$TMP/engine5"
+mkdir -p "$E5"
+CYDER_DXMT_SHA256="$GOOD_SHA" bash "$SCRIPT" --engine "$E5" --tarball "$TMP/good.tar.gz" --dry-run \
+  >"$TMP/dry.stdout" 2>"$TMP/dry.stderr"
+assert test ! -e "$E5/lib/dxmt/x86_64-unix/winemetal.so"
+if [[ -s "$TMP/dry.stdout" ]]; then
+  echo "ASSERT failed: dry-run must not print command echoes to stdout" >&2
+  cat "$TMP/dry.stdout" >&2
+  exit 1
+fi
+assert_contains "$(cat "$TMP/dry.stderr")" "+ mkdir" "dry-run should echo planned commands to stderr"
+assert_contains "$(cat "$TMP/dry.stderr")" "Dry run complete" "dry-run should report completion on stderr"
 
 echo "PASS test-cyder-dxmt-fetch"

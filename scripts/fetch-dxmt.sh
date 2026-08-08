@@ -62,9 +62,11 @@ done
 
 run() {
   if (( DRY_RUN )); then
-    printf '+'
-    printf ' %q' "$@"
-    printf '\n'
+    {
+      printf '+'
+      printf ' %q' "$@"
+      printf '\n'
+    } >&2
   else
     "$@"
   fi
@@ -88,7 +90,8 @@ find_payload_root() {
 
   while IFS= read -r -d '' winemetal; do
     parent="$(cd "$(dirname "$winemetal")/.." && pwd -P)"
-    if [[ -f "$parent/x86_64-windows/d3d11.dll" && -f "$parent/x86_64-windows/dxgi.dll" ]]; then
+    if [[ -f "$parent/x86_64-windows/d3d11.dll" && -f "$parent/x86_64-windows/dxgi.dll" \
+      && -f "$parent/i386-windows/d3d11.dll" ]]; then
       printf '%s\n' "$parent"
       return 0
     fi
@@ -109,11 +112,13 @@ find_payload_root() {
 
     local d3d11_32_path i386_src
     d3d11_32_path="$(find "$extract_dir" -path '*/i386-windows/d3d11.dll' -print -quit 2>/dev/null || true)"
-    if [[ -n "$d3d11_32_path" ]]; then
-      i386_src="$(cd "$(dirname "$d3d11_32_path")" && pwd -P)"
-      mkdir -p "$stage/i386-windows"
-      cp -R "$i386_src/." "$stage/i386-windows/"
+    if [[ -z "$d3d11_32_path" ]]; then
+      echo "DXMT payload missing required i386-windows/d3d11.dll (product needs both i386 and x86_64)" >&2
+      return 1
     fi
+    i386_src="$(cd "$(dirname "$d3d11_32_path")" && pwd -P)"
+    mkdir -p "$stage/i386-windows"
+    cp -R "$i386_src/." "$stage/i386-windows/"
 
     local license_path
     while IFS= read -r -d '' license_path; do
@@ -168,6 +173,8 @@ EOF"
   if (( ! DRY_RUN )); then
     [[ -f "$dest/lib/dxmt/x86_64-windows/d3d11.dll" ]] || return 1
     [[ -f "$dest/lib/dxmt/x86_64-windows/dxgi.dll" ]] || return 1
+    [[ -f "$dest/lib/dxmt/i386-windows/d3d11.dll" ]] || return 1
+    [[ -f "$dest/lib/dxmt/i386-windows/dxgi.dll" ]] || return 1
     [[ -f "$dest/lib/dxmt/x86_64-unix/winemetal.so" ]] || return 1
   fi
 }
@@ -227,7 +234,7 @@ for target in "${targets[@]}"; do
 done
 
 if (( DRY_RUN )); then
-  echo "Dry run complete for DXMT ${DXMT_VERSION}"
+  echo "Dry run complete for DXMT ${DXMT_VERSION}" >&2
 else
   echo "Installed DXMT ${DXMT_VERSION} into ${#targets[@]} engine(s)"
 fi
