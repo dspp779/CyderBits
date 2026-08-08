@@ -14,6 +14,16 @@ result="$(
 assert_eq "$result" $'<-silent>\n<-system-composer>\n<-no-cef-sandbox>' \
   "Steam should receive the macOS compositor compatibility arguments"
 
+no_args="$(
+  bash -c '
+    source "$1/scripts/cyder-common.sh"
+    cyder_apply_steam_compatibility_arguments "/games/steam.exe"
+    printf "<%s>\n" "${CYDER_STEAM_ARGUMENTS[@]}"
+  ' _ "$ROOT"
+)"
+assert_eq "$no_args" $'<-system-composer>\n<-no-cef-sandbox>' \
+  "Steam with no argv should still get compositor args under bash 3.2 set -u"
+
 deduplicated="$(
   bash -c '
     source "$1/scripts/cyder-common.sh"

@@ -2168,13 +2168,16 @@ cyder_apply_steam_compatibility_arguments() {
   local required existing
   for required in -system-composer -no-cef-sandbox; do
     existing=0
-    local argument
-    for argument in "${CYDER_STEAM_ARGUMENTS[@]}"; do
-      if [[ "$argument" == "$required" ]]; then
-        existing=1
-        break
-      fi
-    done
+    # Bash 3.2 + set -u treats "${empty[@]}" as unbound; guard before iterating.
+    if (( ${#CYDER_STEAM_ARGUMENTS[@]} > 0 )); then
+      local argument
+      for argument in "${CYDER_STEAM_ARGUMENTS[@]}"; do
+        if [[ "$argument" == "$required" ]]; then
+          existing=1
+          break
+        fi
+      done
+    fi
     [[ "$existing" -eq 1 ]] || CYDER_STEAM_ARGUMENTS+=("$required")
   done
 }
