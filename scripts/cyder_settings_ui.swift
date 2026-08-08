@@ -43,7 +43,8 @@ private let cyderWinetricksComponentGroups: [(String, [CyderWinetricksComponent]
 
 final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate {
     var onImmediateSave: ((_ registrySetting: String) -> Bool)?
-    var onApplyAll: ((_ shouldStopAll: Bool) -> Void)?
+    /// Live Wine `reg add` with draft env; return true only after registry apply succeeds.
+    var onApplyWhileRunning: ((_ draftEnvironment: [String: String]) -> Bool)?
     var onRebuild: (() -> Void)?
     var onCreateProfile: ((URL) -> Void)?
     var onOpenGameLibrary: (() -> Void)?
@@ -57,6 +58,9 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
     /// Stops all Cyder Wine processes (wineserver -k) and waits (-w). Returns true on success.
     var onStopAllWine: (() -> Bool)?
     private let store = CyderSettingsStore.shared
+    private let applyButton = NSButton()
+    private var wineIsRunning = false
+    private var didShowRunningAlert = false
     private let syncMode = NSPopUpButton()
     private let syncModeDescription = NSTextField(wrappingLabelWithString: "")
     private let retina = NSSwitch()
@@ -138,12 +142,22 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
         status.font = .systemFont(ofSize: 11)
         status.textColor = .secondaryLabelColor
         status.translatesAutoresizingMaskIntoConstraints = false
+        status.maximumNumberOfLines = 3
+        status.preferredMaxLayoutWidth = 320
+
+        applyButton.title = "套用設定"
+        applyButton.bezelStyle = .rounded
+        applyButton.target = self
+        applyButton.action = #selector(applyRunningSettings)
+        applyButton.translatesAutoresizingMaskIntoConstraints = false
+        applyButton.isHidden = true
 
         let reset = NSButton(title: "全部恢復預設值…", target: self, action: #selector(resetAll))
         reset.bezelStyle = .rounded
         reset.translatesAutoresizingMaskIntoConstraints = false
         content.addSubview(tabs)
         content.addSubview(status)
+        content.addSubview(applyButton)
         content.addSubview(reset)
         NSLayoutConstraint.activate([
             tabs.topAnchor.constraint(equalTo: content.topAnchor, constant: 16),
@@ -152,6 +166,9 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
             tabs.bottomAnchor.constraint(equalTo: status.topAnchor, constant: -14),
             status.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 22),
             status.bottomAnchor.constraint(equalTo: content.bottomAnchor, constant: -18),
+            status.trailingAnchor.constraint(lessThanOrEqualTo: applyButton.leadingAnchor, constant: -12),
+            applyButton.trailingAnchor.constraint(equalTo: reset.leadingAnchor, constant: -10),
+            applyButton.centerYAnchor.constraint(equalTo: status.centerYAnchor),
             reset.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -20),
             reset.centerYAnchor.constraint(equalTo: status.centerYAnchor),
         ])
@@ -318,15 +335,11 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
     private func makeAdvancedTab() -> NSTabViewItem {
         let rebuild = NSButton(title: "重建 Windows 遊戲環境…", target: self, action: #selector(rebuildEnvironment))
         rebuild.bezelStyle = .rounded
-        let applyAll = NSButton(title: "套用所有設定", target: self, action: #selector(applyAllSettings))
-        applyAll.bezelStyle = .rounded
         let winetricks = NSButton(title: "Winetricks 元件…", target: self, action: #selector(openWinetricks))
         winetricks.bezelStyle = .rounded
         return tab("進階", rows: [
             rebuild,
             note("重新建立執行 Windows 遊戲所需的環境。遊戲檔案不會刪除，但已安裝的 Windows 元件與自訂設定需要重新套用。"),
-            applyAll,
-            note("使用 Wine 完整寫入目前所有設定；一般調整會在點選控制項時立即快速儲存。"),
             winetricks,
             note("以原生選擇器安裝 VC++、.NET、WMP、Quartz、Devenum 等元件到 shared prefix。請先關閉所有遊戲。"),
         ])
@@ -448,12 +461,40 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
         executableName.stringValue = "尚未選擇 EXE"
         refreshExecutableList()
         isDirty = false
-        status.stringValue = "變更會立即儲存"
-        status.textColor = .secondaryLabelColor
+        refreshRunningChrome()
     }
 
     func prepareForDisplay() {
+        wineIsRunning = hasRunningExes?() ?? false
+        didShowRunningAlert = false
         reload()
+        if wineIsRunning {
+            presentRunningWineAlertIfNeeded()
+        }
+    }
+
+    private func refreshRunningChrome() {
+        wineIsRunning = hasRunningExes?() ?? false
+        applyButton.isHidden = !wineIsRunning
+        status.textColor = .secondaryLabelColor
+        if wineIsRunning {
+            status.stringValue = "目前遊戲正在執行中，需套用設定才會儲存設定，並且完全重開才會套用成功。"
+        } else if isDirty {
+            status.stringValue = "變更會立即儲存"
+        } else {
+            status.stringValue = "變更會立即儲存"
+        }
+    }
+
+    private func presentRunningWineAlertIfNeeded() {
+        guard wineIsRunning, !didShowRunningAlert else { return }
+        didShowRunningAlert = true
+        let alert = NSAlert()
+        alert.messageText = "目前遊戲正在執行中"
+        alert.informativeText = "需按「套用設定」才會儲存設定；Retina／DPI 等顯示設定需完全退出遊戲後再重開才會套用成功。"
+        alert.alertStyle = .informational
+        alert.addButton(withTitle: "知道了")
+        alert.runModal()
     }
 
     @objc private func markDirty() {
@@ -461,18 +502,63 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
     }
 
     private func saveImmediately(registrySetting: String? = nil) {
+        if wineIsRunning || (hasRunningExes?() ?? false) {
+            wineIsRunning = true
+            isDirty = true
+            applyButton.isHidden = false
+            status.stringValue = "目前遊戲正在執行中，需套用設定才會儲存設定，並且完全重開才會套用成功。"
+            status.textColor = .secondaryLabelColor
+            return
+        }
         let requiresPrefixApply = prefixSettingsChanged()
         isDirty = true
         guard saveControls() else { return }
         guard requiresPrefixApply else { return }
-        if hasRunningExes?() ?? false {
-            status.stringValue = "已儲存；關閉遊戲後將於下次啟動前套用"
-            return
-        }
         if onImmediateSave?(registrySetting ?? "all") == false {
             status.stringValue = "設定已儲存，但無法更新 Windows 環境"
             status.textColor = .systemRed
         }
+    }
+
+    @objc private func applyRunningSettings() {
+        wineIsRunning = hasRunningExes?() ?? false
+        guard wineIsRunning else {
+            // Wine exited while the window was open — fall back to immediate save.
+            refreshRunningChrome()
+            saveImmediately(registrySetting: "all")
+            return
+        }
+        let draft = draftApplyEnvironment()
+        status.stringValue = "正在套用設定…"
+        status.textColor = .secondaryLabelColor
+        onSaveStarted?()
+        let ok = onApplyWhileRunning?(draft) ?? false
+        onSaveFailed?() // clears setup chrome; success path still continues below
+        guard ok else {
+            status.stringValue = "無法寫入 Windows 環境；設定尚未儲存"
+            status.textColor = .systemRed
+            return
+        }
+        guard saveControls() else { return }
+        isDirty = false
+        status.stringValue = "已寫入環境並儲存；請完全退出遊戲後再重開以完整套用。"
+        status.textColor = .secondaryLabelColor
+    }
+
+    private func draftApplyEnvironment() -> [String: String] {
+        let dpiValues = [96, 120, 144, 168, 192, 240]
+        let smoothingValues = ["off", "grayscale", "cleartype-rgb"]
+        let mode = CyderSyncMode.allCases[max(0, min(syncMode.indexOfSelectedItem, CyderSyncMode.allCases.count - 1))]
+        return [
+            "CYDER_FORCE_SETTINGS": "1",
+            "CYDER_RETINA_MODE": retina.state == .on ? "1" : "0",
+            "CYDER_DPI": String(dpiValues[max(0, dpi.indexOfSelectedItem)]),
+            "CYDER_FONT_SMOOTHING": smoothingValues[max(0, smoothing.indexOfSelectedItem)],
+            "CYDER_FONT_MINGLIU_TARGET": cyderFontTarget(at: fontMingLiu.indexOfSelectedItem),
+            "CYDER_FONT_SONGTI_TARGET": cyderFontTarget(at: fontSongti.indexOfSelectedItem),
+            "CYDER_MSYNC": mode == .msync ? "1" : "0",
+            "CYDER_ESYNC": mode == .esync ? "1" : "0",
+        ]
     }
 
     @objc private func retinaChanged() {
@@ -578,13 +664,14 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
             DispatchQueue.main.async {
                 guard let self else { return }
                 self.stopAllWineButton.isEnabled = true
-                if ok {
-                    self.status.stringValue = "已關閉所有 Wine 程序"
-                    self.status.textColor = .secondaryLabelColor
-                } else {
-                    self.status.stringValue = "關閉 Wine 程序失敗或尚未就緒"
-                    self.status.textColor = .systemRed
-                }
+                    self.refreshRunningChrome()
+                    if ok {
+                        self.status.stringValue = "已關閉所有 Wine 程序"
+                        self.status.textColor = .secondaryLabelColor
+                    } else {
+                        self.status.stringValue = "關閉 Wine 程序失敗或尚未就緒"
+                        self.status.textColor = .systemRed
+                    }
             }
         }
     }
@@ -1182,24 +1269,6 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
         alert.addButton(withTitle: "取消")
         guard alert.runModal() == .alertFirstButtonReturn else { return }
         onRebuild?()
-        close()
-    }
-
-    @objc private func applyAllSettings() {
-        let running = hasRunningExes?() ?? false
-        var shouldStopAll = false
-        if running {
-            let alert = NSAlert()
-            alert.messageText = "套用所有設定前需要關閉遊戲"
-            alert.informativeText = "這會關閉所有正在執行的遊戲，未儲存的遊戲進度可能會遺失。"
-            alert.alertStyle = .warning
-            alert.addButton(withTitle: "關閉遊戲並套用")
-            alert.addButton(withTitle: "取消")
-            guard alert.runModal() == .alertFirstButtonReturn else { return }
-            shouldStopAll = true
-        }
-        onSaveStarted?()
-        onApplyAll?(shouldStopAll)
         close()
     }
 

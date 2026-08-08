@@ -1,6 +1,6 @@
 # Cyder Preferences: Apply While Wine Is Running
 
-**Status:** approved for implementation (pending spec review)  
+**Status:** implemented  
 **Date:** 2026-08-08  
 **Goal:** Stop silent / misleading preference saves while a Wine prefix is active, and make registry + `settings.json` stay consistent when the user explicitly applies.
 

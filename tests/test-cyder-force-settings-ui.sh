@@ -6,8 +6,14 @@ ui="$(cat "$ROOT/scripts/cyder_settings_ui.swift")"
 library_ui="$(cat "$ROOT/scripts/cyder_game_library_ui.swift")"
 app="$(cat "$ROOT/scripts/cyder_app_main.swift")"
 common="$(cat "$ROOT/scripts/cyder-common.sh")"
-assert_contains "$ui" "套用所有設定" "advanced tab should expose full apply button"
-assert_contains "$ui" "applyAllSettings" "full apply button should have a dedicated action"
+assert_not_contains "$ui" "套用所有設定" "advanced tab should not expose legacy apply-all"
+assert_not_contains "$ui" "applyAllSettings" "legacy apply-all action should be removed"
+assert_contains "$ui" "套用設定" "footer should expose apply while Wine is running"
+assert_contains "$ui" "applyRunningSettings" "apply button should have a dedicated action"
+assert_contains "$ui" "目前遊戲正在執行中，需套用設定才會儲存設定" \
+  "running status should explain apply + full restart"
+assert_contains "$ui" "wineIsRunning" "prefs should branch idle vs running Wine"
+assert_contains "$ui" "onApplyWhileRunning" "prefs should request live apply before saving JSON"
 assert_contains "$ui" "Winetricks 元件…" "advanced tab should expose the native Winetricks component picker"
 assert_contains "$ui" "cyderWinetricksComponentGroups" "Winetricks picker should use a curated component catalog"
 assert_contains "$ui" "onImmediateSave" "controls should expose immediate save"
@@ -101,9 +107,12 @@ if [[ "$ui" == *'NSButton(title: "確認"'* ]]; then
   echo "ASSERT failed: settings UI should not have a confirm button" >&2
   exit 1
 fi
-assert_contains "$app" "onApplyAll" "app delegate should receive full apply requests"
-assert_contains "$app" "CYDER_FORCE_SETTINGS" "apply-settings launcher should receive force environment"
-assert_contains "$app" "extraEnvironment: [\"CYDER_FORCE_SETTINGS\": \"1\"]" "full apply should force Wine registry writes"
+assert_not_contains "$app" "onApplyAll" "app delegate should not wire legacy apply-all"
+assert_contains "$app" "onApplyWhileRunning" "app delegate should receive running-apply requests"
+assert_contains "$app" 'env["CYDER_FORCE_SETTINGS"] = "1"' \
+  "running apply should force live Wine registry writes"
+assert_contains "$ui" '"CYDER_RETINA_MODE"' \
+  "running apply draft should include Retina env before settings.json"
 assert_contains "$app" "--install-winetricks" "Winetricks installs should use the unattended launcher path"
 assert_contains "$ui" "private func retinaChanged()" "Retina toggle should have a dedicated DPI synchronization handler"
 assert_contains "$ui" "let targetDPI = retina.state == .on ? 192 : 96" "global Retina toggle should suggest 192 or 96 DPI"

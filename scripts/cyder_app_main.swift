@@ -41,8 +41,8 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         controller.onImmediateSave = { [weak self] registrySetting in
             self?.applySettingsImmediately(registrySetting: registrySetting) ?? false
         }
-        controller.onApplyAll = { [weak self] shouldStopAll in
-            self?.prepareEnvironmentAfterSettings(stopAll: shouldStopAll)
+        controller.onApplyWhileRunning = { [weak self] draftEnvironment in
+            self?.applySettingsWhileRunning(draftEnvironment: draftEnvironment) ?? false
         }
         controller.onSaveStarted = { [weak self] in
             self?.environmentPreparationInProgress = true
@@ -633,53 +633,18 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         ).succeeded
     }
 
-    private func prepareEnvironmentAfterSettings(stopAll: Bool) {
-        guard terminateWhenSettingsClose,
-              let resourcePath = Bundle.main.resourcePath else { return }
+    private func applySettingsWhileRunning(draftEnvironment: [String: String]) -> Bool {
+        guard let resourcePath = Bundle.main.resourcePath else { return false }
         let context = CyderLaunchContext(resourcePath: resourcePath)
-        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            guard let self else { return }
-            if stopAll {
-                self.showSetup("正在關閉遊戲…")
-                self.stopAllExes()
-            }
-            // The environment was already prepared and health-checked before
-            // the settings window was shown. Re-running ensureEnvironment here
-            // made Confirm unnecessarily repeat wine/cmd probes.
-            self.showSetup("正在套用新設定…")
-            let result = self.runLauncher(
-                context: context,
-                args: [context.launcher, "--apply-settings-only"],
-                stage: .settingsApply,
-                operation: "apply-settings",
-                extraEnvironment: ["CYDER_FORCE_SETTINGS": "1"]
-            )
-            var settingsFailure: CyderFailure?
-            if !result.succeeded {
-                settingsFailure = self.failure(
-                    code: "CYD-SET-002",
-                    stage: .settingsApply,
-                    summary: "套用設定時發生問題。",
-                    result: result
-                )
-            }
-            DispatchQueue.main.async {
-                self.hideSetup()
-                self.environmentPreparationInProgress = false
-                if settingsFailure == nil {
-                    self.showAlert(
-                        "設定完成",
-                        "新設定已儲存，下次開啟遊戲時會自動使用。",
-                        style: .informational
-                    )
-                    CyderDiagnostics.shared.finish(outcome: "settings-completed")
-                } else if let settingsFailure {
-                    self.presentFailure(settingsFailure)
-                    CyderDiagnostics.shared.finish(outcome: "settings-failed")
-                }
-                NSApp.terminate(nil)
-            }
-        }
+        var env = draftEnvironment
+        env["CYDER_FORCE_SETTINGS"] = "1"
+        return runLauncher(
+            context: context,
+            args: [context.launcher, "--apply-settings-only"],
+            stage: .settingsApply,
+            operation: "apply-settings-running",
+            extraEnvironment: env
+        ).succeeded
     }
 
     private func scheduleRun() {
