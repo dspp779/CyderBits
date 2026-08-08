@@ -2615,6 +2615,14 @@ cyder_run_wine_exe() {
     else
       unset CYDER_WINE_DLL_OVERRIDES
     fi
+    # DXMT PE DLLs (especially winemetal.dll) must exist in the prefix before
+    # Wine will resolve them; prepend_dll_path alone is not enough.
+    if [[ "${CYDER_GRAPHICS_BACKEND:-}" == dxmt ]] \
+       && [[ -x "$CYDER_SCRIPTS/install-dxmt-prefix.sh" ]]; then
+      bash "$CYDER_SCRIPTS/install-dxmt-prefix.sh" \
+        --prefix "$prefix" \
+        --engine "$CYDER_GRAPHICS_BACKENDS_ROOT" || true
+    fi
     if [[ "${CYDER_MSYNC:-0}" == 1 ]]; then
       export WINEMSYNC=1
       unset WINEESYNC
