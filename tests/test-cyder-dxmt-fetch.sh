@@ -77,6 +77,44 @@ fi
 assert_contains "$(cat "$TMP/no-i386.err")" "i386" "fetch must reject tarball without i386 payload"
 assert test ! -e "$E4/lib/dxmt/x86_64-unix/winemetal.so"
 
+# Tarball with i386 d3d11 but missing i386 dxgi must fail before replacing a good install.
+STAGE_NO32DXGI="$TMP/stage-no32dxgi"
+mkdir -p \
+  "$STAGE_NO32DXGI/x86_64-windows" \
+  "$STAGE_NO32DXGI/i386-windows" \
+  "$STAGE_NO32DXGI/x86_64-unix"
+printf 'd3d11\n' >"$STAGE_NO32DXGI/x86_64-windows/d3d11.dll"
+printf 'dxgi\n' >"$STAGE_NO32DXGI/x86_64-windows/dxgi.dll"
+printf 'd3d11-32\n' >"$STAGE_NO32DXGI/i386-windows/d3d11.dll"
+printf 'so\n' >"$STAGE_NO32DXGI/x86_64-unix/winemetal.so"
+(
+  cd "$STAGE_NO32DXGI"
+  tar -czf "$TMP/no-i386-dxgi.tar.gz" .
+)
+NO_I386_DXGI_SHA="$(shasum -a 256 "$TMP/no-i386-dxgi.tar.gz" | awk '{print $1}')"
+E6="$TMP/engine6"
+mkdir -p \
+  "$E6/lib/dxmt/x86_64-windows" \
+  "$E6/lib/dxmt/i386-windows" \
+  "$E6/lib/dxmt/x86_64-unix"
+printf 'existing-d3d11\n' >"$E6/lib/dxmt/x86_64-windows/d3d11.dll"
+printf 'existing-dxgi\n' >"$E6/lib/dxmt/x86_64-windows/dxgi.dll"
+printf 'existing-d3d11-32\n' >"$E6/lib/dxmt/i386-windows/d3d11.dll"
+printf 'existing-dxgi-32\n' >"$E6/lib/dxmt/i386-windows/dxgi.dll"
+printf 'existing-so\n' >"$E6/lib/dxmt/x86_64-unix/winemetal.so"
+printf 'existing-version\n' >"$E6/lib/dxmt/version"
+if CYDER_DXMT_SHA256="$NO_I386_DXGI_SHA" bash "$SCRIPT" --engine "$E6" --tarball "$TMP/no-i386-dxgi.tar.gz" 2>"$TMP/no-i386-dxgi.err"; then
+  echo "expected failure for tarball missing i386 dxgi" >&2
+  exit 1
+fi
+assert_contains "$(cat "$TMP/no-i386-dxgi.err")" "i386-windows/dxgi.dll" \
+  "fetch must reject tarball missing i386 dxgi"
+assert test -f "$E6/lib/dxmt/i386-windows/dxgi.dll"
+assert_contains "$(cat "$E6/lib/dxmt/i386-windows/dxgi.dll")" "existing-dxgi-32" \
+  "fetch must not replace good lib/dxmt when payload is incomplete"
+assert_contains "$(cat "$E6/lib/dxmt/version")" "existing-version" \
+  "fetch must not replace version pin when payload is incomplete"
+
 # Dry-run with --tarball must not mutate engine; command echoes go to stderr only.
 E5="$TMP/engine5"
 mkdir -p "$E5"
