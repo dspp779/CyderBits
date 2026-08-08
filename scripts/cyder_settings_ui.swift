@@ -833,7 +833,7 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
     }
 
     private var canSelectDxmt: Bool {
-        supportsD3DMetalOS && CyderGraphicsCapabilities.current().hasDxmt
+        supportsD3DMetalOS && CyderGraphicsCapabilities.current(engineRoot: CyderPaths.engine).hasDxmt
     }
 
     private var graphicsBackendTitles: [String] {
@@ -858,7 +858,7 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
         item.isEnabled = canSelectDxmt
         if !supportsD3DMetalOS {
             item.toolTip = "需要 macOS 14+"
-        } else if !CyderGraphicsCapabilities.current().hasDxmt {
+        } else if !CyderGraphicsCapabilities.current(engineRoot: CyderPaths.engine).hasDxmt {
             item.toolTip = "需要引擎內建 DXMT"
         } else {
             item.toolTip = nil

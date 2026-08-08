@@ -29,6 +29,10 @@ assert_contains "$ui" 'return ["預設", "D3DMetal", "DXMT", "DXVK", "WineD3D"]'
   "prefs graphics labels include DXMT and omit auto"
 assert_not_contains "$ui" '"自動"' "graphics menus must not offer auto"
 assert_contains "$ui" "canSelectDxmt" "DXMT should gate on OS + payload"
+assert_contains "$ui" "CyderGraphicsCapabilities.current(engineRoot: CyderPaths.engine)" \
+  "prefs DXMT gating should probe the installed engine"
+assert_contains "$library_ui" "CyderGraphicsCapabilities.current(engineRoot: CyderPaths.engine)" \
+  "game DXMT gating should probe the installed engine"
 assert_contains "$ui" "需要 macOS 14+" "DXMT/D3DMetal should explain macOS 14+"
 assert_contains "$ui" 'case .dxmt:' "help text must cover DXMT"
 assert_contains "$ui" "帶入預載的遊戲專屬設定" "default graphics help should avoid CompatDB jargon"
