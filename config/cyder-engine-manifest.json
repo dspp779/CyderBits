@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
-  "engineId": "cx26.3-w11-cyder009",
-  "versionLabel": "CX26.3.0-W11-Cyder009",
+  "engineId": "cx26.3-w11-cyder009-dxmt",
+  "versionLabel": "CX26.3.0-W11-Cyder009-dxmt",
   "base": {
     "crossover": "26.3.0",
     "wine": "11.0"
@@ -11,7 +11,7 @@
     "i386",
     "x86_64"
   ],
-  "minimumCyderVersion": "0.9.0",
+  "minimumCyderVersion": "0.9.6",
   "patches": [
     "cyder-compatdb-runtime.patch",
     "a6-final-same-view-backing-sync.patch",
@@ -28,8 +28,8 @@
     "cyder-wineserver-add-completion-guard.patch",
     "cyder-ntdll-qdo-optnone-NtQueryDirectoryObject.patch"
   ],
-  "notes": "Cyder009 keeps Cyder008 teardown / frame-walk / A6 / MoltenVK wait-poll shim, and replaces temporary NtQueryDirectoryObject TRACE with a narrow optnone bandage on NtQueryDirectoryObject for the grap-core leave-game directory-object livelock (not a semantic HID fix).",
+  "notes": "Cyder009-dxmt is Cyder009 plus shipped lib/dxmt (upstream DXMT v0.80 MIT) for Cyder 0.9.6 selectable DXMT graphics. Same teardown / frame-walk / A6 / MoltenVK wait-poll shim / QDO optnone bandage as Cyder009. DXMT host winemetal.so may declare minos up to 15.0 (pack gate exemption); Cyder only offers DXMT on macOS 15+.",
   "ntdllSHA256": "a79ca2e2aab01fe809bfbb2499e374a731734fa1fa2fc32b0890a267c9030de4",
-  "artifact": "engine-wine-x86_64-CX26-3-0-W11-Cyder009.tar.xz",
-  "artifactSHA256": "92d44cd84a71e30ba71eece8dbe0509f36d9b6aefbd240bf4cdb7b43b49e242b"
+  "artifact": "engine-wine-x86_64-CX26-3-0-W11-Cyder009-dxmt.tar.xz",
+  "artifactSHA256": "312a5ac3e96d7e07f651ef470cc52bf423600f05c84411a735be390ce76e7c3f"
 }
