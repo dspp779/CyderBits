@@ -130,6 +130,8 @@ cyder_write_engine_version_file "$ENGINE_TREE" "$ENGINE_VERSION_LABEL"
 for _dxmt_file in \
   lib/dxmt/x86_64-windows/d3d11.dll \
   lib/dxmt/x86_64-windows/dxgi.dll \
+  lib/dxmt/i386-windows/d3d11.dll \
+  lib/dxmt/i386-windows/dxgi.dll \
   lib/dxmt/x86_64-unix/winemetal.so; do
   if [[ ! -f "$ENGINE_TREE/$_dxmt_file" ]]; then
     echo "Refusing to pack engine without $_dxmt_file (run scripts/fetch-dxmt.sh)" >&2

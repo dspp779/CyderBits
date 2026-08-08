@@ -9,7 +9,7 @@ Cyder 0.8.0 起，可在 **Cyder 偏好設定 → 圖形** 或個別遊戲設定
 | **default** | 跟隨 CompatDB／引擎預設；不注入後端覆寫 |
 | **wined3d** | Wine 內建 Direct3D；相容性較廣，效能通常較差 |
 | **dxvk** | Vulkan→Metal（MoltenVK）；需引擎內建 DXVK |
-| **dxmt** | Direct3D→Metal（DXMT）；需引擎 `lib/dxmt`（v0.80）與 macOS 14+ |
+| **dxmt** | Direct3D→Metal（DXMT）；需引擎 `lib/dxmt`（v0.80）與 macOS 15+ |
 | **d3dmetal** | Apple D3DMetal／GPTK；需 macOS 14+ 且本機有可用 GPTK |
 
 個別遊戲可覆寫全域設定；選「跟隨全域」表示不覆寫。
@@ -35,7 +35,7 @@ DXMT 將 Direct3D 轉譯至 Metal，由 Cyder 封裝 engine 隨附 **上游 v0.8
 
 ### 系統需求
 
-- **macOS 14（Sonoma）或更新** — macOS 13 及以下 `dxmt` 選項會灰掉。
+- **macOS 15（Sequoia）或更新** — macOS 14 及以下 `dxmt` 選項會灰掉（不同於 D3DMetal 的 macOS 14+ 門檻）。
 - 引擎缺 `lib/dxmt` 完整 payload 時，`dxmt` 選項亦會灰掉。
 
 選 **DXMT** 時不套用 DXVK 限幀（`DXVK_FRAME_RATE`）；限幀選項僅在 **DXVK** 後端出現。
@@ -68,7 +68,7 @@ D3DMetal 需要 Apple Game Porting Toolkit（GPTK）。**Cyder 不內建、不�
 | 狀況 | 處理 |
 |------|------|
 | D3DMetal 無法選取 | 確認 macOS ≥ 14；安裝 CrossOver 或從評估 DMG 安裝 GPTK |
-| DXMT 無法選取 | 確認 macOS ≥ 14；確認 engine 含 `lib/dxmt`（封裝版應已內建 v0.80） |
+| DXMT 無法選取 | 確認 macOS ≥ 15；確認 engine 含 `lib/dxmt`（封裝版應已內建 v0.80） |
 | DXVK 選項灰掉 | 引擎缺 DXVK／MoltenVK（0.8.0 出貨版不應發生） |
 | 改後端後畫面異常 | 先改回 **default** 或 **wined3d** 再重啟遊戲 |
 | 限幀無效 | 檢查遊戲是否強制 VSync；見上方「限幀 vs VSync」 |

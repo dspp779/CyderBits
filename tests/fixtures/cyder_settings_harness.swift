@@ -156,9 +156,21 @@ struct CyderSettingsHarness {
                 preference: .dxvk, hasD3DMetal: true, hasDxvk: true, hasDxmt: true
             ) == .dxvk
         )
+        // DXMT fails closed without the payload, even on a qualifying OS.
         precondition(
             CyderSettings.effectiveLaunchBackend(
-                preference: .dxmt, hasD3DMetal: true, hasDxvk: true, hasDxmt: false
+                preference: .dxmt, hasD3DMetal: true, hasDxvk: true, hasDxmt: false, osMajorVersion: 15
+            ) == nil
+        )
+        // DXMT fails closed below macOS 15, even with the payload present.
+        precondition(
+            CyderSettings.effectiveLaunchBackend(
+                preference: .dxmt, hasD3DMetal: true, hasDxvk: true, hasDxmt: true, osMajorVersion: 14
+            ) == nil
+        )
+        precondition(
+            CyderSettings.effectiveLaunchBackend(
+                preference: .dxmt, hasD3DMetal: true, hasDxvk: true, hasDxmt: true, osMajorVersion: 15
             ) == .dxmt
         )
         precondition(
@@ -201,7 +213,7 @@ struct CyderSettingsHarness {
         )
         precondition(
             CyderSettings.effectiveLaunchBackend(
-                preference: .dxmt, hasD3DMetal: false, hasDxvk: true, hasDxmt: true
+                preference: .dxmt, hasD3DMetal: false, hasDxvk: true, hasDxmt: true, osMajorVersion: 15
             ) == .dxmt
         )
         precondition(CyderSettings.sanitizedGraphicsBackend("auto") == .default)

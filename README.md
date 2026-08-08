@@ -75,7 +75,7 @@ Below is a summary of tested games on Cyder / CyderBits. For detailed configurat
 | wined3d / OpenGL | **Active default** | BlueCG's validated engine includes the tested `winemac.drv` same-view backing fix for Retina/DPI resize. |
 | Vulkan / MoltenVK | **Included in the current packaged engine** | `libMoltenVK.dylib` is bundled for x86_64 Wine Vulkan support (macOS 10.15 minos); it is not the BlueCG rendering path. `pack-engine-artifact.sh` keeps MoltenVK by default; fresh source builds may use `--without-vulkan`. |
 | DXVK | **Not integrated** | No DXVK runtime or game validation is shipped by this repository. |
-| dxmt | **Integrated (shipped in engine)** | Upstream DXMT v0.80 is bundled under `lib/dxmt/` in packaged CX26/OEM25 engines; macOS 14+ required to select in UI. Game validation is not maintained in this repo. |
+| dxmt | **Integrated (shipped in engine)** | Upstream DXMT v0.80 is bundled under `lib/dxmt/` in packaged CX26/OEM25 engines; macOS 15+ required to select in UI (higher than D3DMetal's macOS 14+). Game validation is not maintained in this repo. |
 | D3DMetal | **Not a product backend** | Only referenced by historical source experiments; it is not wired or validated as a Cyder runtime path. |
 
 See [Wine configure and graphics options](docs/wine-configure-options.md) for build choices and limitations.

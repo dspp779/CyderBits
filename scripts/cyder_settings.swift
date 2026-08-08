@@ -482,16 +482,24 @@ struct CyderSettings: Codable {
 
     /// Concrete backend to inject into Wine, or `nil` to leave CompatDB alone.
     /// No cascade: `default` always defers to CompatDB / Wine's own choice.
+    ///
+    /// DXMT additionally fails closed on `hasDxmt` + `osMajorVersion`: a stale
+    /// or hand-edited `dxmt` preference must never launch DXMT on an engine
+    /// missing the payload or on macOS < 15, even though the UI already
+    /// disables that menu item.
     static func effectiveLaunchBackend(
         preference: CyderGraphicsBackend,
         hasD3DMetal: Bool,
         hasDxvk: Bool,
-        hasDxmt: Bool
+        hasDxmt: Bool,
+        osMajorVersion: Int = ProcessInfo.processInfo.operatingSystemVersion.majorVersion
     ) -> CyderGraphicsBackend? {
         switch preference {
         case .default:
             return nil
-        case .wined3d, .dxvk, .dxmt, .d3dmetal:
+        case .dxmt:
+            return (hasDxmt && osMajorVersion >= 15) ? .dxmt : nil
+        case .wined3d, .dxvk, .d3dmetal:
             return preference
         }
     }

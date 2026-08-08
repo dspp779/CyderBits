@@ -832,8 +832,14 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
         supportsD3DMetalOS && CyderGptk.preferredSource() != nil
     }
 
+    /// DXMT raises the OS floor to macOS 15 (Sequoia); it does not share
+    /// D3DMetal's macOS 14 floor.
+    private var supportsDxmtOS: Bool {
+        ProcessInfo.processInfo.operatingSystemVersion.majorVersion >= 15
+    }
+
     private var canSelectDxmt: Bool {
-        supportsD3DMetalOS && CyderGraphicsCapabilities.current(engineRoot: CyderPaths.engine).hasDxmt
+        supportsDxmtOS && CyderGraphicsCapabilities.current(engineRoot: CyderPaths.engine).hasDxmt
     }
 
     private var graphicsBackendTitles: [String] {
@@ -856,8 +862,8 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
     private func updateDxmtMenuItemAvailability() {
         guard let item = graphicsBackend.item(at: 2) else { return }
         item.isEnabled = canSelectDxmt
-        if !supportsD3DMetalOS {
-            item.toolTip = "需要 macOS 14+"
+        if !supportsDxmtOS {
+            item.toolTip = "需要 macOS 15+"
         } else if !CyderGraphicsCapabilities.current(engineRoot: CyderPaths.engine).hasDxmt {
             item.toolTip = "需要引擎內建 DXMT"
         } else {
@@ -937,7 +943,7 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
         case .default: "帶入預載的遊戲專屬設定；多數遊戲建議使用。"
         case .wined3d: "使用 Wine 內建 Direct3D；相容性較廣，但效能通常較差。"
         case .dxvk: "使用 DXVK 將 Direct3D 轉為 Vulkan，再由 MoltenVK 轉為 Metal。"
-        case .dxmt: "使用 DXMT 將 Direct3D 直接轉為 Metal；需要 macOS 14+ 與引擎內建 DXMT。"
+        case .dxmt: "使用 DXMT 將 Direct3D 直接轉為 Metal；需要 macOS 15+ 與引擎內建 DXMT。"
         case .d3dmetal: "使用 Apple D3DMetal／GPTK；需要 macOS 14+ 與可用的 GPTK。"
         }
         gptkNote.stringValue = "D3DMetal 可使用本機 CrossOver 內附的 GPTK，或自行從 Apple 下載並安裝；若兩者皆有，Cyder 優先使用已安裝版本。"

@@ -31,7 +31,10 @@ printf 'dxgi\n' >"$STAGE/x86_64-windows/dxgi.dll"
 printf 'd3d11-32\n' >"$STAGE/i386-windows/d3d11.dll"
 printf 'dxgi-32\n' >"$STAGE/i386-windows/dxgi.dll"
 printf 'so\n' >"$STAGE/x86_64-unix/winemetal.so"
-printf 'MIT\n' >"$STAGE/LICENSE"
+# Deliberately not the real MIT text: fetch-dxmt.sh must always overwrite
+# whatever (if anything) the upstream tarball provides with the pinned
+# v0.80 MIT LICENSE, never trust/pass through the archive's own file.
+printf 'STAGE-PROVIDED-LICENSE-MUST-BE-OVERWRITTEN\n' >"$STAGE/LICENSE"
 (
   cd "$STAGE"
   tar -czf "$TMP/good.tar.gz" .
@@ -53,6 +56,15 @@ for eng in "$E2" "$E3"; do
   assert test -f "$eng/lib/dxmt/x86_64-unix/winemetal.so"
   assert_contains "$(cat "$eng/lib/dxmt/version")" "v0.80" "version pin file must record DXMT version"
   assert_contains "$(cat "$eng/lib/dxmt/version")" "$GOOD_SHA" "version pin file must record checksum"
+  assert test -f "$eng/lib/dxmt/LICENSE"
+  assert_contains "$(cat "$eng/lib/dxmt/LICENSE")" "MIT License" \
+    "installed DXMT payload must always carry the pinned v0.80 MIT LICENSE"
+  assert_contains "$(cat "$eng/lib/dxmt/LICENSE")" "Feifan He" \
+    "installed LICENSE must carry the upstream DXMT copyright notice"
+  assert_not_contains "$(cat "$eng/lib/dxmt/LICENSE")" "STAGE-PROVIDED-LICENSE-MUST-BE-OVERWRITTEN" \
+    "fetch-dxmt.sh must overwrite any upstream-provided LICENSE with the pinned MIT text"
+  assert_contains "$(cat "$eng/lib/dxmt/version")" "license MIT" \
+    "version pin file should note the bundled license"
 done
 
 # Tarball without i386 must fail closed.
@@ -166,5 +178,21 @@ if [[ -s "$TMP/dry.stdout" ]]; then
 fi
 assert_contains "$(cat "$TMP/dry.stderr")" "+ mkdir" "dry-run should echo planned commands to stderr"
 assert_contains "$(cat "$TMP/dry.stderr")" "Dry run complete" "dry-run should report completion on stderr"
+
+# Dry-run WITHOUT --tarball and with nothing cached: the download itself is
+# only echoed (never actually happens), so there is no local file to
+# checksum/extract. Must exit 0 cleanly rather than crash on a missing file.
+E8="$TMP/engine8"
+CACHE8="$TMP/cache8"
+mkdir -p "$E8"
+# `set -e` above means this line itself fails the test if the script exits
+# non-zero, so simply reaching the assertions below already proves exit 0.
+CYDER_DXMT_CACHE="$CACHE8" bash "$SCRIPT" --engine "$E8" --dry-run \
+  >"$TMP/dry-no-tarball.stdout" 2>"$TMP/dry-no-tarball.stderr"
+assert test ! -e "$E8/lib/dxmt/x86_64-unix/winemetal.so"
+assert_not_contains "$(cat "$TMP/dry-no-tarball.stderr")" "No such file or directory" \
+  "dry-run without --tarball must not attempt to checksum a file that was never downloaded"
+assert_contains "$(cat "$TMP/dry-no-tarball.stderr")" "Dry run" \
+  "dry-run without --tarball should still report a dry-run summary"
 
 echo "PASS test-cyder-dxmt-fetch"

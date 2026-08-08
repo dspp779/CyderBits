@@ -164,6 +164,46 @@ find_payload_root() {
   return 1
 }
 
+# DXMT v0.80 (the last release before upstream 3Shain/dxmt relicensed to
+# LGPL) ships under the MIT License. Cyder pins v0.80, so this text is
+# hard-coded rather than trusted to whatever (if anything) the upstream
+# tarball happens to contain — the upstream archive under test/CI use does
+# not always include a LICENSE file.
+read -r -d '' DXMT_MIT_LICENSE <<'EOF' || true
+MIT License
+
+Copyright (c) 2023 Feifan He
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+EOF
+
+write_dxmt_license() {
+  local dest="$1"
+  if (( DRY_RUN )); then
+    run bash -c "cat >\"$dest/LICENSE\" <<'LICEOF'
+$DXMT_MIT_LICENSE
+LICEOF"
+  else
+    printf '%s\n' "$DXMT_MIT_LICENSE" >"$dest/LICENSE"
+  fi
+}
+
 ensure_winemetal_layout() {
   local dest="$1"
   if [[ -f "$dest/x86_64-unix/winemetal.so" ]]; then
@@ -189,17 +229,23 @@ install_dxmt_into_engine() {
   run mkdir -p "$dest/lib/dxmt"
   run cp -R "$payload/." "$dest/lib/dxmt/"
   ensure_winemetal_layout "$dest/lib/dxmt" || true
+  # Always write our own pinned MIT LICENSE text, regardless of whether the
+  # upstream tarball happened to include one, so a redistributed engine
+  # artifact never ships lib/dxmt/ without a license file.
+  write_dxmt_license "$dest/lib/dxmt"
   if (( ! DRY_RUN )); then
     cat >"$dest/lib/dxmt/version" <<EOF
 dxmt ${DXMT_VERSION}
 source ${DXMT_URL}
 sha256 ${DXMT_SHA256}
+license MIT (see LICENSE)
 EOF
   else
     run bash -c "cat >\"$dest/lib/dxmt/version\" <<EOF
 dxmt ${DXMT_VERSION}
 source ${DXMT_URL}
 sha256 ${DXMT_SHA256}
+license MIT (see LICENSE)
 EOF"
   fi
   if (( ! DRY_RUN )); then
@@ -229,11 +275,26 @@ resolve_tarball() {
 
 TMP_DIR=""
 cleanup() {
-  [[ -n "$TMP_DIR" && -d "$TMP_DIR" ]] && rm -rf "$TMP_DIR"
+  # `set -e` treats a false `[[ ... ]] && cmd` as the trap's own failure and
+  # would overwrite an already-decided exit code (e.g. a clean `exit 0`) with
+  # 1; use `if` so an unset/absent TMP_DIR always leaves the trap at status 0.
+  if [[ -n "$TMP_DIR" && -d "$TMP_DIR" ]]; then
+    rm -rf "$TMP_DIR"
+  fi
 }
 trap cleanup EXIT
 
 archive="$(resolve_tarball)"
+if (( DRY_RUN )) && [[ -z "$TARBALL" ]] && [[ ! -f "$archive" ]]; then
+  # Dry run with no local --tarball and nothing cached yet: the download
+  # itself was only echoed above (see `run curl`/`run mv`), so there is no
+  # file to checksum or extract. Report the plan and stop cleanly instead of
+  # letting verify_sha256 fail on a missing file.
+  echo "Dry run: would download ${DXMT_URL} to ${archive}, verify sha256 ${DXMT_SHA256}," \
+    "then install into: ${ENGINE}${ALSO_ENGINES[*]:+ ${ALSO_ENGINES[*]}}" >&2
+  echo "Dry run complete for DXMT ${DXMT_VERSION} (no cached/local tarball; download skipped)" >&2
+  exit 0
+fi
 verify_sha256 "$archive" "$DXMT_SHA256"
 
 TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/cyder-dxmt-extract.XXXXXX")"

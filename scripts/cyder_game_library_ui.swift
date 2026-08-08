@@ -1009,8 +1009,14 @@ private final class CyderGameSettingsWindowController: NSWindowController, NSWin
         supportsD3DMetalOS && CyderGptk.preferredSource() != nil
     }
 
+    /// DXMT raises the OS floor to macOS 15 (Sequoia); it does not share
+    /// D3DMetal's macOS 14 floor.
+    private var supportsDxmtOS: Bool {
+        ProcessInfo.processInfo.operatingSystemVersion.majorVersion >= 15
+    }
+
     private var canSelectDxmt: Bool {
-        supportsD3DMetalOS && CyderGraphicsCapabilities.current(engineRoot: CyderPaths.engine).hasDxmt
+        supportsDxmtOS && CyderGraphicsCapabilities.current(engineRoot: CyderPaths.engine).hasDxmt
     }
 
     private var graphicsBackendTitles: [String] {
@@ -1033,8 +1039,8 @@ private final class CyderGameSettingsWindowController: NSWindowController, NSWin
     private func updateDxmtMenuItemAvailability() {
         guard let item = graphicsBackend.item(at: 3) else { return }
         item.isEnabled = canSelectDxmt
-        if !supportsD3DMetalOS {
-            item.toolTip = "需要 macOS 14+"
+        if !supportsDxmtOS {
+            item.toolTip = "需要 macOS 15+"
         } else if !CyderGraphicsCapabilities.current(engineRoot: CyderPaths.engine).hasDxmt {
             item.toolTip = "需要引擎內建 DXMT"
         } else {

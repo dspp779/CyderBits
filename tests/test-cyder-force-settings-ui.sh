@@ -33,8 +33,15 @@ assert_contains "$ui" "CyderGraphicsCapabilities.current(engineRoot: CyderPaths.
   "prefs DXMT gating should probe the installed engine"
 assert_contains "$library_ui" "CyderGraphicsCapabilities.current(engineRoot: CyderPaths.engine)" \
   "game DXMT gating should probe the installed engine"
-assert_contains "$ui" "需要 macOS 14+" "DXMT/D3DMetal should explain macOS 14+"
+assert_contains "$ui" "supportsDxmtOS" "DXMT should have its own OS gate distinct from D3DMetal"
+assert_contains "$ui" "ProcessInfo.processInfo.operatingSystemVersion.majorVersion >= 15" \
+  "DXMT OS gate must require macOS 15+, not D3DMetal's 14+"
+assert_contains "$ui" "需要 macOS 15+" "DXMT should explain macOS 15+ (higher than D3DMetal's 14+)"
+assert_contains "$library_ui" "supportsDxmtOS" "game DXMT gating should have its own OS gate distinct from D3DMetal"
+assert_contains "$library_ui" "需要 macOS 15+" "game DXMT gating should explain macOS 15+"
 assert_contains "$ui" 'case .dxmt:' "help text must cover DXMT"
+assert_contains "$ui" "使用 DXMT 將 Direct3D 直接轉為 Metal；需要 macOS 15+" \
+  "DXMT help text must reflect the macOS 15+ requirement"
 assert_contains "$ui" "帶入預載的遊戲專屬設定" "default graphics help should avoid CompatDB jargon"
 assert_contains "$ui" "顯示畫面流暢度" "prefs should expose a smoothness HUD selector"
 assert_contains "$ui" "顯示 frametimes" "prefs should expose a DXVK frametimes toggle"
@@ -91,6 +98,10 @@ assert_contains "$common" 'DXVK_HUD=${DXVK_HUD:-<unset>}' \
 assert_contains "$(cat "$ROOT/scripts/cyder_gptk.swift")" 'CYDER_ALLOW_TEST_HOOKS' "GPTK test override must require an allow flag"
 assert_contains "$(cat "$ROOT/scripts/pack-engine-artifact.sh")" 'apple_gptk' "engine pack must exclude/assert no apple_gptk"
 assert_contains "$(cat "$ROOT/scripts/cyder_settings.swift")" 'defaultGraphicsBackend' "OEM/default graphics backend should be product-aware"
+assert_contains "$(cat "$ROOT/scripts/cyder_settings.swift")" 'osMajorVersion >= 15' \
+  "effectiveLaunchBackend must fail closed on DXMT below macOS 15"
+assert_contains "$(cat "$ROOT/scripts/cyder_settings.swift")" 'return (hasDxmt && osMajorVersion >= 15) ? .dxmt : nil' \
+  "effectiveLaunchBackend must refuse DXMT without payload or OS support"
 assert_contains "$ui" 'saveImmediately(registrySetting: "dpi")' "DPI changes should invoke only the DPI sed path"
 assert_contains "$ui" 'saveImmediately(registrySetting: "display")' "Retina changes should invoke Retina and linked DPI paths"
 assert_contains "$ui" 'saveImmediately(registrySetting: "smoothing")' "smoothing changes should invoke the smoothing sed path"
