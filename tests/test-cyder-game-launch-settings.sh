@@ -210,6 +210,26 @@ auto_game_result="$(
 assert_eq "$auto_game_result" "default|<unset>" \
   "a leftover per-game auto graphicsBackend should be treated as default"
 
+# A leftover global "auto" graphicsBackend (pre-dxmt settings.json) must be
+# treated as "default" rather than kept as a distinct preference.
+global_auto_dir="$TMP/support-global-auto"
+mkdir -p "$global_auto_dir"
+cat >"$global_auto_dir/settings.json" <<'JSON'
+{
+  "schemaVersion": 7,
+  "graphicsBackend": "auto"
+}
+JSON
+global_auto_result="$(
+  CYDER_SUPPORT="$global_auto_dir" bash -c '
+    source "$1/scripts/cyder-common.sh"
+    cyder_load_saved_settings
+    printf "%s|%s" "$CYDER_GRAPHICS_PREFERENCE" "${CYDER_GRAPHICS_BACKEND:-<unset>}"
+  ' _ "$ROOT"
+)"
+assert_eq "$global_auto_result" "default|<unset>" \
+  "a leftover global auto graphicsBackend should be treated as default"
+
 # Runtime harness: d3dmetal + fake GPTK root must emit CYDER_GPTK_ROOT,
 # CX_APPLEGPTK_LIBD3DSHARED_PATH, and DYLD_FRAMEWORK_PATH containing external/.
 # CX_ACTIVE_GRAPHICS_BACKEND is set by Wine apply_graphics_backend() to match

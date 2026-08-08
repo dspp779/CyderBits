@@ -727,13 +727,18 @@ cyder_load_saved_settings() {
   fi
   if [[ -z "${CYDER_GRAPHICS_BACKEND:-}" ]]; then
     value="$(plutil -extract graphicsBackend raw -o - "$settings" 2>/dev/null || true)"
-    export CYDER_GRAPHICS_PREFERENCE="${value:-default}"
     case "$value" in
       wined3d|dxvk|dxmt|d3dmetal)
+        export CYDER_GRAPHICS_PREFERENCE="$value"
         export CYDER_GRAPHICS_BACKEND="$value"
         export CX_GRAPHICS_BACKEND="$value"
         ;;
-      default|"") unset CYDER_GRAPHICS_BACKEND CX_GRAPHICS_BACKEND ;;
+      default|auto|"")
+        # A leftover "auto" (pre-dxmt settings.json) is treated as
+        # "default" rather than kept as a distinct preference.
+        export CYDER_GRAPHICS_PREFERENCE=default
+        unset CYDER_GRAPHICS_BACKEND CX_GRAPHICS_BACKEND
+        ;;
     esac
   fi
   value="$(plutil -extract dxvkFrameRate raw -o - "$settings" 2>/dev/null || true)"
@@ -2080,7 +2085,8 @@ cyder_resolve_effective_graphics_backend() {
   local engine_root="$1"
   local preference="${CYDER_GRAPHICS_PREFERENCE:-${CYDER_GRAPHICS_BACKEND:-default}}"
   case "$preference" in
-    default|"")
+    default|auto|"")
+      export CYDER_GRAPHICS_PREFERENCE=default
       unset CYDER_GRAPHICS_BACKEND CX_GRAPHICS_BACKEND
       ;;
     wined3d|dxvk|dxmt|d3dmetal)
