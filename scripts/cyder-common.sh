@@ -727,19 +727,7 @@ cyder_load_saved_settings() {
   fi
   if [[ -z "${CYDER_GRAPHICS_BACKEND:-}" ]]; then
     value="$(plutil -extract graphicsBackend raw -o - "$settings" 2>/dev/null || true)"
-    case "$value" in
-      wined3d|dxvk|dxmt|d3dmetal)
-        export CYDER_GRAPHICS_PREFERENCE="$value"
-        export CYDER_GRAPHICS_BACKEND="$value"
-        export CX_GRAPHICS_BACKEND="$value"
-        ;;
-      default|auto|"")
-        # A leftover "auto" (pre-dxmt settings.json) is treated as
-        # "default" rather than kept as a distinct preference.
-        export CYDER_GRAPHICS_PREFERENCE=default
-        unset CYDER_GRAPHICS_BACKEND CX_GRAPHICS_BACKEND
-        ;;
-    esac
+    cyder_apply_graphics_preference "${value:-default}" "${CYDER_ENGINES:-}/${CYDER_ENGINE_NAME:-}"
   fi
   value="$(plutil -extract dxvkFrameRate raw -o - "$settings" 2>/dev/null || true)"
   case "$value" in sixty|unlimited) export CYDER_DXVK_FRAME_RATE_PREFERENCE="$value" ;; esac
@@ -2081,18 +2069,50 @@ cyder_game_environment_key_is_allowed() {
   return 0
 }
 
-cyder_resolve_effective_graphics_backend() {
+cyder_engine_has_dxmt_payload() {
   local engine_root="$1"
-  local preference="${CYDER_GRAPHICS_PREFERENCE:-${CYDER_GRAPHICS_BACKEND:-default}}"
+  [[ -r "$engine_root/lib/dxmt/x86_64-windows/d3d11.dll" \
+     && -r "$engine_root/lib/dxmt/x86_64-unix/winemetal.so" ]]
+}
+
+cyder_dxmt_launch_allowed() {
+  local engine_root="$1"
+  declare -F cyder_macos_at_least >/dev/null 2>&1 \
+    && cyder_macos_at_least 15 0 \
+    && cyder_engine_has_dxmt_payload "$engine_root"
+}
+
+cyder_apply_graphics_preference() {
+  local preference="$1"
+  local engine_root="${2:-${CYDER_ENGINES:-}/${CYDER_ENGINE_NAME:-}}"
   case "$preference" in
     default|auto|"")
+      # A leftover "auto" (pre-dxmt settings.json) is treated as
+      # "default" rather than kept as a distinct preference.
       export CYDER_GRAPHICS_PREFERENCE=default
       unset CYDER_GRAPHICS_BACKEND CX_GRAPHICS_BACKEND
       ;;
-    wined3d|dxvk|dxmt|d3dmetal)
+    wined3d|dxvk|d3dmetal)
+      export CYDER_GRAPHICS_PREFERENCE="$preference"
       export CYDER_GRAPHICS_BACKEND="$preference" CX_GRAPHICS_BACKEND="$preference"
       ;;
+    dxmt)
+      if cyder_dxmt_launch_allowed "$engine_root"; then
+        export CYDER_GRAPHICS_PREFERENCE=dxmt
+        export CYDER_GRAPHICS_BACKEND=dxmt CX_GRAPHICS_BACKEND=dxmt
+      else
+        echo "DXMT is unavailable (requires macOS 15+ and engine lib/dxmt); using default graphics backend." >&2
+        export CYDER_GRAPHICS_PREFERENCE=default
+        unset CYDER_GRAPHICS_BACKEND CX_GRAPHICS_BACKEND
+      fi
+      ;;
   esac
+}
+
+cyder_resolve_effective_graphics_backend() {
+  local engine_root="$1"
+  local preference="${CYDER_GRAPHICS_PREFERENCE:-${CYDER_GRAPHICS_BACKEND:-default}}"
+  cyder_apply_graphics_preference "$preference" "$engine_root"
   cyder_apply_graphics_runtime_preferences
 }
 
@@ -2161,6 +2181,7 @@ cyder_apply_steam_compatibility_arguments() {
 
 cyder_load_game_settings() {
   local exe="$1"
+  local engine_root="${2:-${CYDER_ENGINES:-}/${CYDER_ENGINE_NAME:-}}"
   local profile_script="$CYDER_SCRIPTS/cyder-profile.sh"
   local settings_file="$CYDER_SUPPORT/settings.json"
   local profile_id game_json launch_request="${CYDER_TEST_SETTINGS_REQUEST:-}"
@@ -2227,18 +2248,7 @@ cyder_load_game_settings() {
             fontSmoothing) case "$value" in off|grayscale|cleartype-rgb|cleartype-bgr) export CYDER_FONT_SMOOTHING="$value" ;; esac ;;
             powerMode) case "$value" in standard) export CYDER_POWER_MODE=normal ;; energySaving) export CYDER_POWER_MODE=background ;; esac ;;
             graphicsBackend)
-              case "$value" in
-                wined3d|dxvk|dxmt|d3dmetal)
-                  export CYDER_GRAPHICS_PREFERENCE="$value"
-                  export CYDER_GRAPHICS_BACKEND="$value" CX_GRAPHICS_BACKEND="$value"
-                  ;;
-                default|auto)
-                  # A leftover "auto" (pre-dxmt settings.json) is treated as
-                  # "default" rather than kept as a distinct preference.
-                  export CYDER_GRAPHICS_PREFERENCE=default
-                  unset CYDER_GRAPHICS_BACKEND CX_GRAPHICS_BACKEND
-                  ;;
-              esac
+              cyder_apply_graphics_preference "$value" "$engine_root"
               ;;
             dxvkFrameRate)
               case "$value" in
@@ -2281,7 +2291,7 @@ cyder_prepare_game_launch_settings() {
   local engine_root="$2"
   local prefix="$3"
   local exe="$4"
-  cyder_load_game_settings "$exe"
+  cyder_load_game_settings "$exe" "$engine_root"
   cyder_resolve_effective_graphics_backend "$engine_root"
   [[ "$CYDER_GAME_SETTINGS_FOUND" -eq 1 ]] || return 0
 

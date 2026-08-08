@@ -30,8 +30,12 @@ assert_contains "$common" 'fontSongtiTarget' "common should read Songti target f
 assert_contains "$common" 'CYDER_RETINA_MODE:-1' "shell Retina default should be on"
 assert_contains "$common" 'CYDER_DPI:-192' "shell DPI default should be 192"
 
-assert_contains "$common" 'wined3d|dxvk|dxmt|d3dmetal' \
-  "shell settings loader must accept dxmt"
+assert_contains "$common" 'cyder_apply_graphics_preference' \
+  "shell settings loader must route graphicsBackend through shared preference helper"
+assert_contains "$common" 'cyder_dxmt_launch_allowed' \
+  "shell launch path must fail closed on DXMT availability"
+assert_contains "$common" 'cyder_macos_at_least 15 0' \
+  "shell DXMT gate must require macOS 15+"
 assert_not_contains "$common" 'preference=auto' \
   "OEM must not rewrite default to auto"
 

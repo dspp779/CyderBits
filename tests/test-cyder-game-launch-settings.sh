@@ -54,12 +54,19 @@ printf '%s|%s\n' "${WINEPREFIX:-}" "$*" >>"$CYDER_TEST_WINESERVER_LOG"
 SH
 chmod +x "$TMP/engine/bin/wineserver"
 
+stub_dxmt_engine_payload() {
+  mkdir -p "$1/lib/dxmt/x86_64-windows" "$1/lib/dxmt/x86_64-unix"
+  touch "$1/lib/dxmt/x86_64-windows/d3d11.dll" "$1/lib/dxmt/x86_64-unix/winemetal.so"
+}
+stub_dxmt_engine_payload "$TMP/engine"
+
 CYDER_SUPPORT="$TMP/support" \
 CYDER_SCRIPTS="$TMP/scripts" \
 CYDER_TEST_SETTINGS_LOG="$TMP/settings.log" \
 CYDER_TEST_WINESERVER_LOG="$TMP/wineserver.log" \
   bash -c '
     source "$1/scripts/cyder-common.sh"
+    cyder_macos_at_least() { return 0; }
     cyder_init_paths "$1"
     CYDER_SUPPORT="$2/support"
     CYDER_SCRIPTS="$2/scripts"
@@ -171,6 +178,7 @@ assert_not_contains "$crossover_conf" '"DXVK_HUD" = "old"' \
 dxmt_backend="$(
   CYDER_SUPPORT="$TMP/support" bash -c '
     source "$1/scripts/cyder-common.sh"
+    cyder_macos_at_least() { return 0; }
     export CYDER_GRAPHICS_PREFERENCE=dxmt CYDER_GRAPHICS_HUD_PREFERENCE=metal
     cyder_resolve_effective_graphics_backend "$2/engine"
     printf "%s|%s|%s" "$CYDER_GRAPHICS_BACKEND" "$MTL_HUD_ENABLED" "$DXVK_HUD"
@@ -178,6 +186,69 @@ dxmt_backend="$(
 )"
 assert_eq "$dxmt_backend" "dxmt|1|0" \
   "Bash graphics resolve should honor an explicit dxmt preference and apply the saved Metal HUD"
+
+mkdir -p "$TMP/engine-empty/bin"
+
+# Leftover dxmt preference must fail closed when macOS is below 15.
+legacy_dxmt_old_os="$(
+  CYDER_SUPPORT="$TMP/support" bash -c '
+    source "$1/scripts/cyder-common.sh"
+    cyder_macos_at_least() { return 1; }
+    export CYDER_GRAPHICS_PREFERENCE=dxmt
+    cyder_resolve_effective_graphics_backend "$2/engine"
+    printf "%s|%s" "$CYDER_GRAPHICS_PREFERENCE" "${CYDER_GRAPHICS_BACKEND:-<unset>}"
+  ' _ "$ROOT" "$TMP"
+)"
+assert_eq "$legacy_dxmt_old_os" "default|<unset>" \
+  "a leftover dxmt preference must not export dxmt on macOS below 15"
+
+# Leftover dxmt preference must fail closed when the engine payload is missing.
+legacy_dxmt_no_payload="$(
+  CYDER_SUPPORT="$TMP/support" bash -c '
+    source "$1/scripts/cyder-common.sh"
+    cyder_macos_at_least() { return 0; }
+    export CYDER_GRAPHICS_PREFERENCE=dxmt
+    cyder_resolve_effective_graphics_backend "$2/engine-empty"
+    printf "%s|%s" "$CYDER_GRAPHICS_PREFERENCE" "${CYDER_GRAPHICS_BACKEND:-<unset>}"
+  ' _ "$ROOT" "$TMP"
+)"
+assert_eq "$legacy_dxmt_no_payload" "default|<unset>" \
+  "a leftover dxmt preference must not export dxmt without engine lib/dxmt payload"
+
+mkdir -p "$TMP/support-dxmt-saved"
+legacy_dxmt_saved_settings="$(
+  bash -c '
+    source "$1/scripts/cyder-common.sh"
+    cyder_macos_at_least() { return 1; }
+    cyder_init_paths "$1"
+    CYDER_SUPPORT="$2"
+    mkdir -p "$2"
+    printf "%s\n" "{\"schemaVersion\":8,\"graphicsBackend\":\"dxmt\"}" >"$2/settings.json"
+    cyder_load_saved_settings
+    printf "%s|%s" "$CYDER_GRAPHICS_PREFERENCE" "${CYDER_GRAPHICS_BACKEND:-<unset>}"
+  ' _ "$ROOT" "$TMP/support-dxmt-saved"
+)"
+assert_eq "$legacy_dxmt_saved_settings" "default|<unset>" \
+  "saved settings dxmt must fail closed on macOS below 15"
+
+mkdir -p "$TMP/support/launch-requests"
+dxmt_request="$TMP/support/launch-requests/dxmt-request.json"
+printf '%s' '{"graphicsBackend":"dxmt"}' >"$dxmt_request"
+legacy_dxmt_game="$(
+  CYDER_SUPPORT="$TMP/support" CYDER_SCRIPTS="$TMP/scripts" \
+    CYDER_TEST_SETTINGS_REQUEST="$dxmt_request" \
+    bash -c '
+      source "$1/scripts/cyder-common.sh"
+      cyder_macos_at_least() { return 1; }
+      cyder_init_paths "$1"
+      CYDER_ENGINES="$2/engines" CYDER_ENGINE_NAME=test-engine
+      mkdir -p "$CYDER_ENGINES/$CYDER_ENGINE_NAME"
+      cyder_load_game_settings "$3" "$2/engine-empty"
+      printf "%s|%s" "$CYDER_GRAPHICS_PREFERENCE" "${CYDER_GRAPHICS_BACKEND:-<unset>}"
+    ' _ "$ROOT" "$TMP" "$exe"
+)"
+assert_eq "$legacy_dxmt_game" "default|<unset>" \
+  "per-game dxmt override must fail closed on macOS below 15"
 
 # A stale "auto" preference (from a pre-dxmt settings.json) must no longer
 # cascade to a concrete backend now that the auto cascade is gone.
