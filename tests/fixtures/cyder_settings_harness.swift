@@ -115,106 +115,96 @@ struct CyderSettingsHarness {
         precondition(dxvkFrametimesEnv["DXVK_HUD"] == "fps,frametimes")
 
         try store.update { settings in
-            settings.graphicsBackend = .auto
+            settings.graphicsBackend = .dxmt
             settings.dxvkFrameRate = .sixty
-            settings.graphicsHud = .metal
+            settings.graphicsHud = .off
         }
-        let autoEnv = store.environment(
+        let dxmtEnv = store.environment(
             profileID: nil,
             legacyBasename: nil,
-            capabilities: CyderGraphicsCapabilities(hasD3DMetal: false, hasDxvk: true)
+            capabilities: CyderGraphicsCapabilities(hasD3DMetal: false, hasDxvk: true, hasDxmt: true)
         )
-        precondition(autoEnv["CYDER_GRAPHICS_BACKEND"] == "dxvk")
-        precondition(autoEnv["DXVK_FRAME_RATE"] == nil)
-        precondition(autoEnv["MTL_HUD_ENABLED"] == "1")
-        precondition(autoEnv["DXVK_HUD"] == "0")
+        precondition(dxmtEnv["CYDER_GRAPHICS_BACKEND"] == "dxmt")
+        precondition(dxmtEnv["DXVK_FRAME_RATE"] == nil)
+        precondition(dxmtEnv["DXVK_HUD"] == "0")
+        precondition(dxmtEnv["MTL_HUD_ENABLED"] == nil)
 
         try store.update { settings in
             settings.graphicsBackend = .default
             settings.dxvkFrameRate = .sixty
             settings.graphicsHud = .off
         }
-        let defaultEnv = store.environment(profileID: nil, legacyBasename: nil)
+        let defaultEnv = store.environment(
+            profileID: nil,
+            legacyBasename: nil,
+            capabilities: CyderGraphicsCapabilities(hasD3DMetal: true, hasDxvk: true, hasDxmt: true)
+        )
         precondition(defaultEnv["CYDER_GRAPHICS_BACKEND"] == nil)
         precondition(defaultEnv["DXVK_FRAME_RATE"] == nil)
         precondition(defaultEnv["DXVK_HUD"] == "0")
         precondition(defaultEnv["MTL_HUD_ENABLED"] == nil)
 
-        // Cascade resolution is pure App-side preference → concrete backend.
-        precondition(
-            CyderSettings.cascadePreferredBackend(hasD3DMetal: true, hasDxvk: true) == .d3dmetal
-        )
-        precondition(
-            CyderSettings.cascadePreferredBackend(hasD3DMetal: false, hasDxvk: true) == .dxvk
-        )
-        precondition(
-            CyderSettings.cascadePreferredBackend(hasD3DMetal: false, hasDxvk: false) == .wined3d
-        )
+        // No cascade: `default` never resolves to a concrete backend regardless
+        // of what capabilities are available.
         precondition(
             CyderSettings.effectiveLaunchBackend(
-                preference: .auto, hasD3DMetal: false, hasDxvk: true
-            ) == .dxvk
-        )
-        precondition(
-            CyderSettings.effectiveLaunchBackend(
-                preference: .default, hasD3DMetal: true, hasDxvk: true
+                preference: .default, hasD3DMetal: true, hasDxvk: true, hasDxmt: true
             ) == nil
         )
         precondition(
             CyderSettings.effectiveLaunchBackend(
-                preference: .dxvk, hasD3DMetal: true, hasDxvk: true
+                preference: .dxvk, hasD3DMetal: true, hasDxvk: true, hasDxmt: true
             ) == .dxvk
         )
+        precondition(
+            CyderSettings.effectiveLaunchBackend(
+                preference: .dxmt, hasD3DMetal: true, hasDxvk: true, hasDxmt: false
+            ) == .dxmt
+        )
+        precondition(
+            CyderSettings.effectiveLaunchBackend(
+                preference: .d3dmetal, hasD3DMetal: false, hasDxvk: false, hasDxmt: false
+            ) == .d3dmetal
+        )
+        precondition(CyderSettings.sanitizedGraphicsBackend("auto") == .default)
+        precondition(CyderSettings.sanitizedGraphicsBackend(nil) == .default)
+        precondition(CyderSettings.sanitizedGraphicsBackend("dxmt") == .dxmt)
+        precondition(CyderSettings.sanitizedOptionalGraphicsBackend("auto") == .default)
+        precondition(CyderSettings.sanitizedOptionalGraphicsBackend("dxmt") == .dxmt)
+        precondition(CyderSettings.sanitizedOptionalGraphicsBackend(nil) == nil)
 
-        try store.update { settings in
-            settings.graphicsBackend = .auto
-            settings.dxvkFrameRate = .sixty
-            settings.graphicsHud = .off
-        }
-        let autoDxvkEnv = store.environment(
-            profileID: nil,
-            legacyBasename: nil,
-            capabilities: CyderGraphicsCapabilities(hasD3DMetal: false, hasDxvk: true)
-        )
-        precondition(autoDxvkEnv["CYDER_GRAPHICS_BACKEND"] == "dxvk")
-        // Auto cascade to DXVK must not expose the manual frame-rate limiter.
-        precondition(autoDxvkEnv["DXVK_FRAME_RATE"] == nil)
-        let autoMetalEnv = store.environment(
-            profileID: nil,
-            legacyBasename: nil,
-            capabilities: CyderGraphicsCapabilities(hasD3DMetal: true, hasDxvk: true)
-        )
-        precondition(autoMetalEnv["CYDER_GRAPHICS_BACKEND"] == "d3dmetal")
-        precondition(autoMetalEnv["DXVK_FRAME_RATE"] == nil)
+        // hasDxmtPayload mirrors hasDxvkPayload's path resolution / defaulting.
+        let payloadTmp = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cyder-dxmt-payload-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: payloadTmp) }
+        precondition(!CyderGraphicsCapabilities.hasDxmtPayload(engineRoot: payloadTmp))
+        let dxmtWindows = payloadTmp.appendingPathComponent("lib/dxmt/x86_64-windows", isDirectory: true)
+        let dxmtUnix = payloadTmp.appendingPathComponent("lib/dxmt/x86_64-unix", isDirectory: true)
+        try FileManager.default.createDirectory(at: dxmtWindows, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: dxmtUnix, withIntermediateDirectories: true)
+        try Data().write(to: dxmtWindows.appendingPathComponent("d3d11.dll"))
+        precondition(!CyderGraphicsCapabilities.hasDxmtPayload(engineRoot: payloadTmp))
+        try Data().write(to: dxmtUnix.appendingPathComponent("winemetal.so"))
+        precondition(CyderGraphicsCapabilities.hasDxmtPayload(engineRoot: payloadTmp))
+        precondition(CyderGraphicsCapabilities.hasDxmtPayload(engineRoot: nil))
 
         setenv("CYDER_OEM_FLAVOR", "maplestory", 1)
         defer { unsetenv("CYDER_OEM_FLAVOR") }
         precondition(CyderProduct.isMapleStoryOEM)
-        precondition(CyderProduct.defaultGraphicsBackend == .auto)
+        precondition(CyderProduct.defaultGraphicsBackend == .default)
         let oemDefaults = CyderSettings()
-        precondition(oemDefaults.graphicsBackend == .auto)
-        let oemResolved = CyderSettings.resolveGraphics(
-            global: oemDefaults,
-            profile: CyderExecutableSettings(graphicsBackend: .default)
-        )
-        precondition(oemResolved.backend == .auto)
-        // OEM never leaves graphics to CompatDB: default/auto always inject a concrete backend.
+        precondition(oemDefaults.graphicsBackend == .default)
         precondition(
             CyderSettings.effectiveLaunchBackend(
-                preference: .default, hasD3DMetal: false, hasDxvk: true
-            ) == .dxvk
+                preference: .default, hasD3DMetal: false, hasDxvk: true, hasDxmt: true
+            ) == nil
         )
-        try store.update { settings in
-            settings.graphicsBackend = .auto
-            settings.dxvkFrameRate = .sixty
-        }
-        let oemEnv = store.environment(
-            profileID: nil,
-            legacyBasename: nil,
-            capabilities: CyderGraphicsCapabilities(hasD3DMetal: false, hasDxvk: true)
+        precondition(
+            CyderSettings.effectiveLaunchBackend(
+                preference: .dxmt, hasD3DMetal: false, hasDxvk: true, hasDxmt: true
+            ) == .dxmt
         )
-        precondition(oemEnv["CYDER_GRAPHICS_BACKEND"] == "dxvk")
-        precondition(oemEnv["DXVK_FRAME_RATE"] == "60")
+        precondition(CyderSettings.sanitizedGraphicsBackend("auto") == .default)
 
         print("PASS cyder-settings-harness")
     }

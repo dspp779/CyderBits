@@ -1,74 +1,38 @@
-# Task 2 Report: Wine CompatDB Graphics Backends
+# Task 2 Report: Settings model — add `dxmt`, remove `auto`
 
 ## Status
+Done.
 
-DONE_WITH_CONCERNS
+## Files changed
+- `scripts/cyder_settings.swift`
+- `tests/fixtures/cyder_settings_harness.swift`
 
-## Delivered
+## Summary of changes
 
-- `CYDER_GPTK_ROOT` selects `wine/`, `external/libd3dshared.dylib`, and the D3DMetal framework before falling back to `CYDER_GRAPHICS_BACKENDS_ROOT/lib64/apple_gptk`.
-- `CYDER_GRAPHICS_BACKEND` is validated and force-applied after CompatDB DLL rules; resetting the per-rule DLL de-duplication state ensures it supersedes a matched CompatDB backend.
-- Corrected the runtime patch's added-file hunk length so the generated `cyder_compat.c` includes its complete trailing functions.
+- `CyderGraphicsBackend` is now `default | wined3d | dxvk | dxmt | d3dmetal` — `auto` case removed.
+- `CyderProduct.defaultGraphicsBackend` is always `.default` (no more OEM → `.auto`).
+- `sanitizedGraphicsBackend(_:)` / `sanitizedOptionalGraphicsBackend(_:)` migrate the legacy raw string `"auto"` → `.default` (so old persisted settings.json / profile JSON still decode cleanly).
+- `CyderGraphicsCapabilities` gained `hasDxmt: Bool` and `hasDxmtPayload(engineRoot:)`, mirroring `hasDxvkPayload`'s root resolution (checks `CYDER_GRAPHICS_BACKENDS_ROOT` env, defaults to `true` when no root context) and requiring both `lib/dxmt/x86_64-windows/d3d11.dll` and `lib/dxmt/x86_64-unix/winemetal.so`.
+- `CyderGraphicsCapabilities.current(engineRoot:)` now also probes `hasDxmt`.
+- `cascadePreferredBackend` removed entirely.
+- `effectiveLaunchBackend` no longer cascades: `.default` → `nil` unconditionally (no OEM special case); all concrete backends including `.dxmt` → themselves. Signature now takes `hasDxmt:` (kept for interface symmetry/future use even though the switch no longer branches on capabilities).
+- `resolveGraphics` no longer rewrites OEM `.default` → `.auto`.
+- `CyderSettingsStore.environment(...)` passes `hasDxmt` through to `effectiveLaunchBackend`, and the DXVK frame-rate-limiter exposure condition was simplified to just `graphics.backend == .dxvk` (the old OEM/cascade branch is unreachable now that `.default` never resolves to a concrete backend).
 
-## Verification
+## Tests (TDD)
 
-- `bash tests/test-cyder-compatdb-wine-runtime.sh` — PASS.
-- `bash tests/test-cyder-compatdb-data.sh` — PASS.
-- `bash tests/test-cyder-dxvk.sh` — PASS.
-- Applied the patch to `build/cx26/sources/wine`, compiled the affected NTDLL/WineD3D targets, and ran `make install` into `install/wine-cx26-x86_64` — PASS.
+1. Updated `tests/fixtures/cyder_settings_harness.swift` first (deleted all `.auto` / `cascadePreferredBackend` assertions, added `hasDxmt` everywhere `CyderGraphicsCapabilities`/`effectiveLaunchBackend` are called, added `hasDxmtPayload` filesystem-based coverage, replaced the OEM block with the brief's verbatim snippet, added `sanitizedGraphicsBackend("auto") == .default` and `sanitizedOptionalGraphicsBackend("auto") == .default` checks).
+2. Ran `tests/test-cyder-settings-swift.sh` against the unmodified model → confirmed compile failures (`extra argument 'hasDxmt'`, `type 'CyderGraphicsBackend' has no member 'dxmt'`, `has no member 'hasDxmtPayload'`, etc.) — harness fails as expected before implementation.
+3. Implemented the model changes above.
+4. Re-ran `tests/test-cyder-settings-swift.sh` → `PASS cyder-settings-harness` / `PASS test-cyder-settings-swift`.
+5. Also ran `tests/test-cyder-settings-model.sh` (grep-based assertions on `cyder_settings.swift` / `cyder-common.sh`, untouched by this task) → `PASS test-cyder-settings-model`.
 
-## Concerns
+## Commits
+- `feat(settings): add dxmt backend and drop auto cascade`
 
-- `tests/verify-cyder-compatdb-wine-runtime.sh` could not start from this worktree because its hard-coded LLVM-Mingw path does not exist under the worktree (`build/llvm-mingw-...`); the toolchain is present only under the primary checkout. The compile and install verification above succeeded.
-- The MapleStory OEM25 Wine source uses incompatible `process.c` hooks, so the shared CompatDB patch is not applicable there; this task rebuilt the CX26 engine that consumes this runtime patch.
+## Concerns / notes for other tasks
 
-## Review Follow-up (2026-07-28)
-
-### Status
-
-FIXED
-
-### Delivered
-
-- Captured the App-provided `CYDER_GRAPHICS_BACKEND` before CompatDB can change the child environment, restored that value into the child environment after rule application, and captured it again before current-process DLL rules run. The captured valid non-default value is then force-applied through `apply_graphics_backend()` after rules, with DLL de-duplication reset so the App selection wins.
-- Added a behavioral fixture covering both precedence cases: an explicit App backend wins over a CompatDB backend rule, while the rule still selects a backend if the App provides none.
-- Added `patches/cyder-compatdb-runtime-oem25.patch`, an OEM25-specific port. The shared patch fails on OEM25 because two `dlls/ntdll/unix/process.c` hunks conflict with its CrossOver-specific process implementation; the OEM patch uses the compatible OEM process setup and cleanup hooks while retaining the same CompatDB graphics runtime.
-
-### Verification
-
-- `bash tests/test-cyder-compatdb-wine-runtime.sh` — PASS.
-- `bash tests/test-cyder-compatdb-data.sh` — PASS.
-- `patch --dry-run -p1 < patches/cyder-compatdb-runtime-oem25.patch` in `build/maplestory-oem25/sources/wine` — PASS.
-
-## P1 Follow-up (2026-07-28)
-
-### Status
-
-FIXED
-
-### Delivered
-
-- Removed the duplicate OEM25 `process.c` insertions for `cyder_compat.h`, `struct cyder_compat_result compat`, and `cyder_compat_apply_process_rules()`. The OEM25 hook now captures/applies CompatDB exactly once while retaining the shared capture-then-force graphics backend and `CYDER_GPTK_ROOT` runtime behavior.
-- Added a runtime regression assertion that scopes to the OEM25 `process.c` patch section and requires each hook insertion exactly once.
-
-### Verification
-
-- `patch --dry-run --batch -p1 < patches/cyder-compatdb-runtime-oem25.patch` in `build/maplestory-oem25/sources/wine` — PASS.
-- `bash tests/test-cyder-compatdb-wine-runtime.sh` — PASS.
-- `bash tests/test-cyder-compatdb-data.sh` — PASS.
-- OEM25 source tree lacks `config.status` and generated Makefiles, so compiling the NTDLL object was not available.
-
-## Task 2 Blocker Follow-up (2026-07-28)
-
-### Status
-
-FIXED
-
-### Delivered
-
-- Restored the complete tail of the OEM25-added `dlls/ntdll/unix/cyder_compat.c`, including `cyder_compat_apply_current_process_dll_rules()` and `cyder_compat_cleanup_process_rules()`, and corrected its added-file hunk length to 1,619 lines.
-- Extended the Wine runtime test to dry-run and apply the OEM25 patch to a clean, minimal copy of the OEM Wine sources, then assert that the resulting `cyder_compat.c` contains the cleanup function and its full cleanup body.
-
-### Verification
-
-- `bash tests/test-cyder-compatdb-wine-runtime.sh` — PASS.
+- **Task 3 (UI) will not compile until it lands.** `scripts/cyder_settings_ui.swift` and `scripts/cyder_game_library_ui.swift` both reference `.auto` (as a `CyderGraphicsBackend` case) and `cyder_game_library_ui.swift`'s test companion `tests/test-cyder-force-settings-ui.sh` asserts `cascadePreferredBackend` exists. Per the task split these are explicitly out of scope here; confirmed via repo-wide grep that no other Swift file constructs `CyderGraphicsCapabilities` or calls the backend APIs besides those two UI files and this task's own files.
+- `tests/test-cyder-force-settings-ui.sh` will fail until Task 3 updates the UI files — did not touch it (out of scope, owned by Task 3).
+- `cyder-common.sh` was not touched (owned by Task 4); it doesn't reference the Swift `CyderGraphicsBackend` enum directly (shell side reads `CYDER_GRAPHICS_BACKEND` env string), so no cross-task breakage expected there.
+- `effectiveLaunchBackend`'s `hasD3DMetal`/`hasDxvk`/`hasDxmt` parameters are currently unused inside the switch body (no cascade consults them anymore) but were kept per the interface spec in the brief for call-site/API symmetry with `CyderGraphicsCapabilities`.

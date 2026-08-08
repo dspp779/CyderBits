@@ -64,17 +64,14 @@ enum CyderProduct {
         ProcessInfo.processInfo.environment["CYDER_OEM_FLAVOR"] == "maplestory"
     }
 
-    /// Official builds follow CompatDB when unset; OEM uses App-side auto cascade.
-    static var defaultGraphicsBackend: CyderGraphicsBackend {
-        isMapleStoryOEM ? .auto : .default
-    }
+    /// Official and OEM builds both leave `default` to CompatDB / Wine's own
+    /// selection; there is no App-side cascade.
+    static var defaultGraphicsBackend: CyderGraphicsBackend { .default }
 }
 
 enum CyderGraphicsBackend: String, Codable, CaseIterable {
     case `default`
-    /// App-side cascade: d3dmetal → dxvk → wined3d (CompatDB is not consulted).
-    case auto
-    case wined3d, dxvk, d3dmetal
+    case wined3d, dxvk, dxmt, d3dmetal
 }
 
 enum CyderDxvkFrameRate: String, Codable, CaseIterable {
@@ -151,15 +148,18 @@ enum CyderSyncMode: Int, CaseIterable {
 struct CyderGraphicsCapabilities: Equatable {
     var hasD3DMetal: Bool
     var hasDxvk: Bool
+    var hasDxmt: Bool
 
-    /// Probe local GPTK / DXVK availability. When `engineRoot` is nil, DXVK is
-    /// assumed present (0.8 engines ship it); launch paths should pass the real root.
+    /// Probe local GPTK / DXVK / DXMT availability. When `engineRoot` is nil,
+    /// DXVK and DXMT are assumed present (0.8 engines ship them); launch paths
+    /// should pass the real root.
     static func current(engineRoot: URL? = nil) -> CyderGraphicsCapabilities {
         let osOK = ProcessInfo.processInfo.operatingSystemVersion.majorVersion >= 14
         let hasGptk = CyderGptk.preferredSource() != nil
         return CyderGraphicsCapabilities(
             hasD3DMetal: osOK && hasGptk,
-            hasDxvk: hasDxvkPayload(engineRoot: engineRoot)
+            hasDxvk: hasDxvkPayload(engineRoot: engineRoot),
+            hasDxmt: hasDxmtPayload(engineRoot: engineRoot)
         )
     }
 
@@ -181,6 +181,25 @@ struct CyderGraphicsCapabilities: Equatable {
         let moltenB = root.appendingPathComponent("lib64/libMoltenVK.dylib")
         return manager.isReadableFile(atPath: dxvkDLL.path)
             && (manager.isReadableFile(atPath: moltenA.path) || manager.isReadableFile(atPath: moltenB.path))
+    }
+
+    static func hasDxmtPayload(engineRoot: URL?) -> Bool {
+        let root: URL?
+        if let engineRoot {
+            root = engineRoot
+        } else if let path = ProcessInfo.processInfo.environment["CYDER_GRAPHICS_BACKENDS_ROOT"],
+                  !path.isEmpty {
+            root = URL(fileURLWithPath: path, isDirectory: true)
+        } else {
+            // Settings / prefs probes without an engine still allow manual selection.
+            return true
+        }
+        guard let root else { return true }
+        let manager = FileManager.default
+        let dxmtDLL = root.appendingPathComponent("lib/dxmt/x86_64-windows/d3d11.dll")
+        let winemetal = root.appendingPathComponent("lib/dxmt/x86_64-unix/winemetal.so")
+        return manager.isReadableFile(atPath: dxmtDLL.path)
+            && manager.isReadableFile(atPath: winemetal.path)
     }
 }
 
@@ -414,7 +433,11 @@ struct CyderSettings: Codable {
     }
 
     static func sanitizedGraphicsBackend(_ raw: String?) -> CyderGraphicsBackend {
-        guard let raw, let value = CyderGraphicsBackend(rawValue: raw) else {
+        guard let raw else { return CyderProduct.defaultGraphicsBackend }
+        // Legacy "auto" preference collapses to default now that the App-side
+        // cascade has been removed.
+        if raw == "auto" { return .default }
+        guard let value = CyderGraphicsBackend(rawValue: raw) else {
             return CyderProduct.defaultGraphicsBackend
         }
         return value
@@ -437,6 +460,7 @@ struct CyderSettings: Codable {
 
     static func sanitizedOptionalGraphicsBackend(_ raw: String?) -> CyderGraphicsBackend? {
         guard let raw else { return nil }
+        if raw == "auto" { return .default }
         return CyderGraphicsBackend(rawValue: raw)
     }
 
@@ -449,39 +473,25 @@ struct CyderSettings: Codable {
         global: CyderSettings,
         profile: CyderExecutableSettings?
     ) -> CyderResolvedGraphics {
-        var backend = profile?.graphicsBackend ?? global.graphicsBackend
-        // OEM does not use CompatDB graphics; legacy "default" means App auto cascade.
-        if CyderProduct.isMapleStoryOEM && backend == .default {
-            backend = .auto
-        }
+        let backend = profile?.graphicsBackend ?? global.graphicsBackend
         return CyderResolvedGraphics(
             backend: backend,
             dxvkFrameRate: profile?.dxvkFrameRate ?? global.dxvkFrameRate
         )
     }
 
-    /// Preference chain for `auto`: D3DMetal → DXVK → WineD3D.
-    static func cascadePreferredBackend(hasD3DMetal: Bool, hasDxvk: Bool) -> CyderGraphicsBackend {
-        if hasD3DMetal { return .d3dmetal }
-        if hasDxvk { return .dxvk }
-        return .wined3d
-    }
-
     /// Concrete backend to inject into Wine, or `nil` to leave CompatDB alone.
+    /// No cascade: `default` always defers to CompatDB / Wine's own choice.
     static func effectiveLaunchBackend(
         preference: CyderGraphicsBackend,
         hasD3DMetal: Bool,
-        hasDxvk: Bool
+        hasDxvk: Bool,
+        hasDxmt: Bool
     ) -> CyderGraphicsBackend? {
         switch preference {
         case .default:
-            if CyderProduct.isMapleStoryOEM {
-                return cascadePreferredBackend(hasD3DMetal: hasD3DMetal, hasDxvk: hasDxvk)
-            }
             return nil
-        case .auto:
-            return cascadePreferredBackend(hasD3DMetal: hasD3DMetal, hasDxvk: hasDxvk)
-        case .wined3d, .dxvk, .d3dmetal:
+        case .wined3d, .dxvk, .dxmt, .d3dmetal:
             return preference
         }
     }
@@ -699,15 +709,14 @@ final class CyderSettingsStore {
         let effective = CyderSettings.effectiveLaunchBackend(
             preference: graphics.backend,
             hasD3DMetal: caps.hasD3DMetal,
-            hasDxvk: caps.hasDxvk
+            hasDxvk: caps.hasDxvk,
+            hasDxmt: caps.hasDxmt
         )
         if let effective {
             result["CYDER_GRAPHICS_BACKEND"] = effective.rawValue
         }
-        // Manual DXVK exposes the limiter everywhere. OEM also preserves the
-        // saved limiter when auto/default collapses to a concrete DXVK launch.
-        if graphics.dxvkFrameRate == .sixty,
-           (graphics.backend == .dxvk || (CyderProduct.isMapleStoryOEM && effective == .dxvk)) {
+        // Manual DXVK exposes the limiter everywhere.
+        if graphics.dxvkFrameRate == .sixty, graphics.backend == .dxvk {
             result["DXVK_FRAME_RATE"] = "60"
         }
         switch resolvedGraphicsHud(preference: graphics.backend) {
