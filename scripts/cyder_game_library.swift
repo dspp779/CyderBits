@@ -109,6 +109,38 @@ final class CyderGameLibraryStore {
         load()
     }
 
+    /// Drop library entries whose EXE path no longer exists on disk.
+    @discardableResult
+    func removeMissingExecutables() throws -> Int {
+        let before = games.count
+        games.removeAll { !FileManager.default.fileExists(atPath: $0.executablePath) }
+        let removed = before - games.count
+        guard removed > 0 else { return 0 }
+        try save()
+        return removed
+    }
+
+    /// Import EXE targets discovered from Start Menu / Desktop shortcuts.
+    /// Returns newly added records (duplicates are refreshed in place and omitted).
+    @discardableResult
+    func importShortcuts(
+        from prefix: URL = CyderPaths.sharedBottle
+    ) throws -> [CyderGameRecord] {
+        var added: [CyderGameRecord] = []
+        var known = Set(games.map(\.id))
+        for shortcut in CyderBottleShortcutScanner.discover(prefix: prefix) {
+            guard let exe = CyderBottleShortcutScanner.hostExecutableURL(
+                windowsTarget: shortcut.windowsTarget,
+                prefix: prefix
+            ) else { continue }
+            let record = try add(executable: exe)
+            if known.insert(record.id).inserted {
+                added.append(record)
+            }
+        }
+        return added
+    }
+
     private func load() {
         guard let data = try? Data(contentsOf: url),
               let file = try? JSONDecoder().decode(CyderGameLibraryFile.self, from: data),
