@@ -2,8 +2,9 @@ import AppKit
 import Foundation
 
 /// Loads cached PE icons and asks the bundled Python PE parser to extract a
-/// missing icon off the main thread. The generic document icon remains a safe
-/// fallback for executables without an icon resource.
+/// missing icon off the main thread. Never falls back to macOS's generic
+/// `.exe` document icon (`NSWorkspace`); tiles use a neutral SF Symbol until
+/// the PE resource is available.
 final class CyderGameIconStore {
     static let shared = CyderGameIconStore()
 
@@ -14,12 +15,13 @@ final class CyderGameIconStore {
 
     func image(for game: CyderGameRecord) -> NSImage {
         if let logo = logo(for: game) { return logo }
-        return NSWorkspace.shared.icon(forFile: game.executablePath)
+        ensureExtracted(game)
+        return placeholderImage()
     }
 
     /// Returns only an icon extracted from the executable. Unlike `image(for:)`,
-    /// this does not fall back to macOS's generic document icon, so title bars
-    /// can omit the image when the game has no logo.
+    /// this does not fall back to a placeholder, so title bars can omit the
+    /// image when the game has no logo yet.
     func logo(for game: CyderGameRecord) -> NSImage? {
         if let cached = memory[game.id] { return cached }
         let cacheURL = iconURL(for: game)
@@ -33,23 +35,66 @@ final class CyderGameIconStore {
     /// while its user-granted file access is active. The child parser receives
     /// an inherited descriptor and never reopens the protected source path.
     func extractSelectedGame(_ game: CyderGameRecord, completion: @escaping () -> Void) {
-        let cacheURL = iconURL(for: game)
-        guard !pending.contains(game.id), let resources = Bundle.main.resourceURL else { return }
-        // A fresh file-panel selection is explicit permission to retry a
-        // previous failure (for example after the source drive reconnects).
         failed.remove(game.id)
+        ensureExtracted(game, force: true, completion: completion)
+    }
+
+    /// Extract a PE icon when missing. Safe for bottle paths under Application Support.
+    func ensureExtracted(
+        _ game: CyderGameRecord,
+        force: Bool = false,
+        completion: (() -> Void)? = nil
+    ) {
+        let cacheURL = iconURL(for: game)
+        if !force,
+           isFresh(cacheURL: cacheURL, executableURL: game.executableURL),
+           FileManager.default.fileExists(atPath: cacheURL.path) {
+            completion?()
+            return
+        }
+        guard !pending.contains(game.id) else { return }
+        guard force || !failed.contains(game.id) else {
+            completion?()
+            return
+        }
+        guard let resources = Bundle.main.resourceURL else {
+            completion?()
+            return
+        }
         let helper = resources.appendingPathComponent("ogom-scripts/cyder_create_game_app.py")
-        guard FileManager.default.fileExists(atPath: helper.path) else { return }
+        guard FileManager.default.fileExists(atPath: helper.path) else {
+            completion?()
+            return
+        }
         let executable: FileHandle
         do {
             executable = try FileHandle(forReadingFrom: game.executableURL)
         } catch {
             failed.insert(game.id)
             CyderDiagnostics.shared.warning("game-icon source-open-failed id=\(game.id)")
+            completion?()
             return
         }
         pending.insert(game.id)
-        extract(game: game, cacheURL: cacheURL, helper: helper, executable: executable, completion: completion)
+        extract(game: game, cacheURL: cacheURL, helper: helper, executable: executable, completion: completion ?? {})
+    }
+
+    func ensureExtracted(games: [CyderGameRecord], completion: (() -> Void)? = nil) {
+        let group = DispatchGroup()
+        for game in games {
+            group.enter()
+            ensureExtracted(game) { group.leave() }
+        }
+        group.notify(queue: .main) { completion?() }
+    }
+
+    private func placeholderImage() -> NSImage {
+        let symbol = NSImage(
+            systemSymbolName: "gamecontroller.fill",
+            accessibilityDescription: nil
+        ) ?? NSImage()
+        symbol.isTemplate = true
+        return symbol
     }
 
     private func iconURL(for game: CyderGameRecord) -> URL {
@@ -100,7 +145,7 @@ final class CyderGameIconStore {
                     status = -2
                 }
             } catch {
-                // Keep the generic EXE icon when extraction is unavailable.
+                // Keep the neutral placeholder when extraction is unavailable.
             }
             DispatchQueue.main.async {
                 self.pending.remove(game.id)
