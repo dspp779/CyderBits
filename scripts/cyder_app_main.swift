@@ -91,6 +91,9 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             guard let self else { completion(false); return }
             self.removeIndependentProfile(for: executable, completion: completion)
         }
+        controller.onOpenPreferences = { [weak self] in
+            self?.showSettings()
+        }
         controller.onClose = { [weak self] in
             guard let self,
                   self.terminateWhenSettingsClose,

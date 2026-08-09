@@ -69,20 +69,30 @@ private func addCyderTitlebarBrand(
     window.addTitlebarAccessoryViewController(accessory)
 }
 
-private func addCyderTitlebarButton(to window: NSWindow, button: NSButton) {
+private func addCyderTitlebarButtons(to window: NSWindow, buttons: [NSButton]) {
     window.title = ""
     window.titleVisibility = .hidden
     window.titlebarAppearsTransparent = true
     window.styleMask.insert(.fullSizeContentView)
 
     let titlebar = NSView(frame: NSRect(x: 0, y: 0, width: 0, height: 32))
-    titlebar.addSubview(button)
-    button.translatesAutoresizingMaskIntoConstraints = false
+    let stack = NSStackView(views: buttons)
+    stack.orientation = .horizontal
+    stack.alignment = .centerY
+    stack.spacing = 6
+    stack.translatesAutoresizingMaskIntoConstraints = false
+    titlebar.addSubview(stack)
+    for button in buttons {
+        button.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            button.widthAnchor.constraint(equalToConstant: 28),
+            button.heightAnchor.constraint(equalToConstant: 28),
+        ])
+    }
     NSLayoutConstraint.activate([
-        button.trailingAnchor.constraint(equalTo: titlebar.trailingAnchor, constant: -8),
-        button.centerYAnchor.constraint(equalTo: titlebar.centerYAnchor),
-        button.widthAnchor.constraint(equalToConstant: 28),
-        button.heightAnchor.constraint(equalToConstant: 28),
+        stack.trailingAnchor.constraint(equalTo: titlebar.trailingAnchor, constant: -8),
+        stack.centerYAnchor.constraint(equalTo: titlebar.centerYAnchor),
+        stack.leadingAnchor.constraint(greaterThanOrEqualTo: titlebar.leadingAnchor, constant: 8),
     ])
 
     let accessory = NSTitlebarAccessoryViewController()
@@ -466,18 +476,16 @@ private final class CyderGameSettingsWindowController: NSWindowController, NSWin
     private let launchButton = NSButton()
     private let launchHint = NSTextField(labelWithString: "使用目前選項啟動；測試會寫入 Logs/last-launch.log")
     private let removeProfileButton = NSButton()
-    private let syncMode = NSPopUpButton()
-    private let syncModeDescription = NSTextField(wrappingLabelWithString: "")
+    private let customizeFonts = NSSwitch()
     private let retina = NSSwitch()
-    private let dpi = NSPopUpButton()
-    private let power = NSPopUpButton()
     private let graphicsBackend = NSPopUpButton()
-    private let dxvkFrameRate = NSPopUpButton()
     private let fontMingLiu = NSPopUpButton()
     private let fontSongti = NSPopUpButton()
     private let smoothing = NSPopUpButton()
     private let environment = CyderPlaceholderTextView()
     private let arguments = CyderPlaceholderTextView()
+    private let tabs = NSTabView()
+    private var fontsTab: NSTabViewItem?
     private var settingViews: [NSView] = []
     private let cancelButton = NSButton()
     private let confirmButton = NSButton()
@@ -486,7 +494,7 @@ private final class CyderGameSettingsWindowController: NSWindowController, NSWin
         self.game = game
         self.independent = independent
         let window = NSPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 520, height: 450),
+            contentRect: NSRect(x: 0, y: 0, width: 560, height: 420),
             styleMask: [.titled, .closable, .fullSizeContentView],
             backing: .buffered,
             defer: false
@@ -503,7 +511,7 @@ private final class CyderGameSettingsWindowController: NSWindowController, NSWin
         window.contentView = appearanceRoot
         addCyderTitlebarBrand(
             to: window,
-            title: "\(game.displayName) 的啟動選項",
+            title: "\(game.displayName) 的選項",
             image: CyderGameIconStore.shared.logo(for: game),
             hideImageWhenMissing: true
         )
@@ -523,23 +531,16 @@ private final class CyderGameSettingsWindowController: NSWindowController, NSWin
         if let independent { self.independent = independent }
         let global = settingsStore.value
         let rule = settingsStore.value.perProfile[game.id]
-        let msyncValue = rule?.msync ?? global.msync
-        let esyncValue = rule?.esync ?? (global.esync ?? false)
-        let retinaValue = rule?.retinaMode ?? global.retinaMode
-        let dpiValue = rule?.dpi ?? global.dpi
-        let powerValue = rule?.powerMode ?? "standard"
-        let graphicsBackendValue = rule?.graphicsBackend
-        let dxvkFrameRateValue = rule?.dxvkFrameRate
+        let hasFonts = rule?.fontMingLiuTarget != nil
+            || rule?.fontSongtiTarget != nil
+            || rule?.fontSmoothing != nil
         let mingLiuValue = rule?.fontMingLiuTarget ?? global.fontMingLiuTarget
         let songtiValue = rule?.fontSongtiTarget ?? global.fontSongtiTarget
         let smoothingValue = rule?.fontSmoothing ?? global.fontSmoothing
-        syncMode.selectItem(at: CyderSyncMode(msync: msyncValue, esync: esyncValue).rawValue)
-        updateSyncModeDescription()
-        retina.state = retinaValue ? .on : .off
-        dpi.selectItem(at: dpiValues.firstIndex(of: dpiValue) ?? 4)
-        power.selectItem(at: powerValue == "energySaving" ? 1 : 0)
-        graphicsBackend.selectItem(at: graphicsBackendIndex(graphicsBackendValue))
-        dxvkFrameRate.selectItem(at: dxvkFrameRateValue == .unlimited ? 2 : dxvkFrameRateValue == .sixty ? 1 : 0)
+        customizeFonts.state = hasFonts ? .on : .off
+        // Checked = force Retina + 192 DPI; unchecked = follow global preferences.
+        retina.state = rule?.retinaMode == true ? .on : .off
+        graphicsBackend.selectItem(at: graphicsBackendIndex(rule?.graphicsBackend))
         refreshGraphicsControls()
         fontMingLiu.selectItem(at: cyderFontTargetIndex(mingLiuValue))
         fontSongti.selectItem(at: cyderFontTargetIndex(songtiValue))
@@ -548,6 +549,7 @@ private final class CyderGameSettingsWindowController: NSWindowController, NSWin
             .map { "\($0.key)=\($0.value)" }
             .joined(separator: "\n")
         arguments.string = formatArguments(rule?.arguments ?? [])
+        refreshOptionalTabs()
 
         let executableExists = FileManager.default.fileExists(atPath: game.executablePath)
         launchButton.isEnabled = executableExists
@@ -585,15 +587,11 @@ private final class CyderGameSettingsWindowController: NSWindowController, NSWin
         confirmButton.target = self
         confirmButton.action = #selector(confirmSettings)
 
-        dpi.addItems(withTitles: dpiTitles)
-        power.addItems(withTitles: ["標準", "省電"])
         graphicsBackend.addItems(withTitles: graphicsBackendTitles)
         updateD3DMetalMenuItemAvailability()
+        updateDxmtMenuItemAvailability()
         graphicsBackend.target = self
         graphicsBackend.action = #selector(graphicsBackendChanged)
-        dxvkFrameRate.addItems(withTitles: ["跟隨全域", "60", "不限制"])
-        dxvkFrameRate.target = self
-        dxvkFrameRate.action = #selector(dxvkFrameRateChanged)
         for popup in [fontMingLiu, fontSongti] {
             popup.addItems(withTitles: cyderFontTargetTitles)
         }
@@ -608,21 +606,13 @@ private final class CyderGameSettingsWindowController: NSWindowController, NSWin
         }
         environment.placeholderString = "KEY=value  KEY2=value2"
         arguments.placeholderString = "例如：--fullscreen --width 1920"
-        syncMode.addItems(withTitles: CyderSyncMode.allCases.map { $0.title })
-        syncMode.target = self
-        syncMode.action = #selector(syncModeChanged)
-        syncModeDescription.textColor = .secondaryLabelColor
-        syncModeDescription.font = .systemFont(ofSize: 12)
-        syncModeDescription.maximumNumberOfLines = 5
-        syncModeDescription.widthAnchor.constraint(equalToConstant: 360).isActive = true
-        retina.target = self
-        retina.action = #selector(retinaChanged)
+        customizeFonts.target = self
+        customizeFonts.action = #selector(customizeChanged)
 
-        let root = NSScrollView()
-        root.drawsBackground = false
-        root.hasVerticalScroller = true
-        root.autohidesScrollers = true
-        root.translatesAutoresizingMaskIntoConstraints = false
+        tabs.translatesAutoresizingMaskIntoConstraints = false
+        tabs.addTabViewItem(makeGeneralTab())
+        fontsTab = makeFontsTab()
+
         let buttonBar = NSStackView(views: [launchButton, launchHint, NSView(), cancelButton, confirmButton])
         buttonBar.orientation = .horizontal
         buttonBar.alignment = .centerY
@@ -631,63 +621,108 @@ private final class CyderGameSettingsWindowController: NSWindowController, NSWin
         [launchButton, cancelButton, confirmButton].forEach {
             $0.heightAnchor.constraint(equalToConstant: 26).isActive = true
         }
-        let document = NSView()
-        document.translatesAutoresizingMaskIntoConstraints = false
-        let stack = NSStackView()
-        stack.orientation = .vertical
-        stack.alignment = .leading
-        stack.spacing = 10
-        stack.translatesAutoresizingMaskIntoConstraints = false
 
-        let form: [NSView] = [
-            row("同步機制", syncMode),
-            syncModeDescription,
-            row("Retina Mode", retina, information: "啟用 macOS Retina 高解析度模式；部分遊戲可能需要關閉。"),
-            row("縮放比例 / DPI", dpi, information: "設定 Windows 顯示縮放比例；老遊戲視窗可能需要較低 DPI。"),
-            row("能源模式", power, information: "省電模式會降低程序優先級，可能減少耗電但造成遊戲卡頓。"),
-            row("圖形轉譯", graphicsBackend, information: "選「跟隨全域」會使用 Cyder 偏好設定的圖形後端。"),
-            row("限制幀率", dxvkFrameRate, information: "僅在手動選擇 DXVK 時可用；「跟隨全域」會使用偏好設定。"),
-            row("細明體取代", fontMingLiu, information: "細明體組取代目標；選細明體表示不強制取代，需系統已安裝 MingLiU。"),
-            row("宋體取代", fontSongti, information: "宋體組取代目標；選宋體時仍會寫入 Songti TC 以確保可讀性。"),
-            row("字體平滑", smoothing, information: "控制 Windows 字體平滑方式。"),
+        content.addSubview(tabs)
+        content.addSubview(buttonBar)
+        NSLayoutConstraint.activate([
+            tabs.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 18),
+            tabs.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -18),
+            tabs.topAnchor.constraint(equalTo: content.topAnchor, constant: 38),
+            tabs.bottomAnchor.constraint(equalTo: buttonBar.topAnchor, constant: -10),
+            buttonBar.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 22),
+            buttonBar.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -22),
+            buttonBar.bottomAnchor.constraint(equalTo: content.bottomAnchor, constant: -14),
+            buttonBar.heightAnchor.constraint(equalToConstant: 26),
+        ])
+        refreshAppearance()
+    }
+
+    private func makeGeneralTab() -> NSTabViewItem {
+        let rows: [NSView] = [
             row(
                 "環境變數",
                 multilineInput(environment),
                 information: "寫 KEY=value。可同行以空白分隔多組，也可換行；換行會當成空白。值含空白請用引號，例如 NAME=\"hello world\"。"
             ),
             row(
-                "命令列參數",
+                "啟動選項",
                 multilineInput(arguments),
                 information: "直接接在遊戲執行指令後；以空白分隔參數，含空白的參數可用引號包住。可換行書寫，換行視同空白。"
             ),
+            row(
+                "高解析度",
+                retina,
+                information: "開啟時強制 Retina Mode 與 192 DPI；關閉則跟隨偏好設定。"
+            ),
+            row("自訂字體", customizeFonts, information: "開啟後會出現「字體」分頁；關閉則跟隨偏好設定。"),
+            row("圖形轉譯", graphicsBackend, information: "選「跟隨全域」會使用 Cyder 偏好設定的圖形後端。"),
+            removeProfileButton,
         ]
-        settingViews = form
-        form.forEach { stack.addArrangedSubview($0) }
-        stack.addArrangedSubview(removeProfileButton)
+        settingViews.append(contentsOf: rows)
+        return tab("一般", rows: rows)
+    }
 
-        document.addSubview(stack)
-        root.documentView = document
-        content.addSubview(root)
-        content.addSubview(buttonBar)
+    private func makeFontsTab() -> NSTabViewItem {
+        let rows: [NSView] = [
+            row("細明體取代", fontMingLiu, information: "細明體組取代目標；選細明體表示不強制取代，需系統已安裝 MingLiU。"),
+            row("宋體取代", fontSongti, information: "宋體組取代目標；選宋體時仍會寫入 Songti TC 以確保可讀性。"),
+            row("字體平滑", smoothing, information: "控制 Windows 字體平滑方式。"),
+        ]
+        settingViews.append(contentsOf: rows)
+        return tab("字體", rows: rows)
+    }
+
+    private func tab(_ title: String, rows: [NSView]) -> NSTabViewItem {
+        let item = NSTabViewItem(identifier: title)
+        item.label = title
+        let stack = NSStackView(views: rows)
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = 12
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        let container = NSView()
+        container.translatesAutoresizingMaskIntoConstraints = false
+        container.addSubview(stack)
         NSLayoutConstraint.activate([
-            root.leadingAnchor.constraint(equalTo: content.leadingAnchor),
-            root.trailingAnchor.constraint(equalTo: content.trailingAnchor),
-            root.topAnchor.constraint(equalTo: content.topAnchor, constant: 34),
-            root.bottomAnchor.constraint(equalTo: buttonBar.topAnchor, constant: -8),
-            buttonBar.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 22),
-            buttonBar.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -22),
-            buttonBar.bottomAnchor.constraint(equalTo: content.bottomAnchor, constant: -14),
-            buttonBar.heightAnchor.constraint(equalToConstant: 26),
-            document.leadingAnchor.constraint(equalTo: root.contentView.leadingAnchor),
-            document.topAnchor.constraint(equalTo: root.contentView.topAnchor),
-            document.widthAnchor.constraint(equalTo: root.contentView.widthAnchor),
-            document.heightAnchor.constraint(greaterThanOrEqualTo: root.contentView.heightAnchor),
-            stack.leadingAnchor.constraint(equalTo: document.leadingAnchor, constant: 22),
-            stack.trailingAnchor.constraint(equalTo: document.trailingAnchor, constant: -22),
-            stack.topAnchor.constraint(equalTo: document.topAnchor, constant: 22),
-            stack.bottomAnchor.constraint(equalTo: document.bottomAnchor, constant: -24),
+            stack.topAnchor.constraint(equalTo: container.topAnchor, constant: 20),
+            stack.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 18),
+            stack.trailingAnchor.constraint(lessThanOrEqualTo: container.trailingAnchor, constant: -18),
+            stack.bottomAnchor.constraint(lessThanOrEqualTo: container.bottomAnchor, constant: -16),
         ])
-        refreshAppearance()
+        let scroll = NSScrollView()
+        scroll.hasVerticalScroller = true
+        scroll.autohidesScrollers = true
+        scroll.drawsBackground = false
+        scroll.documentView = container
+        NSLayoutConstraint.activate([
+            container.leadingAnchor.constraint(equalTo: scroll.contentView.leadingAnchor),
+            container.topAnchor.constraint(equalTo: scroll.contentView.topAnchor),
+            container.widthAnchor.constraint(equalTo: scroll.contentView.widthAnchor),
+            container.heightAnchor.constraint(greaterThanOrEqualTo: scroll.contentView.heightAnchor),
+        ])
+        item.view = scroll
+        return item
+    }
+
+    private func refreshOptionalTabs() {
+        let selected = tabs.selectedTabViewItem?.label
+        guard let fontsTab else { return }
+        let present = tabs.tabViewItems.contains { $0 === fontsTab }
+        if customizeFonts.state == .on, !present {
+            tabs.addTabViewItem(fontsTab)
+        } else if customizeFonts.state != .on, present {
+            tabs.removeTabViewItem(fontsTab)
+        }
+        if let selected,
+           let match = tabs.tabViewItems.first(where: { $0.label == selected }) {
+            tabs.selectTabViewItem(match)
+        } else if tabs.selectedTabViewItem == nil {
+            tabs.selectTabViewItem(at: 0)
+        }
+    }
+
+    @objc private func customizeChanged() {
+        refreshOptionalTabs()
     }
 
     private func refreshAppearance() {
@@ -741,7 +776,9 @@ private final class CyderGameSettingsWindowController: NSWindowController, NSWin
     }
 
     private func setControlsEnabled(_ enabled: Bool) {
-        [syncMode, retina, dpi, power, graphicsBackend, dxvkFrameRate, fontMingLiu, fontSongti, smoothing].forEach { $0.isEnabled = enabled }
+        [customizeFonts, retina, graphicsBackend, fontMingLiu, fontSongti, smoothing].forEach {
+            $0.isEnabled = enabled
+        }
         environment.isEditable = enabled
         arguments.isEditable = enabled
         settingViews.forEach { $0.alphaValue = enabled ? 1 : 0.52 }
@@ -777,24 +814,9 @@ private final class CyderGameSettingsWindowController: NSWindowController, NSWin
         }
     }
 
-    @objc private func syncModeChanged() {
-        updateSyncModeDescription()
-    }
-
-    private func updateSyncModeDescription() {
-        let index = max(0, min(syncMode.indexOfSelectedItem, CyderSyncMode.allCases.count - 1))
-        syncModeDescription.stringValue = CyderSyncMode.allCases[index].description
-    }
-
-    @objc private func retinaChanged() {
-        dpi.selectItem(at: dpiValues.firstIndex(of: retina.state == .on ? 192 : 96) ?? 0)
-    }
-
     @objc private func graphicsBackendChanged() {
         refreshGraphicsControls()
     }
-
-    @objc private func dxvkFrameRateChanged() {}
 
     @objc private func cancelSettings() {
         stopModal(.cancel)
@@ -811,18 +833,29 @@ private final class CyderGameSettingsWindowController: NSWindowController, NSWin
     }
 
     private func currentRule() -> CyderExecutableSettings {
-        var rule = settingsStore.value.perProfile[game.id] ?? defaultRule()
-        let mode = CyderSyncMode.allCases[max(0, min(syncMode.indexOfSelectedItem, CyderSyncMode.allCases.count - 1))]
-        rule.msync = mode == .msync
-        rule.esync = mode == .esync
-        rule.retinaMode = retina.state == .on
-        rule.dpi = dpiValues[max(0, dpi.indexOfSelectedItem)]
-        rule.powerMode = power.indexOfSelectedItem == 1 ? "energySaving" : "standard"
+        var rule = settingsStore.value.perProfile[game.id] ?? CyderExecutableSettings()
+        // Sync / power are global-only; clear any legacy per-game overrides.
+        rule.msync = nil
+        rule.esync = nil
+        rule.powerMode = nil
+        if retina.state == .on {
+            rule.retinaMode = true
+            rule.dpi = 192
+        } else {
+            rule.retinaMode = nil
+            rule.dpi = nil
+        }
+        if customizeFonts.state == .on {
+            rule.fontMingLiuTarget = cyderFontTarget(at: fontMingLiu.indexOfSelectedItem)
+            rule.fontSongtiTarget = cyderFontTarget(at: fontSongti.indexOfSelectedItem)
+            rule.fontSmoothing = smoothingValues[max(0, smoothing.indexOfSelectedItem)]
+        } else {
+            rule.fontMingLiuTarget = nil
+            rule.fontSongtiTarget = nil
+            rule.fontSmoothing = nil
+        }
         rule.graphicsBackend = graphicsBackendOverride
-        rule.dxvkFrameRate = dxvkFrameRateOverride
-        rule.fontMingLiuTarget = cyderFontTarget(at: fontMingLiu.indexOfSelectedItem)
-        rule.fontSongtiTarget = cyderFontTarget(at: fontSongti.indexOfSelectedItem)
-        rule.fontSmoothing = smoothingValues[max(0, smoothing.indexOfSelectedItem)]
+        rule.dxvkFrameRate = nil
         rule.environment = parseEnvironment(environment.string)
         // Newlines in the multiline field are treated as whitespace separators.
         rule.arguments = parseArguments(
@@ -997,8 +1030,6 @@ private final class CyderGameSettingsWindowController: NSWindowController, NSWin
         alert.runModal()
     }
 
-    private var dpiValues: [Int] { [96, 120, 144, 168, 192, 240] }
-    private var dpiTitles: [String] { ["100%（96 DPI）", "125%（120 DPI）", "150%（144 DPI）", "175%（168 DPI）", "200%（192 DPI）", "250%（240 DPI）"] }
     private var smoothingValues: [String] { ["off", "grayscale", "cleartype-rgb"] }
 
     private var supportsD3DMetalOS: Bool {
@@ -1059,14 +1090,6 @@ private final class CyderGameSettingsWindowController: NSWindowController, NSWin
         }
     }
 
-    private var dxvkFrameRateOverride: CyderDxvkFrameRate? {
-        switch dxvkFrameRate.indexOfSelectedItem {
-        case 1: return .sixty
-        case 2: return .unlimited
-        default: return nil
-        }
-    }
-
     private func graphicsBackendIndex(_ value: CyderGraphicsBackend?) -> Int {
         guard let value else { return 0 }
         switch value {
@@ -1081,30 +1104,6 @@ private final class CyderGameSettingsWindowController: NSWindowController, NSWin
     private func refreshGraphicsControls() {
         updateD3DMetalMenuItemAvailability()
         updateDxmtMenuItemAvailability()
-        let preference = graphicsBackendOverride ?? settingsStore.value.graphicsBackend
-        let showFrameRate: Bool
-        if let override = graphicsBackendOverride {
-            showFrameRate = override == .dxvk
-        } else {
-            showFrameRate = settingsStore.value.graphicsBackend == .dxvk
-        }
-        _ = preference
-        dxvkFrameRate.isHidden = !showFrameRate
-        (dxvkFrameRate.superview as? NSStackView)?.isHidden = !showFrameRate
-    }
-
-    private func defaultRule() -> CyderExecutableSettings {
-        let value = settingsStore.value
-        return CyderExecutableSettings(
-            msync: value.msync,
-            esync: value.esync ?? false,
-            retinaMode: value.retinaMode,
-            dpi: value.dpi,
-            fontMingLiuTarget: value.fontMingLiuTarget,
-            fontSongtiTarget: value.fontSongtiTarget,
-            fontSmoothing: value.fontSmoothing,
-            powerMode: "standard"
-        )
     }
 
     private func cyderFontTargetIndex(_ target: String) -> Int {
@@ -1119,6 +1118,7 @@ private final class CyderGameSettingsWindowController: NSWindowController, NSWin
 final class CyderGameLibraryWindowController: NSWindowController, NSWindowDelegate, NSCollectionViewDataSource {
     var onLaunch: ((URL, CyderExecutableSettings?) -> Void)?
     var onRemoveProfile: ((URL, @escaping (Bool) -> Void) -> Void)?
+    var onOpenPreferences: (() -> Void)?
     var onClose: (() -> Void)?
 
     var isGameSettingsVisible: Bool { gameSettingsController?.window?.isVisible == true }
@@ -1133,6 +1133,8 @@ final class CyderGameLibraryWindowController: NSWindowController, NSWindowDelega
     private var selectedGameID: String?
     private var independentIDs: Set<String> = []
     private var gameSettingsController: CyderGameSettingsWindowController?
+    private let toolbarPreferencesButton = NSButton()
+    private let toolbarRefreshButton = NSButton()
     private let toolbarAddButton = NSButton()
 
     convenience init() {
@@ -1161,12 +1163,31 @@ final class CyderGameLibraryWindowController: NSWindowController, NSWindowDelega
         libraryStore.reload()
         let profiles = profileStore.listRecords()
         try? libraryStore.merge(profileRecords: profiles)
+        importBottleShortcuts()
+        _ = try? libraryStore.removeMissingExecutables()
         games = libraryStore.games
         independentIDs = Set(profiles.map(\.profileId))
         if let selectedGameID, !games.contains(where: { $0.id == selectedGameID }) {
             self.selectedGameID = nil
         }
         reloadGrid()
+        ensureGameIcons()
+    }
+
+    private func importBottleShortcuts() {
+        do {
+            _ = try libraryStore.importShortcuts()
+        } catch {
+            CyderDiagnostics.shared.warning(
+                "game-library shortcut-import-failed error=\(error.localizedDescription)"
+            )
+        }
+    }
+
+    private func ensureGameIcons() {
+        iconStore.ensureExtracted(games: games) { [weak self] in
+            self?.collectionView.reloadData()
+        }
     }
 
     private func buildUI() {
@@ -1185,15 +1206,28 @@ final class CyderGameLibraryWindowController: NSWindowController, NSWindowDelega
         scroll.documentView = collectionView
         scroll.translatesAutoresizingMaskIntoConstraints = false
 
-        toolbarAddButton.title = ""
-        toolbarAddButton.image = NSImage(systemSymbolName: "plus", accessibilityDescription: "加入遊戲") ?? NSImage()
-        toolbarAddButton.target = self
-        toolbarAddButton.action = #selector(addGame)
-        toolbarAddButton.imagePosition = .imageOnly
-        toolbarAddButton.bezelStyle = .texturedRounded
-        toolbarAddButton.toolTip = "加入遊戲"
-        toolbarAddButton.setAccessibilityLabel("加入遊戲")
-        addCyderTitlebarButton(to: window, button: toolbarAddButton)
+        configureTitlebarButton(
+            toolbarPreferencesButton,
+            symbol: "gearshape",
+            label: "偏好設定",
+            action: #selector(openPreferences)
+        )
+        configureTitlebarButton(
+            toolbarRefreshButton,
+            symbol: "arrow.clockwise",
+            label: "重新整理遊戲庫",
+            action: #selector(refreshLibrary)
+        )
+        configureTitlebarButton(
+            toolbarAddButton,
+            symbol: "plus",
+            label: "加入遊戲",
+            action: #selector(addGame)
+        )
+        addCyderTitlebarButtons(
+            to: window,
+            buttons: [toolbarPreferencesButton, toolbarRefreshButton, toolbarAddButton]
+        )
 
         let emptyIcon = NSImageView(image: NSImage(systemSymbolName: "gamecontroller", accessibilityDescription: nil) ?? NSImage())
         emptyIcon.contentTintColor = .secondaryLabelColor
@@ -1268,6 +1302,8 @@ final class CyderGameLibraryWindowController: NSWindowController, NSWindowDelega
         item.onClick = { [weak self] in self?.selectGame(game) }
         item.onDoubleClick = { [weak self] in self?.launch(game) }
         item.onContextMenu = { [weak self] in self?.contextMenu(for: game) }
+        // image(for:) returns a PE logo or a neutral placeholder — never the
+        // macOS generic EXE document icon — and schedules extraction when needed.
         item.configure(record: game, independent: independentIDs.contains(game.id), image: iconStore.image(for: game))
         item.isSelected = game.id == selectedGameID
         return item
@@ -1287,11 +1323,43 @@ final class CyderGameLibraryWindowController: NSWindowController, NSWindowDelega
     private func contextMenu(for game: CyderGameRecord) -> NSMenu {
         selectGame(game)
         let menu = NSMenu()
-        let options = menu.addItem(withTitle: "啟動選項", action: #selector(openSettingsForSelectedGame), keyEquivalent: "")
+        let options = menu.addItem(withTitle: "選項", action: #selector(openSettingsForSelectedGame), keyEquivalent: "")
         options.target = self
-        let remove = menu.addItem(withTitle: "移除", action: #selector(removeGameFromLibrary), keyEquivalent: "")
-        remove.target = self
+        let reveal = menu.addItem(withTitle: "顯示於 Finder", action: #selector(revealSelectedGameInFinder), keyEquivalent: "")
+        reveal.target = self
         return menu
+    }
+
+    private func configureTitlebarButton(
+        _ button: NSButton,
+        symbol: String,
+        label: String,
+        action: Selector
+    ) {
+        button.title = ""
+        button.image = NSImage(systemSymbolName: symbol, accessibilityDescription: label) ?? NSImage()
+        button.target = self
+        button.action = action
+        button.imagePosition = .imageOnly
+        button.bezelStyle = .texturedRounded
+        button.toolTip = label
+        button.setAccessibilityLabel(label)
+    }
+
+    @objc private func openPreferences() {
+        onOpenPreferences?()
+    }
+
+    @objc private func refreshLibrary() {
+        libraryStore.reload()
+        let profiles = profileStore.listRecords()
+        try? libraryStore.merge(profileRecords: profiles)
+        importBottleShortcuts()
+        _ = try? libraryStore.removeMissingExecutables()
+        games = libraryStore.games
+        independentIDs = Set(profiles.map(\.profileId))
+        reloadGrid()
+        ensureGameIcons()
     }
 
     @objc private func addGame() {
@@ -1361,43 +1429,14 @@ final class CyderGameLibraryWindowController: NSWindowController, NSWindowDelega
         }
     }
 
-    @objc private func removeGameFromLibrary() {
+    @objc private func revealSelectedGameInFinder() {
         guard let game = selectedGame else { return }
-        let alert = NSAlert()
-        alert.messageText = "移除「\(game.displayName)」？"
-        alert.informativeText = independentIDs.contains(game.id)
-            ? "這會從遊戲庫移除遊戲，並刪除它的獨立設定。遊戲檔案不會被刪除。"
-            : "這會從遊戲庫移除遊戲與相關設定。遊戲檔案不會被刪除。"
-        alert.alertStyle = .warning
-        alert.addButton(withTitle: "移除")
-        alert.addButton(withTitle: "取消")
-        guard alert.runModal() == .alertFirstButtonReturn else { return }
-
-        let finish = { [weak self] in
-            guard let self else { return }
-            do {
-                try self.libraryStore.remove(id: game.id)
-                try self.settingsStore.update { $0.perProfile.removeValue(forKey: game.id) }
-                self.gameSettingsController?.close()
-                self.selectedGameID = nil
-                self.prepareForDisplay()
-            } catch {
-                self.showAlert(title: "無法移除遊戲", message: error.localizedDescription)
-            }
+        let url = game.executableURL
+        guard FileManager.default.fileExists(atPath: url.path) else {
+            showAlert(title: "找不到遊戲", message: "這個 EXE 已不在原本的位置。")
+            return
         }
-
-        if independentIDs.contains(game.id) {
-            onRemoveProfile?(game.executableURL) { [weak self] succeeded in
-                guard let self else { return }
-                if succeeded {
-                    finish()
-                } else {
-                    self.showAlert(title: "移除失敗", message: "請查看錯誤訊息後再試。")
-                }
-            }
-        } else {
-            finish()
-        }
+        NSWorkspace.shared.activateFileViewerSelecting([url])
     }
 
     private var selectedGame: CyderGameRecord? {
