@@ -69,6 +69,7 @@ install_dxvk_into_engine() {
   done
   run cp "$SOURCE/LICENSE" "$dest_engine/lib/dxvk/LICENSE"
   run cp "$SOURCE/dxvk.conf" "$dest_engine/lib/dxvk/dxvk.conf"
+  run python3 "$SCRIPT_DIR/stamp-wine-builtin-pe.py" "$dest_engine/lib/dxvk"
 }
 
 copy_dxvk_from_engine() {
@@ -79,6 +80,7 @@ copy_dxvk_from_engine() {
     { echo "Missing DXVK payload in source engine: $src_engine/lib/dxvk" >&2; return 1; }
   run mkdir -p "$dest_engine/lib/dxvk"
   run cp -R "$src_engine/lib/dxvk/." "$dest_engine/lib/dxvk/"
+  run python3 "$SCRIPT_DIR/stamp-wine-builtin-pe.py" "$dest_engine/lib/dxvk"
 }
 
 if (( COPY_ONLY )); then
