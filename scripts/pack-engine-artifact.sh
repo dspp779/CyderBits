@@ -105,6 +105,12 @@ if [[ -f "$ARCHIVE" && "$FORCE" -ne 1 ]]; then
   exit 0
 fi
 
+if [[ "$DRY_RUN" -eq 1 ]]; then
+  echo "DRY RUN: would pack separate DXVK/DXMT graphics payloads"
+else
+  bash "$SCRIPT_DIR/pack-graphics-payloads.sh" --engine "$WINE_INSTALL"
+fi
+
 STAGING="$(mktemp -d "${TMPDIR:-/tmp}/cyder-engine-pack.XXXXXX")"
 cleanup() {
   rm -rf "$STAGING"
@@ -117,6 +123,8 @@ echo "==> Staging engine tree ($ENGINE_VERSION_LABEL)"
 rsync -a --delete \
   --exclude 'lib64/apple_gptk' \
   --exclude 'apple_gptk' \
+  --exclude 'lib/dxvk' \
+  --exclude 'lib/dxmt' \
   "$WINE_INSTALL/" "$ENGINE_TREE/"
 find "$ENGINE_TREE" -name '.DS_Store' -delete 2>/dev/null || true
 if [[ -e "$ENGINE_TREE/lib64/apple_gptk" ]] ||
@@ -125,20 +133,6 @@ if [[ -e "$ENGINE_TREE/lib64/apple_gptk" ]] ||
   exit 1
 fi
 cyder_write_engine_version_file "$ENGINE_TREE" "$ENGINE_VERSION_LABEL"
-
-# Fail closed: DXMT is a first-class graphics backend for this engine.
-for _dxmt_file in \
-  lib/dxmt/x86_64-windows/d3d11.dll \
-  lib/dxmt/x86_64-windows/dxgi.dll \
-  lib/dxmt/i386-windows/d3d11.dll \
-  lib/dxmt/i386-windows/dxgi.dll \
-  lib/dxmt/x86_64-unix/winemetal.so; do
-  if [[ ! -f "$ENGINE_TREE/$_dxmt_file" ]]; then
-    echo "Refusing to pack engine without $_dxmt_file (run scripts/fetch-dxmt.sh)" >&2
-    exit 1
-  fi
-done
-unset _dxmt_file
 
 bash "$SCRIPT_DIR/strip-wine-install.sh" "$ENGINE_TREE"
 # Preserve MoltenVK already in the install tree (VULKAN_SOURCE=existing only
