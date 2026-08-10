@@ -73,7 +73,15 @@ run_phased_text="$(awk '
 ' "$ROOT/scripts/cyder_app_main.swift")"
 assert_not_contains "$run_phased_text" '"--ensure-graphics-only"' \
   "Finder EXE launches must not upgrade graphics payloads"
+assert_not_contains "$run_phased_text" 'return .graphicsNotReady' \
+  "Finder EXE launches must not hard-block when graphics payloads are missing"
+assert_contains "$run_phased_text" 'graphics payloads missing; Finder EXE continuing with fallback' \
+  "Finder EXE launches must fall back when graphics payloads are missing"
 assert_contains "$source_text" "圖形元件尚未準備完成" \
-  "Finder EXE launches must direct missing graphics payloads to Cyder.app"
+  "Finder EXE launches must hint the user to open Cyder.app for graphics prep"
+assert_contains "$source_text" 'CYD-GFX-001' \
+  "settings-mode graphics ensure failures remain identifiable"
+assert_contains "$source_text" 'graphics-ensure-soft-failed' \
+  "settings-mode graphics ensure failures must not terminate Cyder"
 
 echo "PASS test-cyder-open-files-lifecycle"

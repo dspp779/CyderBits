@@ -60,6 +60,7 @@ run() {
 install_dxvk_into_engine() {
   local dest_engine="$1"
   local modules=(d3d9 d3d10 d3d10_1 d3d10core d3d11 dxgi)
+  local pinned_version=""
   [[ "$dest_engine" == /* ]] || { echo "Engine path must be absolute: $dest_engine" >&2; return 1; }
   run mkdir -p "$dest_engine/lib/dxvk/x86_64-windows" "$dest_engine/lib/dxvk/i386-windows"
   for machine in x86_64-windows i386-windows; do
@@ -69,6 +70,18 @@ install_dxvk_into_engine() {
   done
   run cp "$SOURCE/LICENSE" "$dest_engine/lib/dxvk/LICENSE"
   run cp "$SOURCE/dxvk.conf" "$dest_engine/lib/dxvk/dxvk.conf"
+  if [[ -f "$SOURCE/RELEASE" ]]; then
+    pinned_version="$(python3 "$SCRIPT_DIR/pin-dxvk-version.py" "$SOURCE")"
+    if (( DRY_RUN )); then
+      printf '+ printf %s\n %q >%q\n' "dxvk ${pinned_version}" "$dest_engine/lib/dxvk/version"
+    else
+      {
+        printf 'dxvk %s\n' "$pinned_version"
+      } >"$dest_engine/lib/dxvk/version"
+    fi
+  else
+    echo "Warning: missing $SOURCE/RELEASE; pack will fall back to unknown DXVK version" >&2
+  fi
   run python3 "$SCRIPT_DIR/stamp-wine-builtin-pe.py" "$dest_engine/lib/dxvk"
 }
 

@@ -70,4 +70,27 @@ assert test -e "$ACTIVE_PREFIX/.cyder-runtime/dxvk-payload"
 assert test -e "$ACTIVE_PREFIX/drive_c/windows/system32/winemetal.dll"
 assert test -e "$ACTIVE_PREFIX/drive_c/windows/syswow64/winemetal.dll"
 
+# Missing Wine built-ins should be skipped (not abort migration).
+MISSING_ENGINE="$TMP/missing-module-engine"
+MISSING_PREFIX="$TMP/missing-module-prefix"
+mkdir -p \
+  "$MISSING_ENGINE/bin" \
+  "$MISSING_ENGINE/lib/wine/x86_64-windows" \
+  "$MISSING_ENGINE/lib/wine/i386-windows" \
+  "$MISSING_PREFIX/drive_c/windows/system32" \
+  "$MISSING_PREFIX/drive_c/windows/syswow64" \
+  "$MISSING_PREFIX/.cyder-runtime"
+printf 'wine-x86_64-d3d11\n' >"$MISSING_ENGINE/lib/wine/x86_64-windows/d3d11.dll"
+printf 'wine-i386-d3d11\n' >"$MISSING_ENGINE/lib/wine/i386-windows/d3d11.dll"
+printf 'old\n' >"$MISSING_PREFIX/drive_c/windows/system32/d3d11.dll"
+: >"$MISSING_PREFIX/.cyder-runtime/dxvk-payload"
+skip_out="$(
+  cyder_migrate_graphics_prefix "$MISSING_ENGINE/bin/wine" "$MISSING_ENGINE" "$MISSING_PREFIX" 2>&1
+)"
+assert_contains "$skip_out" "Skipping missing Wine built-in graphics module" \
+  "migrate must skip modules absent from the engine tree"
+assert_eq "$(cat "$MISSING_PREFIX/drive_c/windows/system32/d3d11.dll")" "wine-x86_64-d3d11" \
+  "present modules must still be restored when others are missing"
+assert test ! -e "$MISSING_PREFIX/.cyder-runtime/dxvk-payload"
+
 echo "PASS test-cyder-migrate-graphics-prefix"

@@ -79,4 +79,53 @@ assert_eq "$(<"$engine/lib/dxvk/d3d11.dll")" "updated dxvk payload" \
 assert_eq "$(readlink "$runtime/graphics/current-dxvk")" "dxvk/1.2.4" \
   "DXVK current symlink must be updated atomically"
 
+# I6: refuse to rm -rf a real lib/dxvk outside managed Engines.
+outside_engine="$tmp/foreign-engine"
+mkdir -p "$outside_engine/lib/dxvk"
+printf 'keep-me\n' >"$outside_engine/lib/dxvk/d3d11.dll"
+set +e
+refuse_out="$(
+  CYDER_OGOM="$resources_root" \
+  CYDER_GRAPHICS_SRC="$resources" \
+  CYDER_RUNTIME_ROOT="$runtime" \
+  CYDER_ENGINES="$runtime/Engines" \
+  CYDER_ENGINE_NAME="wine-test" \
+  bash -c '
+    source "$1/scripts/cyder-ensure-graphics.sh"
+    cyder_replace_engine_graphics_link \
+      "$2/lib/dxvk" "$3/graphics/current-dxvk" "$2" "$4"
+  ' _ "$ROOT" "$outside_engine" "$runtime" "$runtime/Engines" 2>&1
+)"
+refuse_status=$?
+set -e
+assert_eq "$refuse_status" "1" "ensure-graphics must refuse real trees outside managed Engines"
+assert_contains "$refuse_out" "Refusing to replace" \
+  "refuse path must explain why the real graphics tree was kept"
+assert_eq "$(cat "$outside_engine/lib/dxvk/d3d11.dll")" "keep-me" \
+  "foreign engine lib/dxvk must remain untouched"
+
+# I7: overridden CYDER_ENGINES still gets a resolvable relative symlink.
+alt_engines="$tmp/alt-engines"
+alt_engine="$alt_engines/wine-test"
+mkdir -p "$alt_engines"
+env -u CYDER_ZSTD \
+  PATH=/usr/bin:/bin \
+  CYDER_OGOM="$resources_root" \
+  CYDER_GRAPHICS_SRC="$resources" \
+  CYDER_RUNTIME_ROOT="$runtime" \
+  CYDER_ENGINES="$alt_engines" \
+  CYDER_ENGINE_NAME="wine-test" \
+  bash "$ROOT/scripts/cyder-ensure-graphics.sh"
+assert test -L "$alt_engine/lib/dxvk"
+assert test -f "$alt_engine/lib/dxvk/d3d11.dll"
+rel="$(readlink "$alt_engine/lib/dxvk")"
+assert_contains "$rel" "graphics/current-dxvk" \
+  "engine→graphics symlink must be computed relative to the overridden Engines root"
+case "$rel" in
+  ../../../graphics/current-dxvk)
+    echo "ASSERT failed: overridden Engines should not reuse the default ../../../ depth" >&2
+    exit 1
+    ;;
+esac
+
 echo "PASS test-cyder-ensure-graphics"

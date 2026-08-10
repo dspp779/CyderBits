@@ -226,6 +226,8 @@ cp "$SCRIPT_DIR/cyder-profile.sh" "$RES/ogom-scripts/"
 cp "$SCRIPT_DIR/cyder_create_game_app.py" "$RES/ogom-scripts/"
 cp "$SCRIPT_DIR/cyder_common.py" "$RES/ogom-scripts/"
 chmod +x "$RES/ogom-scripts/cyder_launcher.sh"
+chmod +x "$RES/ogom-scripts/cyder-ensure-graphics.sh"
+chmod +x "$RES/ogom-scripts/cyder-migrate-graphics-prefix.sh"
 chmod +x "$RES/ogom-scripts/cyder-macos-compat.sh"
 chmod +x "$RES/ogom-scripts/cyder-catalina-bootstrap.command"
 chmod +x "$RES/ogom-scripts/sign-wine.sh"
@@ -256,11 +258,13 @@ if [[ -f "$GRAPHICS_ARTIFACTS/dxvk-version.txt" \
   rsync -a "$GRAPHICS_ARTIFACTS/" "$RES/graphics/"
 else
   message="Missing packaged DXVK/DXMT graphics artifacts: $GRAPHICS_ARTIFACTS"
-  if [[ "${CYDER_REQUIRE_NATIVE_SWIFT:-0}" == 1 ]]; then
+  if [[ "${CYDER_ALLOW_MISSING_GRAPHICS:-0}" == 1 ]]; then
+    echo "==> Warning: $message" >&2
+  else
     echo "$message" >&2
+    echo "Pack graphics first (scripts/pack-graphics-payloads.sh) or set CYDER_ALLOW_MISSING_GRAPHICS=1 for local experiments." >&2
     exit 1
   fi
-  echo "==> Warning: $message" >&2
 fi
 rsync -a "$OGOM/tools/libarchive/" "$RES/addons/libarchive/"
 

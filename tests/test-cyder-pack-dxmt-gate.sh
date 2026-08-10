@@ -9,13 +9,15 @@ assert_contains "$graphics_pack" 'lib/dxmt' \
   "graphics pack must require the DXMT payload"
 assert_contains "$engine_pack" "pack-graphics-payloads.sh" \
   "engine pack must create graphics payloads before stripping the engine"
+assert_contains "$engine_pack" 'graphics_pack_args+=(--force)' \
+  "engine pack must forward --force to graphics pack"
 assert_contains "$engine_pack" "--exclude 'lib/dxmt'" \
   "engine archive must exclude DXMT"
 assert_contains "$engine_pack" "--exclude 'lib/dxvk'" \
   "engine archive must exclude DXVK"
 
-graphics_pack_line="$(rg -n -F 'bash "$SCRIPT_DIR/pack-graphics-payloads.sh" --engine "$WINE_INSTALL"' \
-  "$ROOT/scripts/pack-engine-artifact.sh" | cut -d: -f1)"
+graphics_pack_line="$(rg -n -F 'pack-graphics-payloads.sh' \
+  "$ROOT/scripts/pack-engine-artifact.sh" | head -n1 | cut -d: -f1)"
 archive_exit_line="$(rg -n -F 'if [[ -f "$ARCHIVE" && "$FORCE" -ne 1 ]]; then' \
   "$ROOT/scripts/pack-engine-artifact.sh" | cut -d: -f1)"
 [[ "$graphics_pack_line" -lt "$archive_exit_line" ]] || {
@@ -29,6 +31,8 @@ engine="$tmp/engine"
 artifacts="$tmp/artifacts"
 fake_zstd="$tmp/zstd"
 mkdir -p "$engine/bin" "$engine/lib/dxvk" "$engine/lib/dxmt" "$artifacts"
+printf 'dxvk v1.2.3\n' >"$engine/lib/dxvk/version"
+printf 'dxmt v4.5.6\n' >"$engine/lib/dxmt/version"
 touch "$engine/bin/wine" "$artifacts/engine-wine-x86_64-test.tar.xz"
 chmod +x "$engine/bin/wine"
 
@@ -59,8 +63,8 @@ chmod +x "$fake_zstd"
 CYDER_ENGINE_ARTIFACTS_DIR="$artifacts" CYDER_ENGINE_VERSION_LABEL="test" \
   CYDER_ZSTD="$fake_zstd" WINE_INSTALL="$engine" \
   bash "$ROOT/scripts/pack-engine-artifact.sh"
-assert test -f "$artifacts/graphics/dxvk-unknown.tar.zst"
-assert test -f "$artifacts/graphics/dxmt-unknown.tar.zst"
+assert test -f "$artifacts/graphics/dxvk-1.2.3.tar.zst"
+assert test -f "$artifacts/graphics/dxmt-4.5.6.tar.zst"
 assert test -f "$artifacts/graphics/dxvk-version.txt"
 assert test -f "$artifacts/graphics/dxmt-version.txt"
 assert test -f "$artifacts/graphics/dxvk-artifact-sha256.txt"

@@ -30,8 +30,8 @@ cyder_restore_wine_graphics_module() {
   local temporary
 
   [[ -f "$source" ]] || {
-    echo "Missing Wine built-in graphics module: $source" >&2
-    return 1
+    echo "Skipping missing Wine built-in graphics module: $source" >&2
+    return 0
   }
   mkdir -p "$(dirname "$destination")"
   temporary="$(mktemp "$(dirname "$destination")/.${destination##*/}.XXXXXX")"

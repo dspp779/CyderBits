@@ -37,8 +37,12 @@ assert_contains "$not_ready_out" "open Cyder.app" "launch-exe should direct the 
 # Cyder.app settings opens upgrade the runtime graphics payload explicitly.
 # The launch-only path above must not implicitly use this operation.
 set +e
-graphics_out="$(CYDER_GRAPHICS_SRC="$TMP/missing-graphics" \
-  bash "$ROOT/scripts/cyder_launcher.sh" --ensure-graphics-only 2>&1)"
+graphics_out="$(
+  env -u CYDER_RESOURCES -u CYDER_APP \
+    CYDER_OGOM="$TMP" \
+    CYDER_GRAPHICS_SRC="$TMP/missing-graphics" \
+    bash "$ROOT/scripts/cyder_launcher.sh" --ensure-graphics-only 2>&1
+)"
 graphics_status=$?
 set -e
 assert_eq "$graphics_status" "1" "ensure-graphics-only should report missing bundled payloads"

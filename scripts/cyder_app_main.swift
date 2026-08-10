@@ -965,20 +965,29 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
                 }
                 self.hideSetup()
                 if let preparationFailure {
-                    let action = self.presentFailure(
-                        preparationFailure,
-                        allowsRebuild: preparationFailure.code == "CYD-HLT-001"
-                            || preparationFailure.code == "CYD-BTS-001"
-                    )
-                    if action == .rebuild {
-                        self.rebuildEnvironment {
-                            self.showSettings()
-                        }
+                    if preparationFailure.code == "CYD-GFX-001" {
+                        // Graphics payload install must not block settings / Cyder residency.
+                        self.showAlert(
+                            "圖形元件尚未準備完成",
+                            "仍可開啟設定。請確認 Cyder.app 已打包 Resources/graphics，或稍後重新開啟 Cyder 再試一次。"
+                        )
+                        CyderDiagnostics.shared.finish(outcome: "graphics-ensure-soft-failed")
                     } else {
-                        CyderDiagnostics.shared.finish(outcome: "environment-check-failed")
-                        NSApp.terminate(nil)
+                        let action = self.presentFailure(
+                            preparationFailure,
+                            allowsRebuild: preparationFailure.code == "CYD-HLT-001"
+                                || preparationFailure.code == "CYD-BTS-001"
+                        )
+                        if action == .rebuild {
+                            self.rebuildEnvironment {
+                                self.showSettings()
+                            }
+                        } else {
+                            CyderDiagnostics.shared.finish(outcome: "environment-check-failed")
+                            NSApp.terminate(nil)
+                        }
+                        return
                     }
-                    return
                 }
                 if self.openLibraryOnLaunch {
                     self.showGameLibrary()
@@ -1011,8 +1020,15 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         guard FileManager.default.isExecutableFile(atPath: wine.path) else {
             return .environmentNotReady
         }
-        guard graphicsPayloadsPresent() else {
-            return .graphicsNotReady
+        if !graphicsPayloadsPresent() {
+            // Do not hard-block Finder EXE launches when DXVK/DXMT payloads are
+            // absent. Fall back to the available Wine stack and hint the user to
+            // open Cyder.app so ensure-graphics can install the payloads.
+            showAlert(
+                "圖形元件尚未準備完成",
+                "仍會嘗試啟動遊戲。若需要 DXVK/DXMT，請先單獨開啟 Cyder.app 準備圖形元件。"
+            )
+            CyderDiagnostics.shared.info("graphics payloads missing; Finder EXE continuing with fallback")
         }
         let exeURL = URL(fileURLWithPath: exePaths[0])
         switch prefixForExecutable(exeURL) {

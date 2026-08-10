@@ -6,39 +6,47 @@ source "$ROOT/tests/assert.sh"
 
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/cyder-dxvk.XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
-ENGINE="$TMP/engine"
-PREFIX="$TMP/prefix"
+PAYLOAD="$TMP/dxvk"
 
-mkdir -p \
-  "$ENGINE/lib/dxvk/x86_64-windows" \
-  "$ENGINE/lib/dxvk/i386-windows" \
-  "$ENGINE/lib/wine/x86_64-unix" \
-  "$PREFIX/drive_c/windows/system32" \
-  "$PREFIX/drive_c/windows/syswow64"
-printf 'moltenvk\n' >"$ENGINE/lib/wine/x86_64-unix/libMoltenVK.dylib"
-for machine in x86_64-windows i386-windows; do
-  for module in d3d9 d3d10 d3d10_1 d3d10core d3d11 dxgi; do
-    printf '%s-%s\n' "$machine" "$module" >"$ENGINE/lib/dxvk/$machine/$module.dll"
-  done
-done
-ln -s "$TMP/do-not-modify" "$PREFIX/drive_c/windows/system32/d3d11.dll"
-printf 'sentinel\n' >"$TMP/do-not-modify"
+mkdir -p "$PAYLOAD/x86_64-windows"
+python3 - "$PAYLOAD/x86_64-windows/d3d11.dll" <<'PY'
+import struct
+import sys
 
-bash "$ROOT/scripts/install-dxvk-prefix.sh" --prefix "$PREFIX" --engine "$ENGINE"
+contents = bytearray(128)
+contents[:2] = b"MZ"
+struct.pack_into("<I", contents, 60, 96)
+contents[96:100] = b"PE\0\0"
+open(sys.argv[1], "wb").write(contents)
+PY
 
-assert_eq "$(cat "$PREFIX/drive_c/windows/system32/d3d11.dll")" \
-  "x86_64-windows-d3d11" "win64 DXVK should replace the bottle entry"
-assert_eq "$(cat "$TMP/do-not-modify")" "sentinel" \
-  "atomic provisioning must not follow a bottle symlink"
-assert_eq "$(cat "$PREFIX/drive_c/windows/syswow64/dxgi.dll")" \
-  "i386-windows-dxgi" "win32 DXVK should be provisioned"
-assert test -f "$PREFIX/.cyder-runtime/dxvk-payload"
+python3 "$ROOT/scripts/stamp-wine-builtin-pe.py" "$PAYLOAD"
 
+python3 - "$PAYLOAD/x86_64-windows/d3d11.dll" <<'PY'
+import sys
+from pathlib import Path
+
+contents = Path(sys.argv[1]).read_bytes()
+assert contents[64:96] == b"Wine builtin DLL" + b"\0" * 16
+PY
+
+# Prepend model: DXVK is stamped for builtin load order; bottles keep Wine PE.
 patch_text="$(cat "$ROOT/patches/cyder-compatdb-runtime.patch")"
-assert_contains "$patch_text" '!strcmp( backend, "dxvk" ) ? "n,b" : "b"' \
-  "DXVK rules must select native DLLs while builtin stacks remain builtin"
+assert_not_contains "$patch_text" '!strcmp( backend, "dxvk" ) ? "n,b" : "b"' \
+  "DXVK must not use native-first n,b overrides in the prepend model"
+assert_contains "$patch_text" 'add_backend_override( applied, modules[i], "b" )' \
+  "DXVK/DXMT backend modules must use builtin load order"
 assert_contains "$(cat "$ROOT/scripts/create-cyder-app.sh")" \
-  'cp "$SCRIPT_DIR/install-dxvk-prefix.sh" "$RES/ogom-scripts/"' \
-  "Cyder.app must bundle the DXVK prefix provisioner"
+  'cyder-ensure-graphics.sh' \
+  "Cyder.app must bundle the graphics payload ensurer"
+assert_not_contains "$(cat "$ROOT/scripts/cyder-common.sh")" \
+  'install-dxvk-prefix.sh' \
+  "Launch path must not copy DXVK PE into prefixes"
+
+build_dxvk="$(cat "$ROOT/scripts/build-dxvk.sh")"
+assert_contains "$build_dxvk" 'pin-dxvk-version.py' \
+  "build-dxvk.sh must pin DXVK via pin-dxvk-version.py"
+assert_contains "$build_dxvk" 'lib/dxvk/version' \
+  "build-dxvk.sh must write lib/dxvk/version for graphics pack"
 
 echo "PASS test-cyder-dxvk"

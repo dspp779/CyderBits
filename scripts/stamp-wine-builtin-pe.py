@@ -62,13 +62,19 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     changed = 0
+    skipped = 0
+    directory_mode = args.path.is_dir()
     for path in paths:
         try:
             changed += stamp_dll(path)
         except ValueError as exc:
+            if directory_mode:
+                print(f"stamp-wine-builtin-pe: skip {path}: {exc}", file=sys.stderr)
+                skipped += 1
+                continue
             print(f"stamp-wine-builtin-pe: {path}: {exc}", file=sys.stderr)
             return 1
-    print(f"Stamped {changed} of {len(paths)} DLL(s)")
+    print(f"Stamped {changed} of {len(paths)} DLL(s)" + (f" (skipped {skipped})" if skipped else ""))
     return 0
 
 

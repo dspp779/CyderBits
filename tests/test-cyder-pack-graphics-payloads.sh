@@ -19,6 +19,8 @@ engine="$tmp/engine"
 output_dir="$tmp/relative-output"
 fake_zstd="$tmp/zstd"
 mkdir -p "$engine/lib/dxvk" "$engine/lib/dxmt"
+printf 'dxvk v1.2.3\n' >"$engine/lib/dxvk/version"
+printf 'dxmt v4.5.6\n' >"$engine/lib/dxmt/version"
 
 python3 - "$engine/lib/dxvk/d3d11.dll" <<'PY'
 import struct
@@ -49,8 +51,8 @@ chmod +x "$fake_zstd"
   CYDER_ZSTD="$fake_zstd" bash "$ROOT/scripts/pack-graphics-payloads.sh" \
     --engine "$engine" --output-dir "$(basename "$output_dir")"
 )
-assert test -f "$output_dir/dxvk-unknown.tar.zst"
-assert test -f "$output_dir/dxmt-unknown.tar.zst"
+assert test -f "$output_dir/dxvk-1.2.3.tar.zst"
+assert test -f "$output_dir/dxmt-4.5.6.tar.zst"
 assert test -f "$output_dir/dxvk-version.txt"
 assert test -f "$output_dir/dxmt-version.txt"
 assert test -f "$output_dir/dxvk-artifact-sha256.txt"

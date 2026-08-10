@@ -66,8 +66,20 @@ assert_contains "$build_script" '"$RES/licenses/cnc-ddraw-LICENSE"' \
   "Cyder.app must expose the bundled cnc-ddraw MIT license"
 assert_contains "$build_script" 'cp "$SCRIPT_DIR/cyder-recipe.sh" "$RES/ogom-scripts/"' \
   "Cyder.app must bundle the declarative recipe runner"
-assert_contains "$build_script" 'cp "$SCRIPT_DIR/install-dxvk-prefix.sh" "$RES/ogom-scripts/"' \
-  "Cyder.app must bundle the DXVK prefix provisioner"
+assert_contains "$build_script" 'cp "$SCRIPT_DIR/cyder-ensure-graphics.sh" "$RES/ogom-scripts/"' \
+  "Cyder.app must bundle the graphics payload ensurer"
+assert_contains "$build_script" 'cp "$SCRIPT_DIR/cyder-migrate-graphics-prefix.sh" "$RES/ogom-scripts/"' \
+  "Cyder.app must bundle the graphics prefix migration helper"
+assert_contains "$build_script" 'chmod +x "$RES/ogom-scripts/cyder-ensure-graphics.sh"' \
+  "Cyder.app must mark ensure-graphics executable"
+assert_contains "$build_script" 'chmod +x "$RES/ogom-scripts/cyder-migrate-graphics-prefix.sh"' \
+  "Cyder.app must mark migrate-graphics executable"
+assert_contains "$build_script" 'GRAPHICS_ARTIFACTS=' \
+  "Cyder.app packaging must copy Resources/graphics artifacts"
+assert_contains "$build_script" 'CYDER_ALLOW_MISSING_GRAPHICS' \
+  "Cyder.app packaging must fail closed on missing graphics unless explicitly allowed"
+assert_not_contains "$build_script" 'install-dxvk-prefix.sh' \
+  "Cyder.app must not bundle obsolete DXVK prefix PE provisioner"
 assert_contains "$build_script" 'cp "$SCRIPT_DIR/cyder-oem-sync-dxvk.sh" "$RES/ogom-scripts/"' \
   "Cyder.app must bundle the OEM DXVK sidecar repair helper"
 winetricks_launcher="$(cat "$ROOT/scripts/cyder-winetricks.sh")"

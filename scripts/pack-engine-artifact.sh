@@ -102,7 +102,11 @@ STAMP_FILE="$ARTIFACTS_DIR/.pack-stamp"
 if [[ "$DRY_RUN" -eq 1 ]]; then
   echo "DRY RUN: would pack separate DXVK/DXMT graphics payloads"
 else
-  bash "$SCRIPT_DIR/pack-graphics-payloads.sh" --engine "$WINE_INSTALL"
+  graphics_pack_args=(--engine "$WINE_INSTALL")
+  if [[ "$FORCE" -eq 1 ]]; then
+    graphics_pack_args+=(--force)
+  fi
+  bash "$SCRIPT_DIR/pack-graphics-payloads.sh" "${graphics_pack_args[@]}"
 fi
 
 if [[ -f "$ARCHIVE" && "$FORCE" -ne 1 ]]; then

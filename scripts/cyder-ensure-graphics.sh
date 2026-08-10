@@ -33,8 +33,17 @@ cyder_graphics_extract() {
 
 cyder_graphics_source_dir() {
   local candidate
+  # Explicit override: fail closed when set but missing (do not fall through).
+  if [[ -n "${CYDER_GRAPHICS_SRC:-}" ]]; then
+    if [[ -d "$CYDER_GRAPHICS_SRC" ]]; then
+      printf '%s\n' "$CYDER_GRAPHICS_SRC"
+      return 0
+    fi
+    echo "Missing bundled graphics payloads; set CYDER_GRAPHICS_SRC" >&2
+    return 1
+  fi
+
   local -a candidates=(
-    "${CYDER_GRAPHICS_SRC:-}"
     "${CYDER_RESOURCES:-}/graphics"
     "${CYDER_APP:-}/Contents/Resources/graphics"
     "${CYDER_OGOM:-}/dist/artifacts/graphics"
@@ -111,19 +120,54 @@ cyder_install_graphics_payload() {
   mv -f -h "$temp_link" "$current"
 }
 
+cyder_graphics_relpath() {
+  local target="$1" start_dir="$2"
+  python3 -c 'import os, sys; print(os.path.relpath(sys.argv[1], sys.argv[2]))' \
+    "$target" "$start_dir"
+}
+
+cyder_engine_under_managed_engines() {
+  local engine="$1" engines_root="$2"
+  local engine_abs engines_abs
+  engine_abs="$(cd "$engine" && pwd -P)"
+  engines_abs="$(cd "$engines_root" && pwd -P)"
+  [[ "$engine_abs" == "$engines_abs" || "$engine_abs" == "$engines_abs"/* ]]
+}
+
+cyder_replace_engine_graphics_link() {
+  local link="$1" target="$2" engine="$3" engines_root="$4"
+  local relative
+
+  if [[ -L "$link" ]]; then
+    rm -f "$link"
+  elif [[ -e "$link" ]]; then
+    if cyder_engine_under_managed_engines "$engine" "$engines_root"; then
+      rm -rf "$link"
+    else
+      echo "Refusing to replace non-symlink graphics path outside managed Engines: $link" >&2
+      return 1
+    fi
+  fi
+
+  relative="$(cyder_graphics_relpath "$target" "$(dirname "$link")")"
+  ln -sfn "$relative" "$link"
+}
+
 cyder_ensure_graphics() {
-  local source_dir runtime_root engine
+  local source_dir runtime_root engines_root engine
   source_dir="$(cyder_graphics_source_dir)"
   runtime_root="${CYDER_RUNTIME_ROOT:-$HOME/.cyder/runtime}"
-  engine="${CYDER_ENGINES:-$runtime_root/Engines}/${CYDER_ENGINE_NAME:-wine-x86_64}"
+  engines_root="${CYDER_ENGINES:-$runtime_root/Engines}"
+  engine="$engines_root/${CYDER_ENGINE_NAME:-wine-x86_64}"
 
   cyder_install_graphics_payload "$source_dir" "$runtime_root" dxvk
   cyder_install_graphics_payload "$source_dir" "$runtime_root" dxmt
 
-  mkdir -p "$engine/lib"
-  rm -rf "$engine/lib/dxvk" "$engine/lib/dxmt"
-  ln -sfn "../../../graphics/current-dxvk" "$engine/lib/dxvk"
-  ln -sfn "../../../graphics/current-dxmt" "$engine/lib/dxmt"
+  mkdir -p "$engine/lib" "$engines_root"
+  cyder_replace_engine_graphics_link \
+    "$engine/lib/dxvk" "$runtime_root/graphics/current-dxvk" "$engine" "$engines_root"
+  cyder_replace_engine_graphics_link \
+    "$engine/lib/dxmt" "$runtime_root/graphics/current-dxmt" "$engine" "$engines_root"
 }
 
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
