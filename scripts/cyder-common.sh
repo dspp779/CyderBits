@@ -1847,15 +1847,6 @@ cyder_provision_prefix_baseline() {
   cyder_diagnostic_stage wineboot
   cyder_init_bottle "$wine_bin" "$prefix" || return $?
 
-  if [[ -f "$CYDER_SCRIPTS/install-dxvk-prefix.sh" ]]; then
-    cyder_report_progress "正在準備 DXVK 圖形元件…"
-    cyder_diagnostic_stage dxvk-setup
-    (
-      export WINEPREFIX="$prefix" WINE_INSTALL="$engine_root"
-      bash "$CYDER_SCRIPTS/install-dxvk-prefix.sh"
-    ) || return $?
-  fi
-
   cyder_report_progress "正在安裝 .NET（Wine Mono）…"
   cyder_diagnostic_stage mono-setup
   local component
@@ -2089,6 +2080,11 @@ cyder_engine_has_dxmt_payload() {
      && -r "$engine_root/lib/dxmt/x86_64-unix/winemetal.so" ]]
 }
 
+cyder_engine_has_dxvk_payload() {
+  local engine_root="$1"
+  [[ -r "$engine_root/lib/dxvk/x86_64-windows/d3d11.dll" ]]
+}
+
 cyder_dxmt_launch_allowed() {
   local engine_root="$1"
   declare -F cyder_macos_at_least >/dev/null 2>&1 \
@@ -2106,9 +2102,19 @@ cyder_apply_graphics_preference() {
       export CYDER_GRAPHICS_PREFERENCE=default
       unset CYDER_GRAPHICS_BACKEND CX_GRAPHICS_BACKEND
       ;;
-    wined3d|dxvk|d3dmetal)
+    wined3d|d3dmetal)
       export CYDER_GRAPHICS_PREFERENCE="$preference"
       export CYDER_GRAPHICS_BACKEND="$preference" CX_GRAPHICS_BACKEND="$preference"
+      ;;
+    dxvk)
+      if cyder_engine_has_dxvk_payload "$engine_root"; then
+        export CYDER_GRAPHICS_PREFERENCE=dxvk
+        export CYDER_GRAPHICS_BACKEND=dxvk CX_GRAPHICS_BACKEND=dxvk
+      else
+        echo "DXVK is unavailable (engine lib/dxvk is missing); using default graphics backend." >&2
+        export CYDER_GRAPHICS_PREFERENCE=default
+        unset CYDER_GRAPHICS_BACKEND CX_GRAPHICS_BACKEND
+      fi
       ;;
     dxmt)
       if cyder_dxmt_launch_allowed "$engine_root"; then
@@ -2702,25 +2708,6 @@ cyder_run_wine_exe() {
   (
     export WINEPREFIX="$prefix" WINESERVER="$wineserver" WINEDEBUG="$wine_debug"
     export CYDER_GRAPHICS_BACKENDS_ROOT="$(cd "$(dirname "$wine_bin")/.." && pwd)"
-    overrides="$(cyder_oem_dxvk_dll_overrides 2>/dev/null || true)"
-    if [[ -n "$overrides" ]]; then
-      export CYDER_WINE_DLL_OVERRIDES="$overrides"
-      if [[ -x "$CYDER_SCRIPTS/install-dxvk-prefix.sh" ]]; then
-        bash "$CYDER_SCRIPTS/install-dxvk-prefix.sh" \
-          --prefix "$prefix" \
-          --engine "$CYDER_GRAPHICS_BACKENDS_ROOT" || true
-      fi
-    else
-      unset CYDER_WINE_DLL_OVERRIDES
-    fi
-    # DXMT PE DLLs (especially winemetal.dll) must exist in the prefix before
-    # Wine will resolve them; prepend_dll_path alone is not enough.
-    if [[ "${CYDER_GRAPHICS_BACKEND:-}" == dxmt ]] \
-       && [[ -x "$CYDER_SCRIPTS/install-dxmt-prefix.sh" ]]; then
-      bash "$CYDER_SCRIPTS/install-dxmt-prefix.sh" \
-        --prefix "$prefix" \
-        --engine "$CYDER_GRAPHICS_BACKENDS_ROOT" || true
-    fi
     if [[ "${CYDER_MSYNC:-0}" == 1 ]]; then
       export WINEMSYNC=1
       unset WINEESYNC

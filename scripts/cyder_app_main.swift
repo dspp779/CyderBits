@@ -7,6 +7,7 @@ private enum CyderLaunchOutcome {
     case success
     case cancelled
     case environmentNotReady
+    case graphicsNotReady
     case failure(CyderFailure)
 }
 
@@ -611,6 +612,11 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
                         "遊戲尚未準備完成",
                         "請先完成 Cyder 的環境準備，再重新啟動遊戲。"
                     )
+                case .graphicsNotReady:
+                    self.showAlert(
+                        "圖形元件尚未準備完成",
+                        "請先重新開啟 Cyder.app 準備圖形元件，再重新啟動遊戲。"
+                    )
                 case .failure(let failure):
                     self.presentFailure(failure)
                 }
@@ -757,6 +763,12 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
                         "請先單獨開啟 Cyder.app 完成首次準備，再重新開啟遊戲。"
                     )
                     CyderDiagnostics.shared.finish(outcome: "environment-not-ready")
+                case .graphicsNotReady:
+                    self.showAlert(
+                        "圖形元件尚未準備完成",
+                        "請先單獨開啟 Cyder.app 準備圖形元件，再重新開啟遊戲。"
+                    )
+                    CyderDiagnostics.shared.finish(outcome: "graphics-not-ready")
                 case .failure(let failure):
                     self.presentFailure(failure)
                     CyderDiagnostics.shared.finish(outcome: "launch-failed")
@@ -825,6 +837,23 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
                     result: result
                 )
             }
+        }
+
+        CyderDiagnostics.shared.enter(.engineExtraction)
+        showSetup("正在準備圖形元件…")
+        let graphics = runLauncher(
+            context: context,
+            args: [context.launcher, "--ensure-graphics-only"],
+            stage: .engineExtraction,
+            operation: "graphics-install"
+        )
+        if !graphics.succeeded {
+            return failure(
+                code: "CYD-GFX-001",
+                stage: .engineExtraction,
+                summary: "準備圖形元件時發生問題。",
+                result: graphics
+            )
         }
 
         // Engine installation can create/replace the engine tree. Recompute
@@ -982,6 +1011,9 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         guard FileManager.default.isExecutableFile(atPath: wine.path) else {
             return .environmentNotReady
         }
+        guard graphicsPayloadsPresent() else {
+            return .graphicsNotReady
+        }
         let exeURL = URL(fileURLWithPath: exePaths[0])
         switch prefixForExecutable(exeURL) {
         case .success(let prefix):
@@ -1025,6 +1057,14 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             ))
         }
         return .success(prefix)
+    }
+
+    private func graphicsPayloadsPresent() -> Bool {
+        let engine = CyderPaths.engine
+        let dxvk = engine.appendingPathComponent("lib/dxvk/x86_64-windows/d3d11.dll")
+        let dxmt = engine.appendingPathComponent("lib/dxmt/x86_64-windows/d3d11.dll")
+        return FileManager.default.isReadableFile(atPath: dxvk.path)
+            || FileManager.default.isReadableFile(atPath: dxmt.path)
     }
 
     private func installWinetricks(_ verbs: [String]) {

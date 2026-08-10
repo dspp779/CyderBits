@@ -59,6 +59,7 @@ Options:
   --health-check      Validate the Wine engine and run a minimal prefix probe
   --rebuild-prefix    Rebuild the shared Windows game environment safely
   --ensure-engine-only  Install shared engine from payload/tarball and exit
+  --ensure-graphics-only Install graphics payloads and migrate inactive prefixes
   --ensure-rosetta-only Check Rosetta 2 on Apple Silicon and exit
   --stop-all          Stop all EXEs in the Cyder shared prefix and exit
   --has-running-exes  Exit 0 if the shared prefix has running EXEs, otherwise 1
@@ -86,6 +87,7 @@ BOOTSTRAP_ONLY=0
 HEALTH_CHECK=0
 REBUILD_PREFIX=0
 ENSURE_ENGINE_ONLY=0
+ENSURE_GRAPHICS_ONLY=0
 ENSURE_ROSETTA_ONLY=0
 STOP_ALL=0
 HAS_RUNNING_EXES=0
@@ -146,6 +148,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --ensure-engine-only)
       ENSURE_ENGINE_ONLY=1
+      shift
+      ;;
+    --ensure-graphics-only)
+      ENSURE_GRAPHICS_ONLY=1
       shift
       ;;
     --ensure-rosetta-only)
@@ -299,6 +305,7 @@ primary_actions=0
 [[ "$HEALTH_CHECK" -eq 1 ]] && primary_actions=$((primary_actions + 1))
 [[ "$REBUILD_PREFIX" -eq 1 ]] && primary_actions=$((primary_actions + 1))
 [[ "$ENSURE_ENGINE_ONLY" -eq 1 ]] && primary_actions=$((primary_actions + 1))
+[[ "$ENSURE_GRAPHICS_ONLY" -eq 1 ]] && primary_actions=$((primary_actions + 1))
 [[ "$ENSURE_ROSETTA_ONLY" -eq 1 ]] && primary_actions=$((primary_actions + 1))
 [[ "$DRY_RUN" -eq 1 ]] && primary_actions=$((primary_actions + 1))
 [[ "$POSITIONAL_EXE" -eq 1 && "$DRY_RUN" -eq 0 && "$LAUNCH_ONLY" -eq 0 ]] && primary_actions=$((primary_actions + 1))
@@ -548,6 +555,16 @@ fi
 if [[ "$ENSURE_ENGINE_ONLY" -eq 1 ]]; then
   cyder_set_stage engine-extraction
   cyder_ensure_shared_engine "$ENGINE_SRC" >/dev/null
+  exit 0
+fi
+
+if [[ "$ENSURE_GRAPHICS_ONLY" -eq 1 ]]; then
+  cyder_set_stage graphics-extraction
+  cyder_ensure_graphics
+  engine="$CYDER_ENGINES/$CYDER_ENGINE_NAME"
+  if [[ -x "$engine/bin/wine" && -d "$CYDER_SHARED_PREFIX" ]]; then
+    cyder_prepare_graphics_prefix "$engine/bin/wine" "$engine" "$CYDER_SHARED_PREFIX"
+  fi
   exit 0
 fi
 

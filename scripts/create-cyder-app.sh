@@ -159,7 +159,7 @@ fi
   exit 1
 }
 
-mkdir -p "$RES/ogom-scripts" "$RES/addons/libarchive" "$RES/tools/zstd" "$RES/tools/cabextract" "$RES/licenses" "$RES/CompatDB" "$RES/Components/cnc-ddraw/7.1.0.0"
+mkdir -p "$RES/ogom-scripts" "$RES/graphics" "$RES/addons/libarchive" "$RES/tools/zstd" "$RES/tools/cabextract" "$RES/licenses" "$RES/CompatDB" "$RES/Components/cnc-ddraw/7.1.0.0"
 COMPATDB_COMPILED="$OGOM/compatdb/compiled/compatdb.cdb"
 [[ -f "$OGOM/scripts/cyder-compatdb.py" ]] || {
   echo "Missing CompatDB tool: scripts/cyder-compatdb.py" >&2
@@ -174,6 +174,8 @@ cp "$COMPATDB_COMPILED" "$RES/CompatDB/compatdb.cdb"
 python3 "$OGOM/scripts/cyder-compatdb.py" inspect "$RES/CompatDB/compatdb.cdb" >/dev/null
 cp "$SCRIPT_DIR/cyder_launcher.sh" "$RES/ogom-scripts/"
 cp "$SCRIPT_DIR/cyder-common.sh" "$RES/ogom-scripts/"
+cp "$SCRIPT_DIR/cyder-ensure-graphics.sh" "$RES/ogom-scripts/"
+cp "$SCRIPT_DIR/cyder-migrate-graphics-prefix.sh" "$RES/ogom-scripts/"
 cp "$SCRIPT_DIR/cyder-ensure-rosetta.sh" "$RES/ogom-scripts/"
 cp "$SCRIPT_DIR/cyder-macos-compat.sh" "$RES/ogom-scripts/"
 cp "$SCRIPT_DIR/cyder-catalina-bootstrap.command" "$RES/ogom-scripts/"
@@ -192,8 +194,6 @@ cp "$SCRIPT_DIR/cyder-edit-user-reg.sh" "$RES/ogom-scripts/"
 cp "$SCRIPT_DIR/cyder-winetricks.sh" "$RES/ogom-scripts/"
 cp "$SCRIPT_DIR/cyder-recipe.sh" "$RES/ogom-scripts/"
 cp "$SCRIPT_DIR/cyder-cnc-ddraw.sh" "$RES/ogom-scripts/"
-cp "$SCRIPT_DIR/install-dxvk-prefix.sh" "$RES/ogom-scripts/"
-cp "$SCRIPT_DIR/install-dxmt-prefix.sh" "$RES/ogom-scripts/"
 cp "$SCRIPT_DIR/cyder-oem-sync-dxvk.sh" "$RES/ogom-scripts/"
 cp "$OGOM/tools/winetricks/winetricks" "$RES/ogom-scripts/"
 cp "$OGOM/tools/winetricks/COPYING" "$RES/licenses/winetricks-COPYING"
@@ -235,8 +235,6 @@ chmod +x "$RES/ogom-scripts/cyder-edit-user-reg.sh"
 chmod +x "$RES/ogom-scripts/cyder-winetricks.sh"
 chmod +x "$RES/ogom-scripts/cyder-recipe.sh"
 chmod +x "$RES/ogom-scripts/cyder-cnc-ddraw.sh"
-chmod +x "$RES/ogom-scripts/install-dxvk-prefix.sh"
-chmod +x "$RES/ogom-scripts/install-dxmt-prefix.sh"
 chmod +x "$RES/ogom-scripts/winetricks"
 chmod +x "$RES/ogom-scripts/cyder-profile.sh"
 chmod +x "$RES/ogom-scripts/cyder_create_game_app.py"
@@ -248,6 +246,22 @@ chmod +x "$RES/tools/cabextract/cabextract"
 source "$SCRIPT_DIR/cyder-copy-engine-artifact.sh"
 
 copy_engine_artifact_into_app "$SCRIPT_DIR" "$RES" "$OGOM"
+GRAPHICS_ARTIFACTS="$OGOM/dist/artifacts/graphics"
+if [[ -f "$GRAPHICS_ARTIFACTS/dxvk-version.txt" \
+   && -f "$GRAPHICS_ARTIFACTS/dxmt-version.txt" \
+   && -f "$GRAPHICS_ARTIFACTS/dxvk-artifact-sha256.txt" \
+   && -f "$GRAPHICS_ARTIFACTS/dxmt-artifact-sha256.txt" ]] \
+   && compgen -G "$GRAPHICS_ARTIFACTS/dxvk-*.tar.zst" >/dev/null \
+   && compgen -G "$GRAPHICS_ARTIFACTS/dxmt-*.tar.zst" >/dev/null; then
+  rsync -a "$GRAPHICS_ARTIFACTS/" "$RES/graphics/"
+else
+  message="Missing packaged DXVK/DXMT graphics artifacts: $GRAPHICS_ARTIFACTS"
+  if [[ "${CYDER_REQUIRE_NATIVE_SWIFT:-0}" == 1 ]]; then
+    echo "$message" >&2
+    exit 1
+  fi
+  echo "==> Warning: $message" >&2
+fi
 rsync -a "$OGOM/tools/libarchive/" "$RES/addons/libarchive/"
 
 echo "==> Building universal MacOS/Cyder (arm64 + x86_64)"

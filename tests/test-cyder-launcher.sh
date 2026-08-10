@@ -34,6 +34,24 @@ set -e
 assert_eq "$not_ready_status" "2" "launch-exe must not create a missing environment"
 assert_contains "$not_ready_out" "open Cyder.app" "launch-exe should direct the user to manual setup"
 
+# Cyder.app settings opens upgrade the runtime graphics payload explicitly.
+# The launch-only path above must not implicitly use this operation.
+set +e
+graphics_out="$(CYDER_GRAPHICS_SRC="$TMP/missing-graphics" \
+  bash "$ROOT/scripts/cyder_launcher.sh" --ensure-graphics-only 2>&1)"
+graphics_status=$?
+set -e
+assert_eq "$graphics_status" "1" "ensure-graphics-only should report missing bundled payloads"
+assert_contains "$graphics_out" "Missing bundled graphics payloads" \
+  "ensure-graphics-only should invoke the graphics payload installer"
+
+missing_dxvk="$(
+  bash -c 'source "$1/scripts/cyder-common.sh"; cyder_apply_graphics_preference dxvk "$2"; printf "%s|%s\n" "$CYDER_GRAPHICS_PREFERENCE" "${CYDER_GRAPHICS_BACKEND:-default}"' \
+    _ "$ROOT" "$TMP/missing-engine" 2>&1
+)"
+assert_contains "$missing_dxvk" "default|default" \
+  "missing DXVK payload should fall back to the default graphics backend"
+
 mkdir -p "$TMP/bin" "$TMP/runtime/Engines/wine-x86_64/bin" \
   "$TMP/support/bottles/shared" "$TMP/support/bottles/profile-stop-test"
 cat >"$TMP/bin/arch" <<'SH'
@@ -334,6 +352,10 @@ cat >"$TMP/profile-scripts/cyder-apply-golden-settings.sh" <<'SH'
 #!/usr/bin/env bash
 : >"$WINEPREFIX/.cyder-golden-baseline-v2"
 SH
+cat >"$TMP/profile-scripts/install-dxvk-prefix.sh" <<'SH'
+#!/usr/bin/env bash
+: >"$WINEPREFIX/.cyder-dxvk-copied"
+SH
 cp "$ROOT/scripts/cyder-profile.sh" "$TMP/profile-scripts/"
 cat >"$TMP/profile-scripts/resolve-wine-locale.sh" <<'SH'
 #!/usr/bin/env bash
@@ -347,6 +369,7 @@ profile_bottle="$(CYDER_SUPPORT="$profile_support" CYDER_SCRIPTS="$TMP/profile-s
   bash "$ROOT/scripts/cyder_launcher.sh" --profile-create "$profile_exe" golden)"
 assert test -d "$profile_bottle"
 assert test -f "$profile_bottle/.cyder-golden-baseline-v2"
+assert test ! -e "$profile_bottle/.cyder-dxvk-copied"
 resolved_bottle="$(CYDER_SUPPORT="$profile_support" CYDER_SCRIPTS="$TMP/profile-scripts" \
   CYDER_ENGINE_VERSION_LABEL=test-engine PATH="$TMP/bin:$PATH" \
   bash "$ROOT/scripts/cyder_launcher.sh" --profile-resolve "$profile_exe")"

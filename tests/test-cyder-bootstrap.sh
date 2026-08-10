@@ -38,6 +38,13 @@ assert test -f "$SHARED/.cyder-golden-baseline-v2"
 assert test ! -e "$SUPPORT/templates/golden/manifest.json"
 
 WINE="$ROOT/install/wine-cx26-x86_64/bin/wine"
+BUILTIN_D3D11="$ROOT/install/wine-cx26-x86_64/lib/wine/x86_64-windows/d3d11.dll"
+BOOTSTRAPPED_D3D11="$SHARED/drive_c/windows/system32/d3d11.dll"
+if [[ -f "$BUILTIN_D3D11" && -f "$BOOTSTRAPPED_D3D11" ]]; then
+  assert_eq "$(shasum -a 256 "$BOOTSTRAPPED_D3D11" | awk '{print $1}')" \
+    "$(shasum -a 256 "$BUILTIN_D3D11" | awk '{print $1}')" \
+    "bootstrap must retain Wine's built-in d3d11.dll"
+fi
 if WINEPREFIX="$SHARED" arch -x86_64 "$WINE" reg query \
   "HKCU\\Software\\Wine\\Fonts\\Replacements" /v "PMingLiU" >/dev/null 2>&1; then
   echo "Songti TC font replacements OK"

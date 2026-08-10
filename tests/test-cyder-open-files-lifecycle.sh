@@ -64,5 +64,16 @@ assert_contains "$source_text" "CYDER_PROGRESS_FILE" \
   "bootstrap should expose a progress file for staged setup messages"
 assert_contains "$source_text" 'args.contains("--bootstrap-only")' \
   "long setup operations should enable progress polling"
+assert_contains "$source_text" '"--ensure-graphics-only"' \
+  "settings-mode preparation must install graphics payloads"
+run_phased_text="$(awk '
+  /private func runPhasedLaunch/ { found = 1 }
+  found { print }
+  /private func prefixForExecutable/ { exit }
+' "$ROOT/scripts/cyder_app_main.swift")"
+assert_not_contains "$run_phased_text" '"--ensure-graphics-only"' \
+  "Finder EXE launches must not upgrade graphics payloads"
+assert_contains "$source_text" "圖形元件尚未準備完成" \
+  "Finder EXE launches must direct missing graphics payloads to Cyder.app"
 
 echo "PASS test-cyder-open-files-lifecycle"
