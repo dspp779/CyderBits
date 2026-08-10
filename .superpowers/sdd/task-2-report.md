@@ -36,3 +36,37 @@ Done.
 - `tests/test-cyder-force-settings-ui.sh` will fail until Task 3 updates the UI files — did not touch it (out of scope, owned by Task 3).
 - `cyder-common.sh` was not touched (owned by Task 4); it doesn't reference the Swift `CyderGraphicsBackend` enum directly (shell side reads `CYDER_GRAPHICS_BACKEND` env string), so no cross-task breakage expected there.
 - `effectiveLaunchBackend`'s `hasD3DMetal`/`hasDxvk`/`hasDxmt` parameters are currently unused inside the switch body (no cascade consults them anymore) but were kept per the interface spec in the brief for call-site/API symmetry with `CyderGraphicsCapabilities`.
+
+## Review follow-up: graphics artifact gates
+
+- Fixed P1 in both `pack-engine-artifact.sh` copies: the graphics-payload pack
+  now executes before an existing engine archive can return success. The
+  graphics pack repairs or generates the DXVK and DXMT archives plus their
+  version and SHA-256 sidecars before the engine archive is reused.
+- Fixed P2 in both `pack-graphics-payloads.sh` copies: `--output-dir` is
+  created and canonicalized with `pwd -P` before the staging-directory
+  subshell changes directory, so relative output paths remain valid.
+- Extended focused tests in both repositories. They build fixture DXVK/DXMT
+  payloads through a fake zstd binary using a relative output directory, and
+  verify the pre-existing-engine-archive path still produces both graphics
+  archives.
+
+### Verification
+
+```text
+cyder-wine-engine:
+bash -n scripts/pack-engine-artifact.sh scripts/pack-graphics-payloads.sh \
+  tests/test-pack-graphics-payloads.sh tests/test-pack-engine-dxmt-gate.sh
+bash tests/test-pack-graphics-payloads.sh
+bash tests/test-pack-engine-dxmt-gate.sh
+PASS test-pack-graphics-payloads
+PASS test-pack-engine-dxmt-gate
+
+ogom:
+bash -n scripts/pack-engine-artifact.sh scripts/pack-graphics-payloads.sh \
+  tests/test-cyder-pack-graphics-payloads.sh tests/test-cyder-pack-dxmt-gate.sh
+bash tests/test-cyder-pack-graphics-payloads.sh
+bash tests/test-cyder-pack-dxmt-gate.sh
+PASS test-cyder-pack-graphics-payloads
+PASS test-cyder-pack-dxmt-gate
+```

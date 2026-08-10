@@ -99,16 +99,16 @@ ARCHIVE="$(cyder_engine_archive_path_for_format "$ENGINE_VERSION" "$ARTIFACTS_DI
 VERSION_FILE="$ARTIFACTS_DIR/engine-version.txt"
 STAMP_FILE="$ARTIFACTS_DIR/.pack-stamp"
 
-if [[ -f "$ARCHIVE" && "$FORCE" -ne 1 ]]; then
-  echo "Engine artifact present: $ARCHIVE"
-  echo "Use --force to rebuild."
-  exit 0
-fi
-
 if [[ "$DRY_RUN" -eq 1 ]]; then
   echo "DRY RUN: would pack separate DXVK/DXMT graphics payloads"
 else
   bash "$SCRIPT_DIR/pack-graphics-payloads.sh" --engine "$WINE_INSTALL"
+fi
+
+if [[ -f "$ARCHIVE" && "$FORCE" -ne 1 ]]; then
+  echo "Engine artifact present: $ARCHIVE"
+  echo "Use --force to rebuild."
+  exit 0
 fi
 
 STAGING="$(mktemp -d "${TMPDIR:-/tmp}/cyder-engine-pack.XXXXXX")"

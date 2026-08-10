@@ -35,6 +35,8 @@ done
 ZSTD_BIN="$(cyder_find_zstd 2>/dev/null || true)"
 [[ -x "$ZSTD_BIN" ]] || { echo "Missing bundled zstd" >&2; exit 1; }
 [[ -n "$OUTPUT_DIR" ]] || OUTPUT_DIR="$(cyder_engine_artifacts_dir)/graphics"
+mkdir -p "$OUTPUT_DIR"
+OUTPUT_DIR="$(cd "$OUTPUT_DIR" && pwd -P)"
 
 payload_version() {
   local name="$1" dir="$2" version_file version="" env_name name_upper
@@ -54,7 +56,6 @@ payload_version() {
 
 STAGING="$(mktemp -d "${TMPDIR:-/tmp}/cyder-graphics-pack.XXXXXX")"
 trap 'rm -rf "$STAGING"' EXIT
-mkdir -p "$OUTPUT_DIR"
 
 pack_payload() {
   local name="$1" source="$2" version archive version_file checksum_file staged
