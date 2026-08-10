@@ -46,7 +46,7 @@
 | `cyder_app_main.swift` | 編譯為 `Cyder.app/Contents/MacOS/Cyder`（Universal）；無 `.exe` 時顯示設定頁，有 `.exe` 時直接啟動 Wine，收到 same-prefix 的 `ActivatingAppPID` Foreground 通知後 activate 並退出 |
 | `create-cyder-pid-test-app.sh` | 建立 `dist/CyderPIDTest.app` Universal 測試工具 |
 | `cyder_pid_test_launcher.swift` | 可選 EXE、比較 wrapper PID 與 Wine `ActivatingAppPID`，測試普通及 cooperative activation |
-| `cyder-common.sh` | 共用路徑、`ensure_shared_engine`、`bootstrap_shared_prefix`、`run_wine_exe` |
+| `cyder-common.sh` | 共用路徑、`ensure_shared_engine`、`cyder_ensure_graphics`、`bootstrap_shared_prefix`、`run_wine_exe` |
 | `cyder-exe-association.swift` | 開發用：查詢 Launch Services `.exe` handler、手動 set/cleanup（**不**打包進 app、執行時不呼叫） |
 | `cyder_launcher.py` | 開發用 CLI，轉呼叫 `cyder_launcher.sh` |
 | `cyder_common.py` | CyderBits 打包器共用（Python） |

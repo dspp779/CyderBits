@@ -48,12 +48,12 @@ CompatDB 在遊戲啟動時以 **builtin + prepend** 方式從 runtime payload �
 
 ## DXMT
 
-DXMT 將 Direct3D 轉譯至 Metal，由 Cyder 封裝 engine 隨附 **上游 v0.80** payload（`lib/dxmt/`，含 `winemetal.so` 與 Windows DLL）。Cyder 不從原始碼建置 DXMT，也不借用 CrossOver 的 `lib/dxmt`。
+DXMT 將 Direct3D 轉譯至 Metal。Cyder 隨 app 打包 **上游 v0.80** DXMT runtime payload（`Resources/graphics/dxmt-*.tar.zst`，含 `winemetal.so` 與 Windows DLL）；開啟 Cyder.app 時由 ensure-graphics 解壓至 `~/.cyder/runtime/graphics/`，並透過 engine `lib/dxmt` symlink 指向 `current-dxmt`（見上方「Runtime 圖形元件與啟動方式」）。Cyder 不從原始碼建置 DXMT，也不借用 CrossOver 的 `lib/dxmt`。
 
 ### 系統需求
 
 - **macOS 15（Sequoia）或更新** — macOS 14 及以下 `dxmt` 選項會灰掉（不同於 D3DMetal 的 macOS 14+ 門檻）。
-- 引擎缺 `lib/dxmt` 完整 payload 時，`dxmt` 選項亦會灰掉。
+- **DXMT runtime payload 已安裝** — 尚未解壓或 `current-dxmt` 不存在時，`dxmt` 選項會灰掉；請先開啟 Cyder.app 完成 ensure-graphics。
 
 選 **DXMT** 時不套用 DXVK 限幀（`DXVK_FRAME_RATE`）；限幀選項僅在 **DXVK** 後端出現。
 
