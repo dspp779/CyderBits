@@ -52,6 +52,29 @@ fresh="$CYDER_SESSION_FILE"
 [[ ! -e "$stale_dir/stale.session" ]]
 cyder_session_release "$prefix" "$fresh"
 
+# Once the primary process returns, its session remains discoverable while the
+# bottle wineserver is still alive and no longer blocks on a dead PID check.
+cyder_session_acquire "$prefix" 0 0 normal
+background="$CYDER_SESSION_FILE"
+cyder_session_mark_background "$background"
+grep -q '^state=background$' "$background"
+grep -q '^primary_exited_at=' "$background"
+cyder_has_running_prefix() { return 0; }
+sed "s/^pid=.*/pid=99999999/" "$background" >"$background.tmp"
+mv "$background.tmp" "$background"
+CYDER_SUPPORT="$TMP"
+CYDER_LEGACY_SHARED_PREFIX="$TMP/legacy-shared"
+background_plist="$TMP/background.plist"
+cyder_write_active_bottles_plist "$background_plist"
+[[ "$(/usr/bin/plutil -extract bottles.0.state raw -o - "$background_plist")" == background ]]
+[[ "$(/usr/bin/plutil -extract bottles.0.sessions.0.state raw -o - "$background_plist")" == background ]]
+cyder_session_acquire "$prefix" 0 0 normal
+background_peer="$CYDER_SESSION_FILE"
+[[ -f "$background" ]]
+cyder_session_release "$prefix" "$background_peer"
+cyder_session_release "$prefix" "$background"
+unset -f cyder_has_running_prefix
+
 mkdir -p "$stale_dir/.lock"
 printf '%s\n' "$$" >"$stale_dir/.lock/pid"
 if CYDER_SESSION_LOCK_ATTEMPTS=2 cyder_session_acquire "$prefix" 0 0 normal >/dev/null 2>&1; then

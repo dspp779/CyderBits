@@ -2337,13 +2337,71 @@ cyder_stop_all_exes() {
     echo "Cyder engine is not installed; no EXEs to stop." >&2
     return 0
   fi
-  local prefix
-  for prefix in "$CYDER_SHARED_PREFIX" "$CYDER_LEGACY_SHARED_PREFIX"; do
-    [[ -d "$prefix" ]] || continue
+  local prefix status=0
+  for prefix in "$CYDER_SUPPORT/bottles"/* "$CYDER_LEGACY_SHARED_PREFIX"; do
+    [[ -d "$prefix" && ! -L "$prefix" ]] || continue
     echo "Stopping all EXEs in $prefix" >&2
-    WINEPREFIX="$prefix" arch -x86_64 "$wineserver" -k || true
-    WINEPREFIX="$prefix" arch -x86_64 "$wineserver" -w || true
+    cyder_stop_managed_prefix "$wineserver" "$prefix" || status=$?
   done
+  return "$status"
+}
+
+# Stop one already-validated Cyder bottle. Unlike the older cleanup helper,
+# this is a user-facing operation and must report wineserver failures.
+cyder_stop_managed_prefix() {
+  local wineserver="$1" prefix="$2" status=0 wait_status=0
+  local timeout="${CYDER_STOP_WAIT_TIMEOUT:-15}" deadline waiter
+  [[ -x "$wineserver" ]] || { echo "Cyder wineserver is unavailable: $wineserver" >&2; return 2; }
+  [[ "$timeout" =~ ^[1-9][0-9]*$ ]] || timeout=15
+  WINEPREFIX="$prefix" arch -x86_64 "$wineserver" -k || status=$?
+  WINEPREFIX="$prefix" arch -x86_64 "$wineserver" -w &
+  waiter=$!
+  deadline=$((SECONDS + timeout))
+  while kill -0 "$waiter" 2>/dev/null; do
+    if (( SECONDS >= deadline )); then
+      kill -TERM "$waiter" 2>/dev/null || true
+      wait "$waiter" 2>/dev/null || true
+      echo "Timed out waiting for Wine processes in $prefix" >&2
+      return 75
+    fi
+    sleep 0.1
+  done
+  wait "$waiter" || wait_status=$?
+  (( wait_status == 0 )) || status=$wait_status
+  return "$status"
+}
+
+# Open Wine's own task manager without keeping the native menu action blocked.
+# All stdio is detached so a caller using a pipe or Process.waitUntilExit also
+# returns as soon as the task manager has been dispatched.
+cyder_open_prefix_taskmgr() {
+  local wine_bin="$1" prefix="$2"
+  local wineserver="${wine_bin%/wine}/wineserver"
+  local session_file sync=""
+  [[ -x "$wine_bin" ]] || { echo "Cyder Wine is unavailable: $wine_bin" >&2; return 2; }
+  mkdir -p "$CYDER_SUPPORT/Logs"
+  (
+    export WINEPREFIX="$prefix" WINESERVER="$wineserver"
+    # A Wine client must use the same synchronization protocol as the active
+    # bottle server. Prefer the live session contract because per-game launch
+    # settings can differ from the currently saved global preference.
+    for session_file in "$(cyder_session_dir "$prefix")"/*.session; do
+      [[ -f "$session_file" && ! -L "$session_file" ]] || continue
+      sync="$(sed -n 's/^sync=//p' "$session_file" | head -1)"
+      [[ -n "$sync" ]] && break
+    done
+    [[ -n "$sync" ]] || sync="msync=${CYDER_MSYNC:-0};esync=${CYDER_ESYNC:-0};power=${CYDER_POWER_MODE:-normal}"
+    case "$sync" in
+      msync=1\;esync=0\;*) export WINEMSYNC=1; unset WINEESYNC ;;
+      msync=0\;esync=1\;*) export WINEESYNC=1; unset WINEMSYNC ;;
+      *) unset WINEMSYNC WINEESYNC ;;
+    esac
+    if [[ -f "$prefix/cxbottle.conf" ]] || cyder_wine_is_crossover_frontend "$wine_bin"; then
+      export CX_BOTTLE="$prefix" CX_ROOT="$(cd "$(dirname "$wine_bin")/.." && pwd -P)" WINEARCH=win64
+    fi
+    cd "$prefix"
+    cyder_exec_wine "$wine_bin" taskmgr
+  ) </dev/null >>"$CYDER_SUPPORT/Logs/taskmgr.log" 2>&1 &
 }
 
 cyder_has_running_prefix() {
@@ -2360,10 +2418,11 @@ cyder_has_running_prefix() {
 }
 
 cyder_has_running_exes() {
-  cyder_has_running_prefix "$CYDER_SHARED_PREFIX" && return 0
-  if [[ "$CYDER_LEGACY_SHARED_PREFIX" != "$CYDER_SHARED_PREFIX" ]]; then
-    cyder_has_running_prefix "$CYDER_LEGACY_SHARED_PREFIX" && return 0
-  fi
+  local prefix
+  for prefix in "$CYDER_SUPPORT/bottles"/* "$CYDER_LEGACY_SHARED_PREFIX"; do
+    [[ -d "$prefix" && ! -L "$prefix" ]] || continue
+    cyder_has_running_prefix "$prefix" && return 0
+  done
   return 1
 }
 
@@ -2466,6 +2525,7 @@ cyder_run_wine_exe() {
   local pid_file="${CYDER_WINE_PID_FILE:-}"
   local result_file="${CYDER_WINE_RESULT_FILE:-}"
   local activated_file="${CYDER_WINE_ACTIVATED_FILE:-}"
+  local lifecycle_file="${CYDER_WINE_LIFECYCLE_FILE:-}"
   local session_id=""
   cyder_wine_locale_exports
   local capture_log="${CYDER_CAPTURE_WINE_LOG:-0}"
@@ -2523,6 +2583,10 @@ cyder_run_wine_exe() {
     if [[ -n "$activated_file" ]]; then
       mkdir -p "$(dirname "$activated_file")"
       rm -f "$activated_file"
+    fi
+    if [[ -n "$lifecycle_file" ]]; then
+      mkdir -p "$(dirname "$lifecycle_file")"
+      rm -f "$lifecycle_file" "${lifecycle_file}.tmp"
     fi
   fi
   cyder_exec_game() {
@@ -2662,6 +2726,14 @@ cyder_run_wine_exe() {
         fi
         wine_status=0
         wait "$wine_pid" || wine_status=$?
+        if [[ -n "$lifecycle_file" ]]; then
+          {
+            printf 'schema=1\n'
+            printf 'state=background\n'
+            printf 'exit_status=%s\n' "$wine_status"
+          } >"${lifecycle_file}.tmp"
+          mv -f "${lifecycle_file}.tmp" "$lifecycle_file"
+        fi
         if [[ -n "$result_file" ]]; then
           {
             printf 'schema=1\n'
@@ -2680,6 +2752,25 @@ cyder_run_wine_exe() {
               sleep 0.1
             done
           fi
+        fi
+        if [[ -n "$detached_session_id" ]]; then
+          # The primary client returning does not imply that the bottle is
+          # finished. Anti-cheat, Steam helpers, and services can keep the
+          # wineserver alive while they wind down. wineserver -w distinguishes
+          # a live server from a stale socket left by an abnormal exit.
+          cyder_session_mark_background "$detached_session_id"
+        fi
+        lifecycle_state=stopped
+        if [[ -n "$detached_session_id" || -n "$lifecycle_file" ]]; then
+          WINEPREFIX="$prefix" arch -x86_64 "$wineserver" -w >/dev/null 2>&1 || lifecycle_state=attention
+        fi
+        if [[ -n "$lifecycle_file" ]]; then
+          {
+            printf 'schema=1\n'
+            printf 'state=%s\n' "$lifecycle_state"
+            printf 'exit_status=%s\n' "$wine_status"
+          } >"${lifecycle_file}.tmp"
+          mv -f "${lifecycle_file}.tmp" "$lifecycle_file"
         fi
         if [[ -n "$detached_session_id" ]]; then
           cyder_session_release "$prefix" "$detached_session_id"
@@ -2748,7 +2839,7 @@ cyder_session_dir() {
 
 cyder_session_acquire() {
   local prefix="$1" msync="${2:-0}" esync="${3:-0}" power="${4:-normal}"
-  local dir lock file pid existing mode attempts=0 max_attempts="${CYDER_SESSION_LOCK_ATTEMPTS:-250}" owner
+  local dir lock file pid existing mode state attempts=0 max_attempts="${CYDER_SESSION_LOCK_ATTEMPTS:-250}" owner
   [[ "$max_attempts" =~ ^[1-9][0-9]*$ ]] || {
     echo "invalid CYDER_SESSION_LOCK_ATTEMPTS: $max_attempts" >&2
     return 2
@@ -2786,7 +2877,9 @@ cyder_session_acquire() {
   for file in "$dir"/*.session; do
     [[ -f "$file" ]] || continue
     pid="$(sed -n 's/^pid=//p' "$file" | head -1)"
-    if [[ -z "$pid" ]] || ! kill -0 "$pid" 2>/dev/null; then
+    state="$(sed -n 's/^state=//p' "$file" | head -1)"
+    if { [[ -z "$pid" ]] || ! kill -0 "$pid" 2>/dev/null; } \
+       && { [[ "$state" != background ]] || ! cyder_has_running_prefix "$prefix"; }; then
       rm -f "$file"
       continue
     fi
@@ -2801,8 +2894,8 @@ cyder_session_acquire() {
   file="$dir/$$-${RANDOM:-0}-$(date +%s).session"
   # Keep compatibility with the macOS system Bash, which does not provide
   # BASHPID. The launcher process remains alive for the whole Wine session.
-  if ! printf 'pid=%s\nsync=msync=%s;esync=%s;power=%s\nmode=%s\n' \
-      "$$" "$msync" "$esync" "$power" "$power" >"$file"; then
+  if ! printf 'schema=2\npid=%s\nsync=msync=%s;esync=%s;power=%s\nmode=%s\nstate=running\nstarted_at=%s\n' \
+      "$$" "$msync" "$esync" "$power" "$power" "$(date +%s)" >"$file"; then
     rm -rf "$lock"
     echo "failed to write Cyder session state" >&2
     return 1
@@ -2810,6 +2903,88 @@ cyder_session_acquire() {
   rm -rf "$lock"
   CYDER_SESSION_FILE="$file"
   export CYDER_SESSION_FILE
+}
+
+cyder_session_mark_background() {
+  local session="$1" tmp
+  [[ -f "$session" && ! -L "$session" ]] || return 1
+  tmp="${session}.tmp.$$"
+  if grep -q '^state=' "$session"; then
+    sed 's/^state=.*/state=background/' "$session" >"$tmp" || { rm -f "$tmp"; return 1; }
+  else
+    { cat "$session"; printf 'state=background\n'; } >"$tmp" || { rm -f "$tmp"; return 1; }
+  fi
+  printf 'primary_exited_at=%s\n' "$(date +%s)" >>"$tmp"
+  mv -f "$tmp" "$session"
+}
+
+# Publish all active Cyder bottles as an XML property list. A bottle remains
+# active while either its wineserver socket exists or it has a live launch
+# reservation. Dead primary PIDs in a background session are intentional.
+cyder_write_active_bottles_plist() {
+  local output="$1" tmp prefix file pid sync mode state started primary_exited
+  tmp="${output}.tmp.$$"
+  local bottle_index=0 session_index socket_live session_live bottle_live bottle_state
+  rm -f "$tmp"
+  /usr/bin/plutil -create xml1 "$tmp"
+  /usr/bin/plutil -insert schemaVersion -integer 1 "$tmp"
+  /usr/bin/plutil -insert bottles -array "$tmp"
+  for prefix in "$CYDER_SUPPORT/bottles"/* "$CYDER_LEGACY_SHARED_PREFIX"; do
+    [[ -d "$prefix" && ! -L "$prefix" ]] || continue
+    socket_live=false
+    cyder_has_running_prefix "$prefix" && socket_live=true
+    session_live=false
+    bottle_state=background
+    for file in "$(cyder_session_dir "$prefix")"/*.session; do
+      [[ -f "$file" && ! -L "$file" ]] || continue
+      pid="$(sed -n 's/^pid=//p' "$file" | head -1)"
+      state="$(sed -n 's/^state=//p' "$file" | head -1)"
+      [[ -n "$state" ]] || state=running
+      if [[ "$pid" =~ ^[1-9][0-9]*$ ]] && kill -0 "$pid" 2>/dev/null; then
+        session_live=true
+        [[ "$state" == running ]] && bottle_state=running
+      elif [[ "$state" == background && "$socket_live" == true ]]; then
+        session_live=true
+      fi
+    done
+    bottle_live=false
+    [[ "$socket_live" == true || "$session_live" == true ]] && bottle_live=true
+    [[ "$bottle_live" == true ]] || continue
+    /usr/bin/plutil -insert "bottles.$bottle_index" -dictionary "$tmp"
+    /usr/bin/plutil -insert "bottles.$bottle_index.name" -string "$(basename "$prefix")" "$tmp"
+    /usr/bin/plutil -insert "bottles.$bottle_index.prefix" -string "$(cd "$prefix" && pwd -P)" "$tmp"
+    /usr/bin/plutil -insert "bottles.$bottle_index.running" -bool "$socket_live" "$tmp"
+    /usr/bin/plutil -insert "bottles.$bottle_index.state" -string "$bottle_state" "$tmp"
+    /usr/bin/plutil -insert "bottles.$bottle_index.sessions" -array "$tmp"
+    session_index=0
+    for file in "$(cyder_session_dir "$prefix")"/*.session; do
+      [[ -f "$file" && ! -L "$file" ]] || continue
+      pid="$(sed -n 's/^pid=//p' "$file" | head -1)"
+      state="$(sed -n 's/^state=//p' "$file" | head -1)"; [[ -n "$state" ]] || state=running
+      if [[ "$pid" =~ ^[1-9][0-9]*$ ]] && kill -0 "$pid" 2>/dev/null; then
+        :
+      elif [[ "$state" == background && "$socket_live" == true ]]; then
+        [[ "$pid" =~ ^[1-9][0-9]*$ ]] || pid=0
+      else
+        continue
+      fi
+      sync="$(sed -n 's/^sync=//p' "$file" | head -1)"
+      mode="$(sed -n 's/^mode=//p' "$file" | head -1)"
+      started="$(sed -n 's/^started_at=//p' "$file" | head -1)"; [[ "$started" =~ ^[0-9]+$ ]] || started=0
+      primary_exited="$(sed -n 's/^primary_exited_at=//p' "$file" | head -1)"; [[ "$primary_exited" =~ ^[0-9]+$ ]] || primary_exited=0
+      /usr/bin/plutil -insert "bottles.$bottle_index.sessions.$session_index" -dictionary "$tmp"
+      /usr/bin/plutil -insert "bottles.$bottle_index.sessions.$session_index.id" -string "$(basename "$file" .session)" "$tmp"
+      /usr/bin/plutil -insert "bottles.$bottle_index.sessions.$session_index.pid" -integer "$pid" "$tmp"
+      /usr/bin/plutil -insert "bottles.$bottle_index.sessions.$session_index.sync" -string "$sync" "$tmp"
+      /usr/bin/plutil -insert "bottles.$bottle_index.sessions.$session_index.mode" -string "$mode" "$tmp"
+      /usr/bin/plutil -insert "bottles.$bottle_index.sessions.$session_index.state" -string "$state" "$tmp"
+      /usr/bin/plutil -insert "bottles.$bottle_index.sessions.$session_index.startedAt" -integer "$started" "$tmp"
+      /usr/bin/plutil -insert "bottles.$bottle_index.sessions.$session_index.primaryExitedAt" -integer "$primary_exited" "$tmp"
+      session_index=$((session_index + 1))
+    done
+    bottle_index=$((bottle_index + 1))
+  done
+  mv -f "$tmp" "$output"
 }
 
 cyder_session_release() {
