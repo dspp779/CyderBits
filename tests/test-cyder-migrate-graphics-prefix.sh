@@ -3,7 +3,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "$ROOT/tests/assert.sh"
-source "$ROOT/scripts/cyder-migrate-graphics-prefix.sh"
+source "$ROOT/scripts/cyder-common.sh"
 
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/cyder-migrate-graphics-prefix.XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
@@ -44,5 +44,30 @@ assert_eq \
 assert test ! -e "$PREFIX/.cyder-runtime/dxvk-payload"
 assert test ! -e "$PREFIX/drive_c/windows/system32/winemetal.dll"
 assert test ! -e "$PREFIX/drive_c/windows/syswow64/winemetal.dll"
+
+ACTIVE_PREFIX="$TMP/active-prefix"
+mkdir -p \
+  "$ACTIVE_PREFIX/drive_c/windows/system32" \
+  "$ACTIVE_PREFIX/drive_c/windows/syswow64" \
+  "$ACTIVE_PREFIX/.cyder-runtime"
+printf 'old dxvk d3d11\n' >"$ACTIVE_PREFIX/drive_c/windows/system32/d3d11.dll"
+printf 'old dxvk d3d11\n' >"$ACTIVE_PREFIX/drive_c/windows/syswow64/d3d11.dll"
+printf 'old winemetal\n' >"$ACTIVE_PREFIX/drive_c/windows/system32/winemetal.dll"
+printf 'old winemetal\n' >"$ACTIVE_PREFIX/drive_c/windows/syswow64/winemetal.dll"
+: >"$ACTIVE_PREFIX/.cyder-runtime/dxvk-payload"
+
+cyder_has_running_prefix() { return 0; }
+active_output="$(
+  cyder_prepare_graphics_prefix "$ENGINE/bin/wine" "$ENGINE" "$ACTIVE_PREFIX"
+)"
+assert_contains "$active_output" "Deferred graphics DLL migration: prefix is in use" \
+  "active prefix migration must be clearly deferred"
+assert_eq "$(cat "$ACTIVE_PREFIX/drive_c/windows/system32/d3d11.dll")" "old dxvk d3d11" \
+  "active prefix system32 DLL must remain untouched"
+assert_eq "$(cat "$ACTIVE_PREFIX/drive_c/windows/syswow64/d3d11.dll")" "old dxvk d3d11" \
+  "active prefix syswow64 DLL must remain untouched"
+assert test -e "$ACTIVE_PREFIX/.cyder-runtime/dxvk-payload"
+assert test -e "$ACTIVE_PREFIX/drive_c/windows/system32/winemetal.dll"
+assert test -e "$ACTIVE_PREFIX/drive_c/windows/syswow64/winemetal.dll"
 
 echo "PASS test-cyder-migrate-graphics-prefix"

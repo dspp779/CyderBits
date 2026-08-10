@@ -2465,6 +2465,10 @@ cyder_prepare_graphics_prefix() {
     cyder_ensure_graphics || return $?
   fi
   if declare -F cyder_migrate_graphics_prefix >/dev/null 2>&1; then
+    if cyder_has_running_prefix "$prefix"; then
+      echo "Deferred graphics DLL migration: prefix is in use: $prefix"
+      return 0
+    fi
     cyder_migrate_graphics_prefix "$wine_bin" "$engine_root" "$prefix"
   fi
 }
