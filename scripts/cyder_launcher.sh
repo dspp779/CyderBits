@@ -62,6 +62,9 @@ Options:
   --ensure-rosetta-only Check Rosetta 2 on Apple Silicon and exit
   --stop-all          Stop all EXEs in the Cyder shared prefix and exit
   --has-running-exes  Exit 0 if the shared prefix has running EXEs, otherwise 1
+  --list-sessions     Print active Cyder bottles and sessions as an XML plist
+  --taskmgr-prefix PREFIX Open Wine Task Manager for a managed bottle
+  --stop-prefix PREFIX Stop one managed bottle and report failures
   --apply-settings-only Apply saved settings without installing the environment
   --install-winetricks VERB [...]  Install selected Winetricks components into the shared prefix
   --apply-settings-prefix PREFIX Apply saved settings to an existing bottle
@@ -86,6 +89,11 @@ ENSURE_ENGINE_ONLY=0
 ENSURE_ROSETTA_ONLY=0
 STOP_ALL=0
 HAS_RUNNING_EXES=0
+LIST_SESSIONS=0
+TASKMGR_PREFIX=""
+TASKMGR_PREFIX_SET=0
+STOP_PREFIX=""
+STOP_PREFIX_SET=0
 APPLY_SETTINGS_ONLY=0
 INSTALL_WINETRICKS=0
 WINETRICKS_VERBS=()
@@ -151,6 +159,22 @@ while [[ $# -gt 0 ]]; do
     --has-running-exes)
       HAS_RUNNING_EXES=1
       shift
+      ;;
+    --list-sessions)
+      LIST_SESSIONS=1
+      shift
+      ;;
+    --taskmgr-prefix)
+      [[ $# -ge 2 ]] || { echo "--taskmgr-prefix requires PREFIX" >&2; exit 1; }
+      TASKMGR_PREFIX="$2"
+      TASKMGR_PREFIX_SET=1
+      shift 2
+      ;;
+    --stop-prefix)
+      [[ $# -ge 2 ]] || { echo "--stop-prefix requires PREFIX" >&2; exit 1; }
+      STOP_PREFIX="$2"
+      STOP_PREFIX_SET=1
+      shift 2
       ;;
     --apply-settings-only)
       APPLY_SETTINGS_ONLY=1
@@ -267,6 +291,9 @@ primary_actions=0
 [[ "$LAUNCH_ONLY" -eq 1 ]] && primary_actions=$((primary_actions + 1))
 [[ "$STOP_ALL" -eq 1 ]] && primary_actions=$((primary_actions + 1))
 [[ "$HAS_RUNNING_EXES" -eq 1 ]] && primary_actions=$((primary_actions + 1))
+[[ "$LIST_SESSIONS" -eq 1 ]] && primary_actions=$((primary_actions + 1))
+[[ "$TASKMGR_PREFIX_SET" -eq 1 ]] && primary_actions=$((primary_actions + 1))
+[[ "$STOP_PREFIX_SET" -eq 1 ]] && primary_actions=$((primary_actions + 1))
 [[ "$TEMPLATES_READY" -eq 1 ]] && primary_actions=$((primary_actions + 1))
 [[ "$BOOTSTRAP_ONLY" -eq 1 ]] && primary_actions=$((primary_actions + 1))
 [[ "$HEALTH_CHECK" -eq 1 ]] && primary_actions=$((primary_actions + 1))
@@ -322,17 +349,59 @@ if [[ "$TEMPLATES_READY" -eq 1 ]]; then
 fi
 
 cyder_validate_bottle_prefix() {
-  local prefix="$1" root prefix_real root_real
+  local prefix="$1" root prefix_real root_real legacy_real
   [[ -d "$prefix" && ! -L "$prefix" ]] || { echo "Bottle prefix must be an existing non-symlink directory: $prefix" >&2; return 1; }
+  prefix_real="$(cd "$prefix" && pwd -P)"
+  if [[ -d "$CYDER_LEGACY_SHARED_PREFIX" && ! -L "$CYDER_LEGACY_SHARED_PREFIX" ]]; then
+    legacy_real="$(cd "$CYDER_LEGACY_SHARED_PREFIX" && pwd -P)"
+    if [[ "$prefix_real" == "$legacy_real" ]]; then
+      printf '%s\n' "$prefix_real"
+      return 0
+    fi
+  fi
   root="$CYDER_SUPPORT/bottles"
   [[ -d "$root" ]] || { echo "Bottle store is missing: $root" >&2; return 1; }
   root_real="$(cd "$root" && pwd -P)"
-  prefix_real="$(cd "$prefix" && pwd -P)"
   case "$prefix_real/" in
-    "$root_real"/*) printf '%s\n' "$prefix_real" ;;
+    "$root_real"/*)
+      [[ "$(dirname "$prefix_real")" == "$root_real" ]] || {
+        echo "Bottle prefix must be a direct child of $root: $prefix" >&2
+        return 1
+      }
+      printf '%s\n' "$prefix_real"
+      ;;
     *) echo "Bottle prefix must be inside $root: $prefix" >&2; return 1 ;;
   esac
 }
+
+if [[ "$LIST_SESSIONS" -eq 1 ]]; then
+  cyder_set_stage list-sessions
+  result_file="${CYDER_RESULT_FILE:-}"
+  if [[ -n "$result_file" ]]; then
+    mkdir -p "$(dirname "$result_file")"
+  else
+    result_file="$(mktemp "${TMPDIR:-/tmp}/cyder-sessions.XXXXXX")"
+  fi
+  cyder_write_active_bottles_plist "$result_file"
+  cat "$result_file"
+  [[ -n "${CYDER_RESULT_FILE:-}" ]] || rm -f "$result_file"
+  exit 0
+fi
+
+if [[ "$TASKMGR_PREFIX_SET" -eq 1 || "$STOP_PREFIX_SET" -eq 1 ]]; then
+  requested_prefix="$TASKMGR_PREFIX"
+  [[ "$STOP_PREFIX_SET" -eq 0 ]] || requested_prefix="$STOP_PREFIX"
+  prefix="$(cyder_validate_bottle_prefix "$requested_prefix")" || exit 2
+  engine="$CYDER_ENGINES/$CYDER_ENGINE_NAME"
+  if [[ "$TASKMGR_PREFIX_SET" -eq 1 ]]; then
+    cyder_set_stage taskmgr-prefix
+    cyder_open_prefix_taskmgr "$engine/bin/wine" "$prefix"
+  else
+    cyder_set_stage stop-prefix
+    cyder_stop_managed_prefix "$engine/bin/wineserver" "$prefix"
+  fi
+  exit $?
+fi
 
 if [[ "$APPLY_SETTINGS_PREFIX_SET" -eq 1 ]]; then
   [[ "$APPLY_SETTINGS_ONLY" -eq 0 ]] || { echo "choose only one settings action" >&2; exit 1; }

@@ -34,7 +34,8 @@ set -e
 assert_eq "$not_ready_status" "2" "launch-exe must not create a missing environment"
 assert_contains "$not_ready_out" "open Cyder.app" "launch-exe should direct the user to manual setup"
 
-mkdir -p "$TMP/bin" "$TMP/runtime/Engines/wine-x86_64/bin" "$TMP/support/bottles/shared"
+mkdir -p "$TMP/bin" "$TMP/runtime/Engines/wine-x86_64/bin" \
+  "$TMP/support/bottles/shared" "$TMP/support/bottles/profile-stop-test"
 cat >"$TMP/bin/arch" <<'SH'
 #!/usr/bin/env bash
 [[ "${1:-}" == -x86_64 ]] && shift
@@ -52,6 +53,8 @@ CYDER_TEST_STOP_LOG="$TMP/stop.log" CYDER_SUPPORT="$TMP/support" PATH="$TMP/bin:
   bash "$ROOT/scripts/cyder_launcher.sh" --stop-all >/dev/null 2>&1
 stop_output="$(cat "$TMP/stop.log")"
 assert_contains "$stop_output" "$TMP/support/bottles/shared|-k" "stop-all should kill the shared-bottle wineserver"
+assert_contains "$stop_output" "$TMP/support/bottles/profile-stop-test|-k" \
+  "stop-all should include per-game bottles"
 
 set +e
 CYDER_SUPPORT="$TMP/support" bash "$ROOT/scripts/cyder_launcher.sh" --has-running-exes >/dev/null 2>&1
@@ -63,6 +66,9 @@ assert_eq "$running_status" "1" "inactive shared prefix should report no running
 # must not stream-decompress the engine archive merely to rediscover a version.
 cat >"$TMP/runtime/Engines/wine-x86_64/bin/wine" <<'SH'
 #!/usr/bin/env bash
+if [[ -n "${CYDER_TEST_TASKMGR_LOG:-}" ]]; then
+  printf '%s|%s|%s|%s\n' "${WINEPREFIX:-}" "$*" "${WINEMSYNC:-}" "${WINEESYNC:-}" >>"$CYDER_TEST_TASKMGR_LOG"
+fi
 exit 0
 SH
 chmod +x "$TMP/runtime/Engines/wine-x86_64/bin/wine"
@@ -269,16 +275,21 @@ sleep 0.2
 exit 0
 SH
 chmod +x "$TMP/fake-bin/wine-activates"
+mkdir -p "$TMP/fake-bin/activated"
+cp "$TMP/fake-bin/wine-activates" "$TMP/fake-bin/activated/wine"
+cp /usr/bin/true "$TMP/fake-bin/activated/wineserver"
 activated_result="$TMP/activated.result"
 activated_marker="$TMP/activated.marker"
+activated_lifecycle="$TMP/activated.lifecycle"
 CYDER_SUPPORT="$TMP/activated-support" \
 CYDER_SCRIPTS="$ROOT/scripts" \
 CYDER_WINE_DETACH=1 \
 CYDER_WINE_PID_FILE="$TMP/activated.pid" \
 CYDER_WINE_RESULT_FILE="$activated_result" \
 CYDER_WINE_ACTIVATED_FILE="$activated_marker" \
+CYDER_WINE_LIFECYCLE_FILE="$activated_lifecycle" \
 PATH="$TMP/fake-bin:$PATH" \
-  bash -c 'source "$1/scripts/cyder-common.sh"; cyder_init_paths "$1"; cyder_run_wine_exe "$2/wine-activates" "$3"' \
+  bash -c 'source "$1/scripts/cyder-common.sh"; cyder_init_paths "$1"; cyder_run_wine_exe "$2/activated/wine" "$3"' \
     _ "$ROOT" "$TMP/fake-bin" "$TMP/foreground-test.exe"
 : >"$activated_marker"
 for _ in {1..30}; do
@@ -287,6 +298,12 @@ for _ in {1..30}; do
 done
 assert test ! -e "$activated_result"
 assert test ! -e "$activated_marker"
+for _ in {1..30}; do
+  grep -q '^state=stopped$' "$activated_lifecycle" 2>/dev/null && break
+  sleep 0.1
+done
+assert_contains "$(cat "$activated_lifecycle")" "state=stopped" \
+  "activated launches must publish bottle completion after wineserver wait"
 
 # Per-game profile routing provisions a fresh bottle for the installed engine.
 profile_support="$TMP/profile-support"
@@ -300,6 +317,8 @@ elif [[ "${1:-}" == wineboot ]]; then
   : >"$WINEPREFIX/system.reg"
   : >"$WINEPREFIX/user.reg"
   : >"$WINEPREFIX/drive_c/windows/system32/kernel32.dll"
+elif [[ "${1:-}" == taskmgr && -n "${CYDER_TEST_TASKMGR_LOG:-}" ]]; then
+  printf '%s|%s|%s|%s\n' "${WINEPREFIX:-}" "$*" "${WINEMSYNC:-}" "${WINEESYNC:-}" >>"$CYDER_TEST_TASKMGR_LOG"
 fi
 SH
 chmod +x "$TMP/runtime/Engines/wine-x86_64/bin/wine"
@@ -388,6 +407,58 @@ fi
 if CYDER_SUPPORT="$profile_support" \
   bash "$ROOT/scripts/cyder_launcher.sh" --session-acquire "$session_prefix" "$$" 1 1 normal >/dev/null 2>&1; then
   echo "dual sync session unexpectedly accepted" >&2
+  exit 1
+fi
+
+# The native status item consumes one plist that covers shared and profile
+# bottles. A live reservation counts as active even before wineserver starts.
+status_session="$(CYDER_SUPPORT="$profile_support" \
+  bash "$ROOT/scripts/cyder_launcher.sh" --session-acquire "$session_prefix" "$$" 0 0 normal)"
+sessions_plist="$TMP/active-sessions.plist"
+CYDER_SUPPORT="$profile_support" CYDER_RESULT_FILE="$sessions_plist" \
+  bash "$ROOT/scripts/cyder_launcher.sh" --list-sessions >"$TMP/active-sessions.stdout"
+assert_eq "$(/usr/bin/plutil -extract bottles.0.prefix raw -o - "$sessions_plist")" \
+  "$(cd "$session_prefix" && pwd -P)" "session list should include a live profile bottle"
+assert_eq "$(/usr/bin/plutil -extract bottles.0.state raw -o - "$sessions_plist")" \
+  "running" "live primary session should report running"
+assert_eq "$(/usr/bin/plutil -extract bottles.0.sessions.0.pid raw -o - "$sessions_plist")" \
+  "$$" "session list should publish the primary PID"
+CYDER_SUPPORT="$profile_support" \
+  bash "$ROOT/scripts/cyder_launcher.sh" --session-release "$session_prefix" "$status_session"
+empty_plist="$TMP/empty-sessions.plist"
+CYDER_SUPPORT="$profile_support" CYDER_RESULT_FILE="$empty_plist" \
+  bash "$ROOT/scripts/cyder_launcher.sh" --list-sessions >/dev/null
+assert_eq "$(/usr/bin/plutil -extract bottles raw -o - "$empty_plist")" "0" \
+  "empty session list should remain a valid plist array"
+
+# Prefix actions reject paths outside the managed bottle store. Task Manager
+# detaches immediately, while stop-prefix preserves wineserver failures.
+taskmgr_log="$TMP/taskmgr.log"
+taskmgr_session="$(CYDER_SUPPORT="$profile_support" \
+  bash "$ROOT/scripts/cyder_launcher.sh" --session-acquire "$session_prefix" "$$" 1 0 normal)"
+CYDER_SUPPORT="$profile_support" CYDER_TEST_TASKMGR_LOG="$taskmgr_log" \
+  bash "$ROOT/scripts/cyder_launcher.sh" --taskmgr-prefix "$session_prefix"
+for _ in {1..100}; do [[ -s "$taskmgr_log" ]] && break; sleep 0.01; done
+assert_contains "$(cat "$taskmgr_log")" "$session_prefix|taskmgr" \
+  "task manager should target the selected bottle"
+assert_contains "$(cat "$taskmgr_log")" "$session_prefix|taskmgr|1|" \
+  "task manager should inherit the active bottle MSync protocol"
+CYDER_SUPPORT="$profile_support" \
+  bash "$ROOT/scripts/cyder_launcher.sh" --session-release "$session_prefix" "$taskmgr_session"
+prefix_stop_log="$TMP/prefix-stop.log"
+CYDER_SUPPORT="$profile_support" CYDER_TEST_STOP_LOG="$prefix_stop_log" PATH="$TMP/bin:$PATH" \
+  bash "$ROOT/scripts/cyder_launcher.sh" --stop-prefix "$session_prefix"
+assert_contains "$(cat "$prefix_stop_log")" "$session_prefix|-k" \
+  "stop-prefix should terminate the selected bottle"
+if CYDER_SUPPORT="$profile_support" CYDER_TEST_STOP_LOG="$prefix_stop_log" \
+  CYDER_TEST_STOP_FAIL=1 PATH="$TMP/bin:$PATH" \
+  bash "$ROOT/scripts/cyder_launcher.sh" --stop-prefix "$session_prefix" >/dev/null 2>&1; then
+  echo "failed wineserver stop unexpectedly reported success" >&2
+  exit 1
+fi
+if CYDER_SUPPORT="$profile_support" \
+  bash "$ROOT/scripts/cyder_launcher.sh" --taskmgr-prefix "$TMP" >/dev/null 2>&1; then
+  echo "out-of-scope task manager prefix unexpectedly accepted" >&2
   exit 1
 fi
 
