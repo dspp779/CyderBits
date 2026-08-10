@@ -18,6 +18,13 @@ if [[ -f "$_graphics_sh" ]]; then
 fi
 unset _graphics_sh
 
+_migrate_graphics_sh="$CYDER_COMMON_DIR/cyder-migrate-graphics-prefix.sh"
+if [[ -f "$_migrate_graphics_sh" ]]; then
+  # shellcheck source=cyder-migrate-graphics-prefix.sh
+  source "$_migrate_graphics_sh"
+fi
+unset _migrate_graphics_sh
+
 cyder_engine_artifacts_dir() {
   local root="${OGOM:-$(cd "$CYDER_COMMON_DIR/.." && pwd)}"
   printf '%s\n' "${CYDER_ENGINE_ARTIFACTS_DIR:-$root/dist/artifacts}"
@@ -2447,10 +2454,26 @@ cyder_shared_prefix_is_ready() {
   return 0
 }
 
+cyder_prepare_graphics_prefix() {
+  local wine_bin="$1" engine_root="$2" prefix="${3:-$CYDER_SHARED_PREFIX}"
+
+  # Bundled Cyder opens install/update the runtime payload before inspecting an
+  # existing bottle. Source check keeps development/bootstrap fixtures usable
+  # when no app graphics payload has been packaged.
+  if declare -F cyder_graphics_source_dir >/dev/null 2>&1 &&
+     cyder_graphics_source_dir >/dev/null 2>&1; then
+    cyder_ensure_graphics || return $?
+  fi
+  if declare -F cyder_migrate_graphics_prefix >/dev/null 2>&1; then
+    cyder_migrate_graphics_prefix "$wine_bin" "$engine_root" "$prefix"
+  fi
+}
+
 cyder_bootstrap_shared_prefix() {
   local wine_bin="$1"
   local engine_root="$2"
   CYDER_BOOTSTRAP_HEALTH_CHECKED=0
+  cyder_prepare_graphics_prefix "$wine_bin" "$engine_root" "$CYDER_SHARED_PREFIX" || return $?
   if cyder_shared_prefix_is_ready "$wine_bin"; then
     return 0
   fi
