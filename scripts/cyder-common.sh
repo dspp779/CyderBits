@@ -11,6 +11,13 @@ if [[ -f "$_rosetta_sh" ]]; then
 fi
 unset _rosetta_sh
 
+_graphics_sh="$CYDER_COMMON_DIR/cyder-ensure-graphics.sh"
+if [[ -f "$_graphics_sh" ]]; then
+  # shellcheck source=cyder-ensure-graphics.sh
+  source "$_graphics_sh"
+fi
+unset _graphics_sh
+
 cyder_engine_artifacts_dir() {
   local root="${OGOM:-$(cd "$CYDER_COMMON_DIR/.." && pwd)}"
   printf '%s\n' "${CYDER_ENGINE_ARTIFACTS_DIR:-$root/dist/artifacts}"
