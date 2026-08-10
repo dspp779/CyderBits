@@ -8,6 +8,7 @@ import sys
 from pathlib import Path
 
 DOS_HEADER_SIZE = 64
+COFF_HEADER_SIZE = 20
 BUILTIN_SIGNATURE = b"Wine builtin DLL" + b"\0" * 16
 
 
@@ -26,6 +27,13 @@ def stamp_dll(path: Path) -> bool:
             file.seek(pe_offset)
             if file.read(4) != b"PE\0\0":
                 raise ValueError("missing PE signature")
+
+            coff_header = file.read(COFF_HEADER_SIZE)
+            if len(coff_header) != COFF_HEADER_SIZE:
+                raise ValueError("truncated COFF header")
+            optional_header_size = struct.unpack_from("<H", coff_header, 16)[0]
+            if len(file.read(optional_header_size)) != optional_header_size:
+                raise ValueError("truncated optional header")
 
             file.seek(DOS_HEADER_SIZE)
             if file.read(len(BUILTIN_SIGNATURE)) == BUILTIN_SIGNATURE:

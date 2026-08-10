@@ -12,11 +12,12 @@ from pathlib import Path
 import struct
 import sys
 
-data = bytearray(160)
+data = bytearray(192)
 data[:2] = b"MZ"
 data[64:96] = b"unpatched DOS stub data........"
 struct.pack_into("<I", data, 60, 120)
 data[120:124] = b"PE\0\0"
+struct.pack_into("<H", data, 120 + 4 + 16, 32)
 Path(sys.argv[1]).write_bytes(data)
 PY
 
@@ -40,6 +41,50 @@ after="$(shasum -a 256 "$DLL")"
 printf 'not a PE' >"$TMP/not-pe.dll"
 if python3 "$STAMP" "$TMP/not-pe.dll"; then
   echo "FAIL: non-PE input was accepted" >&2
+  exit 1
+fi
+
+TRUNCATED="$TMP/truncated-pe.dll"
+python3 - "$TRUNCATED" <<'PY'
+from pathlib import Path
+import struct
+import sys
+
+data = bytearray(124)
+data[:2] = b"MZ"
+struct.pack_into("<I", data, 60, 120)
+data[120:124] = b"PE\0\0"
+Path(sys.argv[1]).write_bytes(data)
+PY
+
+if python3 "$STAMP" "$TRUNCATED"; then
+  echo "FAIL: truncated PE input was accepted" >&2
+  exit 1
+fi
+
+python3 - "$TRUNCATED" <<'PY'
+from pathlib import Path
+import sys
+
+assert Path(sys.argv[1]).read_bytes()[64:96] != b"Wine builtin DLL" + b"\0" * 16
+PY
+
+TRUNCATED_OPTIONAL="$TMP/truncated-optional-header.dll"
+python3 - "$TRUNCATED_OPTIONAL" <<'PY'
+from pathlib import Path
+import struct
+import sys
+
+data = bytearray(144)
+data[:2] = b"MZ"
+struct.pack_into("<I", data, 60, 120)
+data[120:124] = b"PE\0\0"
+struct.pack_into("<H", data, 120 + 4 + 16, 32)
+Path(sys.argv[1]).write_bytes(data)
+PY
+
+if python3 "$STAMP" "$TRUNCATED_OPTIONAL"; then
+  echo "FAIL: truncated optional header input was accepted" >&2
   exit 1
 fi
 
