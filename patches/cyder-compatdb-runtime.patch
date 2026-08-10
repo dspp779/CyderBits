@@ -1187,8 +1187,7 @@
 +        {
 +            if (!backend_has_module( path, machine, modules[i] )) continue;
 +            found = TRUE;
-+            if (!add_backend_override( applied, modules[i],
-+                                       !strcmp( backend, "dxvk" ) ? "n,b" : "b" ))
++            if (!add_backend_override( applied, modules[i], "b" ))
 +                return FALSE;
 +        }
 +        if (!found) goto unavailable;
