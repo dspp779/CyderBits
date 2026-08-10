@@ -16,6 +16,7 @@
 | `link-wine-runtime-libs.sh` | 包裝用 wrapper → `bundle-wine-dylibs.sh` |
 | `run-build-wine-bg.sh` | 背景建置 helper |
 | `wait-and-build-wine.sh` | 等待條件後建置 |
+| `stamp-wine-builtin-pe.py` | 將 DXVK PE DLL 寫入 Wine builtin signature；供 graphics payload 打包時使用，使 CompatDB 的 builtin + prepend 可載入 |
 
 ## BlueCG 執行與調校
 
@@ -33,11 +34,14 @@
 
 | 腳本 | 用途 |
 |------|------|
-| `pack-engine-artifact.sh` | strip + bundle + sign + 預設 xz 最高壓縮比 → `engine-wine-x86_64-CX26-<winever>.tar.xz`；`--zstd` / `CYDER_ENGINE_FORMAT=zstd` 產出 `engine-CX26-<winever>.tar.zst` |
-| `cyder-copy-engine-artifact.sh` | 複製預建 artifact 進 app `Resources/` |
-| `create-cyder-app.sh` | `dist/Cyder.app`（`.exe` 啟動器 + engine artifact + bootstrap） |
+| `pack-graphics-payloads.sh` | 從 engine 的 `lib/dxvk`／`lib/dxmt` 製作獨立 zstd archive、version 與 SHA-256 sidecar 到 `dist/artifacts/graphics/`；DXVK staging DLL 會先加 Wine builtin signature |
+| `pack-engine-artifact.sh` | strip + bundle + sign + 預設 xz 最高壓縮比 → `engine-wine-x86_64-CX26-<winever>.tar.xz`；排除 `lib/dxvk`／`lib/dxmt`，`--zstd` / `CYDER_ENGINE_FORMAT=zstd` 產出 `engine-CX26-<winever>.tar.zst` |
+| `cyder-copy-engine-artifact.sh` | 複製預建 engine artifact 進 app `Resources/` |
+| `create-cyder-app.sh` | `dist/Cyder.app`（`.exe` 啟動器 + engine artifact + graphics payload + bootstrap） |
 | `release-cyder.sh` | 測試／正式通道：建置、簽署、（正式）公證與 `Cyder.app.zip`；見 `docs/release-pipeline.zh-TW.md` |
-| `cyder_launcher.sh` | 解析 `.exe`、bootstrap `bottles/shared`、執行 Wine；`--ensure-engine-only` / `--bootstrap-only` / `--launch-exe` 是 Cyder GUI 的內部維護介面，不是 Cyder.app 公開 argv |
+| `cyder-ensure-graphics.sh` | 將 app `Resources/graphics/` payload 依 version／SHA-256 安裝到 runtime，更新 `current-dxvk`／`current-dxmt`，並建立 engine `lib` 相對 symlink |
+| `cyder-migrate-graphics-prefix.sh` | 偵測舊 Cyder 拷入的 DXVK／DXMT DLL，還原 Wine 內建 `d3d*`／`dxgi`、移除 `winemetal.dll` 與舊 payload marker；不修改 DllOverrides registry |
+| `cyder_launcher.sh` | 解析 `.exe`、bootstrap `bottles/shared`、執行 Wine；`--ensure-engine-only` / `--ensure-graphics-only` / `--bootstrap-only` / `--launch-exe` 是 Cyder GUI 的內部維護介面，不是 Cyder.app 公開 argv；Finder `.exe` 路徑不升級 graphics payload |
 | `cyder-winetricks.sh` | 以 Cyder engine 的 unattended CLI 安裝固定版 Winetricks 元件；目標為 SharedPrefix，供 Cyder 原生元件選擇器呼叫 |
 | `cyder_app_main.swift` | 編譯為 `Cyder.app/Contents/MacOS/Cyder`（Universal）；無 `.exe` 時顯示設定頁，有 `.exe` 時直接啟動 Wine，收到 same-prefix 的 `ActivatingAppPID` Foreground 通知後 activate 並退出 |
 | `create-cyder-pid-test-app.sh` | 建立 `dist/CyderPIDTest.app` Universal 測試工具 |
@@ -64,6 +68,7 @@ build-wine.sh
 
 create-cyder-app.sh
     → bundle-wine-dylibs.sh, sign-wine.sh, strip-wine-install.sh
+    → dist/artifacts/graphics/（由 pack-graphics-payloads.sh 預先產生）
     → cyder_launcher.sh（執行時）
     → install-wine-mono.sh, install-libarchive-tar.sh, enable-mac-retina-hires.sh（bootstrap）
 
@@ -72,7 +77,7 @@ create-cyderbits-app.sh
     → cyder_create_game_app.py（執行時）
 
 cyder_launcher.sh
-    → cyder-common.sh（ensure_shared_engine, bootstrap_shared_prefix, run_wine_exe）
+    → cyder-common.sh（ensure_shared_engine, cyder_ensure_graphics, bootstrap_shared_prefix, run_wine_exe）
 
 cyder_create_game_app.py
     → cyder_common（ensure_shared_engine, init_bottle, apply_mac_hires）
@@ -99,6 +104,10 @@ run-bluecg.sh
 | `tests/test-cyder-exe-association.sh` | `cyder-exe-association.swift status` |
 | `tests/test-install-libarchive-tar.sh` | `install-libarchive-tar.sh` |
 | `tests/test-cyder-bootstrap.sh` | `cyder_launcher.sh --bootstrap-only`（需 Wine） |
+| `tests/test-cyder-graphics-prepend-patch.sh` | CompatDB DXVK 使用 builtin + prepend，而非 native-first `n,b` |
+| `tests/test-cyder-pack-graphics-payloads.sh` | DXVK／DXMT 獨立 archive、sidecar 與 DXVK PE signature |
+| `tests/test-cyder-ensure-graphics.sh` | runtime payload 安裝、版本切換與 engine symlink |
+| `tests/test-cyder-migrate-graphics-prefix.sh` | 舊 prefix 的 Wine builtin DLL 還原與 `winemetal.dll` 清除 |
 | `tests/test-strip-wine-install.sh` | `strip-wine-install.sh`（零風險剝離） |
 | `tests/test-universal-zstd.sh` | bundled zstd slices、deployment target、依賴與無外部工具解壓 |
 

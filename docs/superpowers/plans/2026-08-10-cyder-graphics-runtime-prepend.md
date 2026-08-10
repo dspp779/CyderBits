@@ -36,14 +36,17 @@
 
 ### Task 1: CompatDB — DXVK uses `b` + prepend (like DXMT)
 
+> **Amendment (user 2026-08-10):** CrossOver DXVK PE carries the `"Wine builtin DLL"` stamp. Stock Cyder DXVK does not, so `b`+prepend alone is ignored by Wine. Task 1 also stamps DXVK PE (offset 64, 32 bytes) in `build-dxvk.sh` / install tree; loaddll smoke must show differing builtin addresses. See `.superpowers/sdd/task-1-amendment-stamp-dxvk.md`.
+
 **Files:**
 - Modify: `patches/cyder-compatdb-runtime.patch` (and `patches/cyder-compatdb-runtime-oem25.patch` if present with the same ternary)
 - Modify: matching patch under `/Users/jjc/cyder-wine-engine/patches/` (authoritative rebuild source)
-- Test: `tests/test-cyder-compatdb-wine-runtime.sh` and/or a new focused assert on patch text + loaddll smoke helper
+- Create: `scripts/stamp-wine-builtin-pe.py` (or equivalent) + wire into `scripts/build-dxvk.sh`
+- Test: `tests/test-cyder-compatdb-wine-runtime.sh` and/or a new focused assert on patch text + loaddll smoke helper; stamp unit test
 
 **Interfaces:**
 - Consumes: existing `apply_graphics_backend()`, `backend_has_module()`, `prepend_dll_path()`
-- Produces: DXVK branch uses load order `"b"` (same as non-dxvk backends in the ternary)
+- Produces: DXVK branch uses load order `"b"` (same as non-dxvk backends in the ternary); DXVK PE under `lib/dxvk` is Wine-builtin-stamped like CX/DXMT
 
 - [ ] **Step 1: Write failing test that the patch must not use `n,b` for dxvk**
 
@@ -336,9 +339,9 @@ EOF
 - Modify: `docs/scripts.md` — new scripts
 - Mark: `docs/superpowers/specs/2026-08-10-cyder-graphics-runtime-prepend-design.md` status → 已核准／實作中
 
-- [ ] **Step 1: Update user/docs strings to match behavior**
+- [x] **Step 1: Update user/docs strings to match behavior**
 
-- [ ] **Step 2: Manual checklist from spec §3.4**
+- [x] **Step 2: Manual checklist from spec §3.4**
 
 - [ ] New bottle: no DXVK copy; d3d11 = Wine builtin  
 - [ ] Force each backend: bottle d3d11 hash unchanged; loaddll matches prepend model  
@@ -347,7 +350,7 @@ EOF
 - [ ] GPTK missing does not block Cyder  
 - [ ] Engine tar has no lib/dxvk|dxmt; app has Resources/graphics  
 
-- [ ] **Step 3: Commit docs**
+- [x] **Step 3: Commit docs**
 
 ```bash
 git commit -m "$(cat <<'EOF'

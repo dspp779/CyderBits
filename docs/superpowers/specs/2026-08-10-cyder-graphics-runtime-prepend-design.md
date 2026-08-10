@@ -1,7 +1,7 @@
 # Cyder：圖形後端改為 runtime prepend（對齊 CrossOver）
 
 日期：2026-08-10  
-狀態：草稿（§1–§3 已於對話中核准，待文件審閱）  
+狀態：已核准／實作中（自動化契約測試已完成；Wine、封裝 app 與實際遊戲煙測仍待手動驗證）
 相關：
 
 - `docs/superpowers/specs/2026-07-28-cyder-graphics-backends-design.md`
@@ -156,12 +156,17 @@ Cyder 應對齊：
 
 ### 3.4 驗證清單
 
+自動化 fixture／契約測試已覆蓋 payload 打包與 checksum、runtime 解壓與
+`current-*`／engine symlink、舊 prefix DLL 還原與 `winemetal.dll` 移除、以及
+Cyder 開啟與 Finder `.exe` 路徑的更新分流。下列為尚待具備 Wine、封裝 app
+與實際遊戲環境的手動驗證，不可視為已完成遊戲煙測：
+
 - [ ] 新 bottle：bootstrap **不**拷 DXVK；d3d11 hash = 引擎 Wine 內建。
-- [ ] 強制 dxvk／dxmt／d3dmetal／wined3d：bottle d3d11 hash 不變；loaddll 行為符合 prepend 模型。
+- [ ] 強制 dxvk／dxmt／d3dmetal／wined3d：bottle d3d11 hash 不變；`WINEDEBUG=+loaddll` 行為符合 builtin + prepend 模型。
 - [ ] 舊 bottle（曾 install-dxvk-prefix）：開一次 Cyder 後 d3d11 回到 Wine 內建。
 - [ ] 開 Cyder 更新 graphics version；Finder 開 EXE 不觸發解壓（可用 marker mtime／log 斷言）。
 - [ ] GPTK 缺失不擋開 Cyder。
-- [ ] Engine pack 無 `lib/dxvk`／`lib/dxmt`；app 含 graphics archives；MoltenVK 仍在引擎。
+- [ ] 實際 engine tar 無 `lib/dxvk`／`lib/dxmt`；封裝 app 含 graphics archives；MoltenVK 仍在引擎。
 
 ---
 

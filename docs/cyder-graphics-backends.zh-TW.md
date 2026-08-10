@@ -8,11 +8,28 @@ Cyder 0.8.0 起，可在 **Cyder 偏好設定 → 圖形** 或個別遊戲設定
 |------|------|
 | **default** | 跟隨 CompatDB／引擎預設；不注入後端覆寫 |
 | **wined3d** | Wine 內建 Direct3D；相容性較廣，效能通常較差 |
-| **dxvk** | Vulkan→Metal（MoltenVK）；需引擎內建 DXVK |
-| **dxmt** | Direct3D→Metal（DXMT）；需引擎 `lib/dxmt`（v0.80）與 macOS 15+ |
+| **dxvk** | Vulkan→Metal（MoltenVK）；需 Cyder 已安裝 DXVK runtime payload |
+| **dxmt** | Direct3D→Metal（DXMT）；需 Cyder 已安裝 DXMT runtime payload 與 macOS 15+ |
 | **d3dmetal** | Apple D3DMetal／GPTK；需 macOS 14+ 且本機有可用 GPTK |
 
 個別遊戲可覆寫全域設定；選「跟隨全域」表示不覆寫。
+
+## Runtime 圖形元件與啟動方式
+
+DXVK 與 DXMT 是 Cyder.app 內 `Resources/graphics/` 的獨立 payload，不再包在
+Wine engine archive。Cyder.app 開啟時會依 version／SHA-256 sidecar 將 payload
+解壓到 `~/.cyder/runtime/graphics/`，再由 engine 的 `lib/dxvk`／`lib/dxmt`
+相對 symlink 指向目前版本；MoltenVK 仍由 Wine engine 提供。
+
+切換 DXVK、DXMT、D3DMetal 或 WineD3D 不會把後端 DLL 拷進 bottle 的
+`system32`／`syswow64`。這些位置維持 Wine 內建 `d3d*`／`dxgi`；Wine 的
+CompatDB 在遊戲啟動時以 **builtin + prepend** 方式從 runtime payload 載入選定後端。
+舊版 Cyder 曾寫入 DXVK／DXMT DLL 的 bottle，會在開啟 Cyder.app 時遷移回 Wine
+內建 DLL（不會清除使用者的 DllOverrides registry 設定）。
+
+- **從 Cyder.app 開啟設定或遊戲庫**：會先確認 engine，更新 graphics payload，並對未使用中的 shared bottle 執行遷移。
+- **在 Finder 直接開啟 `.exe`**：不解壓或升級 payload，只使用現有 `current-dxvk`／`current-dxmt`。若所選後端完全不存在，該次會回退到 default／WineD3D，並提示先開啟 Cyder.app。
+- **GPTK**：只更新偵測狀態；未安裝不會阻止開啟 Cyder.app。
 
 ## DXVK 限幀 vs 遊戲內 VSync
 
@@ -68,10 +85,24 @@ D3DMetal 需要 Apple Game Porting Toolkit（GPTK）。**Cyder 不內建、不�
 | 狀況 | 處理 |
 |------|------|
 | D3DMetal 無法選取 | 確認 macOS ≥ 14；安裝 CrossOver 或從評估 DMG 安裝 GPTK |
-| DXMT 無法選取 | 確認 macOS ≥ 15；確認 engine 含 `lib/dxmt`（封裝版應已內建 v0.80） |
-| DXVK 選項灰掉 | 引擎缺 DXVK／MoltenVK（0.8.0 出貨版不應發生） |
+| DXMT 無法選取 | 確認 macOS ≥ 15；先開啟 Cyder.app，使 DXMT runtime payload 安裝完成 |
+| DXVK 選項灰掉 | 先開啟 Cyder.app，使 DXVK runtime payload 安裝完成；同時確認 engine 有 MoltenVK |
 | 改後端後畫面異常 | 先改回 **default** 或 **wined3d** 再重啟遊戲 |
 | 限幀無效 | 檢查遊戲是否強制 VSync；見上方「限幀 vs VSync」 |
+
+## 驗證狀態
+
+已由自動化 fixture／契約測試覆蓋：graphics archive 的 version 與 checksum、
+runtime 解壓與 `current-*`／engine symlink 更新、舊 bottle DLL 還原與
+`winemetal.dll` 移除、以及 Cyder 開啟與 Finder `.exe` 路徑的更新分流。
+
+下列仍須在具備 Wine、已封裝 Cyder.app 與實際遊戲的環境手動確認；尚未宣告遊戲煙測完成：
+
+- 新 bottle bootstrap 未拷 DXVK，且 `d3d11.dll` hash 等於 Wine 內建版本。
+- 強制 dxvk／dxmt／d3dmetal／wined3d 時，bottle hash 不變，`WINEDEBUG=+loaddll` 顯示 builtin + prepend 行為。
+- 曾安裝舊 DXVK 的真實 bottle 在開啟 Cyder.app 後完成遷移。
+- Cyder.app 會升級 payload、Finder 不會（以 log 或 marker mtime 確認）。
+- GPTK 缺失仍可進入 Cyder.app；實際 engine tar 無 `lib/dxvk`／`lib/dxmt`、app 含 `Resources/graphics/` 且 engine 仍有 MoltenVK。
 
 ## 相關文件
 
