@@ -89,9 +89,14 @@ for raw in "$@"; do
   fi
 done
 
-# An explicit EXE is a launch request, never a request for native UI. Keep the
-# Wine execution path shell-only on every supported macOS version.
+# On macOS 11+, explicit EXE launches also pass through the native lifecycle
+# agent so the menu-bar status remains available until the bottle is idle.
+# Catalina deliberately retains the shell-only fallback.
 if [[ -n "$exe" ]]; then
+  if cyder_macos_at_least 11 0 && [[ -x "$SELF/CyderSwift" ]] \
+     && /usr/bin/file -b "$SELF/CyderSwift" 2>/dev/null | grep -q 'Mach-O'; then
+    exec "$SELF/CyderSwift" "$exe" "${game_args[@]}"
+  fi
   if ! cyder_macos_at_least 11 0 && ! cyder_catalina_environment_ready; then
     cyder_start_catalina_bootstrap "$exe" "${game_args[@]}"
     exit $?

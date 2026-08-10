@@ -10,14 +10,10 @@ catalina_bootstrap="$(cat "$ROOT/scripts/cyder-catalina-bootstrap.command")"
 assert test -x "$ROOT/scripts/cyder-catalina-bootstrap.command"
 assert_contains "$wrapper" 'cyder_macos_at_least 11 0' \
   "wrapper must route no-argument macOS 11+ launches to CyderSwift"
-swift_gate_line="$(printf '%s\n' "$wrapper" | grep -n 'cyder_macos_at_least 11 0' | head -n 1 | cut -d: -f1)"
-bash_launch_line="$(printf '%s\n' "$wrapper" | grep -n 'An explicit EXE is a launch request' | head -n 1 | cut -d: -f1)"
-[[ "$bash_launch_line" =~ ^[0-9]+$ && "$swift_gate_line" =~ ^[0-9]+$ && "$bash_launch_line" -lt "$swift_gate_line" ]] || {
-  echo "ASSERT failed: explicit EXE routing must occur before the Swift UI gate" >&2
-  exit 1
-}
+assert_contains "$wrapper" 'exec "$SELF/CyderSwift" "$exe" "${game_args[@]}"' \
+  "explicit EXE arguments on macOS 11+ must enter the native lifecycle agent"
 assert_contains "$wrapper" 'exec "$SCRIPTS/cyder_launcher.sh" --engine-src "$ENGINE_SRC" --launch-exe "$exe"' \
-  "explicit EXE arguments must go directly to the Bash launcher"
+  "Catalina explicit EXE arguments must retain the Bash fallback"
 assert_not_contains "$wrapper" 'CyderLegacyUI.app' \
   "wrapper must not retain the removed Catalina applet"
 assert_contains "$wrapper" 'cyder_catalina_environment_ready' \

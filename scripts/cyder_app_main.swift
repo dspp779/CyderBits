@@ -26,6 +26,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
     // per-game arguments. A non-nil value came from the new application's argv
     // and replaces the saved arguments for this launch only.
     private var pendingLaunchArguments: [String]?
+    private var queuedExecutableFiles: [String] = []
     private var didFinishLaunch = false
     private var didRunLauncher = false
     private var libraryLaunchInProgress = false
@@ -36,6 +37,27 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
     private var openingGameLibrary = false
     private var environmentPreparationInProgress = false
     private var wineActivationWaiter: WineActivationWaiter?
+    private var quitWhenSessionsEnd = false
+    private lazy var statusItemController: CyderStatusItemController = {
+        let controller = CyderStatusItemController()
+        controller.onOpenPreferences = { [weak self] in self?.showSettings() }
+        controller.onOpenTaskManager = { [weak self] prefix in
+            self?.runPrefixAction("--taskmgr-prefix", prefix: prefix, operation: "task-manager")
+        }
+        controller.onStopPrefixes = { [weak self] prefixes in
+            self?.requestQuitAndStop(prefixes: prefixes)
+        }
+        controller.onAllSessionsEnded = { [weak self] in
+            guard let self else { return }
+            if self.quitWhenSessionsEnd || (
+                self.settingsController.window?.isVisible != true
+                    && self.gameLibraryController.window?.isVisible != true
+            ) {
+                NSApp.terminate(nil)
+            }
+        }
+        return controller
+    }()
     private lazy var settingsController: CyderSettingsWindowController = {
         let controller = CyderSettingsWindowController()
         controller.onImmediateSave = { [weak self] registrySetting in
@@ -73,10 +95,15 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             self?.cleanDebugLogs()
         }
         controller.onClose = { [weak self] in
-            guard let self, self.terminateWhenSettingsClose,
+            guard let self,
                   !self.environmentPreparationInProgress,
                   !self.openingGameLibrary,
                   self.gameLibraryController.window?.isVisible != true else { return }
+            if self.statusItemController.hasActiveSessions {
+                NSApp.setActivationPolicy(.accessory)
+                return
+            }
+            guard self.terminateWhenSettingsClose else { return }
             NSApp.terminate(nil)
         }
         return controller
@@ -96,10 +123,14 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         }
         controller.onClose = { [weak self] in
             guard let self,
-                  self.terminateWhenSettingsClose,
                   !self.environmentPreparationInProgress,
                   self.settingsController.window?.isVisible != true,
                   !self.gameLibraryController.isGameSettingsVisible else { return }
+            if self.statusItemController.hasActiveSessions {
+                NSApp.setActivationPolicy(.accessory)
+                return
+            }
+            guard self.terminateWhenSettingsClose else { return }
             NSApp.terminate(nil)
         }
         return controller
@@ -251,9 +282,12 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             return
         }
         if gameLibraryController.window?.isVisible == true {
-            executableFiles.forEach {
-                launchGameFromLibrary(URL(fileURLWithPath: $0), settings: nil)
-            }
+            enqueueOrLaunch(executableFiles)
+            application.reply(toOpenOrPrint: .success)
+            return
+        }
+        if didRunLauncher {
+            enqueueOrLaunch(executableFiles)
             application.reply(toOpenOrPrint: .success)
             return
         }
@@ -384,6 +418,15 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         CyderDiagnostics.shared.finish(outcome: "terminated")
     }
 
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        let prefixes = statusItemController.monitoredPrefixes
+        guard !prefixes.isEmpty else { return .terminateNow }
+        if !quitWhenSessionsEnd {
+            requestQuitAndStop(prefixes: prefixes)
+        }
+        return .terminateCancel
+    }
+
     func applicationDockMenu(_ sender: NSApplication) -> NSMenu? {
         let menu = NSMenu(title: "Cyder")
         menu.addItem(withTitle: "遊戲庫…", action: #selector(showGameLibrary), keyEquivalent: "")
@@ -403,7 +446,8 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         let library = appMenu.addItem(withTitle: "遊戲庫…", action: #selector(showGameLibrary), keyEquivalent: "")
         library.target = self
         appMenu.addItem(NSMenuItem.separator())
-        appMenu.addItem(withTitle: "結束 Cyder", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        let quit = appMenu.addItem(withTitle: "結束 Cyder", action: #selector(quitFromMenu), keyEquivalent: "")
+        quit.target = self
         appItem.submenu = appMenu
         NSApp.mainMenu = main
     }
@@ -570,8 +614,22 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
                 case .failure(let failure):
                     self.presentFailure(failure)
                 }
+                self.launchNextQueuedExecutableIfReady()
             }
         }
+    }
+
+    private func enqueueOrLaunch(_ executableFiles: [String]) {
+        queuedExecutableFiles.append(contentsOf: executableFiles)
+        launchNextQueuedExecutableIfReady()
+    }
+
+    private func launchNextQueuedExecutableIfReady() {
+        guard !libraryLaunchInProgress,
+              wineActivationWaiter == nil,
+              !queuedExecutableFiles.isEmpty else { return }
+        let executable = queuedExecutableFiles.removeFirst()
+        launchGameFromLibrary(URL(fileURLWithPath: executable), settings: nil)
     }
 
     @objc private func showSettingsModal() {
@@ -679,12 +737,14 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
 
         let context = CyderLaunchContext(resourcePath: resourcePath)
 
+        libraryLaunchInProgress = true
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             guard let self else {
                 return
             }
             let outcome = self.runPhasedLaunch(context: context)
             DispatchQueue.main.async {
+                self.libraryLaunchInProgress = false
                 self.hideSetup()
                 switch outcome {
                 case .success:
@@ -701,7 +761,12 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
                     self.presentFailure(failure)
                     CyderDiagnostics.shared.finish(outcome: "launch-failed")
                 }
-                NSApp.terminate(nil)
+                self.launchNextQueuedExecutableIfReady()
+                if !self.statusItemController.hasActiveSessions,
+                   !self.libraryLaunchInProgress,
+                   self.queuedExecutableFiles.isEmpty {
+                    NSApp.terminate(nil)
+                }
             }
         }
     }
@@ -1053,12 +1118,14 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         let pidURL = requestDirectory.appendingPathComponent("wine-\(launchID).pid")
         let exitResultURL = requestDirectory.appendingPathComponent("wine-\(launchID).result")
         let activatedURL = requestDirectory.appendingPathComponent("wine-\(launchID).activated")
+        let lifecycleURL = requestDirectory.appendingPathComponent("wine-\(launchID).lifecycle")
         var launchActivated = false
         defer {
             try? FileManager.default.removeItem(at: pidURL)
             if !launchActivated {
                 try? FileManager.default.removeItem(at: exitResultURL)
                 try? FileManager.default.removeItem(at: activatedURL)
+                try? FileManager.default.removeItem(at: lifecycleURL)
             }
         }
         var args = [context.launcher, "--engine-src", context.engineSrc, "--launch-exe", exe]
@@ -1074,6 +1141,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             "CYDER_WINE_PID_FILE": pidURL.path,
             "CYDER_WINE_RESULT_FILE": exitResultURL.path,
             "CYDER_WINE_ACTIVATED_FILE": activatedURL.path,
+            "CYDER_WINE_LIFECYCLE_FILE": lifecycleURL.path,
             "CYDER_SESSION_GUARD": "1",
             // Always retain the quiet startup stream for optional manual
             // diagnosis. UI classification uses the per-launch wait result
@@ -1108,6 +1176,14 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
                 launchActivated = true
                 FileManager.default.createFile(atPath: activatedURL.path, contents: Data())
                 CyderDiagnostics.shared.enter(.wineActivation, detail: "notification-received")
+                onMainThread {
+                    statusItemController.beginMonitoring(
+                        pid: winePID,
+                        prefix: prefix,
+                        executablePath: exe,
+                        lifecycleURL: lifecycleURL
+                    )
+                }
                 return .success
             }
             if let exitStatus = detachedWineExitStatus(at: exitResultURL) {
@@ -1148,7 +1224,71 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         // supervisor consume the eventual sidecar just like an activation.
         launchActivated = true
         FileManager.default.createFile(atPath: activatedURL.path, contents: Data())
+        onMainThread {
+            statusItemController.beginMonitoring(
+                pid: winePID,
+                prefix: prefix,
+                executablePath: exe,
+                lifecycleURL: lifecycleURL
+            )
+        }
         return .success
+    }
+
+    private func runPrefixAction(_ action: String, prefix: URL, operation: String) {
+        guard let resourcePath = Bundle.main.resourcePath else { return }
+        let context = CyderLaunchContext(resourcePath: resourcePath)
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            guard let self else { return }
+            let result = self.runLauncher(
+                context: context,
+                args: [context.launcher, action, prefix.path],
+                stage: .wineSpawn,
+                operation: operation
+            )
+            if !result.succeeded {
+                DispatchQueue.main.async {
+                    if action == "--stop-prefix" {
+                        self.statusItemController.markStopFailed(prefix: prefix)
+                        self.quitWhenSessionsEnd = false
+                    }
+                    self.showAlert("操作未完成", "無法對這個 Windows 環境執行操作。")
+                }
+            } else if action == "--stop-prefix" {
+                DispatchQueue.main.async {
+                    self.statusItemController.markPrefixStopped(prefix: prefix)
+                }
+            }
+        }
+    }
+
+    @objc private func quitFromMenu() {
+        let prefixes = statusItemController.monitoredPrefixes
+        if prefixes.isEmpty {
+            NSApp.terminate(nil)
+        } else {
+            requestQuitAndStop(prefixes: prefixes)
+        }
+    }
+
+    private func requestQuitAndStop(prefixes: [URL]) {
+        let alert = NSAlert()
+        alert.messageText = "結束所有 Cyder 程序？"
+        alert.informativeText = prefixes.count == 1
+            ? "這會關閉目前 Windows 環境中的遊戲與背景程序。未儲存的內容可能遺失。"
+            : "這會關閉目前 \(prefixes.count) 個 Windows 環境中的遊戲與背景程序。未儲存的內容可能遺失。"
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "結束程序")
+        alert.addButton(withTitle: "取消")
+        guard runFrontmostAlert(alert, dockVisible: false) == .alertFirstButtonReturn else { return }
+        quitWhenSessionsEnd = true
+        settingsController.window?.orderOut(nil)
+        gameLibraryController.window?.orderOut(nil)
+        NSApp.setActivationPolicy(.accessory)
+        statusItemController.markStopping(prefixes: prefixes)
+        for prefix in prefixes {
+            runPrefixAction("--stop-prefix", prefix: prefix, operation: "stop-prefix")
+        }
     }
 
     private func detachedWineExitStatus(at resultURL: URL) -> Int32? {

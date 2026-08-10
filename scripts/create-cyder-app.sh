@@ -258,6 +258,7 @@ SWIFT_SOURCES=(
   "$SCRIPT_DIR/cyder_gptk.swift"
   "$SCRIPT_DIR/cyder_settings.swift"
   "$SCRIPT_DIR/cyder_launch_support.swift"
+  "$SCRIPT_DIR/cyder_status_item.swift"
   "$SCRIPT_DIR/cyder_profiles.swift"
   "$SCRIPT_DIR/cyder_settings_ui.swift"
   "$SCRIPT_DIR/cyder_game_library.swift"
