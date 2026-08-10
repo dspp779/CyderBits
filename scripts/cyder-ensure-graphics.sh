@@ -4,9 +4,26 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+cyder_graphics_find_zstd() {
+  local candidate
+  local -a candidates=("${CYDER_ZSTD:-}")
+  [[ -n "${CYDER_OGOM:-}" ]] && candidates+=("$CYDER_OGOM/tools/zstd/zstd")
+  candidates+=(
+    "$SCRIPT_DIR/../tools/zstd/zstd"
+    "$(command -v zstd 2>/dev/null || true)"
+  )
+  for candidate in "${candidates[@]}"; do
+    if [[ -n "$candidate" && -x "$candidate" ]]; then
+      printf '%s/%s\n' "$(cd "$(dirname "$candidate")" && pwd -P)" "$(basename "$candidate")"
+      return 0
+    fi
+  done
+  return 1
+}
+
 cyder_graphics_extract() {
   local archive="$1" destination="$2" zstd_bin
-  zstd_bin="${CYDER_ZSTD:-$(command -v zstd 2>/dev/null || true)}"
+  zstd_bin="$(cyder_graphics_find_zstd 2>/dev/null || true)"
   [[ -x "$zstd_bin" ]] || {
     echo "Missing zstd required to extract graphics payloads" >&2
     return 1

@@ -7,12 +7,13 @@ source "$ROOT/tests/assert.sh"
 tmp="$(mktemp -d "${TMPDIR:-/tmp}/cyder-ensure-graphics-test.XXXXXX")"
 trap 'rm -rf "$tmp"' EXIT
 
-resources="$tmp/Resources/graphics"
+resources_root="$tmp/Resources"
+resources="$resources_root/graphics"
 runtime="$tmp/runtime"
 engine_name="wine-test"
 engine="$runtime/Engines/$engine_name"
-fake_zstd="$tmp/zstd"
-mkdir -p "$resources" "$tmp/staging/dxvk" "$tmp/staging/dxmt"
+fake_zstd="$resources_root/tools/zstd/zstd"
+mkdir -p "$resources" "$resources_root/tools/zstd" "$tmp/staging/dxvk" "$tmp/staging/dxmt"
 
 printf 'dxvk payload\n' >"$tmp/staging/dxvk/d3d11.dll"
 printf 'dxvk-1.2.3\n' >"$tmp/staging/dxvk/version"
@@ -35,12 +36,14 @@ cat "$3"
 EOF
 chmod +x "$fake_zstd"
 
-CYDER_GRAPHICS_SRC="$resources" \
-CYDER_RUNTIME_ROOT="$runtime" \
-CYDER_ENGINES="$runtime/Engines" \
-CYDER_ENGINE_NAME="$engine_name" \
-CYDER_ZSTD="$fake_zstd" \
-bash "$ROOT/scripts/cyder-ensure-graphics.sh"
+env -u CYDER_ZSTD \
+  PATH=/usr/bin:/bin \
+  CYDER_OGOM="$resources_root" \
+  CYDER_GRAPHICS_SRC="$resources" \
+  CYDER_RUNTIME_ROOT="$runtime" \
+  CYDER_ENGINES="$runtime/Engines" \
+  CYDER_ENGINE_NAME="$engine_name" \
+  bash "$ROOT/scripts/cyder-ensure-graphics.sh"
 
 assert test -f "$runtime/graphics/dxvk/1.2.3/d3d11.dll"
 assert test -f "$runtime/graphics/dxmt/4.5.6/d3d11.dll"
@@ -62,12 +65,14 @@ printf '1.2.4\n' >"$resources/dxvk-version.txt"
 printf '%s  %s\n' "$(shasum -a 256 "$resources/dxvk-1.2.4.tar.zst" | awk '{print $1}')" \
   "dxvk-1.2.4.tar.zst" >"$resources/dxvk-artifact-sha256.txt"
 
-CYDER_GRAPHICS_SRC="$resources" \
-CYDER_RUNTIME_ROOT="$runtime" \
-CYDER_ENGINES="$runtime/Engines" \
-CYDER_ENGINE_NAME="$engine_name" \
-CYDER_ZSTD="$fake_zstd" \
-bash "$ROOT/scripts/cyder-ensure-graphics.sh"
+env -u CYDER_ZSTD \
+  PATH=/usr/bin:/bin \
+  CYDER_OGOM="$resources_root" \
+  CYDER_GRAPHICS_SRC="$resources" \
+  CYDER_RUNTIME_ROOT="$runtime" \
+  CYDER_ENGINES="$runtime/Engines" \
+  CYDER_ENGINE_NAME="$engine_name" \
+  bash "$ROOT/scripts/cyder-ensure-graphics.sh"
 
 assert_eq "$(<"$engine/lib/dxvk/d3d11.dll")" "updated dxvk payload" \
   "DXVK engine symlink must follow the updated current payload"
