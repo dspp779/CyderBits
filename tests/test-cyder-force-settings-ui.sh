@@ -26,8 +26,12 @@ assert_contains "$ui" "CyderGptk.scanEvaluationVolumes()" "graphics tab should s
 assert_contains "$ui" "CyderGptk.removeRuntimeInstall()" "graphics tab should remove a locally installed GPTK runtime"
 assert_contains "$ui" "需要 macOS 14+" "graphics tab should explain the D3DMetal macOS requirement"
 assert_contains "$ui" "canSelectD3DMetal" "D3DMetal should stay disabled without GPTK"
-assert_contains "$ui" 'return ["預設", "D3DMetal", "DXMT", "DXVK", "WineD3D"]' \
-  "prefs graphics labels include DXMT and omit auto"
+assert_contains "$ui" 'return ["預設", "D3DMetal", "DXMT", "DXVK", "DXVK 2", "WineD3D"]' \
+  "prefs graphics labels include DXVK 2 after DXVK"
+assert_contains "$ui" '需要已安裝的 DXVK 2 圖形元件' \
+  "DXVK 2 menu item explains missing payload"
+assert_contains "$ui" '使用 DXVK 2.7 將 Direct3D 轉為 Vulkan' \
+  "DXVK 2 help text mentions DXVK 2.7"
 assert_not_contains "$ui" '"自動"' "graphics menus must not offer auto"
 assert_contains "$ui" "canSelectDxmt" "DXMT should gate on OS + payload"
 assert_contains "$ui" "CyderGraphicsCapabilities.current(engineRoot: CyderPaths.engine)" \
@@ -69,12 +73,16 @@ assert_contains "$ui" "chooseGptkCandidate" "GPTK install should let the user pi
 assert_contains "$ui" "CyderGptk.activeInfo()" "graphics tab should show the active GPTK source and version"
 assert_contains "$ui" "CyderGptk.syncEngineLink()" "graphics tab should refresh engine GPTK symlink"
 assert_contains "$(cat "$ROOT/scripts/cyder_gptk.swift")" "Cyder 已安裝" "installed GPTK should win and show version in status"
-assert_contains "$ui" "let showFrameRate = backend == .dxvk" "frame-rate limiter only for manual DXVK"
-assert_contains "$ui" "let showDxvkFrametimes = backend == .dxvk" "frametimes toggle should only appear for manual DXVK"
+assert_contains "$ui" 'let showFrameRate = backend.usesDxvkTranslation' \
+  "frame-rate limiter for both DXVK families"
+assert_contains "$ui" 'let showDxvkFrametimes = backend.usesDxvkTranslation' \
+  "frametimes toggle for both DXVK families"
+assert_contains "$ui" 'backend.usesDxvkTranslation' \
+  "HUD/limiter gating uses usesDxvkTranslation"
 assert_contains "$ui" "let enableDxvkFrametimes = graphicsHudValue == .dxvk" "frametimes toggle should only enable for DXVK HUD"
 assert_contains "$ui" "dxvkHudFrametimes.isEnabled = enableDxvkFrametimes" "frametimes toggle should disable outside DXVK HUD"
-assert_contains "$ui" 'backend != .dxvk && backend != .wined3d && backend != .dxmt' \
-  "GPTK controls hide for DXVK/WineD3D/DXMT"
+assert_contains "$ui" 'backend != .dxvk && backend != .dxvk2 && backend != .wined3d && backend != .dxmt' \
+  "GPTK controls hide for DXVK/DXVK2/WineD3D/DXMT"
 assert_not_contains "$(cat "$ROOT/scripts/cyder_settings.swift")" 'cascadePreferredBackend' \
   "auto cascade helper must be removed"
 assert_contains "$(cat "$ROOT/scripts/cyder_settings.swift")" 'graphicsHud' "settings schema should persist HUD preference"
@@ -155,8 +163,8 @@ assert_contains "$app" "--install-winetricks" "Winetricks installs should use th
 assert_contains "$ui" "private func retinaChanged()" "Retina toggle should have a dedicated DPI synchronization handler"
 assert_contains "$ui" "let targetDPI = retina.state == .on ? 192 : 96" "global Retina toggle should suggest 192 or 96 DPI"
 assert_contains "$library_ui" "private final class CyderGameSettingsWindowController" "game-specific options should open in a dedicated settings window"
-assert_contains "$library_ui" 'return ["跟隨全域", "預設", "D3DMetal", "DXMT", "DXVK", "WineD3D"]' \
-  "game override menus include DXMT and omit auto"
+assert_contains "$library_ui" 'return ["跟隨全域", "預設", "D3DMetal", "DXMT", "DXVK", "DXVK 2", "WineD3D"]' \
+  "game override menus include DXVK 2 after DXVK"
 assert_not_contains "$library_ui" '"自動"' "game graphics menus must not offer auto"
 assert_contains "$library_ui" "private var graphicsBackendOverride: CyderGraphicsBackend?" "follow-global backend should use an optional profile override"
 assert_not_contains "$library_ui" "private var dxvkFrameRateOverride" "game options should not expose a frame-rate override"

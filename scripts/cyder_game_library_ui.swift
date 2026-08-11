@@ -590,6 +590,7 @@ private final class CyderGameSettingsWindowController: NSWindowController, NSWin
         graphicsBackend.addItems(withTitles: graphicsBackendTitles)
         updateD3DMetalMenuItemAvailability()
         updateDxmtMenuItemAvailability()
+        updateDxvk2MenuItemAvailability()
         graphicsBackend.target = self
         graphicsBackend.action = #selector(graphicsBackendChanged)
         for popup in [fontMingLiu, fontSongti] {
@@ -1050,11 +1051,15 @@ private final class CyderGameSettingsWindowController: NSWindowController, NSWin
         supportsDxmtOS && CyderGraphicsCapabilities.current(engineRoot: CyderPaths.engine).hasDxmt
     }
 
-    private var graphicsBackendTitles: [String] {
-        return ["跟隨全域", "預設", "D3DMetal", "DXMT", "DXVK", "WineD3D"]
+    private var canSelectDxvk2: Bool {
+        CyderGraphicsCapabilities.current(engineRoot: CyderPaths.engine).hasDxvk2
     }
 
-    // Index map (shared by OEM and official): 0 nil/follow, 1 default, 2 d3dmetal, 3 dxmt, 4 dxvk, 5 wined3d.
+    private var graphicsBackendTitles: [String] {
+        return ["跟隨全域", "預設", "D3DMetal", "DXMT", "DXVK", "DXVK 2", "WineD3D"]
+    }
+
+    // Index map (shared by OEM and official): 0 nil/follow, 1 default, 2 d3dmetal, 3 dxmt, 4 dxvk, 5 dxvk2, 6 wined3d.
     private func updateD3DMetalMenuItemAvailability() {
         guard let item = graphicsBackend.item(at: 2) else { return }
         item.isEnabled = canSelectD3DMetal
@@ -1079,13 +1084,24 @@ private final class CyderGameSettingsWindowController: NSWindowController, NSWin
         }
     }
 
+    private func updateDxvk2MenuItemAvailability() {
+        guard let item = graphicsBackend.item(at: 5) else { return }
+        item.isEnabled = canSelectDxvk2
+        if !canSelectDxvk2 {
+            item.toolTip = "需要已安裝的 DXVK 2 圖形元件"
+        } else {
+            item.toolTip = nil
+        }
+    }
+
     private var graphicsBackendOverride: CyderGraphicsBackend? {
         switch graphicsBackend.indexOfSelectedItem {
         case 1: return .default
         case 2: return canSelectD3DMetal ? .d3dmetal : nil
         case 3: return canSelectDxmt ? .dxmt : nil
         case 4: return .dxvk
-        case 5: return .wined3d
+        case 5: return canSelectDxvk2 ? .dxvk2 : nil
+        case 6: return .wined3d
         default: return nil
         }
     }
@@ -1097,14 +1113,15 @@ private final class CyderGameSettingsWindowController: NSWindowController, NSWin
         case .d3dmetal: return canSelectD3DMetal ? 2 : 0
         case .dxmt: return canSelectDxmt ? 3 : 0
         case .dxvk: return 4
-        case .wined3d: return 5
-        case .dxvk2: return 0
+        case .dxvk2: return canSelectDxvk2 ? 5 : 0
+        case .wined3d: return 6
         }
     }
 
     private func refreshGraphicsControls() {
         updateD3DMetalMenuItemAvailability()
         updateDxmtMenuItemAvailability()
+        updateDxvk2MenuItemAvailability()
     }
 
     private func cyderFontTargetIndex(_ target: String) -> Int {

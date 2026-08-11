@@ -291,6 +291,7 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
         graphicsBackend.action = #selector(graphicsBackendChanged)
         updateD3DMetalMenuItemAvailability()
         updateDxmtMenuItemAvailability()
+        updateDxvk2MenuItemAvailability()
         dxvkFrameRate.addItems(withTitles: ["60", "不限制"])
         dxvkFrameRate.target = self
         dxvkFrameRate.action = #selector(dxvkFrameRateChanged)
@@ -581,8 +582,8 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
     }
 
     @objc private func graphicsBackendChanged() {
-        if graphicsBackendValue != .dxvk, store.value.graphicsHud == .dxvk {
-            // Drop an invalid DXVK-only HUD choice when leaving manual DXVK.
+        if !graphicsBackendValue.usesDxvkTranslation, store.value.graphicsHud == .dxvk {
+            // Drop an invalid DXVK-only HUD choice when leaving DXVK families.
             try? store.update { $0.graphicsHud = .off }
         }
         rebuildGraphicsHudMenu(selecting: store.value.graphicsHud)
@@ -842,11 +843,15 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
         supportsDxmtOS && CyderGraphicsCapabilities.current(engineRoot: CyderPaths.engine).hasDxmt
     }
 
-    private var graphicsBackendTitles: [String] {
-        return ["預設", "D3DMetal", "DXMT", "DXVK", "WineD3D"]
+    private var canSelectDxvk2: Bool {
+        CyderGraphicsCapabilities.current(engineRoot: CyderPaths.engine).hasDxvk2
     }
 
-    // Index map (shared by OEM and official): 0 default, 1 d3dmetal, 2 dxmt, 3 dxvk, 4 wined3d.
+    private var graphicsBackendTitles: [String] {
+        return ["預設", "D3DMetal", "DXMT", "DXVK", "DXVK 2", "WineD3D"]
+    }
+
+    // Index map (shared by OEM and official): 0 default, 1 d3dmetal, 2 dxmt, 3 dxvk, 4 dxvk2, 5 wined3d.
     private func updateD3DMetalMenuItemAvailability() {
         guard let item = graphicsBackend.item(at: 1) else { return }
         item.isEnabled = canSelectD3DMetal
@@ -871,12 +876,23 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
         }
     }
 
+    private func updateDxvk2MenuItemAvailability() {
+        guard let item = graphicsBackend.item(at: 4) else { return }
+        item.isEnabled = canSelectDxvk2
+        if !canSelectDxvk2 {
+            item.toolTip = "需要已安裝的 DXVK 2 圖形元件"
+        } else {
+            item.toolTip = nil
+        }
+    }
+
     private var graphicsBackendValue: CyderGraphicsBackend {
         switch graphicsBackend.indexOfSelectedItem {
         case 1: return canSelectD3DMetal ? .d3dmetal : .default
         case 2: return canSelectDxmt ? .dxmt : .default
         case 3: return .dxvk
-        case 4: return .wined3d
+        case 4: return canSelectDxvk2 ? .dxvk2 : .default
+        case 5: return .wined3d
         default: return .default
         }
     }
@@ -887,8 +903,8 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
         case .d3dmetal: return canSelectD3DMetal ? 1 : 0
         case .dxmt: return canSelectDxmt ? 2 : 0
         case .dxvk: return 3
-        case .wined3d: return 4
-        case .dxvk2: return 0
+        case .dxvk2: return canSelectDxvk2 ? 4 : 0
+        case .wined3d: return 5
         }
     }
 
@@ -908,7 +924,7 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
         let previous = preferred ?? graphicsHudValue
         graphicsHud.removeAllItems()
         var titles = ["關閉", "Metal HUD"]
-        if backend == .dxvk {
+        if backend.usesDxvkTranslation {
             titles.append("DXVK HUD")
         }
         graphicsHud.addItems(withTitles: titles)
@@ -929,12 +945,13 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
     private func refreshGraphicsControls() {
         updateD3DMetalMenuItemAvailability()
         updateDxmtMenuItemAvailability()
+        updateDxvk2MenuItemAvailability()
         CyderGptk.syncEngineLink()
         let backend = graphicsBackendValue
-        let showFrameRate = backend == .dxvk
-        let showDxvkFrametimes = backend == .dxvk
+        let showFrameRate = backend.usesDxvkTranslation
+        let showDxvkFrametimes = backend.usesDxvkTranslation
         let enableDxvkFrametimes = graphicsHudValue == .dxvk
-        let showGptkControls = backend != .dxvk && backend != .wined3d && backend != .dxmt
+        let showGptkControls = backend != .dxvk && backend != .dxvk2 && backend != .wined3d && backend != .dxmt
         dxvkFrameRate.isHidden = !showFrameRate
         (dxvkFrameRate.superview as? NSStackView)?.isHidden = !showFrameRate
         dxvkHudFrametimes.isHidden = !showDxvkFrametimes
