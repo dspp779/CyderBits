@@ -187,7 +187,9 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
         stopAllWineButton.bezelStyle = .rounded
         stopAllWineButton.target = self
         stopAllWineButton.action = #selector(stopAllWine)
-        configureNote(engineVersion)
+        engineVersion.font = .systemFont(ofSize: 13)
+        engineVersion.textColor = .secondaryLabelColor
+        engineVersion.alignment = .right
         engineVersion.isSelectable = true
         refreshEngineVersionLabel()
         return tab("一般", rows: [
@@ -195,10 +197,9 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
             note("加入 Windows 遊戲、直接啟動，或管理每個遊戲的獨立 Wine prefix 與設定。"),
             stopAllWineButton,
             note("對目前 Cyder 使用的 Wine 環境執行 wineserver -k，並等待程序結束。"),
-            row("引擎版本", engineVersion),
-            note("目前已安裝的 Wine engine；開啟 Cyder.app 時會依打包版本升級。"),
             row("同步機制", syncMode),
             syncModeDescription,
+            row("引擎版本", engineVersion),
         ])
     }
 

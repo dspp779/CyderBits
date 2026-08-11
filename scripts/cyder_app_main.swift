@@ -42,6 +42,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
     private lazy var statusItemController: CyderStatusItemController = {
         let controller = CyderStatusItemController()
         controller.onOpenPreferences = { [weak self] in self?.showSettings() }
+        controller.onOpenGameLibrary = { [weak self] in self?.showGameLibrary() }
         controller.onOpenTaskManager = { [weak self] prefix in
             self?.runPrefixAction("--taskmgr-prefix", prefix: prefix, operation: "task-manager")
         }
@@ -100,6 +101,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
                   !self.environmentPreparationInProgress,
                   !self.openingGameLibrary,
                   self.gameLibraryController.window?.isVisible != true else { return }
+            self.statusItemController.setUIVisible(false)
             if self.statusItemController.hasActiveSessions {
                 NSApp.setActivationPolicy(.accessory)
                 return
@@ -127,6 +129,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
                   !self.environmentPreparationInProgress,
                   self.settingsController.window?.isVisible != true,
                   !self.gameLibraryController.isGameSettingsVisible else { return }
+            self.statusItemController.setUIVisible(false)
             if self.statusItemController.hasActiveSessions {
                 NSApp.setActivationPolicy(.accessory)
                 return
@@ -454,6 +457,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func showSettings() {
+        statusItemController.setUIVisible(true)
         activateCyderUI(dockVisible: true)
         settingsController.prepareForDisplay()
         settingsController.showWindow(nil)
@@ -534,6 +538,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func showGameLibrary() {
+        statusItemController.setUIVisible(true)
         openingGameLibrary = true
         let settingsWasVisible = settingsController.window?.isVisible == true
         activateCyderUI(dockVisible: true)

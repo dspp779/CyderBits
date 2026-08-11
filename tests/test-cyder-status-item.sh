@@ -12,6 +12,12 @@ assert_contains "$build_source" 'cyder_status_item.swift' \
   "native Cyder build must include menu-bar lifecycle source"
 assert_contains "$status_source" 'NSStatusBar.system.statusItem' \
   "active Wine sessions must create a menu-bar item"
+assert_contains "$status_source" 'func setUIVisible(_ visible: Bool)' \
+  "preferences and game-library windows must keep the menu-bar item visible"
+assert_contains "$status_source" 'var onOpenGameLibrary' \
+  "the status menu must expose a game-library callback"
+assert_contains "$status_source" 'withTitle: "遊戲庫…"' \
+  "the status menu must expose the game library"
 assert_contains "$status_source" 'lifecycleState(at:' \
   "menu-bar lifecycle must consume the supervisor state contract"
 assert_contains "$status_source" 'lifecycleState == "background"' \
@@ -56,6 +62,12 @@ assert_contains "$app_source" '"--stop-prefix"' \
   "stop must be routed to the selected prefix"
 assert_contains "$app_source" 'statusItemController.markActivated' \
   "the status item must transition out of its launch animation"
+assert_contains "$app_source" 'controller.onOpenGameLibrary' \
+  "the app delegate must route the status-menu game library action"
+assert_contains "$app_source" 'statusItemController.setUIVisible(true)' \
+  "opening preferences or the game library must install the menu-bar item"
+assert_contains "$app_source" 'statusItemController.setUIVisible(false)' \
+  "closing both Cyder windows must release the UI-only menu-bar item"
 assert_contains "$app_source" '!self.statusItemController.hasActiveSessions' \
   "successful launches must keep native Cyder alive while Wine is active"
 assert_contains "$app_source" 'quitWhenSessionsEnd' \

@@ -24,6 +24,7 @@ final class CyderStatusItemController: NSObject, NSMenuDelegate {
     }
 
     var onOpenPreferences: (() -> Void)?
+    var onOpenGameLibrary: (() -> Void)?
     var onOpenTaskManager: ((URL) -> Void)?
     var onStopPrefixes: (([URL]) -> Void)?
     var onAllSessionsEnded: (() -> Void)?
@@ -34,8 +35,24 @@ final class CyderStatusItemController: NSObject, NSMenuDelegate {
     private var animationTimer: Timer?
     private var visualState: VisualState = .starting
     private var animationFrame = 0
+    private var uiVisible = false
 
     var hasActiveSessions: Bool { !sessions.isEmpty }
+
+    /// Keep the menu-bar item available while a Cyder-owned window is open,
+    /// even when no Wine process is currently being monitored.
+    func setUIVisible(_ visible: Bool) {
+        precondition(Thread.isMainThread)
+        uiVisible = visible
+        if visible {
+            installStatusItemIfNeeded()
+            refresh()
+        } else if sessions.isEmpty {
+            removeStatusItemIfUnused()
+        } else {
+            refresh()
+        }
+    }
 
     func markActivated(pid: Int32) {
         guard var session = sessions[pid] else { return }
@@ -55,8 +72,7 @@ final class CyderStatusItemController: NSObject, NSMenuDelegate {
             pollTimer = nil
             animationTimer?.invalidate()
             animationTimer = nil
-            if let statusItem { NSStatusBar.system.removeStatusItem(statusItem) }
-            statusItem = nil
+            removeStatusItemIfUnused()
         }
     }
 
@@ -146,9 +162,20 @@ final class CyderStatusItemController: NSObject, NSMenuDelegate {
         pollTimer = nil
         animationTimer?.invalidate()
         animationTimer = nil
-        if let statusItem { NSStatusBar.system.removeStatusItem(statusItem) }
-        statusItem = nil
+        if uiVisible {
+            refresh()
+        } else {
+            removeStatusItemIfUnused()
+        }
         onAllSessionsEnded?()
+    }
+
+    private func removeStatusItemIfUnused() {
+        guard !uiVisible, sessions.isEmpty else { return }
+        if let statusItem {
+            NSStatusBar.system.removeStatusItem(statusItem)
+        }
+        statusItem = nil
     }
 
     func menuNeedsUpdate(_ menu: NSMenu) {
@@ -187,6 +214,8 @@ final class CyderStatusItemController: NSObject, NSMenuDelegate {
 
         let preferences = menu.addItem(withTitle: "偏好設定…", action: #selector(openPreferences), keyEquivalent: ",")
         preferences.target = self
+        let library = menu.addItem(withTitle: "遊戲庫…", action: #selector(openGameLibrary), keyEquivalent: "")
+        library.target = self
         let prefixes = activePrefixes
         let taskManager = menu.addItem(withTitle: "工作管理員…", action: nil, keyEquivalent: "")
         if prefixes.count == 1 {
@@ -294,6 +323,7 @@ final class CyderStatusItemController: NSObject, NSMenuDelegate {
     var monitoredPrefixes: [URL] { activePrefixes }
 
     @objc private func openPreferences() { onOpenPreferences?() }
+    @objc private func openGameLibrary() { onOpenGameLibrary?() }
     @objc private func openTaskManager(_ sender: NSMenuItem) {
         if let prefix = sender.representedObject as? URL { onOpenTaskManager?(prefix) }
     }

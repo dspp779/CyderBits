@@ -78,6 +78,12 @@ assert_contains "$ui" '["60", "120", "144", "不限制"]' \
 assert_contains "$ui" 'let showFrameRate = backend.usesFrameLimiter' \
   "frame-rate limiter for DXVK families and DXMT"
 assert_contains "$ui" 'row("引擎版本"' "general tab should show the installed engine version"
+assert_contains "$ui" 'engineVersion.textColor = .secondaryLabelColor' \
+  "the engine version value should be gray"
+assert_contains "$ui" 'engineVersion.font = .systemFont(ofSize: 13)' \
+  "the engine version value should use the normal compact font"
+assert_not_contains "$ui" "目前已安裝的 Wine engine；開啟 Cyder.app 時會依打包版本升級。" \
+  "general tab should not add explanatory text below the engine version"
 assert_contains "$ui" 'let showDxvkFrametimes = backend.usesDxvkTranslation' \
   "frametimes toggle for both DXVK families"
 assert_contains "$ui" 'backend.usesDxvkTranslation' \
