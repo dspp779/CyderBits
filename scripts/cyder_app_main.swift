@@ -1178,12 +1178,19 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         let activatedURL = requestDirectory.appendingPathComponent("wine-\(launchID).activated")
         let lifecycleURL = requestDirectory.appendingPathComponent("wine-\(launchID).lifecycle")
         var launchActivated = false
+        var monitoringStarted = false
+        var winePID: Int32 = 0
         defer {
             try? FileManager.default.removeItem(at: pidURL)
             if !launchActivated {
                 try? FileManager.default.removeItem(at: exitResultURL)
                 try? FileManager.default.removeItem(at: activatedURL)
                 try? FileManager.default.removeItem(at: lifecycleURL)
+                if monitoringStarted {
+                    onMainThread {
+                        statusItemController.cancelMonitoring(pid: winePID, notifyWhenEmpty: false)
+                    }
+                }
             }
         }
         var args = [context.launcher, "--engine-src", context.engineSrc, "--launch-exe", exe]
@@ -1222,26 +1229,30 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             ))
         }
 
-        let winePID: Int32 = {
+        winePID = {
             guard let text = try? String(contentsOf: pidURL, encoding: .utf8),
                   let value = Int32(text.trimmingCharacters(in: .whitespacesAndNewlines)),
                   value > 0 else { return 0 }
             return value
         }()
+        if winePID > 0 {
+            monitoringStarted = true
+            onMainThread {
+                statusItemController.beginMonitoring(
+                    pid: winePID,
+                    prefix: prefix,
+                    executablePath: exe,
+                    lifecycleURL: lifecycleURL
+                )
+            }
+        }
         let deadline = Date().addingTimeInterval(30)
         while Date() < deadline {
             if activationWaiter.semaphore.wait(timeout: .now() + 0.2) == .success {
                 launchActivated = true
                 FileManager.default.createFile(atPath: activatedURL.path, contents: Data())
                 CyderDiagnostics.shared.enter(.wineActivation, detail: "notification-received")
-                onMainThread {
-                    statusItemController.beginMonitoring(
-                        pid: winePID,
-                        prefix: prefix,
-                        executablePath: exe,
-                        lifecycleURL: lifecycleURL
-                    )
-                }
+                onMainThread { statusItemController.markActivated(pid: winePID) }
                 return .success
             }
             if let exitStatus = detachedWineExitStatus(at: exitResultURL) {
@@ -1282,14 +1293,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         // supervisor consume the eventual sidecar just like an activation.
         launchActivated = true
         FileManager.default.createFile(atPath: activatedURL.path, contents: Data())
-        onMainThread {
-            statusItemController.beginMonitoring(
-                pid: winePID,
-                prefix: prefix,
-                executablePath: exe,
-                lifecycleURL: lifecycleURL
-            )
-        }
+        onMainThread { statusItemController.markActivated(pid: winePID) }
         return .success
     }
 
