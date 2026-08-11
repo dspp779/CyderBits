@@ -81,7 +81,7 @@ CDB v1 目前支援：
 | Action | `actions.dll_overrides.<module>` | 對命中的程序套用 process-local Wine DLL load order |
 | Action | `actions.set_env.<name>` | 設定目標程序的 Windows environment value |
 | Action | `actions.unset_env[]` | 從目標程序移除 environment name |
-| Action | `actions.graphics_backend` | process-local 選擇 `default`、`wined3d`、`dxvk`、`dxmt` 或 `d3dmetal` |
+| Action | `actions.graphics_backend` | process-local 選擇 `default`、`wined3d`、`dxvk`、`dxvk2`、`dxmt` 或 `d3dmetal` |
 | Action | `actions.wined3d_renderer` | WineD3D 內部選擇 `auto`、`opengl`、`gdi` 或 `vulkan` |
 | Action | `actions.replace_executable.path_suffix` | 開啟 PE 前安全替換 executable suffix 與 argv[0] |
 | Action policy | `deduplicate: option` | 依 option key 去重，不覆寫呼叫端已提供的值 |
@@ -123,6 +123,7 @@ actions:
 |---|---|
 | `wined3d` | Wine 內建 DLL，不需額外 payload |
 | `dxvk` | `lib/dxvk/<arch>-windows/` 與 Engine 內的 MoltenVK |
+| `dxvk2` | `lib/dxvk2/<arch>-windows/` 與 Engine 內的 MoltenVK |
 | `dxmt` | `lib/dxmt/<arch>-windows/` 與 `x86_64-unix/winemetal.so` |
 | `d3dmetal` | `lib64/apple_gptk/wine/<arch>-windows/`、`libd3dshared.dylib` 與 `D3DMetal.framework` |
 
@@ -130,15 +131,9 @@ DXVK 的 DLL 是原生 Windows 模組。Cyder 在 bottle bootstrap 時，從 Eng
 同步 `d3d11.dll` 與 `dxgi.dll` 到 `system32/syswow64`；只有匹配
 `graphics_backend: dxvk` 的程序才會套用 `native,builtin`。未匹配程序仍以
 `builtin` 使用 WineD3D，因此同一個 bottle 可以按 EXE 選擇 backend。
-CrossOver 25.0.1 FOSS snapshot 可用下列指令建立並加入目前 Engine：
-
-```bash
-bash scripts/build-dxvk.sh \
-  --engine install/wine-maplestory-oem25-source-x86_64
-```
-
-這個建置目前刻意只包含 MapleStory 所需的 D3D11/DXGI；D3D9 與 D3D10
-沒有啟用，以避開 DXVK 1.10.3 與新版 llvm-mingw headers 的相容性衝突。
+CrossOver 25.0.1 FOSS snapshot（DXVK 1.10.3）與上游 2.7.1 的編譯步驟、目錄
+（`lib/dxvk` vs `lib/dxvk2`）與 llvm-mingw 補丁見
+[DXVK 編譯備忘](build-dxvk.zh-TW.md)。
 
 缺少目前程序架構可用的 DLL 時會記錄診斷並回退 WineD3D，不會跨 App
 搜尋或借用 `/Applications/CrossOver.app` 的檔案。這使規則可以自由匯出，

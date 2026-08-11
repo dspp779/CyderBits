@@ -38,6 +38,7 @@
 | [cyderbits.md](cyderbits.md) | 一般使用者 | CyderBits 打包器：建立 game `.app`、選項與疑難排解 |
 | [bluecg.md](bluecg.md) | 開發 / 驗證 | BlueCG 自建 Wine、執行、高解析度與已知問題 |
 | [wine-configure-options.md](wine-configure-options.md) | 開發 / 建置 | Wine `configure` 旗標說明與老遊戲取捨 |
+| [build-dxvk.zh-TW.md](build-dxvk.zh-TW.md) | 開發 / 建置 | DXVK 1.x→`lib/dxvk`、2.x→`lib/dxvk2` 的工具鏈、版本釘死、builtin 戳記與已知補丁 |
 | [maplestory-classic-cx26-frame-walk-debug.md](maplestory-classic-cx26-frame-walk-debug.md) | 開發 / 除錯 | 新楓之谷經典版登入卡住：Wine 11.1–11.14 對照、CX26 NTDLL 修補、增量編譯與完整驗收 |
 | [games/maplestory/grap-core64-residual-process-analysis.md](games/maplestory/grap-core64-residual-process-analysis.md) | 開發 / 除錯 | 經典版離場 grap-core QDO livelock、Cyder009 optnone bandage |
 | [games/maplestory/maplestory-classic-ngs-x-grap-architecture.md](games/maplestory/maplestory-classic-ngs-x-grap-architecture.md) | 開發 / 研究 | NGS-X／GRAP 元件架構與 IPC |
@@ -81,6 +82,8 @@
 | [superpowers/specs/2026-07-06-cyderbits-bash-design.md](superpowers/specs/2026-07-06-cyderbits-bash-design.md) | **CyderBits Bash 化** — 打包器 / game app 去 Python |
 | [superpowers/plans/2026-07-06-cyderbits-bash-phase1.md](superpowers/plans/2026-07-06-cyderbits-bash-phase1.md) | CyderBits Bash 化 Phase 1 實作計畫 |
 | [superpowers/plans/2026-07-15-cyder-initialization-multigame-power.md](superpowers/plans/2026-07-15-cyder-initialization-multigame-power.md) | Cyder 初始化可靠性、每遊戲 Profile／Bottle、Sync 隔離與省電模式任務切分 |
+| [superpowers/specs/2026-08-11-cyder-dxvk2-graphics-backend-design.md](superpowers/specs/2026-08-11-cyder-dxvk2-graphics-backend-design.md) | **DXVK 2** 獨立後端、payload 與選單 |
+| [superpowers/plans/2026-08-11-cyder-dxvk2-graphics-backend.md](superpowers/plans/2026-08-11-cyder-dxvk2-graphics-backend.md) | DXVK 2 實作計畫（CompatDB／pack／UI／engine pin） |
 | [superpowers/plans/2026-07-27-cyder-compatdb-runtime.md](superpowers/plans/2026-07-27-cyder-compatdb-runtime.md) | CompatDB runtime 開發計劃、工作分配與 closure review |
 
 ## 未來開發路線

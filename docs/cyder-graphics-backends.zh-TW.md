@@ -1,4 +1,4 @@
-# Cyder 圖形後端（WineD3D / DXVK / DXMT / D3DMetal）
+# Cyder 圖形後端（WineD3D / DXVK / DXVK 2 / DXMT / D3DMetal）
 
 Cyder 0.8.0 起，可在 **Cyder 偏好設定 → 圖形** 或個別遊戲設定中選擇 Direct3D 轉譯方式。多數遊戲建議維持 **跟隨 CompatDB（default）**；僅在相容性或效能需要時才手動覆寫。
 
@@ -9,6 +9,7 @@ Cyder 0.8.0 起，可在 **Cyder 偏好設定 → 圖形** 或個別遊戲設定
 | **default** | 跟隨 CompatDB／引擎預設；不注入後端覆寫 |
 | **wined3d** | Wine 內建 Direct3D；相容性較廣，效能通常較差 |
 | **dxvk** | Vulkan→Metal（MoltenVK）；需 Cyder 已安裝 DXVK runtime payload |
+| **dxvk2** | DXVK 2.7（Vulkan→Metal）；需已安裝 DXVK 2 runtime payload |
 | **dxmt** | Direct3D→Metal（DXMT）；需 Cyder 已安裝 DXMT runtime payload 與 macOS 15+ |
 | **d3dmetal** | Apple D3DMetal／GPTK；需 macOS 14+ 且本機有可用 GPTK |
 
@@ -16,10 +17,10 @@ Cyder 0.8.0 起，可在 **Cyder 偏好設定 → 圖形** 或個別遊戲設定
 
 ## Runtime 圖形元件與啟動方式
 
-DXVK 與 DXMT 是 Cyder.app 內 `Resources/graphics/` 的獨立 payload，不再包在
+DXVK、DXVK 2 與 DXMT 是 Cyder.app 內 `Resources/graphics/` 的獨立 payload，不再包在
 Wine engine archive。Cyder.app 開啟時會依 version／SHA-256 sidecar 將 payload
-解壓到 `~/.cyder/runtime/graphics/`，再由 engine 的 `lib/dxvk`／`lib/dxmt`
-相對 symlink 指向目前版本；MoltenVK 仍由 Wine engine 提供。
+解壓到 `~/.cyder/runtime/graphics/`，再由 engine 的 `lib/dxvk`／`lib/dxvk2`／`lib/dxmt`
+相對 symlink 指向目前版本（`current-dxvk`／`current-dxvk2`／`current-dxmt`）；MoltenVK 仍由 Wine engine 提供。
 
 切換 DXVK、DXMT、D3DMetal 或 WineD3D 不會把後端 DLL 拷進 bottle 的
 `system32`／`syswow64`。這些位置維持 Wine 內建 `d3d*`／`dxgi`；Wine 的
@@ -28,12 +29,12 @@ CompatDB 在遊戲啟動時以 **builtin + prepend** 方式從 runtime payload �
 內建 DLL（不會清除使用者的 DllOverrides registry 設定）。
 
 - **從 Cyder.app 開啟設定或遊戲庫**：會先確認 engine，更新 graphics payload，並對未使用中的 shared bottle 執行遷移。
-- **在 Finder 直接開啟 `.exe`**：不解壓或升級 payload，只使用現有 `current-dxvk`／`current-dxmt`。若所選後端完全不存在，該次會回退到 default／WineD3D，並提示先開啟 Cyder.app。
+- **在 Finder 直接開啟 `.exe`**：不解壓或升級 payload，只使用現有 `current-dxvk`／`current-dxvk2`／`current-dxmt`。若所選後端（含 DXVK 2）完全不存在，該次會回退到 default／WineD3D，並提示先開啟 Cyder.app。
 - **GPTK**：只更新偵測狀態；未安裝不會阻止開啟 Cyder.app。
 
 ## DXVK 限幀 vs 遊戲內 VSync
 
-選 **DXVK** 時會出現 **限制幀率** 選項：
+選 **DXVK** 或 **DXVK 2** 時會出現 **限制幀率** 選項：
 
 - **60（預設）** — 啟動時設定 `DXVK_FRAME_RATE=60`，由 DXVK 在轉譯層限幀。
 - **不限制** — 不設定 `DXVK_FRAME_RATE`，幀率由 GPU／遊戲邏輯決定。
@@ -55,7 +56,7 @@ DXMT 將 Direct3D 轉譯至 Metal。Cyder 隨 app 打包 **上游 v0.80** DXMT r
 - **macOS 15（Sequoia）或更新** — macOS 14 及以下 `dxmt` 選項會灰掉（不同於 D3DMetal 的 macOS 14+ 門檻）。
 - **DXMT runtime payload 已安裝** — 尚未解壓或 `current-dxmt` 不存在時，`dxmt` 選項會灰掉；請先開啟 Cyder.app 完成 ensure-graphics。
 
-選 **DXMT** 時不套用 DXVK 限幀（`DXVK_FRAME_RATE`）；限幀選項僅在 **DXVK** 後端出現。
+選 **DXMT** 時不套用 DXVK 限幀（`DXVK_FRAME_RATE`）；限幀選項僅在 **DXVK**／**DXVK 2** 後端出現。
 
 ## D3DMetal 與 GPTK
 
@@ -87,6 +88,7 @@ D3DMetal 需要 Apple Game Porting Toolkit（GPTK）。**Cyder 不內建、不�
 | D3DMetal 無法選取 | 確認 macOS ≥ 14；安裝 CrossOver 或從評估 DMG 安裝 GPTK |
 | DXMT 無法選取 | 確認 macOS ≥ 15；先開啟 Cyder.app，使 DXMT runtime payload 安裝完成 |
 | DXVK 選項灰掉 | 先開啟 Cyder.app，使 DXVK runtime payload 安裝完成；同時確認 engine 有 MoltenVK |
+| DXVK 2 選項灰掉 | 先開啟 Cyder.app 完成 ensure-graphics |
 | 改後端後畫面異常 | 先改回 **default** 或 **wined3d** 再重啟遊戲 |
 | 限幀無效 | 檢查遊戲是否強制 VSync；見上方「限幀 vs VSync」 |
 
@@ -106,5 +108,6 @@ runtime 解壓與 `current-*`／engine symlink 更新、舊 bottle DLL 還原與
 
 ## 相關文件
 
+- [DXVK 編譯備忘（1.x / 2.x）](build-dxvk.zh-TW.md)
 - [Cyder 0.8.0 發布說明](releases/v0.8.0.md)
 - [Cyder 使用指南](cyder.md)

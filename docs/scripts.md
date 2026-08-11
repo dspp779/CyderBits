@@ -16,7 +16,10 @@
 | `link-wine-runtime-libs.sh` | 包裝用 wrapper → `bundle-wine-dylibs.sh` |
 | `run-build-wine-bg.sh` | 背景建置 helper |
 | `wait-and-build-wine.sh` | 等待條件後建置 |
-| `stamp-wine-builtin-pe.py` | 將 DXVK PE DLL 寫入 Wine builtin signature；供 graphics payload 打包時使用，使 CompatDB 的 builtin + prepend 可載入 |
+| `build-dxvk.sh` | 交叉編譯 CrossOver DXVK 1.10.3 → `ENGINE/lib/dxvk/`；細節見 [DXVK 編譯備忘](build-dxvk.zh-TW.md) |
+| `build-dxvk2.sh` | 交叉編譯上游 DXVK 2.7.1 → `ENGINE/lib/dxvk2/`（不碰 `lib/dxvk`） |
+| `pin-dxvk-version.py` | 用 `RELEASE` 釘 `version.h`，避免 `git describe` 吃到 Cyder app tag；**不要**寫進 `include/` |
+| `stamp-wine-builtin-pe.py` | 將 DXVK PE DLL 寫入 Wine builtin signature（offset 64）；供 graphics payload 打包時使用，使 CompatDB 的 builtin + prepend 可載入 |
 
 ## BlueCG 執行與調校
 
@@ -34,12 +37,12 @@
 
 | 腳本 | 用途 |
 |------|------|
-| `pack-graphics-payloads.sh` | 從 engine 的 `lib/dxvk`／`lib/dxmt` 製作獨立 zstd archive、version 與 SHA-256 sidecar 到 `dist/artifacts/graphics/`；DXVK staging DLL 會先加 Wine builtin signature |
+| `pack-graphics-payloads.sh` | 從 engine 的 `lib/dxvk`／`lib/dxvk2`／`lib/dxmt` 製作獨立 zstd archive、version 與 SHA-256 sidecar 到 `dist/artifacts/graphics/`；DXVK／DXVK 2 staging DLL 會先加 Wine builtin signature |
 | `pack-engine-artifact.sh` | strip + bundle + sign + 預設 xz 最高壓縮比 → `engine-wine-x86_64-CX26-<winever>.tar.xz`；排除 `lib/dxvk`／`lib/dxmt`，`--zstd` / `CYDER_ENGINE_FORMAT=zstd` 產出 `engine-CX26-<winever>.tar.zst` |
 | `cyder-copy-engine-artifact.sh` | 複製預建 engine artifact 進 app `Resources/` |
 | `create-cyder-app.sh` | `dist/Cyder.app`（`.exe` 啟動器 + engine artifact + graphics payload + bootstrap） |
 | `release-cyder.sh` | 測試／正式通道：建置、簽署、（正式）公證與 `Cyder.app.zip`；見 `docs/release-pipeline.zh-TW.md` |
-| `cyder-ensure-graphics.sh` | 將 app `Resources/graphics/` payload 依 version／SHA-256 安裝到 runtime，更新 `current-dxvk`／`current-dxmt`，並建立 engine `lib` 相對 symlink |
+| `cyder-ensure-graphics.sh` | 將 app `Resources/graphics/` payload 依 version／SHA-256 安裝到 runtime，更新 `current-dxvk`／`current-dxvk2`／`current-dxmt`，並建立 engine `lib` 相對 symlink |
 | `cyder-migrate-graphics-prefix.sh` | 偵測舊 Cyder 拷入的 DXVK／DXMT DLL，還原 Wine 內建 `d3d*`／`dxgi`、移除 `winemetal.dll` 與舊 payload marker；不修改 DllOverrides registry |
 | `cyder_launcher.sh` | 解析 `.exe`、bootstrap `bottles/shared`、執行 Wine；`--ensure-engine-only` / `--ensure-graphics-only` / `--bootstrap-only` / `--launch-exe` 是 Cyder GUI 的內部維護介面，不是 Cyder.app 公開 argv；Finder `.exe` 路徑不升級 graphics payload |
 | `cyder-winetricks.sh` | 以 Cyder engine 的 unattended CLI 安裝固定版 Winetricks 元件；目標為 SharedPrefix，供 Cyder 原生元件選擇器呼叫 |
@@ -104,6 +107,9 @@ run-bluecg.sh
 | `tests/test-cyder-exe-association.sh` | `cyder-exe-association.swift status` |
 | `tests/test-install-libarchive-tar.sh` | `install-libarchive-tar.sh` |
 | `tests/test-cyder-bootstrap.sh` | `cyder_launcher.sh --bootstrap-only`（需 Wine） |
+| `tests/test-cyder-dxvk.sh` | `build-dxvk.sh` 必須 pin 版本、寫 `lib/dxvk/version`、套用 MinGW-w64 15 補丁 |
+| `tests/test-cyder-dxvk2.sh` | `build-dxvk2.sh` 安裝到 `lib/dxvk2`、含 d3d8、不寫 `lib/dxvk/` |
+| `tests/test-pin-lib-vcs-version.sh` | `pin-dxvk-version.py` 以 RELEASE 取代 vcs_tag，且不污染 `include/version.h` |
 | `tests/test-cyder-graphics-prepend-patch.sh` | CompatDB DXVK 使用 builtin + prepend，而非 native-first `n,b` |
 | `tests/test-cyder-pack-graphics-payloads.sh` | DXVK／DXMT 獨立 archive、sidecar 與 DXVK PE signature |
 | `tests/test-cyder-ensure-graphics.sh` | runtime payload 安裝、版本切換與 engine symlink |
