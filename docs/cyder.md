@@ -262,6 +262,8 @@ Cyder 每次啟動都會建立小型 session 記錄，保存目前階段、shell
 
 ## 相關文件
 
+- [cyder-graphics-backends.zh-TW.md](cyder-graphics-backends.zh-TW.md) — 圖形後端選項
+- [cyder-graphics-runtime-pipeline.zh-TW.md](cyder-graphics-runtime-pipeline.zh-TW.md) — 引擎／圖形安裝與啟動載入
 - [cyderbits.md](cyderbits.md) — 打包 `.exe` 為 game `.app`（CyderBits）
 - [bluecg.md](bluecg.md) — BlueCG 開發與驗證
 - [scripts.md](scripts.md) — 腳本參考

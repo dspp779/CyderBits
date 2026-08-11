@@ -62,3 +62,8 @@ release artifact 匯入；下一階段再進行：
 2. 將引擎專屬測試移出 Cyder CI。
 3. Cyder CI 僅驗證 pinned manifest、artifact 與 App integration。
 4. 以 release tag／digest 取代跨 repository branch 依賴。
+
+## 相關文件
+
+- [引擎、圖形轉譯層與 Runtime 載入](cyder-graphics-runtime-pipeline.zh-TW.md) — engine tar 與 graphics payload 如何分開安裝、再在啟動時接線
+- [DXVK 編譯備忘](build-dxvk.zh-TW.md)

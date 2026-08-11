@@ -73,8 +73,11 @@ assert_contains "$ui" "chooseGptkCandidate" "GPTK install should let the user pi
 assert_contains "$ui" "CyderGptk.activeInfo()" "graphics tab should show the active GPTK source and version"
 assert_contains "$ui" "CyderGptk.syncEngineLink()" "graphics tab should refresh engine GPTK symlink"
 assert_contains "$(cat "$ROOT/scripts/cyder_gptk.swift")" "Cyder 已安裝" "installed GPTK should win and show version in status"
-assert_contains "$ui" 'let showFrameRate = backend.usesDxvkTranslation' \
-  "frame-rate limiter for both DXVK families"
+assert_contains "$ui" '["60", "120", "144", "不限制"]' \
+  "frame-rate menu should offer 60/120/144 and unlimited"
+assert_contains "$ui" 'let showFrameRate = backend.usesFrameLimiter' \
+  "frame-rate limiter for DXVK families and DXMT"
+assert_contains "$ui" 'row("引擎版本"' "general tab should show the installed engine version"
 assert_contains "$ui" 'let showDxvkFrametimes = backend.usesDxvkTranslation' \
   "frametimes toggle for both DXVK families"
 assert_contains "$ui" 'backend.usesDxvkTranslation' \

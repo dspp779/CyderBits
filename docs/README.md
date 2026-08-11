@@ -39,6 +39,7 @@
 | [bluecg.md](bluecg.md) | 開發 / 驗證 | BlueCG 自建 Wine、執行、高解析度與已知問題 |
 | [wine-configure-options.md](wine-configure-options.md) | 開發 / 建置 | Wine `configure` 旗標說明與老遊戲取捨 |
 | [build-dxvk.zh-TW.md](build-dxvk.zh-TW.md) | 開發 / 建置 | DXVK 1.x→`lib/dxvk`、2.x→`lib/dxvk2` 的工具鏈、版本釘死、builtin 戳記與已知補丁 |
+| [cyder-graphics-runtime-pipeline.zh-TW.md](cyder-graphics-runtime-pipeline.zh-TW.md) | 開發 / 發布 | 引擎安裝、圖形 payload、CompatDB prepend 的步驟關係與圖 |
 | [maplestory-classic-cx26-frame-walk-debug.md](maplestory-classic-cx26-frame-walk-debug.md) | 開發 / 除錯 | 新楓之谷經典版登入卡住：Wine 11.1–11.14 對照、CX26 NTDLL 修補、增量編譯與完整驗收 |
 | [games/maplestory/grap-core64-residual-process-analysis.md](games/maplestory/grap-core64-residual-process-analysis.md) | 開發 / 除錯 | 經典版離場 grap-core QDO livelock、Cyder009 optnone bandage |
 | [games/maplestory/maplestory-classic-ngs-x-grap-architecture.md](games/maplestory/maplestory-classic-ngs-x-grap-architecture.md) | 開發 / 研究 | NGS-X／GRAP 元件架構與 IPC |

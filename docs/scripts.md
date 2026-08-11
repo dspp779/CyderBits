@@ -33,12 +33,15 @@
 | `install-libarchive-tar.sh` | 安裝 GnuWin bsdtar 為 prefix `syswow64/tar.exe` |
 | `resolve-wine-locale.sh` | 解析 Wine 用 locale（輸出至 stdout） |
 
+安裝、ensure 與啟動 prepend 的步驟圖見
+[引擎／圖形 runtime 管線](cyder-graphics-runtime-pipeline.zh-TW.md)。
+
 ## Cyder 啟動器
 
 | 腳本 | 用途 |
 |------|------|
 | `pack-graphics-payloads.sh` | 從 engine 的 `lib/dxvk`／`lib/dxvk2`／`lib/dxmt` 製作獨立 zstd archive、version 與 SHA-256 sidecar 到 `dist/artifacts/graphics/`；DXVK／DXVK 2 staging DLL 會先加 Wine builtin signature |
-| `pack-engine-artifact.sh` | strip + bundle + sign + 預設 xz 最高壓縮比 → `engine-wine-x86_64-CX26-<winever>.tar.xz`；排除 `lib/dxvk`／`lib/dxmt`，`--zstd` / `CYDER_ENGINE_FORMAT=zstd` 產出 `engine-CX26-<winever>.tar.zst` |
+| `pack-engine-artifact.sh` | strip + bundle + sign + 預設 xz 最高壓縮比 → `engine-wine-x86_64-CX26-<winever>.tar.xz`；先 pack graphics，再排除 `lib/dxvk`／`lib/dxvk2`／`lib/dxmt`；`--zstd` / `CYDER_ENGINE_FORMAT=zstd` 產出 `engine-CX26-<winever>.tar.zst` |
 | `cyder-copy-engine-artifact.sh` | 複製預建 engine artifact 進 app `Resources/` |
 | `create-cyder-app.sh` | `dist/Cyder.app`（`.exe` 啟動器 + engine artifact + graphics payload + bootstrap） |
 | `release-cyder.sh` | 測試／正式通道：建置、簽署、（正式）公證與 `Cyder.app.zip`；見 `docs/release-pipeline.zh-TW.md` |

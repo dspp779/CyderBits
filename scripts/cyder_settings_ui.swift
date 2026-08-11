@@ -61,6 +61,7 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
     private let applyButton = NSButton()
     private var wineIsRunning = false
     private var didShowRunningAlert = false
+    private let engineVersion = NSTextField(labelWithString: "")
     private let syncMode = NSPopUpButton()
     private let syncModeDescription = NSTextField(wrappingLabelWithString: "")
     private let retina = NSSwitch()
@@ -186,11 +187,16 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
         stopAllWineButton.bezelStyle = .rounded
         stopAllWineButton.target = self
         stopAllWineButton.action = #selector(stopAllWine)
+        configureNote(engineVersion)
+        engineVersion.isSelectable = true
+        refreshEngineVersionLabel()
         return tab("一般", rows: [
             gameLibrary,
             note("加入 Windows 遊戲、直接啟動，或管理每個遊戲的獨立 Wine prefix 與設定。"),
             stopAllWineButton,
             note("對目前 Cyder 使用的 Wine 環境執行 wineserver -k，並等待程序結束。"),
+            row("引擎版本", engineVersion),
+            note("目前已安裝的 Wine engine；開啟 Cyder.app 時會依打包版本升級。"),
             row("同步機制", syncMode),
             syncModeDescription,
         ])
@@ -292,7 +298,7 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
         updateD3DMetalMenuItemAvailability()
         updateDxmtMenuItemAvailability()
         updateDxvk2MenuItemAvailability()
-        dxvkFrameRate.addItems(withTitles: ["60", "不限制"])
+        dxvkFrameRate.addItems(withTitles: ["60", "120", "144", "不限制"])
         dxvkFrameRate.target = self
         dxvkFrameRate.action = #selector(dxvkFrameRateChanged)
         graphicsHud.target = self
@@ -433,6 +439,10 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
         syncModeDescription.stringValue = CyderSyncMode.allCases[index].description
     }
 
+    private func refreshEngineVersionLabel() {
+        engineVersion.stringValue = CyderPaths.installedEngineVersion ?? "尚未安裝"
+    }
+
     private func reload() {
         let value = store.value
         syncMode.selectItem(at: CyderSyncMode(msync: value.msync, esync: value.esync ?? false).rawValue)
@@ -445,7 +455,8 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
         let smoothingValues = ["off", "grayscale", "cleartype-rgb"]
         smoothing.selectItem(at: smoothingValues.firstIndex(of: value.fontSmoothing) ?? 2)
         graphicsBackend.selectItem(at: graphicsBackendIndex(value.graphicsBackend))
-        dxvkFrameRate.selectItem(at: value.dxvkFrameRate == .unlimited ? 1 : 0)
+        dxvkFrameRate.selectItem(at: value.dxvkFrameRate.menuIndex)
+        refreshEngineVersionLabel()
         rebuildGraphicsHudMenu(selecting: value.graphicsHud)
         dxvkHudFrametimes.state = value.dxvkHudFrametimes ? .on : .off
         switch value.wineDiagnostics {
@@ -778,7 +789,7 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
                 $0.fontSongtiTarget = cyderFontTarget(at: fontSongti.indexOfSelectedItem)
                 $0.fontSmoothing = smoothingValues[max(0, smoothing.indexOfSelectedItem)]
                 $0.graphicsBackend = graphicsBackendValue
-                $0.dxvkFrameRate = dxvkFrameRate.indexOfSelectedItem == 1 ? .unlimited : .sixty
+                $0.dxvkFrameRate = CyderDxvkFrameRate(menuIndex: dxvkFrameRate.indexOfSelectedItem)
                 $0.graphicsHud = graphicsHudValue
                 $0.dxvkHudFrametimes = dxvkHudFrametimes.state == .on
                 switch wineDiagnostics.indexOfSelectedItem {
@@ -948,7 +959,7 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
         updateDxvk2MenuItemAvailability()
         CyderGptk.syncEngineLink()
         let backend = graphicsBackendValue
-        let showFrameRate = backend.usesDxvkTranslation
+        let showFrameRate = backend.usesFrameLimiter
         let showDxvkFrametimes = backend.usesDxvkTranslation
         let enableDxvkFrametimes = graphicsHudValue == .dxvk
         let showGptkControls = backend != .dxvk && backend != .dxvk2 && backend != .wined3d && backend != .dxmt

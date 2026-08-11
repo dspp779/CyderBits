@@ -131,6 +131,35 @@ struct CyderSettingsHarness {
         precondition(dxvk2Env["DXVK_FRAME_RATE"] == "60")
         precondition(dxvk2Env["DXVK_HUD"] == "fps,frametimes")
 
+        try store.update { settings in
+            settings.dxvkFrameRate = .oneTwenty
+        }
+        let dxvk120Env = store.environment(
+            profileID: nil,
+            legacyBasename: nil,
+            capabilities: CyderGraphicsCapabilities(
+                hasD3DMetal: false, hasDxvk: true, hasDxvk2: true, hasDxmt: true
+            )
+        )
+        precondition(dxvk120Env["DXVK_FRAME_RATE"] == "120")
+
+        try store.update { settings in
+            settings.dxvkFrameRate = .oneFortyFour
+        }
+        let dxvk144Env = store.environment(
+            profileID: nil,
+            legacyBasename: nil,
+            capabilities: CyderGraphicsCapabilities(
+                hasD3DMetal: false, hasDxvk: true, hasDxvk2: true, hasDxmt: true
+            )
+        )
+        precondition(dxvk144Env["DXVK_FRAME_RATE"] == "144")
+        precondition(CyderSettings.sanitizedDxvkFrameRate("sixty") == .sixty)
+        precondition(CyderSettings.sanitizedDxvkFrameRate("120") == .oneTwenty)
+        precondition(CyderSettings.sanitizedDxvkFrameRate("144") == .oneFortyFour)
+        precondition(CyderDxvkFrameRate.sixty.fpsValue == "60")
+        precondition(CyderDxvkFrameRate.unlimited.fpsValue == nil)
+
         precondition(
             CyderSettings.effectiveLaunchBackend(
                 preference: .dxvk2, hasD3DMetal: true, hasDxvk: true, hasDxvk2: false, hasDxmt: true
@@ -171,8 +200,52 @@ struct CyderSettingsHarness {
         )
         precondition(dxmtEnv["CYDER_GRAPHICS_BACKEND"] == "dxmt")
         precondition(dxmtEnv["DXVK_FRAME_RATE"] == nil)
+        precondition(dxmtEnv["DXMT_CONFIG"] == "d3d11.preferredMaxFrameRate=60;")
         precondition(dxmtEnv["DXVK_HUD"] == "0")
         precondition(dxmtEnv["MTL_HUD_ENABLED"] == nil)
+
+        try store.update { settings in
+            settings.dxvkFrameRate = .oneTwenty
+        }
+        let dxmt120Env = store.environment(
+            profileID: nil,
+            legacyBasename: nil,
+            capabilities: CyderGraphicsCapabilities(
+                hasD3DMetal: false, hasDxvk: true, hasDxvk2: true, hasDxmt: true
+            )
+        )
+        precondition(dxmt120Env["DXMT_CONFIG"] == "d3d11.preferredMaxFrameRate=120;")
+        precondition(dxmt120Env["DXVK_FRAME_RATE"] == nil)
+
+        try store.update { settings in
+            settings.dxvkFrameRate = .unlimited
+        }
+        let dxmtUnlimitedEnv = store.environment(
+            profileID: nil,
+            legacyBasename: nil,
+            override: CyderExecutableSettings(
+                environment: ["DXMT_CONFIG": "dxgi.forceSDR=True;d3d11.preferredMaxFrameRate=30;"]
+            ),
+            capabilities: CyderGraphicsCapabilities(
+                hasD3DMetal: false, hasDxvk: true, hasDxvk2: true, hasDxmt: true
+            )
+        )
+        precondition(dxmtUnlimitedEnv["DXMT_CONFIG"] == "dxgi.forceSDR=True;")
+
+        try store.update { settings in
+            settings.dxvkFrameRate = .sixty
+        }
+        let dxmtMergedEnv = store.environment(
+            profileID: nil,
+            legacyBasename: nil,
+            override: CyderExecutableSettings(
+                environment: ["DXMT_CONFIG": "dxgi.forceSDR=True;"]
+            ),
+            capabilities: CyderGraphicsCapabilities(
+                hasD3DMetal: false, hasDxvk: true, hasDxvk2: true, hasDxmt: true
+            )
+        )
+        precondition(dxmtMergedEnv["DXMT_CONFIG"] == "dxgi.forceSDR=True;d3d11.preferredMaxFrameRate=60;")
 
         try store.update { settings in
             settings.graphicsBackend = .default

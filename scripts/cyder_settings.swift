@@ -74,11 +74,42 @@ enum CyderGraphicsBackend: String, Codable, CaseIterable {
     case wined3d, dxvk, dxvk2, dxmt, d3dmetal
 
     var usesDxvkTranslation: Bool { self == .dxvk || self == .dxvk2 }
+
+    var usesFrameLimiter: Bool { usesDxvkTranslation || self == .dxmt }
 }
 
 enum CyderDxvkFrameRate: String, Codable, CaseIterable {
     case sixty = "60"
+    case oneTwenty = "120"
+    case oneFortyFour = "144"
     case unlimited
+
+    var fpsValue: String? {
+        switch self {
+        case .sixty: return "60"
+        case .oneTwenty: return "120"
+        case .oneFortyFour: return "144"
+        case .unlimited: return nil
+        }
+    }
+
+    var menuIndex: Int {
+        switch self {
+        case .sixty: return 0
+        case .oneTwenty: return 1
+        case .oneFortyFour: return 2
+        case .unlimited: return 3
+        }
+    }
+
+    init(menuIndex: Int) {
+        switch menuIndex {
+        case 1: self = .oneTwenty
+        case 2: self = .oneFortyFour
+        case 3: self = .unlimited
+        default: self = .sixty
+        }
+    }
 }
 
 /// Global-only smoothness overlay. Default is off.
@@ -468,8 +499,7 @@ struct CyderSettings: Codable {
     }
 
     static func sanitizedDxvkFrameRate(_ raw: String?) -> CyderDxvkFrameRate {
-        guard let raw, let value = CyderDxvkFrameRate(rawValue: raw) else { return .sixty }
-        return value
+        sanitizedOptionalDxvkFrameRate(raw) ?? .sixty
     }
 
     static func sanitizedGraphicsHud(_ raw: String?) -> CyderGraphicsHud {
@@ -490,7 +520,47 @@ struct CyderSettings: Codable {
 
     static func sanitizedOptionalDxvkFrameRate(_ raw: String?) -> CyderDxvkFrameRate? {
         guard let raw else { return nil }
-        return CyderDxvkFrameRate(rawValue: raw)
+        switch raw {
+        case "sixty", "60": return .sixty
+        case "120": return .oneTwenty
+        case "144": return .oneFortyFour
+        case "unlimited": return .unlimited
+        default: return CyderDxvkFrameRate(rawValue: raw)
+        }
+    }
+
+    static func mergingDxmtPreferredMaxFrameRate(existing: String?, fps: String?) -> String? {
+        var parts = (existing ?? "")
+            .split(separator: ";", omittingEmptySubsequences: true)
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+        parts.removeAll { part in
+            let key = part.split(separator: "=", maxSplits: 1).first?
+                .trimmingCharacters(in: .whitespaces)
+                .lowercased()
+            return key == "d3d11.preferredmaxframerate"
+        }
+        if let fps {
+            parts.append("d3d11.preferredMaxFrameRate=\(fps)")
+        }
+        guard !parts.isEmpty else { return nil }
+        return parts.joined(separator: ";") + ";"
+    }
+
+    static func applyGraphicsFrameLimiter(
+        _ env: inout [String: String],
+        backend: CyderGraphicsBackend,
+        rate: CyderDxvkFrameRate
+    ) {
+        if backend.usesDxvkTranslation, let fps = rate.fpsValue {
+            env["DXVK_FRAME_RATE"] = fps
+        }
+        guard backend == .dxmt else { return }
+        if let merged = mergingDxmtPreferredMaxFrameRate(existing: env["DXMT_CONFIG"], fps: rate.fpsValue) {
+            env["DXMT_CONFIG"] = merged
+        } else {
+            env.removeValue(forKey: "DXMT_CONFIG")
+        }
     }
 
     static func resolveGraphics(
@@ -751,10 +821,6 @@ final class CyderSettingsStore {
         if let effective {
             result["CYDER_GRAPHICS_BACKEND"] = effective.rawValue
         }
-        // Manual DXVK-family backends expose the limiter everywhere.
-        if graphics.dxvkFrameRate == .sixty, graphics.backend.usesDxvkTranslation {
-            result["DXVK_FRAME_RATE"] = "60"
-        }
         switch resolvedGraphicsHud(preference: graphics.backend) {
         case .metal:
             result["MTL_HUD_ENABLED"] = "1"
@@ -766,16 +832,21 @@ final class CyderSettingsStore {
             result["DXVK_HUD"] = "0"
             result.removeValue(forKey: "MTL_HUD_ENABLED")
         }
-        guard let rule else { return result }
-        if let v = rule.msync { result["CYDER_MSYNC"] = v ? "1" : "0" }
-        if let v = rule.esync { result["CYDER_ESYNC"] = v ? "1" : "0" }
-        if let v = rule.retinaMode { result["CYDER_RETINA_MODE"] = v ? "1" : "0" }
-        if let v = rule.dpi { result["CYDER_DPI"] = String(min(480, max(72, v))) }
-        if let v = rule.fontMingLiuTarget { result["CYDER_FONT_MINGLIU_TARGET"] = v }
-        if let v = rule.fontSongtiTarget { result["CYDER_FONT_SONGTI_TARGET"] = v }
-        if let v = rule.fontSmoothing { result["CYDER_FONT_SMOOTHING"] = v }
-        if let v = rule.powerMode { result["CYDER_POWER_MODE"] = v == "energySaving" ? "background" : "normal" }
-        result.merge(rule.environment.filter { CyderSettings.isValidEnvironmentKey($0.key) }) { _, override in override }
+        if let rule {
+            if let v = rule.msync { result["CYDER_MSYNC"] = v ? "1" : "0" }
+            if let v = rule.esync { result["CYDER_ESYNC"] = v ? "1" : "0" }
+            if let v = rule.retinaMode { result["CYDER_RETINA_MODE"] = v ? "1" : "0" }
+            if let v = rule.dpi { result["CYDER_DPI"] = String(min(480, max(72, v))) }
+            if let v = rule.fontMingLiuTarget { result["CYDER_FONT_MINGLIU_TARGET"] = v }
+            if let v = rule.fontSongtiTarget { result["CYDER_FONT_SONGTI_TARGET"] = v }
+            if let v = rule.fontSmoothing { result["CYDER_FONT_SMOOTHING"] = v }
+            if let v = rule.powerMode { result["CYDER_POWER_MODE"] = v == "energySaving" ? "background" : "normal" }
+            result.merge(rule.environment.filter { CyderSettings.isValidEnvironmentKey($0.key) }) { _, override in override }
+        }
+        // Apply after per-game env so DXMT_CONFIG keys merge instead of clobber.
+        CyderSettings.applyGraphicsFrameLimiter(
+            &result, backend: graphics.backend, rate: graphics.dxvkFrameRate
+        )
         return result
     }
 

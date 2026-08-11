@@ -22,6 +22,10 @@ assert_contains "$settings" 'case wined3d, dxvk, dxvk2, dxmt, d3dmetal' \
   "settings enum must include dxvk2"
 assert_contains "$settings" 'usesDxvkTranslation' \
   "frame-rate and HUD must share a DXVK-family helper"
+assert_contains "$settings" 'usesFrameLimiter' \
+  "DXMT must share the frame-rate limiter with the DXVK family"
+assert_contains "$settings" 'oneTwenty = "120"' "settings must persist 120 fps"
+assert_contains "$settings" 'oneFortyFour = "144"' "settings must persist 144 fps"
 assert_contains "$settings" 'CYDER_FONT_MINGLIU_TARGET' "env export MingLiU target"
 assert_contains "$settings" 'CYDER_FONT_SONGTI_TARGET' "env export Songti target"
 assert_not_contains "$settings" '"CYDER_FONT_PRESET": value.fontPreset' \

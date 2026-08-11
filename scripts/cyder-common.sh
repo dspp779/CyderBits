@@ -744,7 +744,11 @@ cyder_load_saved_settings() {
     cyder_apply_graphics_preference "${value:-default}" "${CYDER_ENGINES:-}/${CYDER_ENGINE_NAME:-}"
   fi
   value="$(plutil -extract dxvkFrameRate raw -o - "$settings" 2>/dev/null || true)"
-  case "$value" in sixty|unlimited) export CYDER_DXVK_FRAME_RATE_PREFERENCE="$value" ;; esac
+  case "$value" in
+    sixty|60) export CYDER_DXVK_FRAME_RATE_PREFERENCE=60 ;;
+    120|144) export CYDER_DXVK_FRAME_RATE_PREFERENCE="$value" ;;
+    unlimited) export CYDER_DXVK_FRAME_RATE_PREFERENCE=unlimited ;;
+  esac
   value="$(plutil -extract graphicsHud raw -o - "$settings" 2>/dev/null || true)"
   case "$value" in off|metal|dxvk) export CYDER_GRAPHICS_HUD_PREFERENCE="$value" ;; esac
   value="$(plutil -extract dxvkHudFrametimes raw -o - "$settings" 2>/dev/null || true)"
@@ -1058,12 +1062,14 @@ cyder_sync_crossover_graphics_environment() {
     -v backend="${CX_GRAPHICS_BACKEND:-}" \
     -v frame_rate="${DXVK_FRAME_RATE:-}" \
     -v dxvk_hud="${DXVK_HUD:-}" \
-    -v metal_hud="${MTL_HUD_ENABLED:-}" '
+    -v metal_hud="${MTL_HUD_ENABLED:-}" \
+    -v dxmt_config="${DXMT_CONFIG:-}" '
     function emit() {
       if (backend != "") print "\"CX_GRAPHICS_BACKEND\" = \"" backend "\""
       if (frame_rate != "") print "\"DXVK_FRAME_RATE\" = \"" frame_rate "\""
       if (dxvk_hud != "") print "\"DXVK_HUD\" = \"" dxvk_hud "\""
       if (metal_hud != "") print "\"MTL_HUD_ENABLED\" = \"" metal_hud "\""
+      if (dxmt_config != "") print "\"DXMT_CONFIG\" = \"" dxmt_config "\""
     }
     BEGIN { in_environment = 0; found = 0 }
     /^\[EnvironmentVariables\]$/ {
@@ -1074,7 +1080,7 @@ cyder_sync_crossover_graphics_environment() {
       next
     }
     /^\[/ { in_environment = 0 }
-    in_environment && /^"(CX_GRAPHICS_BACKEND|DXVK_FRAME_RATE|DXVK_HUD|MTL_HUD_ENABLED)"[[:space:]]*=/ { next }
+    in_environment && /^"(CX_GRAPHICS_BACKEND|DXVK_FRAME_RATE|DXVK_HUD|MTL_HUD_ENABLED|DXMT_CONFIG)"[[:space:]]*=/ { next }
     { print }
     END {
       if (!found) {
@@ -2151,16 +2157,66 @@ cyder_resolve_effective_graphics_backend() {
   cyder_apply_graphics_runtime_preferences
 }
 
+cyder_graphics_frame_rate_fps() {
+  case "${CYDER_DXVK_FRAME_RATE_PREFERENCE:-60}" in
+    sixty|60) printf '%s\n' 60 ;;
+    120) printf '%s\n' 120 ;;
+    144) printf '%s\n' 144 ;;
+    *) printf '%s\n' "" ;;
+  esac
+}
+
+# Keep other DXMT_CONFIG keys; replace or strip d3d11.preferredMaxFrameRate.
+cyder_dxmt_config_set_frame_rate() {
+  local fps="${1:-}"
+  local existing="${DXMT_CONFIG:-}"
+  local part key out=""
+  local IFS=';'
+  # shellcheck disable=SC2086
+  for part in $existing; do
+    part="${part#"${part%%[![:space:]]*}"}"
+    part="${part%"${part##*[![:space:]]}"}"
+    [[ -n "$part" ]] || continue
+    key="${part%%=*}"
+    key="${key#"${key%%[![:space:]]*}"}"
+    key="${key%"${key##*[![:space:]]}"}"
+    key="$(printf '%s' "$key" | tr '[:upper:]' '[:lower:]')"
+    [[ "$key" == "d3d11.preferredmaxframerate" ]] && continue
+    if [[ -n "$out" ]]; then
+      out="$out;$part"
+    else
+      out="$part"
+    fi
+  done
+  if [[ -n "$fps" ]]; then
+    if [[ -n "$out" ]]; then
+      out="$out;d3d11.preferredMaxFrameRate=$fps"
+    else
+      out="d3d11.preferredMaxFrameRate=$fps"
+    fi
+  fi
+  if [[ -n "$out" ]]; then
+    export DXMT_CONFIG="${out};"
+  else
+    unset DXMT_CONFIG
+  fi
+}
+
 cyder_apply_graphics_runtime_preferences() {
   local preference="${CYDER_GRAPHICS_PREFERENCE:-${CYDER_GRAPHICS_BACKEND:-default}}"
   local backend="${CYDER_GRAPHICS_BACKEND:-default}"
   local hud="${CYDER_GRAPHICS_HUD_PREFERENCE:-off}"
+  local fps
 
   unset DXVK_FRAME_RATE DXVK_HUD MTL_HUD_ENABLED
-  if [[ "$backend" == dxvk || "$backend" == dxvk2 ]] \
-     && { [[ "$preference" == dxvk || "$preference" == dxvk2 ]] || cyder_is_maplestory_oem; } \
-     && [[ "${CYDER_DXVK_FRAME_RATE_PREFERENCE:-sixty}" == sixty ]]; then
-    export DXVK_FRAME_RATE=60
+  fps="$(cyder_graphics_frame_rate_fps)"
+  if [[ -n "$fps" ]] \
+     && [[ "$backend" == dxvk || "$backend" == dxvk2 ]] \
+     && { [[ "$preference" == dxvk || "$preference" == dxvk2 ]] || cyder_is_maplestory_oem; }; then
+    export DXVK_FRAME_RATE="$fps"
+  fi
+  if [[ "$backend" == dxmt && "$preference" == dxmt ]]; then
+    cyder_dxmt_config_set_frame_rate "$fps"
   fi
 
   case "$hud" in
@@ -2287,7 +2343,8 @@ cyder_load_game_settings() {
               ;;
             dxvkFrameRate)
               case "$value" in
-                60|sixty) export CYDER_DXVK_FRAME_RATE_PREFERENCE=sixty ;;
+                60|sixty) export CYDER_DXVK_FRAME_RATE_PREFERENCE=60 ;;
+                120|144) export CYDER_DXVK_FRAME_RATE_PREFERENCE="$value" ;;
                 unlimited) export CYDER_DXVK_FRAME_RATE_PREFERENCE=unlimited ;;
               esac
               ;;
@@ -2687,6 +2744,7 @@ cyder_run_wine_exe() {
     echo "Graphics backend: ${CYDER_GRAPHICS_BACKEND:-default}"
     echo "GPTK root: ${CYDER_GPTK_ROOT:-<unset>}"
     echo "DXVK frame rate: ${DXVK_FRAME_RATE:-<unset>}"
+    echo "DXMT config: ${DXMT_CONFIG:-<unset>}"
     echo "DXVK HUD: ${DXVK_HUD:-<unset>}"
     echo "Metal HUD: ${MTL_HUD_ENABLED:-<unset>}"
     if [[ "${CYDER_MSYNC:-0}" == 1 ]]; then
@@ -2714,6 +2772,7 @@ cyder_run_wine_exe() {
     echo "  CYDER_GPTK_ROOT=${CYDER_GPTK_ROOT:-<unset>}"
     echo "  CYDER_WINE_DIAGNOSTICS=$wine_diagnostics"
     echo "  DXVK_FRAME_RATE=${DXVK_FRAME_RATE:-<unset>}"
+    echo "  DXMT_CONFIG=${DXMT_CONFIG:-<unset>}"
     echo "  DXVK_HUD=${DXVK_HUD:-<unset>}"
     echo "  MTL_HUD_ENABLED=${MTL_HUD_ENABLED:-<unset>}"
     echo "  WINEDEBUG=$wine_debug"

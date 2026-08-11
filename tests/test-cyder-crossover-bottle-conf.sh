@@ -141,6 +141,53 @@ JSON
   assert_eq "$DXVK_HUD" "fps" "shell settings loader should apply DXVK HUD for dxvk2"
 )
 
+# DXVK 120/144 use the same limiter field as 60.
+cat >"$SETTINGS_DIR/settings.json" <<'JSON'
+{
+  "schemaVersion": 9,
+  "graphicsBackend": "dxvk",
+  "dxvkFrameRate": "120",
+  "graphicsHud": "off"
+}
+JSON
+(
+  export CYDER_SUPPORT="$SETTINGS_DIR"
+  export CYDER_ENGINES="$SETTINGS_ENGINES"
+  export CYDER_ENGINE_NAME="$SETTINGS_ENGINE_NAME"
+  export CYDER_GRAPHICS_BACKEND=
+  unset DXVK_FRAME_RATE DXVK_HUD MTL_HUD_ENABLED DXMT_CONFIG
+  cyder_load_saved_settings
+  assert_eq "$DXVK_FRAME_RATE" "120" "shell settings loader should apply DXVK 120 fps"
+)
+
+# Manual DXMT uses DXMT_CONFIG, not DXVK_FRAME_RATE, and merges existing keys.
+mkdir -p "$SETTINGS_ENGINES/$SETTINGS_ENGINE_NAME/lib/dxmt/x86_64-windows" \
+  "$SETTINGS_ENGINES/$SETTINGS_ENGINE_NAME/lib/dxmt/x86_64-unix"
+: >"$SETTINGS_ENGINES/$SETTINGS_ENGINE_NAME/lib/dxmt/x86_64-windows/d3d11.dll"
+: >"$SETTINGS_ENGINES/$SETTINGS_ENGINE_NAME/lib/dxmt/x86_64-unix/winemetal.so"
+cat >"$SETTINGS_DIR/settings.json" <<'JSON'
+{
+  "schemaVersion": 9,
+  "graphicsBackend": "dxmt",
+  "dxvkFrameRate": "144",
+  "graphicsHud": "off"
+}
+JSON
+(
+  export CYDER_SUPPORT="$SETTINGS_DIR"
+  export CYDER_ENGINES="$SETTINGS_ENGINES"
+  export CYDER_ENGINE_NAME="$SETTINGS_ENGINE_NAME"
+  export CYDER_GRAPHICS_BACKEND=
+  export DXMT_CONFIG="dxgi.forceSDR=True;"
+  unset DXVK_FRAME_RATE DXVK_HUD MTL_HUD_ENABLED
+  cyder_macos_at_least() { return 0; }
+  cyder_load_saved_settings
+  assert_eq "$CYDER_GRAPHICS_BACKEND" "dxmt" "shell settings loader should retain dxmt backend"
+  assert_eq "${DXVK_FRAME_RATE:-}" "" "DXMT must not set DXVK_FRAME_RATE"
+  assert_eq "$DXMT_CONFIG" "dxgi.forceSDR=True;d3d11.preferredMaxFrameRate=144;" \
+    "shell should merge DXMT frame rate into existing DXMT_CONFIG"
+)
+
 # Metal HUD is independent of a manual DXVK selection. In particular, the
 # generic "default" backend leaves CompatDB in charge but must still inject the
 # user's Metal HUD request.

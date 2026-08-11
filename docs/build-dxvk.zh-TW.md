@@ -4,10 +4,11 @@
 > Wine engine／wineserver／host Mach-O minOS 仍屬 sibling `cyder-wine-engine`；
 > DXVK 是 **Windows PE**，由本 repo 的腳本交叉編譯後放進 engine 的 `lib/`。
 
-正式發布路徑仍是：engine 打包**排除** `lib/dxvk`／`lib/dxmt`，再由
+正式發布路徑仍是：engine 打包**排除** `lib/dxvk`／`lib/dxvk2`／`lib/dxmt`，再由
 `pack-graphics-payloads.sh` 做成 `Resources/graphics/*.tar.zst`。本文件只談
-**如何正確編譯**，不涵蓋 CompatDB 選後端或 ensure-graphics 流程
-（見 [圖形後端](cyder-graphics-backends.zh-TW.md)）。
+**如何正確編譯**。安裝、ensure 與啟動 prepend 見
+[引擎／圖形 runtime 管線](cyder-graphics-runtime-pipeline.zh-TW.md)；
+使用者選項見 [圖形後端](cyder-graphics-backends.zh-TW.md)。
 
 ## 目錄約定
 
@@ -182,7 +183,8 @@ bash tests/test-pin-lib-vcs-version.sh
 - CompatDB 與偏好設定的 **`dxvk`** 指向 `lib/dxvk`（1.x）；**`dxvk2`** 指向
   `lib/dxvk2`（2.x）。兩者獨立，重編 2.7.1 只影響選 **DXVK 2** 的程序。
 
-使用者流程見 [圖形後端](cyder-graphics-backends.zh-TW.md)。
+步驟圖見 [引擎／圖形 runtime 管線](cyder-graphics-runtime-pipeline.zh-TW.md)；
+使用者選項見 [圖形後端](cyder-graphics-backends.zh-TW.md)。
 
 ## 相關腳本
 

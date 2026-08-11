@@ -17,6 +17,9 @@ Cyder 0.8.0 起，可在 **Cyder 偏好設定 → 圖形** 或個別遊戲設定
 
 ## Runtime 圖形元件與啟動方式
 
+步驟圖與打包／安裝／prepend 關係見
+[引擎、圖形轉譯層與 Runtime 載入](cyder-graphics-runtime-pipeline.zh-TW.md)。
+
 DXVK、DXVK 2 與 DXMT 是 Cyder.app 內 `Resources/graphics/` 的獨立 payload，不再包在
 Wine engine archive。Cyder.app 開啟時會依 version／SHA-256 sidecar 將 payload
 解壓到 `~/.cyder/runtime/graphics/`，再由 engine 的 `lib/dxvk`／`lib/dxvk2`／`lib/dxmt`
@@ -32,16 +35,16 @@ CompatDB 在遊戲啟動時以 **builtin + prepend** 方式從 runtime payload �
 - **在 Finder 直接開啟 `.exe`**：不解壓或升級 payload，只使用現有 `current-dxvk`／`current-dxvk2`／`current-dxmt`。若所選後端（含 DXVK 2）完全不存在，該次會回退到 default／WineD3D，並提示先開啟 Cyder.app。
 - **GPTK**：只更新偵測狀態；未安裝不會阻止開啟 Cyder.app。
 
-## DXVK 限幀 vs 遊戲內 VSync
+## 限幀 vs 遊戲內 VSync
 
-選 **DXVK** 或 **DXVK 2** 時會出現 **限制幀率** 選項：
+選 **DXVK**、**DXVK 2** 或 **DXMT** 時會出現 **限制幀率** 選項：
 
-- **60（預設）** — 啟動時設定 `DXVK_FRAME_RATE=60`，由 DXVK 在轉譯層限幀。
-- **不限制** — 不設定 `DXVK_FRAME_RATE`，幀率由 GPU／遊戲邏輯決定。
+- **60（預設）／120／144** — DXVK 家族設 `DXVK_FRAME_RATE`；DXMT 合併進 `DXMT_CONFIG` 的 `d3d11.preferredMaxFrameRate`。
+- **不限制** — 不設 `DXVK_FRAME_RATE`，並從既有 `DXMT_CONFIG` 拿掉限幀鍵。
 
 這與遊戲選單內的 **VSync（垂直同步）** 是不同機制：
 
-- DXVK 限幀在 Wine 轉譯層生效，可在遊戲未提供限幀選項時控制負載。
+- DXVK 限幀在轉譯層生效；DXMT 則由 Metal／CoreAnimation 控節奏。兩者都可在遊戲未提供限幀時控制負載。
 - 若遊戲強制開啟 VSync 或以固定 tick 驅動畫面，實際幀率仍可能卡在遊戲設定的值。
 - 兩者同時存在時，以較嚴的限制為準（例如遊戲 VSync 鎖 30 fps 時，DXVK 限 60 不會讓畫面超過 30）。
 
@@ -56,7 +59,7 @@ DXMT 將 Direct3D 轉譯至 Metal。Cyder 隨 app 打包 **上游 v0.80** DXMT r
 - **macOS 15（Sequoia）或更新** — macOS 14 及以下 `dxmt` 選項會灰掉（不同於 D3DMetal 的 macOS 14+ 門檻）。
 - **DXMT runtime payload 已安裝** — 尚未解壓或 `current-dxmt` 不存在時，`dxmt` 選項會灰掉；請先開啟 Cyder.app 完成 ensure-graphics。
 
-選 **DXMT** 時不套用 DXVK 限幀（`DXVK_FRAME_RATE`）；限幀選項僅在 **DXVK**／**DXVK 2** 後端出現。
+選 **DXMT** 時限幀走 `DXMT_CONFIG`（Metal／CoreAnimation 節奏），不是 `DXVK_FRAME_RATE`。DXMT 的數值最好是螢幕刷新率的因數（例如 60Hz 上選 144 可能實際落到較低的整除值）。
 
 ## D3DMetal 與 GPTK
 
@@ -108,6 +111,7 @@ runtime 解壓與 `current-*`／engine symlink 更新、舊 bottle DLL 還原與
 
 ## 相關文件
 
+- [引擎、圖形轉譯層與 Runtime 載入](cyder-graphics-runtime-pipeline.zh-TW.md)
 - [DXVK 編譯備忘（1.x / 2.x）](build-dxvk.zh-TW.md)
 - [Cyder 0.8.0 發布說明](releases/v0.8.0.md)
 - [Cyder 使用指南](cyder.md)

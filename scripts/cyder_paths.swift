@@ -30,6 +30,20 @@ enum CyderPaths {
     }()
     static let engine = runtimeRoot
         .appendingPathComponent("Engines/\(engineName)", isDirectory: true)
+
+    /// Label written by ensure-engine (`version`, with a legacy marker fallback).
+    static var installedEngineVersion: String? {
+        let files = [
+            engine.appendingPathComponent("version"),
+            engine.appendingPathComponent(".cyder-engine-version"),
+        ]
+        for url in files {
+            guard let raw = try? String(contentsOf: url, encoding: .utf8) else { continue }
+            let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty { return trimmed }
+        }
+        return nil
+    }
     /// Prefer an absolute `CYDER_PREFIX`, then its compatibility alias;
     /// `bottles/$CYDER_BOTTLE_NAME` (default `shared`).
     static let sharedBottle: URL = {

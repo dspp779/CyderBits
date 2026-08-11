@@ -117,9 +117,10 @@ actions:
 
 `graphics_backend` 是整套 Direct3D translation stack；未填寫時採預設選擇，
 明確填寫 `default` 則會阻止較低 priority 的 backend 規則，並回到 Engine
-安全預設（目前是 WineD3D）。Engine 只會從自己的 payload root 尋找：
+安全預設（目前是 WineD3D）。ntdll 從 `CYDER_GRAPHICS_BACKENDS_ROOT`
+（啟動時設成 engine 根）找 `lib/<token>`：
 
-| 值 | 需要的 Engine payload |
+| 值 | 需要的 payload |
 |---|---|
 | `wined3d` | Wine 內建 DLL，不需額外 payload |
 | `dxvk` | `lib/dxvk/<arch>-windows/` 與 Engine 內的 MoltenVK |
@@ -127,17 +128,18 @@ actions:
 | `dxmt` | `lib/dxmt/<arch>-windows/` 與 `x86_64-unix/winemetal.so` |
 | `d3dmetal` | `lib64/apple_gptk/wine/<arch>-windows/`、`libd3dshared.dylib` 與 `D3DMetal.framework` |
 
-DXVK 的 DLL 是原生 Windows 模組。Cyder 在 bottle bootstrap 時，從 Engine
-同步 `d3d11.dll` 與 `dxgi.dll` 到 `system32/syswow64`；只有匹配
-`graphics_backend: dxvk` 的程序才會套用 `native,builtin`。未匹配程序仍以
-`builtin` 使用 WineD3D，因此同一個 bottle 可以按 EXE 選擇 backend。
-CrossOver 25.0.1 FOSS snapshot（DXVK 1.10.3）與上游 2.7.1 的編譯步驟、目錄
-（`lib/dxvk` vs `lib/dxvk2`）與 llvm-mingw 補丁見
-[DXVK 編譯備忘](build-dxvk.zh-TW.md)。
+`lib/dxvk`／`lib/dxvk2`／`lib/dxmt` 是 ensure-graphics 接到
+`~/.cyder/runtime/graphics/current-*` 的 symlink，**不在** engine tar 裡。
+Bottle 的 `system32`／`syswow64` 維持 Wine 內建 `d3d*`／`dxgi`；匹配規則
+（或使用者覆寫）時，CompatDB 以 **builtin + prepend** 從上述目錄載入
+已 stamp 的 PE。同一個 bottle 仍可依 EXE 選不同 backend。
+步驟圖見 [引擎／圖形 runtime 管線](cyder-graphics-runtime-pipeline.zh-TW.md)；
+編譯見 [DXVK 編譯備忘](build-dxvk.zh-TW.md)。
 
 缺少目前程序架構可用的 DLL 時會記錄診斷並回退 WineD3D，不會跨 App
 搜尋或借用 `/Applications/CrossOver.app` 的檔案。這使規則可以自由匯出，
-而 backend 的授權、簽署及版本相容性仍由 Engine payload 負責。
+而 backend 的授權、簽署及版本相容性仍由 Cyder 圖形 payload 與 Engine
+（MoltenVK）負責。
 
 ### D3DMetal 並不是 macOS 自動提供
 
