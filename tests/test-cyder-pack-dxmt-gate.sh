@@ -15,6 +15,8 @@ assert_contains "$engine_pack" "--exclude 'lib/dxmt'" \
   "engine archive must exclude DXMT"
 assert_contains "$engine_pack" "--exclude 'lib/dxvk'" \
   "engine archive must exclude DXVK"
+assert_contains "$engine_pack" "--exclude 'lib/dxvk2'" \
+  "engine archive must exclude DXVK2"
 
 graphics_pack_line="$(rg -n -F 'pack-graphics-payloads.sh' \
   "$ROOT/scripts/pack-engine-artifact.sh" | head -n1 | cut -d: -f1)"
@@ -30,13 +32,24 @@ trap 'rm -rf "$tmp"' EXIT
 engine="$tmp/engine"
 artifacts="$tmp/artifacts"
 fake_zstd="$tmp/zstd"
-mkdir -p "$engine/bin" "$engine/lib/dxvk" "$engine/lib/dxmt" "$artifacts"
+mkdir -p "$engine/bin" "$engine/lib/dxvk" "$engine/lib/dxvk2" "$engine/lib/dxmt" "$artifacts"
 printf 'dxvk v1.2.3\n' >"$engine/lib/dxvk/version"
+printf 'dxvk v2.7.1\n' >"$engine/lib/dxvk2/version"
 printf 'dxmt v4.5.6\n' >"$engine/lib/dxmt/version"
 touch "$engine/bin/wine" "$artifacts/engine-wine-x86_64-test.tar.xz"
 chmod +x "$engine/bin/wine"
 
 python3 - "$engine/lib/dxvk/d3d11.dll" <<'PY'
+import struct
+import sys
+
+contents = bytearray(128)
+contents[:2] = b"MZ"
+struct.pack_into("<I", contents, 60, 96)
+contents[96:100] = b"PE\0\0"
+open(sys.argv[1], "wb").write(contents)
+PY
+python3 - "$engine/lib/dxvk2/d3d11.dll" <<'PY'
 import struct
 import sys
 
@@ -64,6 +77,7 @@ CYDER_ENGINE_ARTIFACTS_DIR="$artifacts" CYDER_ENGINE_VERSION_LABEL="test" \
   CYDER_ZSTD="$fake_zstd" WINE_INSTALL="$engine" \
   bash "$ROOT/scripts/pack-engine-artifact.sh"
 assert test -f "$artifacts/graphics/dxvk-1.2.3.tar.zst"
+assert test -f "$artifacts/graphics/dxvk2-2.7.1.tar.zst"
 assert test -f "$artifacts/graphics/dxmt-4.5.6.tar.zst"
 assert test -f "$artifacts/graphics/dxvk-version.txt"
 assert test -f "$artifacts/graphics/dxmt-version.txt"

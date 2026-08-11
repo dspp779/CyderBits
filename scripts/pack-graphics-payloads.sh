@@ -14,7 +14,7 @@ usage() {
   cat <<EOF
 Usage: $(basename "$0") [--engine PATH] [--output-dir PATH] [--force]
 
-Package ENGINE/lib/dxvk and ENGINE/lib/dxmt as independent zstd graphics
+Package ENGINE/lib/dxvk, lib/dxvk2, and lib/dxmt as independent zstd graphics
 payloads. Archives and version/checksum sidecars are written to
 dist/artifacts/graphics by default.
 EOF
@@ -31,6 +31,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 [[ -d "$ENGINE/lib/dxvk" ]] || { echo "Missing DXVK payload: $ENGINE/lib/dxvk" >&2; exit 1; }
+[[ -d "$ENGINE/lib/dxvk2" ]] || { echo "Missing DXVK2 payload: $ENGINE/lib/dxvk2" >&2; exit 1; }
 [[ -d "$ENGINE/lib/dxmt" ]] || { echo "Missing DXMT payload: $ENGINE/lib/dxmt" >&2; exit 1; }
 ZSTD_BIN="$(cyder_find_zstd 2>/dev/null || true)"
 [[ -x "$ZSTD_BIN" ]] || { echo "Missing bundled zstd" >&2; exit 1; }
@@ -69,7 +70,7 @@ pack_payload() {
   else
     rm -rf "$staged"
     cp -R "$source" "$staged"
-    if [[ "$name" == dxvk ]]; then
+    if [[ "$name" == dxvk || "$name" == dxvk2 ]]; then
       python3 "$SCRIPT_DIR/stamp-wine-builtin-pe.py" "$staged"
     fi
     (
@@ -83,4 +84,5 @@ pack_payload() {
 }
 
 pack_payload dxvk "$ENGINE/lib/dxvk"
+pack_payload dxvk2 "$ENGINE/lib/dxvk2"
 pack_payload dxmt "$ENGINE/lib/dxmt"

@@ -128,6 +128,7 @@ rsync -a --delete \
   --exclude 'lib64/apple_gptk' \
   --exclude 'apple_gptk' \
   --exclude 'lib/dxvk' \
+  --exclude 'lib/dxvk2' \
   --exclude 'lib/dxmt' \
   "$WINE_INSTALL/" "$ENGINE_TREE/"
 find "$ENGINE_TREE" -name '.DS_Store' -delete 2>/dev/null || true
