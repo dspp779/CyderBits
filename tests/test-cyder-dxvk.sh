@@ -31,22 +31,22 @@ assert contents[64:96] == b"Wine builtin DLL" + b"\0" * 16
 PY
 
 # Prepend model: DXVK is stamped for builtin load order; bottles keep Wine PE.
-patch_text="$(cat "$ROOT/patches/cyder-compatdb-runtime.patch")"
-assert_not_contains "$patch_text" '!strcmp( backend, "dxvk" ) ? "n,b" : "b"' \
-  "DXVK must not use native-first n,b overrides in the prepend model"
-assert_contains "$patch_text" 'add_backend_override( applied, modules[i], "b" )' \
-  "DXVK/DXMT backend modules must use builtin load order"
 assert_contains "$(cat "$ROOT/scripts/create-cyder-app.sh")" \
   'cyder-ensure-graphics.sh' \
   "Cyder.app must bundle the graphics payload ensurer"
 assert_not_contains "$(cat "$ROOT/scripts/cyder-common.sh")" \
   'install-dxvk-prefix.sh' \
   "Launch path must not copy DXVK PE into prefixes"
+assert_not_contains "$(cat "$ROOT/scripts/build-wine.sh")" \
+  'cyder-compatdb-runtime.patch' \
+  "DXVK prepend must not require an ntdll patch"
 
 build_dxvk="$(cat "$ROOT/scripts/build-dxvk.sh")"
 assert_contains "$build_dxvk" 'pin-dxvk-version.py' \
   "build-dxvk.sh must pin DXVK via pin-dxvk-version.py"
 assert_contains "$build_dxvk" 'lib/dxvk/version' \
   "build-dxvk.sh must write lib/dxvk/version for graphics pack"
+assert_contains "$build_dxvk" '__MINGW64_VERSION_MAJOR < 15' \
+  "build-dxvk.sh must skip dummy D3DDEVINFO_RESOURCEMANAGER on MinGW-w64 15+"
 
 echo "PASS test-cyder-dxvk"

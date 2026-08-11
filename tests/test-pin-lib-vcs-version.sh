@@ -48,6 +48,8 @@ fi
 
 out2="$(python3 "$ROOT/scripts/pin-dxvk-version.py" "$DXVK")"
 assert_eq "$out2" "v1.10.3" "pin-dxvk-version must be idempotent"
+assert_contains "$(cat "$DXVK/meson.build")" "dxvk_version_inc = include_directories('.')" \
+  "pin must expose build-root version.h via include_directories"
 
 # --- MoltenVK: gen script must not call git rev-parse ---
 MVK="$TMP/moltenvk"

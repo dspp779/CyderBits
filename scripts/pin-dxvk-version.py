@@ -5,6 +5,9 @@ CrossOver FOSS tarballs ship dxvk without a nested .git. Meson's vcs_tag runs
 `git describe`, which walks up into the Cyder app repo and bakes the wrong
 string (e.g. v0.7.0-25-g...) into dxgi/d3d11 logs. Replace vcs_tag with a
 configure_file that uses RELEASE (pure upstream version, e.g. v1.10.3).
+
+Do not write include/version.h — it shadows the Windows SDK header.
+See docs/build-dxvk.zh-TW.md.
 """
 from __future__ import annotations
 
@@ -46,6 +49,7 @@ def pin_meson_build(meson_text: str, version: str) -> tuple[str, bool]:
         f"  input: 'version.h.in',\n"
         f"  output: 'version.h',\n"
         f")\n"
+        f"dxvk_version_inc = include_directories('.')\n"
     )
 
     if VCS_TAG_RE.search(meson_text):
@@ -68,6 +72,26 @@ def pin_meson_build(meson_text: str, version: str) -> tuple[str, bool]:
     raise ValueError("meson.build: expected dxvk_version = vcs_tag(...) or Cyder configure_file pin")
 
 
+def pin_dxvk_source_includes(source: Path) -> None:
+    """Expose the generated build-root version.h to src/dxvk.
+
+    ``configure_file`` does not add the project build dir to
+    ``dxvk_include_path`` (``./include``). Do not write ``include/version.h``:
+    that shadows the Windows SDK header of the same name.
+    """
+    meson_src = source / "src" / "dxvk" / "meson.build"
+    if not meson_src.is_file():
+        return
+    text = meson_src.read_text(encoding="utf-8")
+    needle = "include_directories : [ dxvk_include_path ]"
+    replacement = "include_directories : [ dxvk_include_path, dxvk_version_inc ]"
+    if "dxvk_version_inc" in text:
+        return
+    if needle not in text:
+        raise ValueError(f"{meson_src}: expected {needle!r}")
+    meson_src.write_text(text.replace(needle, replacement), encoding="utf-8")
+
+
 def pin_dxvk_source(source: Path) -> str:
     release_path = source / "RELEASE"
     meson_path = source / "meson.build"
@@ -81,6 +105,15 @@ def pin_dxvk_source(source: Path) -> str:
     new_text, changed = pin_meson_build(text, version)
     if changed:
         meson_path.write_text(new_text, encoding="utf-8")
+    text = meson_path.read_text(encoding="utf-8")
+    if "dxvk_version_inc" not in text:
+        text = text.replace(
+            "  output: 'version.h',\n)\n",
+            "  output: 'version.h',\n)\ndxvk_version_inc = include_directories('.')\n",
+            1,
+        )
+        meson_path.write_text(text, encoding="utf-8")
+    pin_dxvk_source_includes(source)
     return version
 
 

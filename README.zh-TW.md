@@ -78,7 +78,8 @@ bash scripts/run-bluecg.sh
 | dxmt | **已整合（隨 engine 出貨）** | 封裝 engine 於 `lib/dxmt/` 內含上游 DXMT v0.80；需 macOS 15+ 方可選取（高於 D3DMetal 的 macOS 14+）。本 repo 未維護遊戲驗證結果。 |
 | D3DMetal | **不是產品 backend** | 只在歷史 source 實驗中被提及，尚未接入或驗證為 Cyder runtime 路徑。 |
 
-詳見 [Wine configure 與圖形選項](docs/wine-configure-options.md)。
+詳見 [Wine configure 與圖形選項](docs/wine-configure-options.md)、
+[DXVK 編譯備忘](docs/build-dxvk.zh-TW.md)。
 
 ## Wine 原始碼
 
@@ -175,6 +176,7 @@ bash tests/test-verify-bluecg.sh
 - [docs/cyderbits.md](docs/cyderbits.md) — CyderBits 打包器
 - [docs/bluecg.md](docs/bluecg.md) — BlueCG 流程
 - [docs/scripts.md](docs/scripts.md) — 腳本參考
+- [docs/build-dxvk.zh-TW.md](docs/build-dxvk.zh-TW.md) — DXVK 1.x／2.x 編譯注意事項
 - [docs/superpowers/](docs/superpowers/) — 設計規格
 
 ## 授權與原始碼

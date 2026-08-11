@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # Build the CrossOver 25 DXVK snapshot with llvm-mingw and stage it in a Wine engine.
+# Compile notes: docs/build-dxvk.zh-TW.md
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -128,6 +129,28 @@ patch_dxvk_source() {
     pinned_version="$(python3 "$SCRIPT_DIR/pin-dxvk-version.py" "$SOURCE")"
     echo "DXVK version pinned to $pinned_version (from RELEASE; not parent git describe)"
   fi
+  local d3d9_header="$SOURCE/src/d3d9/d3d9_include.h"
+  if [[ -f "$d3d9_header" ]]; then
+    python3 - "$d3d9_header" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+text = path.read_text()
+old = """// MinGW headers are broken. Who'dve guessed?
+#ifndef _MSC_VER
+typedef struct _D3DDEVINFO_RESOURCEMANAGER
+"""
+new = """// Older MinGW headers omit this type. MinGW-w64 15 provides the real
+// definition, so do not redeclare it when building with current llvm-mingw.
+#if !defined(_MSC_VER) \
+ && (!defined(__MINGW64_VERSION_MAJOR) || __MINGW64_VERSION_MAJOR < 15)
+typedef struct _D3DDEVINFO_RESOURCEMANAGER
+"""
+if old in text:
+    path.write_text(text.replace(old, new, 1))
+PY
+  fi
   [[ -f "$header" ]] || return 0
   python3 - "$header" <<'PY'
 from pathlib import Path
@@ -242,9 +265,11 @@ build_arch 64 x86_64-w64-mingw32 x86_64 x86_64 x86_64-windows
 build_arch 32 i686-w64-mingw32 x86 i686 i386-windows
 
 install_dxvk_into_engine "$ENGINE"
-for also in "${ALSO_ENGINES[@]}"; do
-  install_dxvk_into_engine "$also"
-done
+if ((${#ALSO_ENGINES[@]})); then
+  for also in "${ALSO_ENGINES[@]}"; do
+    install_dxvk_into_engine "$also"
+  done
+fi
 
 echo "DXVK D3D9/D3D10/D3D11/DXGI installed in $ENGINE/lib/dxvk"
 if ((${#ALSO_ENGINES[@]})); then
