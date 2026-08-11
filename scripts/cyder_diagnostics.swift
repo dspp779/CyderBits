@@ -125,6 +125,7 @@ final class CyderDiagnostics {
         }
         logsURL = supportURL.appendingPathComponent("Logs", isDirectory: true)
         let sessionsURL = logsURL.appendingPathComponent("sessions", isDirectory: true)
+        let operationsURL = logsURL.appendingPathComponent("operations", isDirectory: true)
         stateURL = logsURL.appendingPathComponent("session-state.json")
         lastErrorURL = logsURL.appendingPathComponent("last-error.json")
 
@@ -134,6 +135,7 @@ final class CyderDiagnostics {
 
         do {
             try FileManager.default.createDirectory(at: sessionsURL, withIntermediateDirectories: true)
+            try FileManager.default.createDirectory(at: operationsURL, withIntermediateDirectories: true)
             previousUnexpectedSession = Self.readPreviousSession(from: stateURL)
             FileManager.default.createFile(atPath: sessionLogURL.path, contents: nil)
             logHandle = try FileHandle(forWritingTo: sessionLogURL)
@@ -205,6 +207,25 @@ final class CyderDiagnostics {
     }
 
     func makeOperationLog(_ name: String) -> URL {
+        if name == "apply-settings-fast" || name == "apply-settings-running" {
+            return logsURL
+                .appendingPathComponent("operations", isDirectory: true)
+                .appendingPathComponent("settings-apply.log")
+        }
+        if name == "wine-launch" {
+            let sessionsURL = logsURL.appendingPathComponent("sessions", isDirectory: true)
+            let launchURL = sessionsURL.appendingPathComponent("last-wine-launch.log")
+            let pointerURL = logsURL.appendingPathComponent("last-launch.log")
+            let compressedPointerURL = logsURL.appendingPathComponent("last-launch.log.gz")
+            try? FileManager.default.createDirectory(at: sessionsURL, withIntermediateDirectories: true)
+            if FileManager.default.fileExists(atPath: pointerURL.path)
+                || (try? FileManager.default.destinationOfSymbolicLink(atPath: pointerURL.path)) != nil {
+                try? FileManager.default.removeItem(at: pointerURL)
+            }
+            try? FileManager.default.removeItem(at: compressedPointerURL)
+            try? FileManager.default.createSymbolicLink(at: pointerURL, withDestinationURL: launchURL)
+            return launchURL
+        }
         let safeName = name.replacingOccurrences(
             of: "[^A-Za-z0-9._-]",
             with: "-",
@@ -214,8 +235,52 @@ final class CyderDiagnostics {
         operationSequence += 1
         let sequence = operationSequence
         lock.unlock()
-        return sessionLogURL.deletingLastPathComponent()
+        return logsURL
+            .appendingPathComponent("operations", isDirectory: true)
             .appendingPathComponent(String(format: "%@-%03d-%@.log", sessionID, sequence, safeName))
+    }
+
+    /// Prepare an operation log for one launcher invocation. The settings
+    /// diagnostic is append-only until the rolling size cap is reached;
+    /// launch and other operation logs start a fresh invocation at offset zero.
+    func prepareOperationLog(at url: URL) throws {
+        try FileManager.default.createDirectory(
+            at: url.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        if FileManager.default.fileExists(atPath: url.path) {
+            if url.lastPathComponent != "settings-apply.log" {
+                let handle = try FileHandle(forWritingTo: url)
+                try handle.truncate(atOffset: 0)
+                try handle.seek(toOffset: 0)
+                try handle.close()
+            }
+            return
+        }
+        guard FileManager.default.createFile(atPath: url.path, contents: nil) else {
+            throw CocoaError(.fileWriteUnknown, userInfo: [NSURLErrorKey: url.path])
+        }
+    }
+
+    /// Keep the settings apply diagnostic as a single bounded rolling file.
+    /// The tail is retained because it contains the most useful registry or
+    /// validation failure when a command emits an unusually large trace.
+    func trimRollingOperationLog(at url: URL, maxBytes: Int = 512 * 1024) {
+        guard url.lastPathComponent == "settings-apply.log",
+              let handle = try? FileHandle(forUpdating: url) else { return }
+        defer { try? handle.close() }
+        let marker = Data("[Cyder] settings-apply.log truncated; showing newest output\n".utf8)
+        guard maxBytes > marker.count,
+              let size = try? handle.seekToEnd(),
+              size > UInt64(maxBytes) else { return }
+        let offset = size - UInt64(maxBytes - marker.count)
+        try? handle.seek(toOffset: offset)
+        guard let data = try? handle.readToEnd() else { return }
+        var replacement = marker
+        replacement.append(data)
+        try? handle.truncate(atOffset: 0)
+        try? handle.seek(toOffset: 0)
+        try? handle.write(contentsOf: replacement)
     }
 
     /// Export only the most recent game launch log.
@@ -385,7 +450,10 @@ final class CyderDiagnostics {
             includingPropertiesForKeys: [.contentModificationDateKey],
             options: [.skipsHiddenFiles]
         ) else { return }
-        let logs = files.filter { $0.pathExtension == "log" || $0.pathExtension == "gz" }
+        let logs = files.filter {
+            ($0.pathExtension == "log" || $0.pathExtension == "gz")
+                && $0.lastPathComponent != "last-wine-launch.log"
+        }
         let sorted = logs.sorted {
             let left = (try? $0.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
             let right = (try? $1.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast

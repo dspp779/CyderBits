@@ -18,6 +18,8 @@ assert_contains "$settings" 'var retinaMode = true' "Retina should default on"
 assert_contains "$settings" 'var dpi = 192' "DPI should default to 192"
 assert_contains "$settings" 'var graphicsHud: CyderGraphicsHud = .off' "graphics HUD should default off"
 assert_contains "$settings" 'schemaVersion = 9' "schema version 9"
+assert_contains "$settings" 'var updatedAt: String?' "settings should persist the last update time"
+assert_contains "$settings" 'var lastModified: [String: String]' "settings should persist per-scope modification times"
 assert_contains "$settings" 'case wined3d, dxvk, dxvk2, dxmt, d3dmetal' \
   "settings enum must include dxvk2"
 assert_contains "$settings" 'usesDxvkTranslation' \

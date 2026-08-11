@@ -48,6 +48,12 @@ struct CyderSettingsHarness {
         precondition(legacy["GAME_PROFILE"] == "test")
         precondition(store.arguments(profileID: nil, legacyBasename: "game.exe") == ["--windowed", "中文 \"測試\""])
         let saved = try JSONSerialization.jsonObject(with: Data(contentsOf: path)) as! [String: Any]
+        let updatedAt = saved["updatedAt"] as? String
+        precondition(updatedAt?.isEmpty == false)
+        let lastModified = saved["lastModified"] as! [String: String]
+        precondition(lastModified["global.dpi"] == updatedAt)
+        precondition(lastModified["global.msync"] == updatedAt)
+        precondition(lastModified["executable:game.exe"] == updatedAt)
         let profiles = saved["perProfile"] as! [String: Any]
         precondition(profiles["not-a-profile"] == nil)
         let profile = profiles[profileID] as! [String: Any]

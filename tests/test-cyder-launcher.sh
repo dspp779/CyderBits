@@ -159,9 +159,11 @@ assert_contains "$(cat "$TMP/run-support/Logs/last-launch.log")" \
   "captured quiet launches should not enable Wine tracing"
 assert_contains "$(cat "$TMP/run-support/Logs/last-launch.log")" "Engine version:" \
   "captured launches should record the actual engine identity"
-launch_log_count="$(find "$TMP/run-support/Logs" -maxdepth 1 -type f -name 'launch-*.log' | wc -l | tr -d ' ')"
-if [[ "$launch_log_count" -lt 2 ]]; then
-  echo "ASSERT failed: timestamped Wine logs should not overwrite the previous launch" >&2
+assert_eq "$(readlink "$TMP/run-support/Logs/last-launch.log")" "sessions/last-wine-launch.log" \
+  "last-launch should point to the single retained Wine session"
+launch_log_count="$(find "$TMP/run-support/Logs/sessions" -maxdepth 1 -type f -name 'last-wine-launch.log' | wc -l | tr -d ' ')"
+if [[ "$launch_log_count" -ne 1 ]]; then
+  echo "ASSERT failed: Wine diagnostics should retain one launch session log" >&2
   exit 1
 fi
 

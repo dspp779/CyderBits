@@ -2675,15 +2675,24 @@ cyder_run_wine_exe() {
     [[ -n "$ntdll_sha256" ]] || ntdll_sha256="unavailable"
   fi
   local log_file="/dev/null"
-  rm -f "$CYDER_SUPPORT/Logs/last-launch.log"
   if [[ "$capture_log" == 1 ]]; then
     local log_dir="$CYDER_SUPPORT/Logs"
-    mkdir -p "$log_dir"
-    log_file="$log_dir/launch-$(date '+%Y%m%d-%H%M%S')-$$.log"
+    local sessions_dir="$log_dir/sessions"
+    local diagnostic_log="${CYDER_DIAGNOSTIC_LOG:-}"
     local latest_log="$log_dir/last-launch.log"
-    : >"$log_file"
-    ln -s "$(basename "$log_file")" "$latest_log"
-    find "$log_dir" -maxdepth 1 -type f -name 'launch-*.log' -mtime +30 -delete 2>/dev/null || true
+    mkdir -p "$sessions_dir"
+    # Keep one stable Wine launch session. The Swift launcher prepares this
+    # path before spawning the shell so its command header and this preamble
+    # share the same file descriptor. Direct shell launches truncate it here.
+    log_file="$sessions_dir/last-wine-launch.log"
+    if [[ "$diagnostic_log" == "$log_file" ]]; then
+      log_file="$diagnostic_log"
+    else
+      : >"$log_file"
+    fi
+    rm -f "$latest_log"
+    rm -f "$log_dir/last-launch.log.gz"
+    ln -sfn "sessions/last-wine-launch.log" "$latest_log"
   fi
   if [[ "$detach" == 1 && -n "$pid_file" ]]; then
     mkdir -p "$(dirname "$pid_file")"

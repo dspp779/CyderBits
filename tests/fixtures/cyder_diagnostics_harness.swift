@@ -65,6 +65,34 @@ struct CyderDiagnosticsHarness {
                 exit(14)
             }
             diagnostics.finish(outcome: "cleaned")
+        case "rolling":
+            let fast = diagnostics.makeOperationLog("apply-settings-fast")
+            let running = diagnostics.makeOperationLog("apply-settings-running")
+            guard fast.path == running.path,
+                  fast.lastPathComponent == "settings-apply.log",
+                  fast.path.contains("/operations/") else {
+                exit(15)
+            }
+            try! diagnostics.prepareOperationLog(at: fast)
+            let oversized = String(repeating: "old settings output\n", count: 100_000)
+            try! oversized.write(to: fast, atomically: true, encoding: .utf8)
+            diagnostics.trimRollingOperationLog(at: fast, maxBytes: 512)
+            let bounded = try! Data(contentsOf: fast)
+            guard bounded.count <= 512,
+                  String(decoding: bounded, as: UTF8.self).contains("truncated") else {
+                exit(16)
+            }
+            try! diagnostics.prepareOperationLog(at: running)
+            let appendHandle = try! FileHandle(forWritingTo: running)
+            try! appendHandle.seekToEnd()
+            try! appendHandle.write(contentsOf: Data("new settings output\n".utf8))
+            try! appendHandle.close()
+            let retained = try! String(contentsOf: fast, encoding: .utf8)
+            guard retained.contains("truncated"),
+                  retained.contains("new settings output") else {
+                exit(17)
+            }
+            diagnostics.finish(outcome: "rolling")
         default:
             exit(12)
         }

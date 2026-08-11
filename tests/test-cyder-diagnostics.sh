@@ -44,4 +44,9 @@ assert test ! -e "$TMP/cleanup-support/Logs/last-launch.log"
 assert test ! -e "$TMP/cleanup-support/Logs/sessions/old-session.log"
 assert test ! -e "$TMP/cleanup-support/Logs/operations/old-operation.log"
 
+CYDER_SUPPORT="$TMP/rolling-support" "$TMP/diagnostics-harness" rolling
+assert test -f "$TMP/rolling-support/Logs/operations/settings-apply.log"
+assert_contains "$(cat "$TMP/rolling-support/Logs/operations/settings-apply.log")" "new settings output" \
+  "settings apply should reuse one rolling log"
+
 echo "PASS test-cyder-diagnostics"

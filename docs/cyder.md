@@ -248,17 +248,25 @@ BlueCG（魔力寶貝）可透過 Cyder 直接開 `BlueLauncher.exe`；遊戲目
 Cyder 每次啟動都會建立小型 session 記錄，保存目前階段、shell worker 輸出與結束原因；Wine stdout／stderr 預設不保存：
 
 ```text
-  ~/Library/Application Support/Cyder/Logs/
-  operations/               # wineboot、環境套用等操作記錄
-  sessions/                 # 每次啟動及各子程序的獨立記錄
-  session-state.json        # 目前／上次 session 是否正常完成
-  last-error.json           # 最近一次結構化錯誤
-  last-launch.log           # 最近一次 Wine 啟動記錄的連結
-  bootstrap-error.log       # bootstrap 詳細錯誤（若有）
-  engine-install.log        # engine 解壓與安裝記錄
+  ~/Library/Application Support/Cyder/
+  settings.json             # 設定狀態、revision、updatedAt、lastModified
+  Logs/
+    operations/
+      settings-apply.log    # 設定套用的單一 rolling 記錄（上限 512 KiB）
+      ...                   # wineboot、環境套用等其它操作記錄
+    sessions/
+      <session>.log         # Cyder App session
+      last-wine-launch.log  # 最近一次遊戲執行診斷（固定覆寫）
+    session-state.json      # 目前／上次 session 是否正常完成
+    last-error.json         # 最近一次結構化錯誤
+    last-launch.log         # 指向 sessions/last-wine-launch.log 的連結
+    bootstrap-error.log     # bootstrap 詳細錯誤（若有）
+    engine-install.log      # engine 解壓與安裝記錄
 ```
 
 除使用者主動取消外，非預期失敗會顯示 `CYD-*` 錯誤代碼、失敗階段、exit status 或 signal，並提供「複製診斷資訊」及「開啟相關記錄」。偏好設定 →「除錯」只匯出上次遊戲的 Wine launch log；其他初始化或啟動錯誤可直接複製錯誤對話框中的診斷資訊。清理除錯記錄會在關閉遊戲後移除 launch/debug log，以及 `operations`、`sessions` 內的舊紀錄。若 native process 來不及顯示對話框便 crash，Cyder 會在下次啟動時偵測未完成的 session 並提示查看上次記錄。
+
+設定套用會追加到單一 rolling settings-apply.log；遊戲執行只保留最新的 last-wine-launch.log。
 
 ## 相關文件
 

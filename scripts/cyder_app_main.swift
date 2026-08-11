@@ -1715,7 +1715,16 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
     ) -> CyderProcessResult {
         CyderDiagnostics.shared.enter(stage, detail: operation)
         let operationLog = CyderDiagnostics.shared.makeOperationLog(operation)
-        FileManager.default.createFile(atPath: operationLog.path, contents: nil)
+        do {
+            try CyderDiagnostics.shared.prepareOperationLog(at: operationLog)
+        } catch {
+            return CyderProcessResult(
+                status: 1,
+                terminationReason: .exit,
+                logURL: operationLog,
+                outputTail: "Unable to prepare operation log at \(operationLog.path): \(error)"
+            )
+        }
         guard let handle = FileHandle(forWritingAtPath: operationLog.path) else {
             return CyderProcessResult(
                 status: 1,
@@ -1723,6 +1732,11 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
                 logURL: operationLog,
                 outputTail: "Unable to create operation log at \(operationLog.path)"
             )
+        }
+        if operationLog.lastPathComponent == "settings-apply.log" {
+            try? handle.seekToEnd()
+            let separator = "\n===== Cyder settings apply \(ISO8601DateFormatter().string(from: Date())) =====\n"
+            try? handle.write(contentsOf: Data(separator.utf8))
         }
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/bin/bash")
@@ -1790,6 +1804,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             progressTimer?.cancel()
             progressTimer = nil
             try? handle.close()
+            CyderDiagnostics.shared.trimRollingOperationLog(at: operationLog)
             try? FileManager.default.removeItem(at: progressURL)
             let tail = CyderDiagnostics.shared.tail(of: operationLog)
             var machineResult: [String: String] = [:]

@@ -368,6 +368,12 @@ struct CyderSettings: Codable {
     // legacy basename fallback; never infer a profile from a basename.
     var schemaVersion = 9
     var revision = 0
+    /// Wall-clock time of the most recent effective settings change. Kept in
+    /// settings.json so the state and its provenance travel together.
+    var updatedAt: String?
+    /// Last-change timestamps for global fields and per-profile/legacy rules.
+    /// Keys use `global.<field>`, `profile:<id>`, and `executable:<basename>`.
+    var lastModified: [String: String] = [:]
     var msync = false
     var esync: Bool? = false
     var retinaMode = true
@@ -386,7 +392,7 @@ struct CyderSettings: Codable {
     static var defaults: CyderSettings { CyderSettings() }
 
     enum CodingKeys: String, CodingKey {
-        case schemaVersion, revision, msync, esync, retinaMode, dpi
+        case schemaVersion, revision, updatedAt, lastModified, msync, esync, retinaMode, dpi
         case fontMingLiuTarget, fontSongtiTarget, fontSmoothing
         case graphicsBackend, dxvkFrameRate, graphicsHud, dxvkHudFrametimes, wineDiagnostics
         case perExecutable, perProfile
@@ -418,6 +424,8 @@ struct CyderSettings: Codable {
         ) }
         schemaVersion = 9
         revision = try values.decodeIfPresent(Int.self, forKey: .revision) ?? 0
+        updatedAt = try values.decodeIfPresent(String.self, forKey: .updatedAt)
+        lastModified = try values.decodeIfPresent([String: String].self, forKey: .lastModified) ?? [:]
         msync = try values.decodeIfPresent(Bool.self, forKey: .msync) ?? false
         esync = try values.decodeIfPresent(Bool?.self, forKey: .esync) ?? false
         retinaMode = try values.decodeIfPresent(Bool.self, forKey: .retinaMode) ?? true
@@ -471,6 +479,8 @@ struct CyderSettings: Codable {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(schemaVersion, forKey: .schemaVersion)
         try container.encode(revision, forKey: .revision)
+        try container.encodeIfPresent(updatedAt, forKey: .updatedAt)
+        try container.encode(lastModified, forKey: .lastModified)
         try container.encode(msync, forKey: .msync)
         try container.encode(esync, forKey: .esync)
         try container.encode(retinaMode, forKey: .retinaMode)
@@ -733,12 +743,60 @@ struct CyderSettings: Codable {
         }
         return result
     }
+
+    /// Return stable metadata keys for values that changed during one store
+    /// update. The UI writes a complete settings snapshot, so comparing the
+    /// post-sanitization snapshot avoids marking every field as modified on
+    /// each control event.
+    static func changedMetadataKeys(from before: CyderSettings, to after: CyderSettings) -> [String] {
+        var keys = Set<String>()
+        func mark(_ field: String, _ changed: Bool) {
+            if changed { keys.insert("global.\(field)") }
+        }
+        mark("msync", before.msync != after.msync)
+        mark("esync", before.esync != after.esync)
+        mark("retinaMode", before.retinaMode != after.retinaMode)
+        mark("dpi", before.dpi != after.dpi)
+        mark("fontMingLiuTarget", before.fontMingLiuTarget != after.fontMingLiuTarget)
+        mark("fontSongtiTarget", before.fontSongtiTarget != after.fontSongtiTarget)
+        mark("fontSmoothing", before.fontSmoothing != after.fontSmoothing)
+        mark("graphicsBackend", before.graphicsBackend.rawValue != after.graphicsBackend.rawValue)
+        mark("dxvkFrameRate", before.dxvkFrameRate.rawValue != after.dxvkFrameRate.rawValue)
+        mark("graphicsHud", before.graphicsHud.rawValue != after.graphicsHud.rawValue)
+        mark("dxvkHudFrametimes", before.dxvkHudFrametimes != after.dxvkHudFrametimes)
+        mark("wineDiagnostics", before.wineDiagnostics.rawValue != after.wineDiagnostics.rawValue)
+
+        let profileIDs = Set(before.perProfile.keys).union(after.perProfile.keys)
+        for profileID in profileIDs {
+            if encoded(before.perProfile[profileID]) != encoded(after.perProfile[profileID]) {
+                keys.insert("profile:\(profileID)")
+            }
+        }
+        let executableNames = Set(before.perExecutable.keys).union(after.perExecutable.keys)
+        for basename in executableNames {
+            if encoded(before.perExecutable[basename]) != encoded(after.perExecutable[basename]) {
+                keys.insert("executable:\(basename)")
+            }
+        }
+        return keys.sorted()
+    }
+
+    private static func encoded<T: Encodable>(_ value: T?) -> Data? {
+        guard let value else { return nil }
+        return try? JSONEncoder.pretty.encode(value)
+    }
 }
 
 final class CyderSettingsStore {
     static let shared = CyderSettingsStore()
     private(set) var value: CyderSettings
     private let url: URL
+
+    private static let modificationTimestampFormatter: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter
+    }()
 
     init(url: URL = CyderPaths.support.appendingPathComponent("settings.json")) {
         self.url = url
@@ -774,8 +832,16 @@ final class CyderSettingsStore {
         next.perExecutable = next.perExecutable.reduce(into: [:]) { result, item in
             result[item.key] = CyderSettings.sanitized(item.value)
         }
-        next.revision = max(value.revision + 1, next.revision)
         next.dpi = min(480, max(72, next.dpi))
+        let changedKeys = CyderSettings.changedMetadataKeys(from: value, to: next)
+        if !changedKeys.isEmpty || next.updatedAt == nil {
+            let timestamp = Self.modificationTimestampFormatter.string(from: Date())
+            next.updatedAt = timestamp
+            for key in changedKeys {
+                next.lastModified[key] = timestamp
+            }
+        }
+        next.revision = max(value.revision + 1, next.revision)
         let directory = url.deletingLastPathComponent()
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let data = try JSONEncoder.pretty.encode(next)
