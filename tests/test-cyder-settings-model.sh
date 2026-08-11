@@ -38,5 +38,9 @@ assert_contains "$common" 'cyder_macos_at_least 15 0' \
   "shell DXMT gate must require macOS 15+"
 assert_not_contains "$common" 'preference=auto' \
   "OEM must not rewrite default to auto"
+assert_contains "$common" 'dxvk2)' \
+  "shell preference helper must handle dxvk2"
+assert_contains "$common" 'cyder_engine_has_dxvk2_payload' \
+  "shell launch path must fail closed when lib/dxvk2 is missing"
 
 echo "PASS test-cyder-settings-model"

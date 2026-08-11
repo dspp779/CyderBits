@@ -2085,6 +2085,11 @@ cyder_engine_has_dxvk_payload() {
   [[ -r "$engine_root/lib/dxvk/x86_64-windows/d3d11.dll" ]]
 }
 
+cyder_engine_has_dxvk2_payload() {
+  local engine_root="$1"
+  [[ -r "$engine_root/lib/dxvk2/x86_64-windows/d3d11.dll" ]]
+}
+
 cyder_dxmt_launch_allowed() {
   local engine_root="$1"
   declare -F cyder_macos_at_least >/dev/null 2>&1 \
@@ -2112,6 +2117,16 @@ cyder_apply_graphics_preference() {
         export CYDER_GRAPHICS_BACKEND=dxvk CX_GRAPHICS_BACKEND=dxvk
       else
         echo "DXVK is unavailable (engine lib/dxvk is missing); using default graphics backend." >&2
+        export CYDER_GRAPHICS_PREFERENCE=default
+        unset CYDER_GRAPHICS_BACKEND CX_GRAPHICS_BACKEND
+      fi
+      ;;
+    dxvk2)
+      if cyder_engine_has_dxvk2_payload "$engine_root"; then
+        export CYDER_GRAPHICS_PREFERENCE=dxvk2
+        export CYDER_GRAPHICS_BACKEND=dxvk2 CX_GRAPHICS_BACKEND=dxvk2
+      else
+        echo "DXVK 2 is unavailable (engine lib/dxvk2 is missing); using default graphics backend." >&2
         export CYDER_GRAPHICS_PREFERENCE=default
         unset CYDER_GRAPHICS_BACKEND CX_GRAPHICS_BACKEND
       fi
