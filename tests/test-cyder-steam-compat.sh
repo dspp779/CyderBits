@@ -61,21 +61,14 @@ assert_contains "$common" 'cyder_apply_steam_compatibility_arguments "$exe"' \
 assert_contains "$common" 'for required in -system-composer -no-cef-sandbox' \
   "the Bash launch path should own the verified Steam compatibility arguments"
 
-runtime_patch="$(cat "$ROOT/patches/cyder-compatdb-runtime.patch")"
 rules="$(cat "$ROOT/compatdb/rules/steam.yml")"
-assert_contains "$runtime_patch" 'cyder_compat_apply_process_rules' \
-  "Wine should use the generic process-creation CompatDB hook"
-if [[ "$runtime_patch" == *"steamwebhelper.exe"* ]]; then
-  echo "ASSERT failed: Wine runtime should not hard-code Steam WebHelper" >&2
-  exit 1
-fi
 assert_contains "$rules" "path_suffix: '\\steamwebhelper.exe'" \
   "CompatDB data should target Steam WebHelper"
 assert_contains "$rules" "'--no-sandbox'" \
   "CompatDB should append the verified CrossOver Chromium arguments"
 
 build_wine="$(cat "$ROOT/scripts/build-wine.sh")"
-assert_contains "$build_wine" 'cyder-compatdb-runtime.patch' \
-  "Wine builds should apply the generic CompatDB runtime patch"
+assert_not_contains "$build_wine" 'cyder-compatdb-runtime.patch' \
+  "app-side Wine builds should leave the original CrossOver ntdll unchanged"
 
 echo "PASS test-cyder-steam-compat"

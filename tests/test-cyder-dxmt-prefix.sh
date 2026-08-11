@@ -8,7 +8,6 @@ source "$ROOT/tests/assert.sh"
 # CompatDB builtin prepend. Prefix PE copying is no longer part of launch.
 common_script="$(cat "$ROOT/scripts/cyder-common.sh")"
 build_script="$(cat "$ROOT/scripts/create-cyder-app.sh")"
-patch_text="$(cat "$ROOT/patches/cyder-compatdb-runtime.patch")"
 
 assert_contains "$build_script" 'cyder-ensure-graphics.sh' \
   "Cyder.app must bundle the graphics payload ensurer"
@@ -16,8 +15,8 @@ assert_contains "$build_script" 'cyder-migrate-graphics-prefix.sh' \
   "Cyder.app must bundle the legacy prefix migration helper"
 assert_not_contains "$common_script" 'install-dxmt-prefix.sh' \
   "Launch path must not copy DXMT PE into prefixes"
-assert_contains "$patch_text" 'prepend_dll_path' \
-  "CompatDB runtime must prepend backend DLL paths"
+assert_not_contains "$(cat "$ROOT/scripts/build-wine.sh")" 'cyder-compatdb-runtime.patch' \
+  "DXMT prepend must not require an ntdll patch"
 assert_contains "$common_script" 'cyder_engine_has_dxmt_payload' \
   "Launch path must probe DXMT payload availability instead of provisioning PE"
 

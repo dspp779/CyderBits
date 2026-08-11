@@ -357,8 +357,6 @@ remove_obsolete_cyder_patch() {
   fi
 }
 
-remove_obsolete_cyder_patch "$OGOM/patches/cyder-steam-webhelper-compat.patch"
-apply_cyder_patch "$OGOM/patches/cyder-compatdb-runtime.patch"
 if [[ "$CX_VERSION" == "26" ]]; then
   remove_obsolete_cyder_patch \
     "$OGOM/patches/obsolete/cyder-ntdll-frame-walk-guard.patch" \

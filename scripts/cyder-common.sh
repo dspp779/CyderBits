@@ -2769,6 +2769,7 @@ cyder_run_wine_exe() {
     echo "  CYDER_MSYNC=${CYDER_MSYNC:-0}"
     echo "  CYDER_ESYNC=${CYDER_ESYNC:-0}"
     echo "  CYDER_GRAPHICS_BACKEND=${CYDER_GRAPHICS_BACKEND:-<unset>}"
+    echo "  CYDER_GRAPHICS_BACKEND_PATH=${CYDER_GRAPHICS_BACKEND_PATH:-<derived from engine>}"
     echo "  CYDER_GPTK_ROOT=${CYDER_GPTK_ROOT:-<unset>}"
     echo "  CYDER_WINE_DIAGNOSTICS=$wine_diagnostics"
     echo "  DXVK_FRAME_RATE=${DXVK_FRAME_RATE:-<unset>}"

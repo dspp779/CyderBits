@@ -70,6 +70,7 @@ struct CyderSettingsHarness {
         precondition(!CyderSettings.isValidEnvironmentKey("DYLD_INSERT_LIBRARIES"))
         precondition(!CyderSettings.isValidEnvironmentKey("CYDER_WINE_RESULT_FILE"))
         precondition(!CyderSettings.isValidEnvironmentKey("CYDER_GRAPHICS_HUD_PREFERENCE"))
+        precondition(CyderSettings.isValidEnvironmentKey("CYDER_GRAPHICS_BACKEND_PATH"))
 
         try store.update { settings in
             settings.wineDiagnostics = .sync

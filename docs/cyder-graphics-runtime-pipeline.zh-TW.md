@@ -239,18 +239,20 @@ sequenceDiagram
 |------|------|
 | `CYDER_GRAPHICS_BACKEND` | `dxvk`／`dxvk2`／`dxmt`／`wined3d`／`d3dmetal`；`default` 不強制，交給 CompatDB 規則 |
 | `CYDER_GRAPHICS_BACKENDS_ROOT` | 設成 **engine 根**（`bin/wine` 的上一層），讓 `lib/%s` 與 MoltenVK 同一棵樹 |
+| `CYDER_GRAPHICS_BACKEND_PATH` | 可選；直接指定 backend 目錄。`cxcompatdb.so` 會 canonicalize，檢查目前 PE machine、builtin signature、必要 DLL 與 host dependency，失敗回退 WineD3D |
 | `CX_GRAPHICS_BACKEND` | 與上者同步，對齊 CrossOver 命名 |
 | `DXVK_FRAME_RATE`／`DXVK_HUD` | 僅手動 DXVK 或 DXVK 2（60／120／144） |
 | `DXMT_CONFIG` | 僅手動 DXMT；合併 `d3d11.preferredMaxFrameRate` |
 
-CompatDB（`patches/cyder-compatdb-runtime.patch`）：
+Cyder `cxcompatdb.so`（由 CrossOver 原始 ntdll 的既有 hook 載入）：
 
 - `valid_graphics_backend` 接受 `dxvk`（4）與 `dxvk2`（5）。
-- 路徑是 `snprintf(..., "%s/lib/%s", root, backend)`，因此 token **必須**等於目錄名。
+- 未指定直接路徑時，從 engine root 的 `lib/<backend>` 推導。
 - `dxvk` 與 `dxvk2` 都檢查 MoltenVK。
 - Load-order 為 `"b"`（builtin）。Wine 只把 PE offset 64 寫著 `"Wine builtin DLL"` 的模組當 builtin；stamp 發生在 build／pack，不是啟動時。
+- 成功與失敗 log 都包含實際使用或拒絕的 backend 路徑。
 
-舊 engine（Cyder009 及更早）的 ntdll **不認** `dxvk2`，環境變數會被忽略。
+舊 engine（Cyder010 及更早）沒有 Cyder `cxcompatdb.so`，仍由當時的 ntdll patch 處理。
 現行 pin：`CX26.3.0-W11-Cyder010-dxvk2`。
 
 ---
@@ -305,7 +307,7 @@ Swift：`prepareEnvironmentAndShowSettings` 走完整 ensure；
 ```bash
 bash tests/test-cyder-pack-graphics-payloads.sh
 bash tests/test-cyder-ensure-graphics.sh
-bash tests/test-cyder-graphics-prepend-patch.sh
+bash tests/test-cyder-graphics-prepend.sh
 ```
 
 ## 相關文件

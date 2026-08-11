@@ -113,7 +113,7 @@ run-bluecg.sh
 | `tests/test-cyder-dxvk.sh` | `build-dxvk.sh` 必須 pin 版本、寫 `lib/dxvk/version`、套用 MinGW-w64 15 補丁 |
 | `tests/test-cyder-dxvk2.sh` | `build-dxvk2.sh` 安裝到 `lib/dxvk2`、含 d3d8、不寫 `lib/dxvk/` |
 | `tests/test-pin-lib-vcs-version.sh` | `pin-dxvk-version.py` 以 RELEASE 取代 vcs_tag，且不污染 `include/version.h` |
-| `tests/test-cyder-graphics-prepend-patch.sh` | CompatDB DXVK 使用 builtin + prepend，而非 native-first `n,b` |
+| `tests/test-cyder-graphics-prepend.sh` | 圖形 backend 路徑由 app 傳入，且不修改 CrossOver ntdll |
 | `tests/test-cyder-pack-graphics-payloads.sh` | DXVK／DXMT 獨立 archive、sidecar 與 DXVK PE signature |
 | `tests/test-cyder-ensure-graphics.sh` | runtime payload 安裝、版本切換與 engine symlink |
 | `tests/test-cyder-migrate-graphics-prefix.sh` | 舊 prefix 的 Wine builtin DLL 還原與 `winemetal.dll` 清除 |

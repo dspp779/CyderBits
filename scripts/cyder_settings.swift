@@ -682,6 +682,9 @@ struct CyderSettings: Codable {
             "CYDER_SCRIPTS", "CYDER_APP", "CYDER_RESULT_FILE", "CYDER_PROGRESS_FILE",
             "CYDER_GPTK_ROOT", "CYDER_GRAPHICS_BACKENDS_ROOT", "CYDER_GAME_ARGUMENTS",
         ]
+        // Explicit advanced override: cxcompatdb canonicalizes and validates
+        // the directory, PE machine, builtin signature and dependencies.
+        if value == "CYDER_GRAPHICS_BACKEND_PATH" { return true }
         if exactReserved.contains(value) { return false }
         return !["DYLD_", "LD_", "CYDER_WINE_", "CYDER_SESSION_", "CYDER_DIAGNOSTIC_", "CYDER_TEST_", "CYDER_GRAPHICS_"]
             .contains { value.hasPrefix($0) }

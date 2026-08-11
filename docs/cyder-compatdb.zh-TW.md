@@ -1,7 +1,7 @@
 # Cyder CompatDB：相容性規則維護指南
 
 Cyder CompatDB 將特定 Windows 程式需要的相容參數從 Wine 原始碼移到
-YAML 規則。Wine runtime 只實作通用的「匹配程序、執行受限制動作」能力，
+YAML 規則。自製的開源 `cxcompatdb.so` 只實作通用的「匹配目前程序、執行受限制動作」能力，
 不包含 `steamwebhelper.exe` 等特定程式名稱。
 
 目前第一條正式規則用於修正 Steam WebHelper 黑畫面：
@@ -11,7 +11,7 @@ YAML 規則
   → validate / fixtures
   → compile
   → compatdb.cdb
-  → Wine process runtime
+  → CrossOver 原始 ntdll 載入 Cyder cxcompatdb.so
   → 匹配 exe 並追加 argv 或套用 process-local DLL override
 ```
 
@@ -19,11 +19,11 @@ YAML 規則
 
 **需要，必須重包一次。**
 
-既有 Engine 沒有通用 CompatDB parser 與 `NtCreateUserProcess` hook，只更新
+既有 Engine 沒有 Cyder `cxcompatdb.so`，只更新
 Cyder App 或放入 YAML/CDB 不會生效。第一次發布此功能時需要：
 
-1. 重新編譯 Wine，讓 `scripts/build-wine.sh` 套用
-   `patches/cyder-compatdb-runtime.patch`。
+1. 保留 CrossOver 原始 ntdll，執行 `scripts/build-cyder-cxcompatdb.sh` 建置
+   `lib/wine/x86_64-unix/cxcompatdb.so`。
 2. 將新的 Wine install tree 重包成 Engine artifact。
 3. 以新 Engine artifact 建立 Cyder App；打包流程會從 YAML 重新編譯內建
    `CompatDB/compatdb.cdb`。
@@ -64,7 +64,7 @@ Cyder004 artifact。
 - 新增 v1 尚未支援的 matcher，例如環境變數、Steam App ID 或 parent process。
 - 新增 v1 尚未支援的新 action 類型。
 - 變更 CDB binary format 或 `engine_api`。
-- 修正 Wine runtime parser、argv quoting 或 process hook 本身。
+- 修正 `cxcompatdb.so` parser、argv quoting 或 graphics loader policy。
 
 ## 可以自行加入 YAML 規則嗎？
 
@@ -314,17 +314,11 @@ python3 scripts/cyder-compatdb.py inspect \
 ```bash
 bash tests/test-cyder-compatdb-data.sh
 bash tests/test-cyder-compatdb-integration.sh
-bash tests/test-cyder-compatdb-wine-runtime.sh
 ```
 
-要實際套 patch、編譯 ntdll/kernelbase 並啟動測試 exe：
-
-```bash
-bash tests/verify-cyder-compatdb-wine-runtime.sh
-```
-
-此 verifier 需要現有的 CrossOver Wine source/build tree，而且會啟動本機
-Wine/wineserver。完成後會將 source tree 還原成測試前狀態。
+`cxcompatdb.so` 的編譯、ABI 與實際 Wine smoke test 由
+`cyder-wine-engine` repository 負責；Cyder app repository 不再維護或驗證
+任何 ntdll CompatDB patch。
 
 ## 本機測試新 CDB，不重包 App
 

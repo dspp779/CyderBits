@@ -183,7 +183,6 @@ CX_APPLEGPTK_LIBD3DSHARED_PATH=/Applications/CrossOver.app/Contents/SharedSuppor
 ```text
 bash tests/test-cyder-dxvk.sh
 bash tests/test-cyder-app-payload.sh
-bash tests/test-cyder-compatdb-wine-runtime.sh
 bash tests/test-cyder-compatdb-data.sh
 bash tests/test-build-wine.sh
 ```

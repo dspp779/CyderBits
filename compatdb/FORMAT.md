@@ -224,12 +224,14 @@ and `vulkan` compile to `gl`, `gdi`, and `vulkan`; `auto` leaves WineD3D's
 normal selection unchanged. This action may be used alone or with
 `graphics_backend: wined3d`, but not with another translation stack.
 
-`ACTION_REPLACE_EXECUTABLE` replaces the longest matched source suffix with its
-payload, then updates the image path, process parameters, and command-line
-argv[0] before Wine opens the PE image. It is exclusive: it must be the only
-action in its rule. Actions intended for the replacement process belong in a
-separate rule matching the replacement executable. This prevents recursive or
-ambiguous source/target action inheritance.
+`ACTION_REPLACE_EXECUTABLE` remains reserved in the v1 file format, but the
+standalone Cyder `cxcompatdb.so` does not apply it. Cyder currently has no
+shipped replacement rule. Initial executable selection belongs to the App;
+adding an internal-process replacement requires a separate runtime review.
+
+The standalone runtime applies current-process append arguments, DLL overrides,
+and graphics backend actions. It intentionally does not apply `SET_ENV`,
+`UNSET_ENV`, executable replacement, or WineD3D renderer records.
 
 ## Canonical writer order
 

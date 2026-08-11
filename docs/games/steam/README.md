@@ -14,9 +14,9 @@ Cyder 對 `Steam.exe` 套用 macOS/Wine 專用的啟動相容設定：
 這一層不能只靠 `Steam.exe -cef-*` 參數取代。新版 Steam 不會把
 `-cef-in-process-gpu` 轉交給 64 位元 WebHelper；獨立 GPU process 會在
 Wine/macOS 建立無效的 Skia output surface，連續崩潰後留下黑畫面。Cyder
-透過 `compatdb/rules/steam.yml` 宣告規則，再由
-`patches/cyder-compatdb-runtime.patch` 在 Wine `NtCreateUserProcess`
-階段套用和 CrossOver 26.3 compatibility database 相同的必要行為。
+透過 `compatdb/rules/steam.yml` 宣告規則，再由 engine 內的開放原始碼
+`cxcompatdb.so` 經 CrossOver 原有 loader hook 套用。原始 CrossOver ntdll
+不需要 Cyder patch。
 規則更新只需要重新產生 CompatDB，不需重新編譯 Wine。
 新增或維護 YAML 規則、Engine 重包時機與本機 CDB 測試方式，見
 [Cyder CompatDB 維護指南](../../cyder-compatdb.zh-TW.md)。

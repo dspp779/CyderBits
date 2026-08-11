@@ -25,10 +25,10 @@ assert_contains "$output" "PKG_CONFIG_PATH=" "dry-run configure must set PKG_CON
 assert_contains "$output" "require pkg-config freetype2" "dry-run should check for x86_64 freetype2"
 assert_contains "$output" "ensure" "dry-run should ensure bzip2.pc exists"
 assert_contains "$output" "build/cx26/sources/wine" "dry-run should use CX26 source tree"
-assert_contains "$output" "remove obsolete patch if applied: $ROOT/patches/cyder-steam-webhelper-compat.patch" \
-  "build should remove the earlier executable-specific Steam patch"
-assert_contains "$output" "$ROOT/patches/cyder-compatdb-runtime.patch" \
-  "build should apply the generic CompatDB runtime patch"
+assert_not_contains "$output" "cyder-compatdb-runtime.patch" \
+  "app-side builds must not modify CrossOver ntdll for CompatDB"
+assert_not_contains "$output" "cyder-steam-webhelper-compat.patch" \
+  "app-side builds must not carry the old executable-specific Steam patch"
 assert_contains "$output" "$ROOT/patches/obsolete/cyder-ntdll-frame-walk-guard.patch" \
   "build should migrate an existing combined frame-walk patch"
 assert_contains "$output" "superseded by: $ROOT/patches/cyder-ntdll-frame-walk-page-fault-guard.patch" \
