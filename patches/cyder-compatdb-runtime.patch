@@ -438,6 +438,7 @@
 +    return (slice->size == 7 && !memcmp( slice->data, "default", 7 )) ||
 +           (slice->size == 7 && !memcmp( slice->data, "wined3d", 7 )) ||
 +           (slice->size == 4 && !memcmp( slice->data, "dxvk", 4 )) ||
++           (slice->size == 5 && !memcmp( slice->data, "dxvk2", 5 )) ||
 +           (slice->size == 4 && !memcmp( slice->data, "dxmt", 4 )) ||
 +           (slice->size == 8 && !memcmp( slice->data, "d3dmetal", 8 ));
 +}
@@ -1169,7 +1170,7 @@
 +                access( support, R_OK ))
 +                goto unavailable;
 +        }
-+        else if (!strcmp( backend, "dxvk" ))
++        else if (!strcmp( backend, "dxvk" ) || !strcmp( backend, "dxvk2" ))
 +        {
 +            if (snprintf( support, sizeof(support),
 +                          "%s/lib/wine/x86_64-unix/libMoltenVK.dylib", root ) >= sizeof(support))
