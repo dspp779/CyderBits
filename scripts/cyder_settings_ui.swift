@@ -888,6 +888,7 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
         case .dxmt: return canSelectDxmt ? 2 : 0
         case .dxvk: return 3
         case .wined3d: return 4
+        case .dxvk2: return 0
         }
     }
 
@@ -943,6 +944,7 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
         case .default: "帶入預載的遊戲專屬設定；多數遊戲建議使用。"
         case .wined3d: "使用 Wine 內建 Direct3D；相容性較廣，但效能通常較差。"
         case .dxvk: "使用 DXVK 將 Direct3D 轉為 Vulkan，再由 MoltenVK 轉為 Metal。"
+        case .dxvk2: "使用 DXVK 2.7 將 Direct3D 轉為 Vulkan，再由 MoltenVK 轉為 Metal。"
         case .dxmt: "使用 DXMT 將 Direct3D 直接轉為 Metal；需要 macOS 15+ 與引擎內建 DXMT。"
         case .d3dmetal: "使用 Apple D3DMetal／GPTK；需要 macOS 14+ 與可用的 GPTK。"
         }

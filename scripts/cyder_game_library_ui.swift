@@ -1098,6 +1098,7 @@ private final class CyderGameSettingsWindowController: NSWindowController, NSWin
         case .dxmt: return canSelectDxmt ? 3 : 0
         case .dxvk: return 4
         case .wined3d: return 5
+        case .dxvk2: return 0
         }
     }
 
