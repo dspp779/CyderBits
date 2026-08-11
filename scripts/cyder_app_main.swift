@@ -1739,7 +1739,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             )
         }
         if operationLog.lastPathComponent == "settings-apply.log" {
-            try? handle.seekToEnd()
+            _ = try? handle.seekToEnd()
             let separator = "\n===== Cyder settings apply \(ISO8601DateFormatter().string(from: Date())) =====\n"
             try? handle.write(contentsOf: Data(separator.utf8))
         }
