@@ -6,7 +6,7 @@ struct CyderSettingsHarness {
         let path = URL(fileURLWithPath: CommandLine.arguments[1])
         let store = CyderSettingsStore(url: path)
         let profileID = "profile-0123456789abcdef01234567"
-        precondition(store.value.schemaVersion == 8)
+        precondition(store.value.schemaVersion == 9)
         precondition(store.value.graphicsBackend == .default)
         precondition(store.value.dxvkFrameRate == .sixty)
         precondition(store.value.graphicsHud == .off)
@@ -54,7 +54,7 @@ struct CyderSettingsHarness {
         let environment = profile["environment"] as! [String: Any]
         precondition(environment["NOT VALID"] == nil)
         let reloaded = CyderSettingsStore(url: path)
-        precondition(reloaded.value.schemaVersion == 8)
+        precondition(reloaded.value.schemaVersion == 9)
         precondition(reloaded.value.revision == 1)
 
         try store.update { settings in
@@ -115,6 +115,37 @@ struct CyderSettingsHarness {
         precondition(dxvkFrametimesEnv["DXVK_HUD"] == "fps,frametimes")
 
         try store.update { settings in
+            settings.graphicsBackend = .dxvk2
+            settings.dxvkFrameRate = .sixty
+            settings.graphicsHud = .dxvk
+            settings.dxvkHudFrametimes = true
+        }
+        let dxvk2Env = store.environment(
+            profileID: nil,
+            legacyBasename: nil,
+            capabilities: CyderGraphicsCapabilities(
+                hasD3DMetal: false, hasDxvk: true, hasDxvk2: true, hasDxmt: true
+            )
+        )
+        precondition(dxvk2Env["CYDER_GRAPHICS_BACKEND"] == "dxvk2")
+        precondition(dxvk2Env["DXVK_FRAME_RATE"] == "60")
+        precondition(dxvk2Env["DXVK_HUD"] == "fps,frametimes")
+
+        precondition(
+            CyderSettings.effectiveLaunchBackend(
+                preference: .dxvk2, hasD3DMetal: true, hasDxvk: true, hasDxvk2: false, hasDxmt: true
+            ) == nil
+        )
+        precondition(
+            CyderSettings.effectiveLaunchBackend(
+                preference: .dxvk2, hasD3DMetal: true, hasDxvk: true, hasDxvk2: true, hasDxmt: true
+            ) == .dxvk2
+        )
+        precondition(CyderSettings.sanitizedGraphicsBackend("dxvk2") == .dxvk2)
+        precondition(CyderSettings.resolvedGraphicsHud(preference: .dxvk2, requested: .dxvk) == .dxvk)
+        precondition(CyderSettings.resolvedGraphicsHud(preference: .wined3d, requested: .dxvk) == .off)
+
+        try store.update { settings in
             settings.graphicsBackend = .dxmt
             settings.dxvkFrameRate = .sixty
             settings.graphicsHud = .off
@@ -122,7 +153,9 @@ struct CyderSettingsHarness {
         let dxmtEnv = store.environment(
             profileID: nil,
             legacyBasename: nil,
-            capabilities: CyderGraphicsCapabilities(hasD3DMetal: false, hasDxvk: true, hasDxmt: true)
+            capabilities: CyderGraphicsCapabilities(
+                hasD3DMetal: false, hasDxvk: true, hasDxvk2: true, hasDxmt: true
+            )
         )
         precondition(dxmtEnv["CYDER_GRAPHICS_BACKEND"] == "dxmt")
         precondition(dxmtEnv["DXVK_FRAME_RATE"] == nil)
@@ -137,7 +170,9 @@ struct CyderSettingsHarness {
         let defaultEnv = store.environment(
             profileID: nil,
             legacyBasename: nil,
-            capabilities: CyderGraphicsCapabilities(hasD3DMetal: true, hasDxvk: true, hasDxmt: true)
+            capabilities: CyderGraphicsCapabilities(
+                hasD3DMetal: true, hasDxvk: true, hasDxvk2: true, hasDxmt: true
+            )
         )
         precondition(defaultEnv["CYDER_GRAPHICS_BACKEND"] == nil)
         precondition(defaultEnv["DXVK_FRAME_RATE"] == nil)
@@ -148,34 +183,34 @@ struct CyderSettingsHarness {
         // of what capabilities are available.
         precondition(
             CyderSettings.effectiveLaunchBackend(
-                preference: .default, hasD3DMetal: true, hasDxvk: true, hasDxmt: true
+                preference: .default, hasD3DMetal: true, hasDxvk: true, hasDxvk2: true, hasDxmt: true
             ) == nil
         )
         precondition(
             CyderSettings.effectiveLaunchBackend(
-                preference: .dxvk, hasD3DMetal: true, hasDxvk: true, hasDxmt: true
+                preference: .dxvk, hasD3DMetal: true, hasDxvk: true, hasDxvk2: true, hasDxmt: true
             ) == .dxvk
         )
         // DXMT fails closed without the payload, even on a qualifying OS.
         precondition(
             CyderSettings.effectiveLaunchBackend(
-                preference: .dxmt, hasD3DMetal: true, hasDxvk: true, hasDxmt: false, osMajorVersion: 15
+                preference: .dxmt, hasD3DMetal: true, hasDxvk: true, hasDxvk2: true, hasDxmt: false, osMajorVersion: 15
             ) == nil
         )
         // DXMT fails closed below macOS 15, even with the payload present.
         precondition(
             CyderSettings.effectiveLaunchBackend(
-                preference: .dxmt, hasD3DMetal: true, hasDxvk: true, hasDxmt: true, osMajorVersion: 14
+                preference: .dxmt, hasD3DMetal: true, hasDxvk: true, hasDxvk2: true, hasDxmt: true, osMajorVersion: 14
             ) == nil
         )
         precondition(
             CyderSettings.effectiveLaunchBackend(
-                preference: .dxmt, hasD3DMetal: true, hasDxvk: true, hasDxmt: true, osMajorVersion: 15
+                preference: .dxmt, hasD3DMetal: true, hasDxvk: true, hasDxvk2: true, hasDxmt: true, osMajorVersion: 15
             ) == .dxmt
         )
         precondition(
             CyderSettings.effectiveLaunchBackend(
-                preference: .d3dmetal, hasD3DMetal: false, hasDxvk: false, hasDxmt: false
+                preference: .d3dmetal, hasD3DMetal: false, hasDxvk: false, hasDxvk2: false, hasDxmt: false
             ) == .d3dmetal
         )
         precondition(CyderSettings.sanitizedGraphicsBackend("auto") == .default)
@@ -200,6 +235,21 @@ struct CyderSettingsHarness {
         precondition(CyderGraphicsCapabilities.hasDxmtPayload(engineRoot: payloadTmp))
         precondition(CyderGraphicsCapabilities.hasDxmtPayload(engineRoot: nil))
 
+        // hasDxvk2Payload mirrors hasDxvkPayload (d3d11 under lib/dxvk2 + MoltenVK).
+        let dxvk2PayloadTmp = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cyder-dxvk2-payload-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: dxvk2PayloadTmp) }
+        precondition(!CyderGraphicsCapabilities.hasDxvk2Payload(engineRoot: dxvk2PayloadTmp))
+        let dxvk2Windows = dxvk2PayloadTmp.appendingPathComponent("lib/dxvk2/x86_64-windows", isDirectory: true)
+        let moltenUnix = dxvk2PayloadTmp.appendingPathComponent("lib/wine/x86_64-unix", isDirectory: true)
+        try FileManager.default.createDirectory(at: dxvk2Windows, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: moltenUnix, withIntermediateDirectories: true)
+        try Data().write(to: dxvk2Windows.appendingPathComponent("d3d11.dll"))
+        precondition(!CyderGraphicsCapabilities.hasDxvk2Payload(engineRoot: dxvk2PayloadTmp))
+        try Data().write(to: moltenUnix.appendingPathComponent("libMoltenVK.dylib"))
+        precondition(CyderGraphicsCapabilities.hasDxvk2Payload(engineRoot: dxvk2PayloadTmp))
+        precondition(CyderGraphicsCapabilities.hasDxvk2Payload(engineRoot: nil))
+
         setenv("CYDER_OEM_FLAVOR", "maplestory", 1)
         defer { unsetenv("CYDER_OEM_FLAVOR") }
         precondition(CyderProduct.isMapleStoryOEM)
@@ -208,12 +258,12 @@ struct CyderSettingsHarness {
         precondition(oemDefaults.graphicsBackend == .default)
         precondition(
             CyderSettings.effectiveLaunchBackend(
-                preference: .default, hasD3DMetal: false, hasDxvk: true, hasDxmt: true
+                preference: .default, hasD3DMetal: false, hasDxvk: true, hasDxvk2: true, hasDxmt: true
             ) == nil
         )
         precondition(
             CyderSettings.effectiveLaunchBackend(
-                preference: .dxmt, hasD3DMetal: false, hasDxvk: true, hasDxmt: true, osMajorVersion: 15
+                preference: .dxmt, hasD3DMetal: false, hasDxvk: true, hasDxvk2: true, hasDxmt: true, osMajorVersion: 15
             ) == .dxmt
         )
         precondition(CyderSettings.sanitizedGraphicsBackend("auto") == .default)
