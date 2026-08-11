@@ -90,8 +90,15 @@ assert_contains "$(cyder_wine_frontend_args "$ENGINE/bin/wine" 'd3d11,dxgi=n,b')
 unset CYDER_WINE_FRONTEND_ARGS CYDER_WINE_DLL_OVERRIDES
 
 # Saved settings should control DXVK frametimes in the shell launcher path.
+# Stub engine payloads so preference apply is hermetic (no host Cyder Engines).
 SETTINGS_DIR="$TMP/support"
-mkdir -p "$SETTINGS_DIR"
+SETTINGS_ENGINE_NAME=wine-x86_64
+SETTINGS_ENGINES="$TMP/settings-engines"
+mkdir -p "$SETTINGS_DIR" \
+  "$SETTINGS_ENGINES/$SETTINGS_ENGINE_NAME/lib/dxvk/x86_64-windows" \
+  "$SETTINGS_ENGINES/$SETTINGS_ENGINE_NAME/lib/dxvk2/x86_64-windows"
+: >"$SETTINGS_ENGINES/$SETTINGS_ENGINE_NAME/lib/dxvk/x86_64-windows/d3d11.dll"
+: >"$SETTINGS_ENGINES/$SETTINGS_ENGINE_NAME/lib/dxvk2/x86_64-windows/d3d11.dll"
 cat >"$SETTINGS_DIR/settings.json" <<'JSON'
 {
   "schemaVersion": 6,
@@ -103,11 +110,35 @@ cat >"$SETTINGS_DIR/settings.json" <<'JSON'
 JSON
 (
   export CYDER_SUPPORT="$SETTINGS_DIR"
+  export CYDER_ENGINES="$SETTINGS_ENGINES"
+  export CYDER_ENGINE_NAME="$SETTINGS_ENGINE_NAME"
   export CYDER_GRAPHICS_BACKEND=
   unset DXVK_FRAME_RATE DXVK_HUD MTL_HUD_ENABLED
   cyder_load_saved_settings
   assert_eq "$DXVK_FRAME_RATE" "60" "shell settings loader should preserve DXVK frame limit"
   assert_eq "$DXVK_HUD" "fps" "shell settings loader should allow DXVK HUD without frametimes"
+)
+
+# DXVK 2 is the same translation family for the frame limiter and DXVK HUD.
+cat >"$SETTINGS_DIR/settings.json" <<'JSON'
+{
+  "schemaVersion": 9,
+  "graphicsBackend": "dxvk2",
+  "dxvkFrameRate": "sixty",
+  "graphicsHud": "dxvk",
+  "dxvkHudFrametimes": false
+}
+JSON
+(
+  export CYDER_SUPPORT="$SETTINGS_DIR"
+  export CYDER_ENGINES="$SETTINGS_ENGINES"
+  export CYDER_ENGINE_NAME="$SETTINGS_ENGINE_NAME"
+  export CYDER_GRAPHICS_BACKEND=
+  unset DXVK_FRAME_RATE DXVK_HUD MTL_HUD_ENABLED
+  cyder_load_saved_settings
+  assert_eq "$CYDER_GRAPHICS_BACKEND" "dxvk2" "shell settings loader should retain dxvk2 backend"
+  assert_eq "$DXVK_FRAME_RATE" "60" "shell settings loader should apply DXVK frame limit for dxvk2"
+  assert_eq "$DXVK_HUD" "fps" "shell settings loader should apply DXVK HUD for dxvk2"
 )
 
 # Metal HUD is independent of a manual DXVK selection. In particular, the
@@ -124,6 +155,8 @@ cat >"$SETTINGS_DIR/settings.json" <<'JSON'
 JSON
 (
   export CYDER_SUPPORT="$SETTINGS_DIR"
+  export CYDER_ENGINES="$SETTINGS_ENGINES"
+  export CYDER_ENGINE_NAME="$SETTINGS_ENGINE_NAME"
   export CYDER_GRAPHICS_BACKEND=
   unset CYDER_GRAPHICS_PREFERENCE DXVK_FRAME_RATE DXVK_HUD MTL_HUD_ENABLED
   cyder_load_saved_settings

@@ -145,6 +145,18 @@ struct CyderSettingsHarness {
         precondition(CyderSettings.resolvedGraphicsHud(preference: .dxvk2, requested: .dxvk) == .dxvk)
         precondition(CyderSettings.resolvedGraphicsHud(preference: .wined3d, requested: .dxvk) == .off)
 
+        // Decode must not wipe DXVK HUD when the backend is DXVK 2 (same family).
+        let dxvk2HudJSON = Data("""
+        {
+          "schemaVersion": 9,
+          "graphicsBackend": "dxvk2",
+          "graphicsHud": "dxvk"
+        }
+        """.utf8)
+        let decodedDxvk2Hud = try JSONDecoder().decode(CyderSettings.self, from: dxvk2HudJSON)
+        precondition(decodedDxvk2Hud.graphicsBackend == .dxvk2)
+        precondition(decodedDxvk2Hud.graphicsHud == .dxvk)
+
         try store.update { settings in
             settings.graphicsBackend = .dxmt
             settings.dxvkFrameRate = .sixty

@@ -430,8 +430,8 @@ struct CyderSettings: Codable {
         if !["off", "grayscale", "cleartype-rgb", "cleartype-bgr"].contains(fontSmoothing) {
             fontSmoothing = "cleartype-rgb"
         }
-        // DXVK HUD is only meaningful with a manual DXVK preference.
-        if graphicsHud == .dxvk && graphicsBackend != .dxvk {
+        // DXVK HUD is only meaningful with a manual DXVK / DXVK 2 preference.
+        if graphicsHud == .dxvk && !graphicsBackend.usesDxvkTranslation {
             graphicsHud = .off
         }
     }

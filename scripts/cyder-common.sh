@@ -2157,8 +2157,8 @@ cyder_apply_graphics_runtime_preferences() {
   local hud="${CYDER_GRAPHICS_HUD_PREFERENCE:-off}"
 
   unset DXVK_FRAME_RATE DXVK_HUD MTL_HUD_ENABLED
-  if [[ "$backend" == dxvk ]] \
-     && { [[ "$preference" == dxvk ]] || cyder_is_maplestory_oem; } \
+  if [[ "$backend" == dxvk || "$backend" == dxvk2 ]] \
+     && { [[ "$preference" == dxvk || "$preference" == dxvk2 ]] || cyder_is_maplestory_oem; } \
      && [[ "${CYDER_DXVK_FRAME_RATE_PREFERENCE:-sixty}" == sixty ]]; then
     export DXVK_FRAME_RATE=60
   fi
@@ -2168,7 +2168,7 @@ cyder_apply_graphics_runtime_preferences() {
       export MTL_HUD_ENABLED=1 DXVK_HUD=0
       ;;
     dxvk)
-      if [[ "$preference" == dxvk ]]; then
+      if [[ "$preference" == dxvk || "$preference" == dxvk2 ]]; then
         if [[ "${CYDER_DXVK_HUD_FRAMETIMES:-1}" == 0 ]]; then
           export DXVK_HUD=fps
         else
