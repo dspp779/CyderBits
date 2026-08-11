@@ -1,7 +1,7 @@
 # 引擎、圖形轉譯層與 Runtime 載入
 
 > 對象：開發／發布。說明 **Wine engine**、**DXVK／DXVK 2／DXMT payload**、
-> **MoltenVK** 與 **CompatDB prepend** 如何分開安裝、再在啟動時接起來。  
+> **MoltenVK** 與獨立 **`cxcompatdb.so` prepend runtime** 如何分開安裝、再在啟動時接起來。
 > 使用者選項見 [圖形後端](cyder-graphics-backends.zh-TW.md)；編譯細節見
 > [DXVK 編譯備忘](build-dxvk.zh-TW.md)；engine 專案邊界見
 > [Wine engine 專案](cyder-wine-engine-project.md)。
@@ -12,7 +12,7 @@
 |----|--------|--------|----------|
 | **Engine** | Wine + MoltenVK + media；**不含** DXVK／DXMT PE | `Resources/engine-*.tar.xz` | `~/.cyder/runtime/Engines/wine-x86_64/` |
 | **Graphics payload** | DXVK 1.10.3、DXVK 2.7.1、DXMT v0.80 的 PE（+ DXMT `winemetal.so`） | `Resources/graphics/*.tar.zst` | `~/.cyder/runtime/graphics/` |
-| **Runtime 載入** | 啟動時 CompatDB **builtin + prepend**，bottle 內 `d3d*` 維持 Wine 內建 | 無額外檔案 | 程序環境變數 + engine `lib/{dxvk,dxvk2,dxmt}` symlink |
+| **Runtime 載入** | 原始 CrossOver ntdll hook 載入 `cxcompatdb.so`，由 plugin 執行 CompatDB **builtin + prepend**；bottle 內 `d3d*` 維持 Wine 內建 | engine 內 `lib/wine/x86_64-unix/cxcompatdb.so` | 程序環境變數 + engine `lib/{dxvk,dxvk2,dxmt}` symlink |
 
 GPTK／D3DMetal 不隨 app 出貨，不在這三層裡。
 
@@ -60,7 +60,8 @@ flowchart TB
     ENG --> LINK["engine/lib/dxvk → current-dxvk<br/>lib/dxvk2 → current-dxvk2<br/>lib/dxmt → current-dxmt"]
     GFX --> LINK
     LINK --> LAUNCH["cyder_run_wine_exe<br/>CYDER_GRAPHICS_BACKENDS_ROOT=engine"]
-    LAUNCH --> CDB["ntdll CompatDB<br/>prepend lib/&lt;backend&gt;"]
+    LAUNCH --> HOOK["原始 CrossOver ntdll loader hook"]
+    HOOK --> CDB["engine cxcompatdb.so<br/>prepend lib/&lt;backend&gt;"]
   end
 ```
 
@@ -99,17 +100,17 @@ flowchart LR
 
 | 腳本 | 做什麼 |
 |------|--------|
-| `scripts/build-wine.sh` | 在 **cyder-wine-engine** 建 Wine；CompatDB 必須已接受 `dxvk2` 才會讓 UI 選項生效 |
+| `scripts/build-wine.sh` | 在 **cyder-wine-engine** 建 Wine，並編譯獨立 `cxcompatdb.so`；不修改 CrossOver 原始 ntdll |
 | `scripts/build-dxvk.sh` | 1.10.3 → `lib/dxvk`；寫 `version`；stamp `"Wine builtin DLL"` |
 | `scripts/build-dxvk2.sh` | 2.7.1 → `lib/dxvk2`；不碰 `lib/dxvk` |
 | `scripts/fetch-dxmt.sh` | 上游 v0.80 → `lib/dxmt` |
 | `scripts/pack-graphics-payloads.sh` | 從上述三棵樹打 zstd + `*-version.txt` + `*-artifact-sha256.txt` |
-| `scripts/pack-engine-artifact.sh` | **先** pack graphics，再 stage engine 並排除三棵圖形樹 |
+| `scripts/pack-engine-artifact.sh` | **先** pack graphics，確認 `cxcompatdb.so` 存在且相容，再 stage engine 並排除三棵圖形樹 |
 | `scripts/import-engine-release.sh --apply` | 驗證 manifest／NTDLL SHA，寫入 `config/cyder-engine-*` |
 | `scripts/create-cyder-app.sh` | 複製 pin 住的 engine tar **與** 三組 graphics sidecar；缺一則失敗（`CYDER_ALLOW_MISSING_GRAPHICS=1` 除外） |
 
-Engine 升級（例如 `Cyder010-dxvk2`）只換 ntdll／Wine；圖形 payload 版本由
-`lib/*/version` 與 sidecar 獨立演進。
+Engine 升級（例如 `Cyder010-dxvk2`）會更新 Wine 與 engine 內的
+`cxcompatdb.so`；圖形 payload 版本仍由 `lib/*/version` 與 sidecar 獨立演進。
 
 ---
 
@@ -134,6 +135,7 @@ Cyder.app/Contents/Resources/
   Engines/wine-x86_64/               # 解壓後的 Wine + MoltenVK
     bin/wine
     lib/wine/x86_64-unix/libMoltenVK.dylib
+    lib/wine/x86_64-unix/cxcompatdb.so # CompatDB policy plugin
     lib/dxvk  → 相對路徑 ../../../graphics/current-dxvk
     lib/dxvk2 → ../../../graphics/current-dxvk2
     lib/dxmt  → ../../../graphics/current-dxmt
@@ -204,7 +206,8 @@ Engine 大版本升級會 `cyder_reset_shared_prefix`；圖形 payload 換版**�
 ## 5. 啟動時如何載入轉譯層
 
 Bottle 的 `system32`／`syswow64` 維持 Wine 內建 `d3d*`／`dxgi`。真正換成 DXVK／DXMT
-是 **process-local**：環境變數 + ntdll CompatDB prepend。
+是 **process-local**：Cyder 傳入環境變數，原始 CrossOver ntdll 的 loader hook 載入
+`cxcompatdb.so`，再由 plugin 呼叫既有 loader primitive 完成 prepend。
 
 ```mermaid
 sequenceDiagram
@@ -212,7 +215,7 @@ sequenceDiagram
   participant S as settings.json
   participant Sh as cyder_apply_graphics_preference
   participant W as wine / ntdll
-  participant C as apply_graphics_backend
+  participant C as cxcompatdb.so
   participant FS as ENGINE/lib/&lt;token&gt;
 
   S->>Sh: graphicsBackend=dxvk2
@@ -225,7 +228,7 @@ sequenceDiagram
   end
   W->>W: CYDER_GRAPHICS_BACKENDS_ROOT=engine 根
   W->>C: 讀 CYDER_GRAPHICS_BACKEND
-  C->>C: valid_graphics_backend("dxvk2")
+  C->>C: validate backend path / PE / dependency
   C->>FS: root/lib/dxvk2 + MoltenVK
   alt 模組存在且已 stamp builtin
     C->>C: load-order "b" + prepend_dll_path
@@ -240,20 +243,23 @@ sequenceDiagram
 | `CYDER_GRAPHICS_BACKEND` | `dxvk`／`dxvk2`／`dxmt`／`wined3d`／`d3dmetal`；`default` 不強制，交給 CompatDB 規則 |
 | `CYDER_GRAPHICS_BACKENDS_ROOT` | 設成 **engine 根**（`bin/wine` 的上一層），讓 `lib/%s` 與 MoltenVK 同一棵樹 |
 | `CYDER_GRAPHICS_BACKEND_PATH` | 可選；直接指定 backend 目錄。`cxcompatdb.so` 會 canonicalize，檢查目前 PE machine、builtin signature、必要 DLL 與 host dependency，失敗回退 WineD3D |
-| `CX_GRAPHICS_BACKEND` | 與上者同步，對齊 CrossOver 命名 |
+| `CX_GRAPHICS_BACKEND` | 與上者同步，供既有 CrossOver 相容環境辨識；Cyder plugin 的主控制變數是 `CYDER_GRAPHICS_BACKEND` |
 | `DXVK_FRAME_RATE`／`DXVK_HUD` | 僅手動 DXVK 或 DXVK 2（60／120／144） |
 | `DXMT_CONFIG` | 僅手動 DXMT；合併 `d3d11.preferredMaxFrameRate` |
+| `CYDER_ACTIVE_GRAPHICS_BACKEND_PATH` | plugin 成功後寫入實際 canonical path，供診斷 log／子流程觀察 |
 
-Cyder `cxcompatdb.so`（由 CrossOver 原始 ntdll 的既有 hook 載入）：
+### `cxcompatdb.so` 的責任
 
-- `valid_graphics_backend` 接受 `dxvk`（4）與 `dxvk2`（5）。
-- 未指定直接路徑時，從 engine root 的 `lib/<backend>` 推導。
-- `dxvk` 與 `dxvk2` 都檢查 MoltenVK。
-- Load-order 為 `"b"`（builtin）。Wine 只把 PE offset 64 寫著 `"Wine builtin DLL"` 的模組當 builtin；stamp 發生在 build／pack，不是啟動時。
-- 成功與失敗 log 都包含實際使用或拒絕的 backend 路徑。
+- CrossOver 原始 ntdll 的既有 hook 載入它；Cyder 不 patch ntdll，也不改變 ntdll 的 loader mechanism。
+- 直接使用 `CYDER_GRAPHICS_BACKEND_PATH` 時，檢查 canonical directory、owner／寫入權限、非 symlink、PE machine、`MZ`／`PE` header 與 `Wine builtin DLL` signature。
+- 每個 backend 至少必須提供同一 machine 的 `d3d11.dll` 與 `dxgi.dll`；DXVK／DXVK 2 另需 engine 的 MoltenVK，DXMT 需 `winemetal.so`，D3DMetal 需 GPTK `libd3dshared.dylib`。
+- 對可用 DLL 設定 load-order `"b"`，再將 backend 目錄交給既有 `prepend_dll_path`；stamp 發生在 build／pack，不是啟動時。
+- 成功 log 記錄 backend、PE machine 與實際 canonical path；拒絕時記錄輸入 path 與 WineD3D fallback。
+- 它目前處理 current-process append arguments、DLL overrides 與 graphics backend；`set_env`、`unset_env`、executable replacement、WineD3D renderer records 會記錄 unsupported 並忽略，不應當成可用規則發布。
 
-舊 engine（Cyder010 及更早）沒有 Cyder `cxcompatdb.so`，仍由當時的 ntdll patch 處理。
-現行 pin：`CX26.3.0-W11-Cyder010-dxvk2`。
+舊版已發布、未內含 `cxcompatdb.so` 的 engine 必須重新打包升級；不能藉由更新
+app 端環境變數讓舊 engine 自動取得此 plugin。現行 pin：
+`CX26.3.0-W11-Cyder010-dxvk2`。
 
 ---
 
@@ -285,7 +291,7 @@ Swift：`prepareEnvironmentAndShowSettings` 走完整 ensure；
 
 | 專案 | 擁有 |
 |------|------|
-| **cyder-wine-engine** | Wine／MoltenVK 建置、CompatDB patch 進 ntdll、engine pack（排除圖形樹）、minOS |
+| **cyder-wine-engine** | Wine／MoltenVK 建置、獨立 `cxcompatdb.so`、engine pack（排除圖形樹）、minOS；保留原始 CrossOver ntdll |
 | **ogom（Cyder）** | DXVK／DXMT 編譯與 pack、ensure-graphics、設定 UI、CompatDB YAML、app 打包 |
 
 本機 `install/wine-cx26_x86_64` 常是 ogom → engine 的 symlink；**pack／rebuild 仍應在 engine repo** 跑，以免 `.env` 與 minOS 旗標錯位。
@@ -296,9 +302,9 @@ Swift：`prepareEnvironmentAndShowSettings` 走完整 ensure；
 
 | 症狀 | 先查 |
 |------|------|
-| 選 DXVK 2 沒有效果，像 default | Engine 是否 Cyder010+（`strings ntdll.so \| grep dxvk2`）；`CYDER_GRAPHICS_BACKEND` 是否真的是 `dxvk2` |
+| 選 DXVK 2 沒有效果，像 default | Engine 是否含 `lib/wine/x86_64-unix/cxcompatdb.so`（`strings cxcompatdb.so \| grep CYDER_GRAPHICS_BACKEND_PATH`）；`CYDER_GRAPHICS_BACKEND` 是否真的是 `dxvk2` |
 | 選項灰掉 | 是否開過 Cyder.app 做 ensure；`lib/dxvk2/x86_64-windows/d3d11.dll` 與 MoltenVK 是否可讀 |
-| prepend 仍落到 WineD3D | PE 有無 `"Wine builtin DLL"` stamp；`WINEDEBUG=+loaddll` 位址是否異於 wined3d |
+| prepend 仍落到 WineD3D | 檢查 `cxcompatdb` log 的 rejected path、PE machine／signature、MoltenVK／DXMT dependency；再確認 `WINEDEBUG=+loaddll` |
 | Finder 一直用舊 DXVK | 預期：Finder 不升級；開一次 Cyder.app |
 | `create-cyder-app` 失敗 | `dist/artifacts/graphics/` 是否三組 version／sha／tar 齊 |
 
@@ -308,6 +314,9 @@ Swift：`prepareEnvironmentAndShowSettings` 走完整 ensure；
 bash tests/test-cyder-pack-graphics-payloads.sh
 bash tests/test-cyder-ensure-graphics.sh
 bash tests/test-cyder-graphics-prepend.sh
+
+# engine 端 plugin／Wine runtime 測試
+(cd /Users/jjc/cyder-wine-engine && bash tests/run.sh)
 ```
 
 ## 相關文件
