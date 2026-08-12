@@ -205,9 +205,10 @@ sequenceDiagram
 | 6. Bootstrap bottle | `cyder_bootstrap_shared_prefix` | 開 Cyder 且 marker 未齊；**不再**把 DXVK 拷進 system32 |
 
 `cyder_prepare_graphics_prefix` 在有 graphics 貨源時會先跑 ensure，再開 Cyder
-的 `--ensure-graphics-only` 會再跑一次（第二次應是 no-op）。Finder 的
-`--launch-exe` **不**走這條。若是首次建立 prefix，bootstrap 完成後會再跑一次
-ensure，補上建立前不存在、因此無法先安裝的 `winemetal.dll`。
+的 `--ensure-graphics-only` 會再跑一次（第二次應是 no-op）。`--launch-exe`
+在選定 shared 或 per-game prefix 後也會執行同一個 preparation，確保舊 profile
+不會因缺少 `winemetal.dll` 而直接失敗。若是首次建立 prefix，bootstrap 完成後會
+再跑一次 ensure，補上建立前不存在、因此無法先安裝的 `winemetal.dll`。
 
 Engine 大版本升級會 `cyder_reset_shared_prefix`；圖形 payload 換版**不會**重做 bottle。
 
