@@ -13,6 +13,7 @@
 
 | 版本 | 文件 | 重點 |
 |------|------|------|
+| 0.10.0 | [繁中](releases/v0.10.0.md) | Cyder010、DXVK 2／DXMT 圖形後端、單一選單列 instance、設定與啟動診斷收斂（目標版本） |
 | 0.9.5 | [繁中](releases/v0.9.5.md) | Cyder009（QDO optnone）、高解析度預設開啟、啟動檢查文案 |
 | 0.9.4 | [繁中](releases/v0.9.4.md) | 雙字體取代選項收斂、顯示相關預設值修正 |
 | 0.9.3 | [繁中](releases/v0.9.3.md) | Cyder008（A6、free_async_queue、MoltenVK shim）、macOS 11 UI、Bash 單一路徑與啟動錯誤提示 |
@@ -31,11 +32,13 @@
 
 | 文件 | 對象 | 內容 |
 |------|------|------|
+| [project-development-dashboard.zh-TW.md](project-development-dashboard.zh-TW.md) | 開發 / 維護 | **專案開發狀態 dashboard**：待開發、已知錯誤、程序管理、MapleStory OEM、每遊戲設定與優先級 |
 | [cyder.md](cyder.md) | 一般使用者 | Cyder 啟動器：開 `.exe`、SharedPrefix、bootstrap |
 | [cyder-session-process-monitoring.zh-TW.md](cyder-session-process-monitoring.zh-TW.md) | 開發 / 設計 | 選單列 session、Steam helper、同 prefix 多程式與 process monitor 設計 |
 | [cyder-graphics-backends.zh-TW.md](cyder-graphics-backends.zh-TW.md) | 一般使用者 | 圖形後端（WineD3D/DXVK/D3DMetal）、GPTK 安裝、DXVK 限幀 vs VSync |
 | [cyder-compatdb.zh-TW.md](cyder-compatdb.zh-TW.md) | 開發 / 發布 | CompatDB 架構、Engine 重包判斷、YAML 規則新增與本機測試 |
 | [cyder-wine-engine-project.md](cyder-wine-engine-project.md) | 開發 / 發布 | Wine engine 獨立專案邊界、manifest 契約與 Cyder 匯入流程 |
+| [upstream-prs/README.zh-TW.md](upstream-prs/README.zh-TW.md) | 開發 / upstream | 各 Wine patch 的 PR dossier、重現方式、嚴重性、完整修正／workaround 判定與提交順序 |
 | [cyderbits.md](cyderbits.md) | 一般使用者 | CyderBits 打包器：建立 game `.app`、選項與疑難排解 |
 | [bluecg.md](bluecg.md) | 開發 / 驗證 | BlueCG 自建 Wine、執行、高解析度與已知問題 |
 | [wine-configure-options.md](wine-configure-options.md) | 開發 / 建置 | Wine `configure` 旗標說明與老遊戲取捨 |
