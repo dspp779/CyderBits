@@ -95,6 +95,20 @@ xcrun notarytool store-credentials cyder-notary \
 `dist/` 不在版本控制內,所以 clone 後不會有這個檔案 — 向 團隊成員 拿到 tarball 後放到上述路徑,
 或建置時用 `--engine-archive /path/to/engine.tar.xz` 指定。
 
+MapleStory OEM25 使用獨立的 engine archive，不沿用主線 pin。其測試 label 為
+`CX25.0.1.38865-OEM25-dev`，由 sibling checkout 的專用腳本產生：
+
+```bash
+cd ../cyder-wine-engine
+SIGN_IDENTITY=- \
+CYDER_ENGINE_VERSION_LABEL='CX25.0.1.38865-OEM25-dev' \
+  bash scripts/pack-maplestory-oem25-engine.sh --xz --force
+```
+
+這個 archive 保留原始 OEM `ntdll.so`，含 Cyder `cxcompatdb.so` 與 MoltenVK 1.4.0，
+不含 `lib/dxvk`／`lib/dxmt`；DXVK／DXMT 由 App 的 `Resources/graphics` 在 runtime
+ensure。App 腳本會驗證 archive 的 SHA-256 sidecar 與上述內容。
+
 ## 每次發佈流程
 
 建議用一鍵腳本（會做建置、簽署、公證、staple、發佈 zip）：
@@ -121,6 +135,16 @@ bash scripts/create-cyder-app.sh
 ```bash
 SIGN_IDENTITY="Developer ID Application: <developer_id_application>" \
   bash scripts/pack-engine-artifact.sh
+```
+
+OEM25 測試版（adhoc，不會公證）可用：
+
+```bash
+CYDER_OEM_APP_OUT_DIR="$PWD/dist/oem-dev" \
+CYDER_APP_VERSION=0.10.0-maplestory-oem25 \
+CYDER_OEM_ENGINE_VERSION='CX25.0.1.38865-OEM25-dev' \
+SIGN_IDENTITY=- CYDER_VERIFY_ENGINE_SHA256=1 \
+  bash scripts/create-cyder-maplestory-oem-app.sh
 ```
 
 ### 2. 驗證簽章
@@ -187,7 +211,7 @@ OEM 版 (`Cyder-maplestory-oem25.app`) 與正式版使用相同的 Developer ID 
 bash scripts/create-cyder-maplestory-oem-app.sh
 ```
 
-產出為 `dist/Cyder-maplestory-oem25.app`（預設版本字串 `0.8.2-maplestory-oem25`）。公證步驟與正式版相同，僅替換 App 名稱：
+產出為 `dist/Cyder-maplestory-oem25.app`（測試版目前使用 `0.10.0-maplestory-oem25`）。公證步驟與正式版相同，僅替換 App 名稱：
 
 ```bash
 codesign --verify --deep --strict --verbose=2 dist/Cyder-maplestory-oem25.app
@@ -202,7 +226,10 @@ xcrun stapler validate dist/Cyder-maplestory-oem25.app
 ditto -c -k --keepParent dist/Cyder-maplestory-oem25.app dist/Cyder-maplestory-oem25-0.8.2.zip
 ```
 
-**0.8.0 起 engine 內建 DXVK，但不含 Apple GPTK** — 公證前請確認打包後的 engine 沒有 `lib64/apple_gptk` 或評估 DMG 內容被打進 App；GPTK 僅能由使用者本機 CrossOver 或偏好設定從官方評估卷安裝。兩套 App（正式版與 OEM）皆需各自送公證並 staple 後再壓 zip 發佈。
+OEM engine 不內建 DXVK／DXMT，也不含 Apple GPTK。公證前請確認 engine 沒有
+`lib/dxvk`、`lib/dxvk2`、`lib/dxmt` 或 `lib64/apple_gptk`；圖形後端應只出現在
+App 的 `Resources/graphics` sidecars。兩套 App（正式版與 OEM）皆需各自送公證並
+staple 後再壓 zip 發佈。
 
 OEM 最終檢查：
 

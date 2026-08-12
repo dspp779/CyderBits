@@ -1,5 +1,10 @@
 #!/usr/bin/env bash
 # Package the MapleStory OEM flavor around the shared Cyder app builder.
+#
+# The OEM engine archive is built separately by
+# cyder-wine-engine/scripts/pack-maplestory-oem25-engine.sh.  Graphics PE
+# payloads remain App resources and are installed by cyder-ensure-graphics.sh;
+# this script must not inject or repair lib/dxvk inside the engine archive.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -7,95 +12,101 @@ ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 OUT_DIR="${CYDER_OEM_APP_OUT_DIR:-$ROOT/dist}"
 APP="$OUT_DIR/Cyder-maplestory-oem25.app"
 BASE_APP="$OUT_DIR/Cyder.app"
-EXPECTED_SHA256="be890c31d65d5777204fc9614d19d6fedba1410625594b330dc985cbf96f1e23"
-BASE_ARCHIVE="${CYDER_OEM_ENGINE_ARCHIVE:-}"
-if [[ -z "$BASE_ARCHIVE" ]]; then
-  for candidate in \
-    "$ROOT/dist/artifacts/maplestory-oem25/engine-maplestory-oem25.0.1.38865.tar.xz" \
-    "$ROOT/../../dist/artifacts/maplestory-oem25/engine-maplestory-oem25.0.1.38865.tar.xz"
-  do
-    if [[ -f "$candidate" ]]; then
-      BASE_ARCHIVE="$(cd "$(dirname "$candidate")" && pwd)/$(basename "$candidate")"
-      break
-    fi
-  done
+
+ARCHIVE="${CYDER_OEM_ENGINE_ARCHIVE:-}"
+ARCHIVE_PIN="$ROOT/config/cyder-oem-engine-archive.txt"
+VERSION_PIN="$ROOT/config/cyder-oem-engine-version.txt"
+if [[ -z "$ARCHIVE" && -f "$ARCHIVE_PIN" ]]; then
+  ARCHIVE="$(tr -d '[:space:]' <"$ARCHIVE_PIN")"
+  [[ "$ARCHIVE" = /* ]] || ARCHIVE="$ROOT/$ARCHIVE"
 fi
-# Redistributable DXVK PE payload (D3D11/DXGI). Prefer a Cyder-built tree.
-DXVK_SRC="${CYDER_OEM_DXVK_SRC:-}"
-if [[ -z "$DXVK_SRC" ]]; then
-  # Prefer worktree install/, then parent monorepo install/ when packaging from a worktree.
-  for candidate in \
-    "$ROOT/install/wine-cx26-x86_64/lib/dxvk" \
-    "$ROOT/install/wine-maplestory-oem25-source-x86_64/lib/dxvk" \
-    "$ROOT/../../install/wine-cx26-x86_64/lib/dxvk" \
-    "$ROOT/../../install/wine-maplestory-oem25-source-x86_64/lib/dxvk"
-  do
-    if [[ -f "$candidate/x86_64-windows/d3d11.dll" && -f "$candidate/x86_64-windows/dxgi.dll" ]]; then
-      DXVK_SRC="$(cd "$candidate" && pwd)"
-      break
-    fi
-  done
+ENGINE_VERSION="${CYDER_OEM_ENGINE_VERSION:-}"
+if [[ -z "$ENGINE_VERSION" && -f "$VERSION_PIN" ]]; then
+  ENGINE_VERSION="$(tr -d '[:space:]' <"$VERSION_PIN")"
 fi
 
-[[ -f "$BASE_ARCHIVE" ]] || {
-  echo "Missing MapleStory OEM engine archive: $BASE_ARCHIVE" >&2
+[[ -f "$ARCHIVE" ]] || {
+  echo "Missing MapleStory OEM engine archive: $ARCHIVE" >&2
+  echo "Build it with cyder-wine-engine/scripts/pack-maplestory-oem25-engine.sh or set CYDER_OEM_ENGINE_ARCHIVE." >&2
+  exit 1
+}
+[[ -n "$ENGINE_VERSION" ]] || {
+  echo "Missing OEM engine version label (set CYDER_OEM_ENGINE_VERSION or $VERSION_PIN)" >&2
   exit 1
 }
 
 if [[ "${CYDER_VERIFY_ENGINE_SHA256:-0}" == 1 ]]; then
-  actual_sha256="$(shasum -a 256 "$BASE_ARCHIVE" | awk '{print $1}')"
-  [[ "$actual_sha256" == "$EXPECTED_SHA256" ]] || {
+  sha_file="$ARCHIVE.sha256"
+  [[ -f "$sha_file" ]] || {
+    echo "Missing engine SHA-256 sidecar: $sha_file" >&2
+    exit 1
+  }
+  read -r expected_sha listed_archive <"$sha_file"
+  [[ "$listed_archive" == "$(basename "$ARCHIVE")" ]] || {
+    echo "Engine SHA-256 sidecar names a different archive: $listed_archive" >&2
+    exit 1
+  }
+  actual_sha="$(shasum -a 256 "$ARCHIVE" | awk '{print $1}')"
+  [[ "$actual_sha" == "$expected_sha" ]] || {
     echo "MapleStory OEM engine archive SHA-256 mismatch" >&2
+    echo "  expected=$expected_sha" >&2
+    echo "  actual=$actual_sha" >&2
     exit 1
   }
 fi
 
-[[ -n "$DXVK_SRC" && -f "$DXVK_SRC/x86_64-windows/d3d11.dll" ]] || {
-  echo "Missing DXVK payload to inject into OEM engine (set CYDER_OEM_DXVK_SRC)" >&2
-  exit 1
-}
-
-# Build a derived archive: stock CX OEM tree + lib/dxvk (do not mutate the pinned base).
-ARTIFACTS_DIR="$ROOT/dist/artifacts/maplestory-oem25"
-mkdir -p "$ARTIFACTS_DIR"
-INJECTED_ARCHIVE="$ARTIFACTS_DIR/engine-maplestory-oem25.0.1.38865+dxvk.tar.xz"
-STAGING="$(mktemp -d "${TMPDIR:-/tmp}/cyder-oem-dxvk.XXXXXX")"
-cleanup() { rm -rf "$STAGING"; }
+# Validate the archive before handing it to the generic app packer.  The OEM
+# engine keeps CrossOver's original ntdll and carries only Cyder's compatdb
+# replacement plus engine-owned MoltenVK; DXVK/DXMT are external sidecars.
+VALIDATE_STAGING="$(mktemp -d "${TMPDIR:-/tmp}/cyder-oem-validate.XXXXXX")"
+cleanup() { rm -rf "$VALIDATE_STAGING"; }
 trap cleanup EXIT
-
-echo "==> Injecting DXVK into OEM engine archive"
-echo "    base=$BASE_ARCHIVE"
-echo "    dxvk=$DXVK_SRC"
-tar -xJf "$BASE_ARCHIVE" -C "$STAGING"
-ENGINE_TREE="$STAGING/wine-x86_64"
+tar -xJf "$ARCHIVE" -C "$VALIDATE_STAGING"
+ENGINE_TREE="$VALIDATE_STAGING/wine-x86_64"
 [[ -x "$ENGINE_TREE/bin/wine" ]] || {
   echo "OEM archive missing wine-x86_64/bin/wine" >&2
   exit 1
 }
-mkdir -p "$ENGINE_TREE/lib/dxvk"
-rm -rf "$ENGINE_TREE/lib/dxvk"
-cp -R "$DXVK_SRC" "$ENGINE_TREE/lib/dxvk"
-[[ -f "$ENGINE_TREE/lib/dxvk/x86_64-windows/d3d11.dll" ]] || {
-  echo "DXVK inject failed: missing d3d11.dll" >&2
+[[ -f "$ENGINE_TREE/version" ]] || {
+  echo "OEM archive missing engine version label" >&2
   exit 1
 }
-# Keep the stock version label so an already-bootstrapped OEM bottle is not reset
-# on upgrade; sidecar installs still pick up DXVK via the new archive on re-extract
-# or via the post-pack sidecar sync below.
-(
-  cd "$STAGING"
-  # Prefer xz for create-cyder-app compatibility with .tar.xz resources.
-  if command -v xz >/dev/null 2>&1; then
-    tar -cf - wine-x86_64 | xz -T0 -c >"$INJECTED_ARCHIVE"
-  else
-    tar -cJf "$INJECTED_ARCHIVE" wine-x86_64
-  fi
-)
-ARCHIVE="$INJECTED_ARCHIVE"
-echo "==> Wrote $ARCHIVE ($(du -h "$ARCHIVE" | awk '{print $1}'))"
+archive_engine_version="$(tr -d '[:space:]' <"$ENGINE_TREE/version")"
+[[ "$archive_engine_version" == "$ENGINE_VERSION" ]] || {
+  echo "OEM engine version mismatch" >&2
+  echo "  pinned=$ENGINE_VERSION" >&2
+  echo "  archive=$archive_engine_version" >&2
+  exit 1
+}
+[[ -f "$ENGINE_TREE/lib/wine/x86_64-unix/cxcompatdb.so" ]] || {
+  echo "OEM archive missing Cyder cxcompatdb.so" >&2
+  exit 1
+}
+[[ -f "$ENGINE_TREE/lib64/libMoltenVK.dylib" ]] || {
+  echo "OEM archive missing engine-owned MoltenVK" >&2
+  exit 1
+}
+for legacy_graphics_dir in "$ENGINE_TREE/lib/dxvk" "$ENGINE_TREE/lib/dxvk2" "$ENGINE_TREE/lib/dxmt"; do
+  [[ ! -e "$legacy_graphics_dir" ]] || {
+    echo "OEM engine must not contain legacy graphics payload: ${legacy_graphics_dir#$ENGINE_TREE/}" >&2
+    exit 1
+  }
+done
+cxcompatdb_strings="$VALIDATE_STAGING/cxcompatdb.strings"
+strings "$ENGINE_TREE/lib/wine/x86_64-unix/cxcompatdb.so" >"$cxcompatdb_strings"
+grep -Fq 'CYDER_GRAPHICS_BACKEND_PATH' "$cxcompatdb_strings" || {
+  echo "OEM cxcompatdb.so does not expose CYDER_GRAPHICS_BACKEND_PATH support" >&2
+  exit 1
+}
+moltenvk_strings="$VALIDATE_STAGING/moltenvk.strings"
+strings "$ENGINE_TREE/lib64/libMoltenVK.dylib" >"$moltenvk_strings"
+grep -Fq '1.4.0' "$moltenvk_strings" || {
+  echo "OEM engine does not contain MoltenVK 1.4.0" >&2
+  exit 1
+}
 
-export CYDER_APP_VERSION="${CYDER_APP_VERSION:-0.9.4-maplestory-oem25}"
-export CYDER_BUNDLED_ENGINE_VERSION="${CYDER_BUNDLED_ENGINE_VERSION:-MapleStory OEM CrossOver 25.0.1.38865}"
+export CYDER_APP_VERSION="${CYDER_APP_VERSION:-0.10.0-maplestory-oem25}"
+export CYDER_BUNDLED_ENGINE_VERSION="${CYDER_BUNDLED_ENGINE_VERSION:-$ENGINE_VERSION}"
 # Match create-cyder-app.sh: Developer ID by default; SIGN_IDENTITY=- for ad-hoc.
 export SIGN_IDENTITY="${SIGN_IDENTITY:-Developer ID Application: Chun Ho Kwok (3U9565WWM2)}"
 
@@ -161,14 +172,7 @@ codesign --force --options runtime "$timestamp_flag" \
   --sign "$SIGN_IDENTITY" "$APP"
 codesign --verify --deep --strict --verbose=2 "$APP"
 
-# Sync DXVK into the already-installed OEM sidecar without resetting the bottle.
-SIDECAR="${CYDER_OEM_SIDECAR_ENGINE:-$HOME/.cyder/runtime/Engines/maplestory-oem25}"
-if [[ -d "$SIDECAR/bin" ]]; then
-  echo "==> Syncing DXVK into installed sidecar: $SIDECAR"
-  mkdir -p "$SIDECAR/lib"
-  rm -rf "$SIDECAR/lib/dxvk"
-  cp -R "$DXVK_SRC" "$SIDECAR/lib/dxvk"
-fi
-
 echo "Created $APP"
-echo "Engine archive includes lib/dxvk from $DXVK_SRC"
+echo "Engine archive: $(basename "$ARCHIVE")"
+echo "Engine version: $ENGINE_VERSION"
+echo "Graphics payloads: external Resources/graphics (DXVK/DXMT)"

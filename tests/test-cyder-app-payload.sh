@@ -86,8 +86,8 @@ assert_contains "$build_script" 'CYDER_ALLOW_MISSING_GRAPHICS' \
   "Cyder.app packaging must fail closed on missing graphics unless explicitly allowed"
 assert_not_contains "$build_script" 'install-dxvk-prefix.sh' \
   "Cyder.app must not bundle obsolete DXVK prefix PE provisioner"
-assert_contains "$build_script" 'cp "$SCRIPT_DIR/cyder-oem-sync-dxvk.sh" "$RES/ogom-scripts/"' \
-  "Cyder.app must bundle the OEM DXVK sidecar repair helper"
+assert_not_contains "$build_script" 'cyder-oem-sync-dxvk.sh' \
+  "Cyder.app must not bundle the obsolete OEM DXVK sidecar repair helper"
 winetricks_launcher="$(cat "$ROOT/scripts/cyder-winetricks.sh")"
 assert_contains "$winetricks_launcher" 'exec /usr/bin/arch -x86_64 /bin/sh "$winetricks" --unattended "$@"' \
   "Cyder Winetricks integration should use unattended CLI mode"
@@ -131,6 +131,14 @@ assert_contains "$oem_build_script" 'rm -f "$MACOS/Cyder"' \
   "OEM packaging should remove the inherited base launcher"
 assert_contains "$oem_build_script" 'for helper in CyderOEMBootstrap CyderMapleStoryOEM; do' \
   "OEM signing should include the renamed launcher"
+assert_contains "$oem_build_script" 'CYDER_GRAPHICS_BACKEND_PATH' \
+  "OEM packaging should validate the Cyder graphics backend hook"
+assert_contains "$oem_build_script" 'external Resources/graphics' \
+  "OEM packaging should keep graphics payloads external to the engine"
+assert_not_contains "$oem_build_script" 'DXVK_SRC' \
+  "OEM packaging must not inject a DXVK tree into the engine"
+assert_not_contains "$oem_build_script" 'cyder-oem-sync-dxvk.sh' \
+  "OEM packaging must not retain the removed DXVK repair path"
 if [[ "$oem_build_script" == *'*/MacOS/Cyder |'* ]]; then
   echo "ASSERT failed: OEM payload signing should no longer whitelist the old Cyder launcher path" >&2
   exit 1

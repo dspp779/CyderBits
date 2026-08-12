@@ -34,16 +34,6 @@ if [[ -x "$SELF/CyderOEMBootstrap" ]]; then
   export CYDER_OEM_BOOTSTRAP_HELPER="$SELF/CyderOEMBootstrap"
 fi
 
-sync_dxvk="$SELF/../Resources/ogom-scripts/cyder-oem-sync-dxvk.sh"
-archive_name_file="$SELF/../Resources/engine-archive.txt"
-if [[ -x "$sync_dxvk" && -f "$archive_name_file" ]]; then
-  archive_name="$(tr -d '[:space:]' <"$archive_name_file")"
-  archive_path="$SELF/../Resources/$archive_name"
-  "$sync_dxvk" \
-    --engine "$CYDER_RUNTIME_ROOT/Engines/$CYDER_ENGINE_NAME" \
-    --archive "$archive_path" || true
-fi
-
 # CrossOver Perl frontend reads bottle metadata via CX_BOTTLE.
 export CX_BOTTLE="$CYDER_PREFIX"
 

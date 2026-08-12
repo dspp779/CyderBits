@@ -194,7 +194,6 @@ cp "$SCRIPT_DIR/cyder-edit-user-reg.sh" "$RES/ogom-scripts/"
 cp "$SCRIPT_DIR/cyder-winetricks.sh" "$RES/ogom-scripts/"
 cp "$SCRIPT_DIR/cyder-recipe.sh" "$RES/ogom-scripts/"
 cp "$SCRIPT_DIR/cyder-cnc-ddraw.sh" "$RES/ogom-scripts/"
-cp "$SCRIPT_DIR/cyder-oem-sync-dxvk.sh" "$RES/ogom-scripts/"
 cp "$OGOM/tools/winetricks/winetricks" "$RES/ogom-scripts/"
 cp "$OGOM/tools/winetricks/COPYING" "$RES/licenses/winetricks-COPYING"
 "$SCRIPT_DIR/cyder-cnc-ddraw.sh" verify \

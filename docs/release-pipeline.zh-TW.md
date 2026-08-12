@@ -63,6 +63,25 @@ bash scripts/import-engine-release.sh \
 
 只驗證不寫入 pin：省略 `--apply`。
 
+### MapleStory OEM25 測試引擎
+
+OEM25 不再把 DXVK／DXMT 放進 engine。請在 sibling checkout
+`cyder-wine-engine` 使用專用 repack 腳本；它保留 OEM 原始 `ntdll.so`，只替換
+Cyder `cxcompatdb.so` 與 MoltenVK 1.4.0，並在 archive 內寫入引擎 label：
+
+```bash
+cd ../cyder-wine-engine
+SIGN_IDENTITY=- \
+CYDER_ENGINE_VERSION_LABEL='CX25.0.1.38865-OEM25-dev' \
+  bash scripts/pack-maplestory-oem25-engine.sh --xz --force
+```
+
+產物應為：
+`ogom/dist/artifacts/maplestory-oem25/engine-maplestory-oem25.0.1.38865-OEM25-dev.tar.xz`。
+確認 archive 的 `wine-x86_64/lib/dxvk`、`lib/dxvk2`、`lib/dxmt` 都不存在，並將
+`config/cyder-oem-engine-archive.txt` 與 `config/cyder-oem-engine-version.txt`
+指向同一個 archive／label。這些 pin 只描述 OEM flavor，不會改動主線引擎 pin。
+
 ## 測試／分支通道
 
 ```bash
@@ -120,7 +139,8 @@ bash scripts/release-cyder.sh --channel release --skip-notarize
 
 ## 發佈前檢查清單
 
-- [ ] Engine：`lib/dxvk` 齊全、無 `apple_gptk`、host Mach-O minos ≤ 10.15  
+- [ ] Engine：不含 `lib/dxvk`、`lib/dxvk2`、`lib/dxmt`；圖形 payload 位於 App `Resources/graphics`
+- [ ] Engine：host Mach-O minos ≤ 10.15；OEM repack 的原始 `ntdll.so` hash 未變更
 - [ ] `import-engine-release` 通過；`config/cyder-engine-version.txt` 與預期 label 一致  
 - [ ] App 版本字串正確（正式勿帶 `-dev`／誤用未宣告的 rc 當 GA）  
 - [ ] `codesign --verify --deep --strict`  
@@ -130,7 +150,19 @@ bash scripts/release-cyder.sh --channel release --skip-notarize
 
 ## OEM flavor
 
-MapleStory OEM App 仍用 `scripts/create-cyder-maplestory-oem-app.sh`，公證步驟與主線相同，見簽署指南「MapleStory OEM」一節。主線 `release-cyder.sh` **不**包 OEM。
+MapleStory OEM App 用 `scripts/create-cyder-maplestory-oem-app.sh`，會驗證 pinned
+OEM archive、把外部 DXVK／DXMT sidecars 放進 App，並使用獨立的 bundle id、support
+root 與 bottle。測試版可用：
+
+```bash
+CYDER_OEM_APP_OUT_DIR="$PWD/dist/oem-dev" \
+CYDER_APP_VERSION=0.10.0-maplestory-oem25 \
+SIGN_IDENTITY=- CYDER_VERIFY_ENGINE_SHA256=1 \
+  bash scripts/create-cyder-maplestory-oem-app.sh
+```
+
+公證步驟與主線相同，見簽署指南「MapleStory OEM」一節；主線
+`release-cyder.sh` **不**包 OEM。
 
 ## 相關文件
 
