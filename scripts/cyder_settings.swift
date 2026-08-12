@@ -71,9 +71,9 @@ enum CyderProduct {
 
 enum CyderGraphicsBackend: String, Codable, CaseIterable {
     case `default`
-    case wined3d, dxvk, dxvk2, dxmt, d3dmetal
+    case wined3d, dxvk, dxmt, d3dmetal
 
-    var usesDxvkTranslation: Bool { self == .dxvk || self == .dxvk2 }
+    var usesDxvkTranslation: Bool { self == .dxvk }
 
     var usesFrameLimiter: Bool { usesDxvkTranslation || self == .dxmt }
 }
@@ -181,10 +181,9 @@ enum CyderSyncMode: Int, CaseIterable {
 struct CyderGraphicsCapabilities: Equatable {
     var hasD3DMetal: Bool
     var hasDxvk: Bool
-    var hasDxvk2: Bool
     var hasDxmt: Bool
 
-    /// Probe local GPTK / DXVK / DXVK2 / DXMT availability. When `engineRoot` is nil,
+    /// Probe local GPTK / DXVK / DXMT availability. When `engineRoot` is nil,
     /// graphics payload availability is unknown, so the settings-only UI keeps the
     /// options selectable until an engine root is available; launch paths should pass
     /// the real root.
@@ -194,7 +193,6 @@ struct CyderGraphicsCapabilities: Equatable {
         return CyderGraphicsCapabilities(
             hasD3DMetal: osOK && hasGptk,
             hasDxvk: hasDxvkPayload(engineRoot: engineRoot),
-            hasDxvk2: hasDxvk2Payload(engineRoot: engineRoot),
             hasDxmt: hasDxmtPayload(engineRoot: engineRoot)
         )
     }
@@ -213,26 +211,6 @@ struct CyderGraphicsCapabilities: Equatable {
         guard let root else { return true }
         let manager = FileManager.default
         let dxvkDLL = root.appendingPathComponent("lib/dxvk/x86_64-windows/d3d11.dll")
-        let moltenA = root.appendingPathComponent("lib/wine/x86_64-unix/libMoltenVK.dylib")
-        let moltenB = root.appendingPathComponent("lib64/libMoltenVK.dylib")
-        return manager.isReadableFile(atPath: dxvkDLL.path)
-            && (manager.isReadableFile(atPath: moltenA.path) || manager.isReadableFile(atPath: moltenB.path))
-    }
-
-    static func hasDxvk2Payload(engineRoot: URL?) -> Bool {
-        let root: URL?
-        if let engineRoot {
-            root = engineRoot
-        } else if let path = ProcessInfo.processInfo.environment["CYDER_GRAPHICS_BACKENDS_ROOT"],
-                  !path.isEmpty {
-            root = URL(fileURLWithPath: path, isDirectory: true)
-        } else {
-            // Settings / prefs probes without an engine still allow cascade past d3dmetal.
-            return true
-        }
-        guard let root else { return true }
-        let manager = FileManager.default
-        let dxvkDLL = root.appendingPathComponent("lib/dxvk2/x86_64-windows/d3d11.dll")
         let moltenA = root.appendingPathComponent("lib/wine/x86_64-unix/libMoltenVK.dylib")
         let moltenB = root.appendingPathComponent("lib64/libMoltenVK.dylib")
         return manager.isReadableFile(atPath: dxvkDLL.path)
@@ -373,11 +351,13 @@ struct CyderExecutableSettings: Codable {
 }
 
 struct CyderSettings: Codable {
-    // Schema 9 adds dxvk2 graphics backend. Schema 8 replaces fontPreset with fontMingLiuTarget/fontSongtiTarget.
+    // Schema 10 removes the experimental dxvk2 graphics backend. Schema 9 added
+    // that backend; old settings are migrated to the default backend on decode.
+    // Schema 8 replaces fontPreset with fontMingLiuTarget/fontSongtiTarget.
     // Schema 7 adds wineDiagnostics. Schema 6 adds dxvkHudFrametimes. Schema 5 adds graphicsHud.
     // Schema 4 adds graphics backend and DXVK frame rate. Schema 3 adds profile-keyed overrides. Keep perExecutable as a
     // legacy basename fallback; never infer a profile from a basename.
-    var schemaVersion = 9
+    var schemaVersion = 10
     var revision = 0
     /// Wall-clock time of the most recent effective settings change. Kept in
     /// settings.json so the state and its provenance travel together.
@@ -430,10 +410,10 @@ struct CyderSettings: Codable {
     init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
         let version = try values.decodeIfPresent(Int.self, forKey: .schemaVersion) ?? 1
-        guard version <= 9 else { throw DecodingError.dataCorruptedError(
+        guard version <= 10 else { throw DecodingError.dataCorruptedError(
             forKey: .schemaVersion, in: values, debugDescription: "unsupported settings schema \(version)"
         ) }
-        schemaVersion = 9
+        schemaVersion = 10
         revision = try values.decodeIfPresent(Int.self, forKey: .revision) ?? 0
         updatedAt = try values.decodeIfPresent(String.self, forKey: .updatedAt)
         lastModified = try values.decodeIfPresent([String: String].self, forKey: .lastModified) ?? [:]
@@ -480,7 +460,7 @@ struct CyderSettings: Codable {
         if !["off", "grayscale", "cleartype-rgb", "cleartype-bgr"].contains(fontSmoothing) {
             fontSmoothing = "cleartype-rgb"
         }
-        // DXVK HUD is only meaningful with a manual DXVK / DXVK 2 preference.
+        // DXVK HUD is only meaningful with a manual DXVK preference.
         if graphicsHud == .dxvk && !graphicsBackend.usesDxvkTranslation {
             graphicsHud = .off
         }
@@ -606,7 +586,6 @@ struct CyderSettings: Codable {
         preference: CyderGraphicsBackend,
         hasD3DMetal: Bool,
         hasDxvk: Bool,
-        hasDxvk2: Bool,
         hasDxmt: Bool,
         osMajorVersion: Int = ProcessInfo.processInfo.operatingSystemVersion.majorVersion
     ) -> CyderGraphicsBackend? {
@@ -615,8 +594,6 @@ struct CyderSettings: Codable {
             return nil
         case .dxmt:
             return (hasDxmt && osMajorVersion >= 15) ? .dxmt : nil
-        case .dxvk2:
-            return hasDxvk2 ? .dxvk2 : nil
         case .wined3d, .dxvk, .d3dmetal:
             return preference
         }
@@ -765,7 +742,7 @@ final class CyderSettingsStore {
         do {
             let data = try Data(contentsOf: url)
             let decoded = try JSONDecoder().decode(CyderSettings.self, from: data)
-            guard decoded.schemaVersion <= 9 else {
+            guard decoded.schemaVersion <= 10 else {
                 CyderDiagnostics.shared.warning("unsupported settings schema=\(decoded.schemaVersion); using defaults")
                 value = .defaults
                 return
@@ -781,7 +758,7 @@ final class CyderSettingsStore {
         CyderDiagnostics.shared.enter(.settingsSave)
         var next = value
         work(&next)
-        next.schemaVersion = 9
+        next.schemaVersion = 10
         next.perProfile = next.perProfile.reduce(into: [:]) { result, item in
             guard CyderSettings.isValidProfileID(item.key) else { return }
             result[item.key] = CyderSettings.sanitized(item.value)
@@ -841,7 +818,6 @@ final class CyderSettingsStore {
             preference: graphics.backend,
             hasD3DMetal: caps.hasD3DMetal,
             hasDxvk: caps.hasDxvk,
-            hasDxvk2: caps.hasDxvk2,
             hasDxmt: caps.hasDxmt
         )
         if let effective {

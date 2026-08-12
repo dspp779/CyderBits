@@ -17,11 +17,13 @@ assert_contains "$common" 'mingliu|songti|pingfang' "common should only accept s
 assert_contains "$settings" 'var retinaMode = true' "Retina should default on"
 assert_contains "$settings" 'var dpi = 192' "DPI should default to 192"
 assert_contains "$settings" 'var graphicsHud: CyderGraphicsHud = .off' "graphics HUD should default off"
-assert_contains "$settings" 'schemaVersion = 9' "schema version 9"
+assert_contains "$settings" 'schemaVersion = 10' "schema version 10"
 assert_contains "$settings" 'var updatedAt: String?' "settings should persist the last update time"
 assert_contains "$settings" 'var lastModified: [String: String]' "settings should persist per-scope modification times"
-assert_contains "$settings" 'case wined3d, dxvk, dxvk2, dxmt, d3dmetal' \
-  "settings enum must include dxvk2"
+assert_contains "$settings" 'case wined3d, dxvk, dxmt, d3dmetal' \
+  "settings enum must expose only supported graphics backends"
+assert_contains "$settings" 'Schema 10 removes the experimental dxvk2 graphics backend' \
+  "settings should document the DXVK 2 migration"
 assert_contains "$settings" 'usesDxvkTranslation' \
   "frame-rate and HUD must share a DXVK-family helper"
 assert_contains "$settings" 'usesFrameLimiter' \
@@ -48,9 +50,7 @@ assert_contains "$common" 'cyder_macos_at_least 15 0' \
   "shell DXMT gate must require macOS 15+"
 assert_not_contains "$common" 'preference=auto' \
   "OEM must not rewrite default to auto"
-assert_contains "$common" 'dxvk2)' \
-  "shell preference helper must handle dxvk2"
-assert_contains "$common" 'cyder_engine_has_dxvk2_payload' \
-  "shell launch path must fail closed when lib/dxvk2 is missing"
+assert_not_contains "$common" 'dxvk2' \
+  "shell launch path must not expose the deferred DXVK 2 backend"
 
 echo "PASS test-cyder-settings-model"

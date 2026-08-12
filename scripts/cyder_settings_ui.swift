@@ -294,7 +294,6 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
         graphicsBackend.action = #selector(graphicsBackendChanged)
         updateD3DMetalMenuItemAvailability()
         updateDxmtMenuItemAvailability()
-        updateDxvk2MenuItemAvailability()
         dxvkFrameRate.addItems(withTitles: ["60", "120", "144", "不限制"])
         dxvkFrameRate.target = self
         dxvkFrameRate.action = #selector(dxvkFrameRateChanged)
@@ -870,15 +869,11 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
         supportsDxmtOS && CyderGraphicsCapabilities.current(engineRoot: CyderPaths.engine).hasDxmt
     }
 
-    private var canSelectDxvk2: Bool {
-        CyderGraphicsCapabilities.current(engineRoot: CyderPaths.engine).hasDxvk2
-    }
-
     private var graphicsBackendTitles: [String] {
-        return ["預設", "D3DMetal", "DXMT", "DXVK", "DXVK 2", "WineD3D"]
+        return ["預設", "D3DMetal", "DXMT", "DXVK", "WineD3D"]
     }
 
-    // Index map (shared by OEM and official): 0 default, 1 d3dmetal, 2 dxmt, 3 dxvk, 4 dxvk2, 5 wined3d.
+    // Index map (shared by OEM and official): 0 default, 1 d3dmetal, 2 dxmt, 3 dxvk, 4 wined3d.
     private func updateD3DMetalMenuItemAvailability() {
         guard let item = graphicsBackend.item(at: 1) else { return }
         item.isEnabled = canSelectD3DMetal
@@ -903,23 +898,12 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
         }
     }
 
-    private func updateDxvk2MenuItemAvailability() {
-        guard let item = graphicsBackend.item(at: 4) else { return }
-        item.isEnabled = canSelectDxvk2
-        if !canSelectDxvk2 {
-            item.toolTip = "需要已安裝的 DXVK 2 圖形元件"
-        } else {
-            item.toolTip = nil
-        }
-    }
-
     private var graphicsBackendValue: CyderGraphicsBackend {
         switch graphicsBackend.indexOfSelectedItem {
         case 1: return canSelectD3DMetal ? .d3dmetal : .default
         case 2: return canSelectDxmt ? .dxmt : .default
         case 3: return .dxvk
-        case 4: return canSelectDxvk2 ? .dxvk2 : .default
-        case 5: return .wined3d
+        case 4: return .wined3d
         default: return .default
         }
     }
@@ -930,8 +914,7 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
         case .d3dmetal: return canSelectD3DMetal ? 1 : 0
         case .dxmt: return canSelectDxmt ? 2 : 0
         case .dxvk: return 3
-        case .dxvk2: return canSelectDxvk2 ? 4 : 0
-        case .wined3d: return 5
+        case .wined3d: return 4
         }
     }
 
@@ -972,13 +955,12 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
     private func refreshGraphicsControls() {
         updateD3DMetalMenuItemAvailability()
         updateDxmtMenuItemAvailability()
-        updateDxvk2MenuItemAvailability()
         CyderGptk.syncEngineLink()
         let backend = graphicsBackendValue
         let showFrameRate = backend.usesFrameLimiter
         let showDxvkFrametimes = backend.usesDxvkTranslation
         let enableDxvkFrametimes = graphicsHudValue == .dxvk
-        let showGptkControls = backend != .dxvk && backend != .dxvk2 && backend != .wined3d && backend != .dxmt
+        let showGptkControls = backend != .dxvk && backend != .wined3d && backend != .dxmt
         dxvkFrameRate.isHidden = !showFrameRate
         (dxvkFrameRate.superview as? NSStackView)?.isHidden = !showFrameRate
         dxvkHudFrametimes.isHidden = !showDxvkFrametimes
@@ -988,7 +970,6 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
         case .default: "帶入預載的遊戲專屬設定；多數遊戲建議使用。"
         case .wined3d: "使用 Wine 內建 Direct3D；相容性較廣，但效能通常較差。"
         case .dxvk: "使用 DXVK 將 Direct3D 轉為 Vulkan，再由 MoltenVK 轉為 Metal。"
-        case .dxvk2: "使用 DXVK 2.7 將 Direct3D 轉為 Vulkan，再由 MoltenVK 轉為 Metal。"
         case .dxmt: "使用 DXMT 將 Direct3D 直接轉為 Metal；需要 macOS 15+ 與引擎內建 DXMT。"
         case .d3dmetal: "使用 Apple D3DMetal／GPTK；需要 macOS 14+ 與可用的 GPTK。"
         }

@@ -1195,7 +1195,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
 
     private func graphicsPayloadsPresent() -> Bool {
         let capabilities = CyderGraphicsCapabilities.current(engineRoot: CyderPaths.engine)
-        return capabilities.hasDxvk || capabilities.hasDxvk2 || capabilities.hasDxmt
+        return capabilities.hasDxvk || capabilities.hasDxmt
     }
 
     private func installWinetricks(_ verbs: [String]) {

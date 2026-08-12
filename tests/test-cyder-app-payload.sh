@@ -76,8 +76,12 @@ assert_contains "$build_script" 'chmod +x "$RES/ogom-scripts/cyder-migrate-graph
   "Cyder.app must mark migrate-graphics executable"
 assert_contains "$build_script" 'GRAPHICS_ARTIFACTS=' \
   "Cyder.app packaging must copy Resources/graphics artifacts"
-assert_contains "$build_script" 'dxvk2-version.txt' \
-  "Cyder.app packaging must require the DXVK 2 graphics sidecar"
+assert_not_contains "$build_script" 'dxvk2-version.txt' \
+  "Cyder.app packaging must not require the deferred DXVK 2 graphics sidecar"
+assert_contains "$build_script" 'cp "$GRAPHICS_ARTIFACTS"/dxvk-*.tar.zst "$RES/graphics/"' \
+  "Cyder.app packaging must copy only the supported DXVK payload"
+assert_not_contains "$build_script" 'rsync -a "$GRAPHICS_ARTIFACTS/" "$RES/graphics/"' \
+  "Cyder.app packaging must not copy deferred graphics artifacts"
 assert_contains "$build_script" 'CYDER_ALLOW_MISSING_GRAPHICS' \
   "Cyder.app packaging must fail closed on missing graphics unless explicitly allowed"
 assert_not_contains "$build_script" 'install-dxvk-prefix.sh' \

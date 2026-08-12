@@ -1,4 +1,4 @@
-# Cyder 圖形後端（WineD3D / DXVK / DXVK 2 / DXMT / D3DMetal）
+# Cyder 圖形後端（WineD3D / DXVK / DXMT / D3DMetal）
 
 可在 **Cyder 偏好設定 → 圖形** 或個別遊戲設定中選擇 Direct3D 轉譯方式。多數遊戲建議維持 **跟隨 CompatDB（default）**；僅在相容性或效能需要時才手動覆寫。
 
@@ -9,7 +9,6 @@
 | **default** | 跟隨 CompatDB／引擎預設；不注入強制後端覆寫。某個 CompatDB rule 仍可為特定程式選 backend |
 | **wined3d** | Wine 內建 Direct3D；相容性較廣，效能通常較差 |
 | **dxvk** | Vulkan→Metal（MoltenVK）；需 Cyder 已安裝 DXVK runtime payload |
-| **dxvk2** | DXVK 2.7（Vulkan→Metal）；需已安裝 DXVK 2 runtime payload |
 | **dxmt** | Direct3D→Metal（DXMT）；需 Cyder 已安裝 DXMT runtime payload 與 macOS 15+ |
 | **d3dmetal** | Apple D3DMetal／GPTK；需 macOS 14+ 且本機有可用 GPTK |
 
@@ -20,10 +19,10 @@
 步驟圖與打包／安裝／prepend 關係見
 [引擎、圖形轉譯層與 Runtime 載入](cyder-graphics-runtime-pipeline.zh-TW.md)。
 
-DXVK、DXVK 2 與 DXMT 是 Cyder.app 內 `Resources/graphics/` 的獨立 payload，不再包在
+DXVK 與 DXMT 是 Cyder.app 內 `Resources/graphics/` 的獨立 payload，不再包在
 Wine engine archive。Cyder.app 開啟時會依 version／SHA-256 sidecar 將 payload
-解壓到 `~/.cyder/runtime/graphics/`，再由 engine 的 `lib/dxvk`／`lib/dxvk2`／`lib/dxmt`
-相對 symlink 指向目前版本（`current-dxvk`／`current-dxvk2`／`current-dxmt`）；MoltenVK 仍由 Wine engine 提供。
+解壓到 `~/.cyder/runtime/graphics/`，再由 engine 的 `lib/dxvk`／`lib/dxmt`
+相對 symlink 指向目前版本（`current-dxvk`／`current-dxmt`）；MoltenVK 仍由 Wine engine 提供。
 
 切換 DXVK、DXMT、D3DMetal 或 WineD3D 不會把後端 DLL 拷進 bottle 的
 `system32`／`syswow64`。這些位置維持 Wine 內建 `d3d*`／`dxgi`；Wine 的
@@ -34,7 +33,7 @@ CrossOver 原始 ntdll。
 內建 DLL（不會清除使用者的 DllOverrides registry 設定）。
 
 - **從 Cyder.app 開啟設定或遊戲庫**：會先確認 engine，更新 graphics payload，並對未使用中的 shared bottle 執行遷移。
-- **在 Finder 直接開啟 `.exe`**：不解壓或升級 payload，只使用現有 `current-dxvk`／`current-dxvk2`／`current-dxmt`。若所選後端（含 DXVK 2）完全不存在，該次會回退到 default／WineD3D，並提示先開啟 Cyder.app。
+- **在 Finder 直接開啟 `.exe`**：不解壓或升級 payload，只使用現有 `current-dxvk`／`current-dxmt`。若所選後端完全不存在，該次會回退到 default／WineD3D，並提示先開啟 Cyder.app。
 - **GPTK**：只更新偵測狀態；未安裝不會阻止開啟 Cyder.app。
 
 ### 後端路徑與檢查
@@ -48,7 +47,7 @@ CrossOver 原始 ntdll。
 - 路徑可 canonicalize 為目錄，且不是 group/world writable；目錄 owner 必須是目前使用者或 root。
 - backend DLL 不是 symlink，具備 `MZ`／`PE\0\0`、目前 Wine process 的 PE machine，且 offset 64 有 `Wine builtin DLL` signature。
 - 至少有同一 machine 的 `d3d11.dll` 與 `dxgi.dll`。
-- DXVK／DXVK 2 可找到 engine 提供的 MoltenVK；DXMT 可找到兩個 PE 架構的
+- DXVK 可找到 engine 提供的 MoltenVK；DXMT 可找到兩個 PE 架構的
   `d3d11.dll`、`dxgi.dll`、`winemetal.dll` 與 Unix 端的 `winemetal.so`；D3DMetal
   可找到 GPTK 的 `libd3dshared.dylib`。
 
@@ -59,7 +58,7 @@ process-local 設定，不會改寫 engine symlink；prefix 中唯一由 ensure-
 
 ## 限幀 vs 遊戲內 VSync
 
-選 **DXVK**、**DXVK 2** 或 **DXMT** 時會出現 **限制幀率** 選項：
+選 **DXVK** 或 **DXMT** 時會出現 **限制幀率** 選項：
 
 - **60（預設）／120／144** — DXVK 家族設 `DXVK_FRAME_RATE`；DXMT 合併進 `DXMT_CONFIG` 的 `d3d11.preferredMaxFrameRate`。
 - **不限制** — 不設 `DXVK_FRAME_RATE`，並從既有 `DXMT_CONFIG` 拿掉限幀鍵。
@@ -113,7 +112,6 @@ D3DMetal 需要 Apple Game Porting Toolkit（GPTK）。**Cyder 不內建、不�
 | D3DMetal 無法選取 | 確認 macOS ≥ 14；安裝 CrossOver 或從評估 DMG 安裝 GPTK |
 | DXMT 無法選取 | 確認 macOS ≥ 15；先開啟 Cyder.app，使 DXMT runtime payload 安裝完成 |
 | DXVK 選項灰掉 | 先開啟 Cyder.app，使 DXVK runtime payload 安裝完成；同時確認 engine 有 MoltenVK |
-| DXVK 2 選項灰掉 | 先開啟 Cyder.app 完成 ensure-graphics |
 | 改後端後畫面異常 | 先改回 **default** 或 **wined3d** 再重啟遊戲 |
 | 限幀無效 | 檢查遊戲是否強制 VSync；見上方「限幀 vs VSync」 |
 
@@ -135,7 +133,7 @@ bash tests/run.sh
 下列仍須在具備 Wine、已封裝 Cyder.app 與實際遊戲的環境手動確認；尚未宣告遊戲煙測完成：
 
 - 新 bottle bootstrap 未拷 DXVK，且 `d3d11.dll` hash 等於 Wine 內建版本。
-- 強制 dxvk／dxvk2／dxmt／d3dmetal／wined3d 時，bottle hash 不變，`WINEDEBUG=+loaddll` 顯示 builtin + prepend 行為。
+- 強制 dxvk／dxmt／d3dmetal／wined3d 時，bottle hash 不變，`WINEDEBUG=+loaddll` 顯示 builtin + prepend 行為。
 - 設定無效的 `CYDER_GRAPHICS_BACKEND_PATH` 時，log 明確記錄拒絕的路徑並回退 WineD3D。
 - 曾安裝舊 DXVK 的真實 bottle 在開啟 Cyder.app 後完成遷移。
 - Cyder.app 會升級 payload、Finder 不會（以 log 或 marker mtime 確認）。
@@ -147,3 +145,10 @@ bash tests/run.sh
 - [DXVK 編譯備忘（1.x / 2.x）](build-dxvk.zh-TW.md)
 - [Cyder 0.8.0 發布說明](releases/v0.8.0.md)
 - [Cyder 使用指南](cyder.md)
+
+## DXVK 2（待開發）
+
+DXVK 2.7.1 已從目前版本的 UI、ensure、graphics payload 打包與啟動路徑移除。
+在 Apple Metal／MoltenVK 上，DXVK 2.7.1 需要的 `robustBufferAccess2`、
+`nullDescriptor` 等能力目前無法安全提供；不能只用 capability hack 偽裝支援。
+未來若有可行的 Vulkan backend／語意實作，再重新評估獨立的 `dxvk2` payload。

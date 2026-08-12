@@ -2105,11 +2105,6 @@ cyder_engine_has_dxvk_payload() {
   [[ -r "$engine_root/lib/dxvk/x86_64-windows/d3d11.dll" ]]
 }
 
-cyder_engine_has_dxvk2_payload() {
-  local engine_root="$1"
-  [[ -r "$engine_root/lib/dxvk2/x86_64-windows/d3d11.dll" ]]
-}
-
 cyder_dxmt_launch_allowed() {
   local engine_root="$1"
   declare -F cyder_macos_at_least >/dev/null 2>&1 \
@@ -2141,16 +2136,6 @@ cyder_apply_graphics_preference() {
         unset CYDER_GRAPHICS_BACKEND CX_GRAPHICS_BACKEND
       fi
       ;;
-    dxvk2)
-      if cyder_engine_has_dxvk2_payload "$engine_root"; then
-        export CYDER_GRAPHICS_PREFERENCE=dxvk2
-        export CYDER_GRAPHICS_BACKEND=dxvk2 CX_GRAPHICS_BACKEND=dxvk2
-      else
-        echo "DXVK 2 is unavailable (engine lib/dxvk2 is missing); using default graphics backend." >&2
-        export CYDER_GRAPHICS_PREFERENCE=default
-        unset CYDER_GRAPHICS_BACKEND CX_GRAPHICS_BACKEND
-      fi
-      ;;
     dxmt)
       if cyder_dxmt_launch_allowed "$engine_root"; then
         export CYDER_GRAPHICS_PREFERENCE=dxmt
@@ -2160,6 +2145,11 @@ cyder_apply_graphics_preference() {
         export CYDER_GRAPHICS_PREFERENCE=default
         unset CYDER_GRAPHICS_BACKEND CX_GRAPHICS_BACKEND
       fi
+      ;;
+    *)
+      echo "Unsupported graphics backend '$preference'; using default graphics backend." >&2
+      export CYDER_GRAPHICS_PREFERENCE=default
+      unset CYDER_GRAPHICS_BACKEND CX_GRAPHICS_BACKEND
       ;;
   esac
 }
@@ -2225,8 +2215,8 @@ cyder_apply_graphics_runtime_preferences() {
   unset DXVK_FRAME_RATE DXVK_HUD MTL_HUD_ENABLED
   fps="$(cyder_graphics_frame_rate_fps)"
   if [[ -n "$fps" ]] \
-     && [[ "$backend" == dxvk || "$backend" == dxvk2 ]] \
-     && { [[ "$preference" == dxvk || "$preference" == dxvk2 ]] || cyder_is_maplestory_oem; }; then
+     && [[ "$backend" == dxvk ]] \
+     && { [[ "$preference" == dxvk ]] || cyder_is_maplestory_oem; }; then
     export DXVK_FRAME_RATE="$fps"
   fi
   if [[ "$backend" == dxmt && "$preference" == dxmt ]]; then
@@ -2238,7 +2228,7 @@ cyder_apply_graphics_runtime_preferences() {
       export MTL_HUD_ENABLED=1 DXVK_HUD=0
       ;;
     dxvk)
-      if [[ "$preference" == dxvk || "$preference" == dxvk2 ]]; then
+      if [[ "$preference" == dxvk ]]; then
         if [[ "${CYDER_DXVK_HUD_FRAMETIMES:-1}" == 0 ]]; then
           export DXVK_HUD=fps
         else

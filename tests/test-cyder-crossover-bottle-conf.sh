@@ -95,10 +95,8 @@ SETTINGS_DIR="$TMP/support"
 SETTINGS_ENGINE_NAME=wine-x86_64
 SETTINGS_ENGINES="$TMP/settings-engines"
 mkdir -p "$SETTINGS_DIR" \
-  "$SETTINGS_ENGINES/$SETTINGS_ENGINE_NAME/lib/dxvk/x86_64-windows" \
-  "$SETTINGS_ENGINES/$SETTINGS_ENGINE_NAME/lib/dxvk2/x86_64-windows"
+  "$SETTINGS_ENGINES/$SETTINGS_ENGINE_NAME/lib/dxvk/x86_64-windows"
 : >"$SETTINGS_ENGINES/$SETTINGS_ENGINE_NAME/lib/dxvk/x86_64-windows/d3d11.dll"
-: >"$SETTINGS_ENGINES/$SETTINGS_ENGINE_NAME/lib/dxvk2/x86_64-windows/d3d11.dll"
 cat >"$SETTINGS_DIR/settings.json" <<'JSON'
 {
   "schemaVersion": 6,
@@ -119,14 +117,12 @@ JSON
   assert_eq "$DXVK_HUD" "fps" "shell settings loader should allow DXVK HUD without frametimes"
 )
 
-# DXVK 2 is the same translation family for the frame limiter and DXVK HUD.
+# Legacy DXVK 2 settings are fail-safe: the shell launcher treats the removed
+# backend as the default instead of passing an unknown token to Wine.
 cat >"$SETTINGS_DIR/settings.json" <<'JSON'
 {
   "schemaVersion": 9,
-  "graphicsBackend": "dxvk2",
-  "dxvkFrameRate": "sixty",
-  "graphicsHud": "dxvk",
-  "dxvkHudFrametimes": false
+  "graphicsBackend": "dxvk2"
 }
 JSON
 (
@@ -134,11 +130,10 @@ JSON
   export CYDER_ENGINES="$SETTINGS_ENGINES"
   export CYDER_ENGINE_NAME="$SETTINGS_ENGINE_NAME"
   export CYDER_GRAPHICS_BACKEND=
-  unset DXVK_FRAME_RATE DXVK_HUD MTL_HUD_ENABLED
-  cyder_load_saved_settings
-  assert_eq "$CYDER_GRAPHICS_BACKEND" "dxvk2" "shell settings loader should retain dxvk2 backend"
-  assert_eq "$DXVK_FRAME_RATE" "60" "shell settings loader should apply DXVK frame limit for dxvk2"
-  assert_eq "$DXVK_HUD" "fps" "shell settings loader should apply DXVK HUD for dxvk2"
+  unset CYDER_GRAPHICS_PREFERENCE DXVK_FRAME_RATE DXVK_HUD MTL_HUD_ENABLED
+  cyder_load_saved_settings 2>"$TMP/legacy-dxvk2.log"
+  assert_eq "$CYDER_GRAPHICS_PREFERENCE" "default" "legacy DXVK 2 should migrate to default"
+  assert_eq "${CYDER_GRAPHICS_BACKEND:-}" "" "legacy DXVK 2 should not reach Wine"
 )
 
 # DXVK 120/144 use the same limiter field as 60.

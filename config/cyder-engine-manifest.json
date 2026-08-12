@@ -30,8 +30,8 @@
   "components": [
     "runtime/cxcompatdb/cxcompatdb.c"
   ],
-  "notes": "Cyder uses an open cxcompatdb.so loaded by the original CrossOver ntdll hook. It owns current-process CompatDB arguments, DLL overrides, graphics backend validation and runtime prepend; Cyder no longer patches ntdll for CompatDB. Graphics payloads are shipped separately.",
+  "notes": "Cyder uses an open cxcompatdb.so loaded by the original CrossOver ntdll hook. It owns current-process CompatDB arguments, DLL overrides, graphics backend validation and runtime prepend; Cyder no longer patches ntdll for CompatDB. Graphics payloads are shipped separately. The graphics build is pinned to upstream MoltenVK 1.4.0 with the Cyder CrossOver capability patch plus timeline-wait and present autoreleasepool patches.",
   "ntdllSHA256": "fc597d07c7305d23dac1ee49dd42ee10da642b14b2bf91a1c8cbe4ae63f8c295",
   "artifact": "engine-wine-x86_64-CX26-3-0-W11-Cyder010.tar.xz",
-  "artifactSHA256": "b6f2d42df67f25802068705e5f969c62e30f7707f932fd2765bbb6477c550368"
+  "artifactSHA256": "2ba11ece8407326da852f48fbdcca27f859fb9e3a37f53086d9d899b4c625b6a"
 }

@@ -1,10 +1,10 @@
-# DXVK 編譯備忘（1.x / 2.x）
+# DXVK 編譯備忘（1.x；2.x 待開發）
 
 > 對象：在本機重建 Cyder 圖形 payload 的開發者。  
 > Wine engine／wineserver／host Mach-O minOS 仍屬 sibling `cyder-wine-engine`；
 > DXVK 是 **Windows PE**，由本 repo 的腳本交叉編譯後放進 engine 的 `lib/`。
 
-正式發布路徑仍是：engine 打包**排除** `lib/dxvk`／`lib/dxvk2`／`lib/dxmt`，再由
+正式發布路徑仍是：engine 打包**排除** `lib/dxvk`／`lib/dxmt`（以及舊的 `lib/dxvk2`），再由
 `pack-graphics-payloads.sh` 做成 `Resources/graphics/*.tar.zst`。本文件只談
 **如何正確編譯**。安裝、ensure 與啟動 prepend 見
 [引擎／圖形 runtime 管線](cyder-graphics-runtime-pipeline.zh-TW.md)；
@@ -15,9 +15,9 @@
 | 系列 | 腳本 | 安裝目錄 | 目前釘住版本 | 來源 |
 |------|------|----------|--------------|------|
 | 1.x | `scripts/build-dxvk.sh` | `ENGINE/lib/dxvk/` | CrossOver FOSS snapshot，`RELEASE` = **v1.10.3** | `tools/archives/crossover-sources-25.0.1.tar.gz` 內的 `sources/dxvk` |
-| 2.x | `scripts/build-dxvk2.sh` | `ENGINE/lib/dxvk2/` | 上游 **v2.7.1** | `git clone --recurse-submodules`；GitHub src tarball **不夠** |
+| 2.x | `scripts/build-dxvk2.sh` | `ENGINE/lib/dxvk2/` | 上游 **v2.7.1**（待開發） | 目前不進入 Cyder UI、ensure 或 app payload |
 
-兩棵樹必須分開。`build-dxvk2.sh` 不得寫入 `lib/dxvk`；重編 1.x 也不得覆蓋 `lib/dxvk2`。
+2.x 的建置腳本與設計文件保留作為後續研究資料；目前發布流程只消費 1.x DXVK。
 
 `--engine` 必須是**絕對路徑**。本機 engine 常在 sibling 的
 `install/wine-cx26-x86_64`（ogom 的 `install/` 可能是 symlink）。
@@ -27,9 +27,7 @@
 bash scripts/build-dxvk.sh \
   --engine "$PWD/install/wine-cx26-x86_64"
 
-# 2.7.1 → lib/dxvk2（不碰 lib/dxvk）
-bash scripts/build-dxvk2.sh \
-  --engine "$PWD/install/wine-cx26-x86_64"
+# DXVK 2.x 目前暫停發布；不要在目前 app release 流程中執行 build-dxvk2.sh。
 ```
 
 ## 工具鏈
@@ -60,7 +58,7 @@ Cyder app repo，把 `git describe` 編成例如 `v0.7.0-25-g…`，log 裡就�
 **不要**把 `version.h` 寫進 `include/`。那個目錄會蓋掉 Windows SDK 的
 `version.h`，接著在 MinGW-w64 15 觸發 `_D3DDEVINFO_RESOURCEMANAGER` 重定義。
 
-安裝後應有純文字 `ENGINE/lib/dxvk/version` 或 `…/dxvk2/version`，內容像
+安裝後應有純文字 `ENGINE/lib/dxvk/version`，內容像
 `dxvk v1.10.3`。`pack-graphics-payloads.sh` 靠這個檔案命名 archive，缺了會變成
 `unknown`。
 
@@ -74,8 +72,8 @@ CompatDB 對 DXVK 走 **builtin + prepend**。Wine 的 `mapping.c` 只把 offset
 prepend 無效，遊戲仍載入 WineD3D。
 
 `stamp-wine-builtin-pe.py` 寫入 offset 64、32 bytes（16 字元 + 16 個 NUL）。
-`build-dxvk.sh`／`build-dxvk2.sh` 安裝時會跑；`pack-graphics-payloads.sh` 打包前
-會再戳一次 `lib/dxvk` 與 `lib/dxvk2`。
+`build-dxvk.sh` 安裝時會跑；`pack-graphics-payloads.sh` 打包前會再戳一次
+`lib/dxvk`。
 
 ```bash
 python3 - <<'PY'
@@ -107,7 +105,12 @@ PY
 `set -u` 底下若沒有 `--also-engine`，必須先判斷 `ALSO_ENGINES` 長度再展開陣列
 （macOS Bash 3.2 對空陣列 `${arr[@]}` 會 unbound）。
 
-## 2.x（`lib/dxvk2`）
+## 2.x（`lib/dxvk2`，待開發資料）
+
+本節保留上游 2.7.1 的研究與重建備忘，但目前不會被 `pack-graphics-payloads.sh`、
+`cyder-ensure-graphics.sh` 或 Cyder.app 使用。DXVK 2.7.1 在 Apple Metal／MoltenVK
+上要求 `robustBufferAccess2`、`nullDescriptor` 等目前無法安全提供的 Vulkan 能力；
+不要以 capability hack 偽裝成支援。
 
 上游 `doitsujin/dxvk` **v2.7.1**。預設 work dir：`build/dxvk-2.7.1/`。
 
@@ -176,12 +179,12 @@ bash tests/test-pin-lib-vcs-version.sh
 
 編譯產物經 graphics 管線進入 Cyder 執行期：
 
-- `pack-graphics-payloads.sh` 從 `lib/dxvk`、`lib/dxvk2`、`lib/dxmt` 各打一份
+- `pack-graphics-payloads.sh` 從 `lib/dxvk`、`lib/dxmt` 各打一份
   `Resources/graphics/*.tar.zst`（含 version 與 SHA-256 sidecar）。
 - `cyder-ensure-graphics.sh` 解壓至 `~/.cyder/runtime/graphics/`，維護
-  `current-dxvk`／`current-dxvk2`／`current-dxmt`，並更新 engine `lib/` symlink。
-- CompatDB 與偏好設定的 **`dxvk`** 指向 `lib/dxvk`（1.x）；**`dxvk2`** 指向
-  `lib/dxvk2`（2.x）。兩者獨立，重編 2.7.1 只影響選 **DXVK 2** 的程序。
+  `current-dxvk`／`current-dxmt`，並更新 engine `lib/` symlink。
+- 目前 CompatDB 與偏好設定只消費 **`dxvk`**（1.x）；舊設定中的 `dxvk2` 會遷移為
+  `default`。
 
 步驟圖見 [引擎／圖形 runtime 管線](cyder-graphics-runtime-pipeline.zh-TW.md)；
 使用者選項見 [圖形後端](cyder-graphics-backends.zh-TW.md)。
@@ -191,7 +194,7 @@ bash tests/test-pin-lib-vcs-version.sh
 | 腳本 | 角色 |
 |------|------|
 | `scripts/build-dxvk.sh` | 1.x → `lib/dxvk` |
-| `scripts/build-dxvk2.sh` | 2.x → `lib/dxvk2` |
+| `scripts/build-dxvk2.sh` | 2.x 研究用建置腳本（待開發，不進目前發布流程） |
 | `scripts/pin-dxvk-version.py` | 以 `RELEASE` 取代 `git describe` |
 | `scripts/stamp-wine-builtin-pe.py` | PE offset 64 builtin 戳記 |
-| `scripts/pack-graphics-payloads.sh` | 從 `lib/dxvk`／`lib/dxvk2`／`lib/dxmt` 打 zstd |
+| `scripts/pack-graphics-payloads.sh` | 從 `lib/dxvk`／`lib/dxmt` 打 zstd |

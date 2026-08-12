@@ -250,17 +250,20 @@ source "$SCRIPT_DIR/cyder-copy-engine-artifact.sh"
 copy_engine_artifact_into_app "$SCRIPT_DIR" "$RES" "$OGOM"
 GRAPHICS_ARTIFACTS="$OGOM/dist/artifacts/graphics"
 if [[ -f "$GRAPHICS_ARTIFACTS/dxvk-version.txt" \
-   && -f "$GRAPHICS_ARTIFACTS/dxvk2-version.txt" \
    && -f "$GRAPHICS_ARTIFACTS/dxmt-version.txt" \
    && -f "$GRAPHICS_ARTIFACTS/dxvk-artifact-sha256.txt" \
-   && -f "$GRAPHICS_ARTIFACTS/dxvk2-artifact-sha256.txt" \
    && -f "$GRAPHICS_ARTIFACTS/dxmt-artifact-sha256.txt" ]] \
    && compgen -G "$GRAPHICS_ARTIFACTS/dxvk-*.tar.zst" >/dev/null \
-   && compgen -G "$GRAPHICS_ARTIFACTS/dxvk2-*.tar.zst" >/dev/null \
    && compgen -G "$GRAPHICS_ARTIFACTS/dxmt-*.tar.zst" >/dev/null; then
-  rsync -a "$GRAPHICS_ARTIFACTS/" "$RES/graphics/"
+  mkdir -p "$RES/graphics"
+  cp "$GRAPHICS_ARTIFACTS"/dxvk-*.tar.zst "$RES/graphics/"
+  cp "$GRAPHICS_ARTIFACTS"/dxvk-version.txt \
+     "$GRAPHICS_ARTIFACTS"/dxvk-artifact-sha256.txt "$RES/graphics/"
+  cp "$GRAPHICS_ARTIFACTS"/dxmt-*.tar.zst "$RES/graphics/"
+  cp "$GRAPHICS_ARTIFACTS"/dxmt-version.txt \
+     "$GRAPHICS_ARTIFACTS"/dxmt-artifact-sha256.txt "$RES/graphics/"
 else
-  message="Missing packaged DXVK/DXVK2/DXMT graphics artifacts: $GRAPHICS_ARTIFACTS"
+  message="Missing packaged DXVK/DXMT graphics artifacts: $GRAPHICS_ARTIFACTS"
   if [[ "${CYDER_ALLOW_MISSING_GRAPHICS:-0}" == 1 ]]; then
     echo "==> Warning: $message" >&2
   else

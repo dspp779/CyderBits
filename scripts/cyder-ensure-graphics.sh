@@ -189,14 +189,11 @@ cyder_ensure_graphics() {
   prefix="${1:-${CYDER_SHARED_PREFIX:-}}"
 
   cyder_install_graphics_payload "$source_dir" "$runtime_root" dxvk
-  cyder_install_graphics_payload "$source_dir" "$runtime_root" dxvk2
   cyder_install_graphics_payload "$source_dir" "$runtime_root" dxmt
 
   mkdir -p "$engine/lib" "$engines_root"
   cyder_replace_engine_graphics_link \
     "$engine/lib/dxvk" "$runtime_root/graphics/current-dxvk" "$engine" "$engines_root"
-  cyder_replace_engine_graphics_link \
-    "$engine/lib/dxvk2" "$runtime_root/graphics/current-dxvk2" "$engine" "$engines_root"
   cyder_replace_engine_graphics_link \
     "$engine/lib/dxmt" "$runtime_root/graphics/current-dxmt" "$engine" "$engines_root"
   cyder_ensure_dxmt_winemetal_prefix "$runtime_root/graphics/current-dxmt" "$prefix"

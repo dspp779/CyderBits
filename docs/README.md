@@ -13,7 +13,7 @@
 
 | 版本 | 文件 | 重點 |
 |------|------|------|
-| 0.10.0 | [繁中](releases/v0.10.0.md) | Cyder010、DXVK 2／DXMT 圖形後端、單一選單列 instance、設定與啟動診斷收斂（目標版本） |
+| 0.10.0 | [繁中](releases/v0.10.0.md) | Cyder010、DXVK／DXMT 圖形後端、單一選單列 instance、設定與啟動診斷收斂（目標版本） |
 | 0.9.5 | [繁中](releases/v0.9.5.md) | Cyder009（QDO optnone）、高解析度預設開啟、啟動檢查文案 |
 | 0.9.4 | [繁中](releases/v0.9.4.md) | 雙字體取代選項收斂、顯示相關預設值修正 |
 | 0.9.3 | [繁中](releases/v0.9.3.md) | Cyder008（A6、free_async_queue、MoltenVK shim）、macOS 11 UI、Bash 單一路徑與啟動錯誤提示 |
@@ -42,7 +42,7 @@
 | [cyderbits.md](cyderbits.md) | 一般使用者 | CyderBits 打包器：建立 game `.app`、選項與疑難排解 |
 | [bluecg.md](bluecg.md) | 開發 / 驗證 | BlueCG 自建 Wine、執行、高解析度與已知問題 |
 | [wine-configure-options.md](wine-configure-options.md) | 開發 / 建置 | Wine `configure` 旗標說明與老遊戲取捨 |
-| [build-dxvk.zh-TW.md](build-dxvk.zh-TW.md) | 開發 / 建置 | DXVK 1.x→`lib/dxvk`、2.x→`lib/dxvk2` 的工具鏈、版本釘死、builtin 戳記與已知補丁 |
+| [build-dxvk.zh-TW.md](build-dxvk.zh-TW.md) | 開發 / 建置 | DXVK 1.x 工具鏈；2.x 暫停發布與待開發備忘 |
 | [cyder-graphics-runtime-pipeline.zh-TW.md](cyder-graphics-runtime-pipeline.zh-TW.md) | 開發 / 發布 | 引擎安裝、圖形 payload、CompatDB prepend 的步驟關係與圖 |
 | [maplestory-classic-cx26-frame-walk-debug.md](maplestory-classic-cx26-frame-walk-debug.md) | 開發 / 除錯 | 新楓之谷經典版登入卡住：Wine 11.1–11.14 對照、CX26 NTDLL 修補、增量編譯與完整驗收 |
 | [games/maplestory/grap-core64-residual-process-analysis.md](games/maplestory/grap-core64-residual-process-analysis.md) | 開發 / 除錯 | 經典版離場 grap-core QDO livelock、Cyder009 optnone bandage |
@@ -87,8 +87,8 @@
 | [superpowers/specs/2026-07-06-cyderbits-bash-design.md](superpowers/specs/2026-07-06-cyderbits-bash-design.md) | **CyderBits Bash 化** — 打包器 / game app 去 Python |
 | [superpowers/plans/2026-07-06-cyderbits-bash-phase1.md](superpowers/plans/2026-07-06-cyderbits-bash-phase1.md) | CyderBits Bash 化 Phase 1 實作計畫 |
 | [superpowers/plans/2026-07-15-cyder-initialization-multigame-power.md](superpowers/plans/2026-07-15-cyder-initialization-multigame-power.md) | Cyder 初始化可靠性、每遊戲 Profile／Bottle、Sync 隔離與省電模式任務切分 |
-| [superpowers/specs/2026-08-11-cyder-dxvk2-graphics-backend-design.md](superpowers/specs/2026-08-11-cyder-dxvk2-graphics-backend-design.md) | **DXVK 2** 獨立後端、payload 與選單 |
-| [superpowers/plans/2026-08-11-cyder-dxvk2-graphics-backend.md](superpowers/plans/2026-08-11-cyder-dxvk2-graphics-backend.md) | DXVK 2 實作計畫（CompatDB／pack／UI／engine pin） |
+| [superpowers/specs/2026-08-11-cyder-dxvk2-graphics-backend-design.md](superpowers/specs/2026-08-11-cyder-dxvk2-graphics-backend-design.md) | **DXVK 2（待開發）** 歷史設計與 capability 研究 |
+| [superpowers/plans/2026-08-11-cyder-dxvk2-graphics-backend.md](superpowers/plans/2026-08-11-cyder-dxvk2-graphics-backend.md) | **DXVK 2（待開發）** 歷史實作計畫，暫不進目前 release |
 | [superpowers/plans/2026-07-27-cyder-compatdb-runtime.md](superpowers/plans/2026-07-27-cyder-compatdb-runtime.md) | CompatDB runtime 開發計劃、工作分配與 closure review |
 
 ## 未來開發路線

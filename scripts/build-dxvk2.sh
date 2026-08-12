@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
-# Build upstream DXVK 2.x (doitsujin) into ENGINE/lib/dxvk2.
+# Build upstream DXVK 2.x (doitsujin) into ENGINE/lib/dxvk2 for deferred
+# development only. The current Cyder packaging/runtime intentionally does not
+# consume this tree because DXVK 2.7.1 is not compatible with MoltenVK's
+# advertised robustness/null-descriptor capabilities.
 # Leaves ENGINE/lib/dxvk (1.10.3 / CrossOver snapshot) untouched.
 # Compile notes: docs/build-dxvk.zh-TW.md
 set -euo pipefail

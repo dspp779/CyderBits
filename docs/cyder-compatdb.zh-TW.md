@@ -81,7 +81,7 @@ CDB v1 目前支援：
 | Action | `actions.dll_overrides.<module>` | 對命中的程序套用 process-local Wine DLL load order |
 | Action | `actions.set_env.<name>` | 設定目標程序的 Windows environment value |
 | Action | `actions.unset_env[]` | 從目標程序移除 environment name |
-| Action | `actions.graphics_backend` | process-local 選擇 `default`、`wined3d`、`dxvk`、`dxvk2`、`dxmt` 或 `d3dmetal` |
+| Action | `actions.graphics_backend` | process-local 選擇 `default`、`wined3d`、`dxvk`、`dxmt` 或 `d3dmetal` |
 | Action | `actions.wined3d_renderer` | WineD3D 內部選擇 `auto`、`opengl`、`gdi` 或 `vulkan` |
 | Action | `actions.replace_executable.path_suffix` | 開啟 PE 前安全替換 executable suffix 與 argv[0] |
 | Action policy | `deduplicate: option` | 依 option key 去重，不覆寫呼叫端已提供的值 |
@@ -124,11 +124,10 @@ actions:
 |---|---|
 | `wined3d` | Wine 內建 DLL，不需額外 payload |
 | `dxvk` | `lib/dxvk/<arch>-windows/` 與 Engine 內的 MoltenVK |
-| `dxvk2` | `lib/dxvk2/<arch>-windows/` 與 Engine 內的 MoltenVK |
 | `dxmt` | `lib/dxmt/<arch>-windows/`（含 `d3d11.dll`、`dxgi.dll`、`winemetal.dll`）與 `x86_64-unix/winemetal.so`；ensure-graphics 同步將 `winemetal.dll` 放入 prefix 對應架構目錄 |
 | `d3dmetal` | `lib64/apple_gptk/wine/<arch>-windows/`、`libd3dshared.dylib` 與 `D3DMetal.framework` |
 
-`lib/dxvk`／`lib/dxvk2`／`lib/dxmt` 是 ensure-graphics 接到
+`lib/dxvk`／`lib/dxmt` 是 ensure-graphics 接到
 `~/.cyder/runtime/graphics/current-*` 的 symlink，**不在** engine tar 裡。
 Bottle 的 `system32`／`syswow64` 維持 Wine 內建 `d3d*`／`dxgi`；匹配規則
 （或使用者覆寫）時，CompatDB 以 **builtin + prepend** 從上述目錄載入
