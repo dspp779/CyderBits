@@ -1,72 +1,74 @@
-# Task 2 Report: Settings model — add `dxmt`, remove `auto`
+# Task 2 Report: Pack dxvk2 payload and exclude from engine tar
 
-## Status
-Done.
+## Summary
 
-## Files changed
-- `scripts/cyder_settings.swift`
-- `tests/fixtures/cyder_settings_harness.swift`
+Added `lib/dxvk2` to the graphics payload pipeline alongside existing `lib/dxvk` and `lib/dxmt`. Engine tarball now excludes `lib/dxvk2`. Cyder.app packaging requires dxvk2 sidecars.
 
-## Summary of changes
+## TDD Evidence
 
-- `CyderGraphicsBackend` is now `default | wined3d | dxvk | dxmt | d3dmetal` — `auto` case removed.
-- `CyderProduct.defaultGraphicsBackend` is always `.default` (no more OEM → `.auto`).
-- `sanitizedGraphicsBackend(_:)` / `sanitizedOptionalGraphicsBackend(_:)` migrate the legacy raw string `"auto"` → `.default` (so old persisted settings.json / profile JSON still decode cleanly).
-- `CyderGraphicsCapabilities` gained `hasDxmt: Bool` and `hasDxmtPayload(engineRoot:)`, mirroring `hasDxvkPayload`'s root resolution (checks `CYDER_GRAPHICS_BACKENDS_ROOT` env, defaults to `true` when no root context) and requiring both `lib/dxmt/x86_64-windows/d3d11.dll` and `lib/dxmt/x86_64-unix/winemetal.so`.
-- `CyderGraphicsCapabilities.current(engineRoot:)` now also probes `hasDxmt`.
-- `cascadePreferredBackend` removed entirely.
-- `effectiveLaunchBackend` no longer cascades: `.default` → `nil` unconditionally (no OEM special case); all concrete backends including `.dxmt` → themselves. Signature now takes `hasDxmt:` (kept for interface symmetry/future use even though the switch no longer branches on capabilities).
-- `resolveGraphics` no longer rewrites OEM `.default` → `.auto`.
-- `CyderSettingsStore.environment(...)` passes `hasDxmt` through to `effectiveLaunchBackend`, and the DXVK frame-rate-limiter exposure condition was simplified to just `graphics.backend == .dxvk` (the old OEM/cascade branch is unreachable now that `.default` never resolves to a concrete backend).
+### RED (Step 2 — tests fail before implementation)
 
-## Tests (TDD)
+```bash
+$ bash tests/test-cyder-pack-graphics-payloads.sh
+ASSERT_CONTAINS failed: graphics pack help must list DXVK2
+  missing: dxvk2
+# exit 1
 
-1. Updated `tests/fixtures/cyder_settings_harness.swift` first (deleted all `.auto` / `cascadePreferredBackend` assertions, added `hasDxmt` everywhere `CyderGraphicsCapabilities`/`effectiveLaunchBackend` are called, added `hasDxmtPayload` filesystem-based coverage, replaced the OEM block with the brief's verbatim snippet, added `sanitizedGraphicsBackend("auto") == .default` and `sanitizedOptionalGraphicsBackend("auto") == .default` checks).
-2. Ran `tests/test-cyder-settings-swift.sh` against the unmodified model → confirmed compile failures (`extra argument 'hasDxmt'`, `type 'CyderGraphicsBackend' has no member 'dxmt'`, `has no member 'hasDxmtPayload'`, etc.) — harness fails as expected before implementation.
-3. Implemented the model changes above.
-4. Re-ran `tests/test-cyder-settings-swift.sh` → `PASS cyder-settings-harness` / `PASS test-cyder-settings-swift`.
-5. Also ran `tests/test-cyder-settings-model.sh` (grep-based assertions on `cyder_settings.swift` / `cyder-common.sh`, untouched by this task) → `PASS test-cyder-settings-model`.
+$ bash tests/test-cyder-pack-dxmt-gate.sh
+ASSERT_CONTAINS failed: engine archive must exclude DXVK2
+  missing: --exclude 'lib/dxvk2'
+# exit 1
 
-## Commits
-- `feat(settings): add dxmt backend and drop auto cascade`
-
-## Concerns / notes for other tasks
-
-- **Task 3 (UI) will not compile until it lands.** `scripts/cyder_settings_ui.swift` and `scripts/cyder_game_library_ui.swift` both reference `.auto` (as a `CyderGraphicsBackend` case) and `cyder_game_library_ui.swift`'s test companion `tests/test-cyder-force-settings-ui.sh` asserts `cascadePreferredBackend` exists. Per the task split these are explicitly out of scope here; confirmed via repo-wide grep that no other Swift file constructs `CyderGraphicsCapabilities` or calls the backend APIs besides those two UI files and this task's own files.
-- `tests/test-cyder-force-settings-ui.sh` will fail until Task 3 updates the UI files — did not touch it (out of scope, owned by Task 3).
-- `cyder-common.sh` was not touched (owned by Task 4); it doesn't reference the Swift `CyderGraphicsBackend` enum directly (shell side reads `CYDER_GRAPHICS_BACKEND` env string), so no cross-task breakage expected there.
-- `effectiveLaunchBackend`'s `hasD3DMetal`/`hasDxvk`/`hasDxmt` parameters are currently unused inside the switch body (no cascade consults them anymore) but were kept per the interface spec in the brief for call-site/API symmetry with `CyderGraphicsCapabilities`.
-
-## Review follow-up: graphics artifact gates
-
-- Fixed P1 in both `pack-engine-artifact.sh` copies: the graphics-payload pack
-  now executes before an existing engine archive can return success. The
-  graphics pack repairs or generates the DXVK and DXMT archives plus their
-  version and SHA-256 sidecars before the engine archive is reused.
-- Fixed P2 in both `pack-graphics-payloads.sh` copies: `--output-dir` is
-  created and canonicalized with `pwd -P` before the staging-directory
-  subshell changes directory, so relative output paths remain valid.
-- Extended focused tests in both repositories. They build fixture DXVK/DXMT
-  payloads through a fake zstd binary using a relative output directory, and
-  verify the pre-existing-engine-archive path still produces both graphics
-  archives.
-
-### Verification
-
-```text
-cyder-wine-engine:
-bash -n scripts/pack-engine-artifact.sh scripts/pack-graphics-payloads.sh \
-  tests/test-pack-graphics-payloads.sh tests/test-pack-engine-dxmt-gate.sh
-bash tests/test-pack-graphics-payloads.sh
-bash tests/test-pack-engine-dxmt-gate.sh
-PASS test-pack-graphics-payloads
-PASS test-pack-engine-dxmt-gate
-
-ogom:
-bash -n scripts/pack-engine-artifact.sh scripts/pack-graphics-payloads.sh \
-  tests/test-cyder-pack-graphics-payloads.sh tests/test-cyder-pack-dxmt-gate.sh
-bash tests/test-cyder-pack-graphics-payloads.sh
-bash tests/test-cyder-pack-dxmt-gate.sh
-PASS test-cyder-pack-graphics-payloads
-PASS test-cyder-pack-dxmt-gate
+$ bash tests/test-cyder-app-payload.sh
+ASSERT_CONTAINS failed: Cyder.app packaging must require the DXVK 2 graphics sidecar
+  missing: dxvk2-version.txt
+# exit 1
 ```
+
+### GREEN (Step 4 — all three pass after implementation)
+
+```bash
+$ bash tests/test-cyder-pack-graphics-payloads.sh
+Stamped 1 of 1 DLL(s)
+Created graphics artifact: .../dxvk-1.2.3.tar.zst
+Stamped 1 of 1 DLL(s)
+Created graphics artifact: .../dxvk2-2.7.1.tar.zst
+Created graphics artifact: .../dxmt-4.5.6.tar.zst
+PASS test-cyder-pack-graphics-payloads
+
+$ bash tests/test-cyder-pack-dxmt-gate.sh
+...
+Created graphics artifact: .../dxvk2-2.7.1.tar.zst
+PASS test-cyder-pack-dxmt-gate
+
+$ bash tests/test-cyder-app-payload.sh
+PASS test-cyder-app-payload
+```
+
+## Files Changed
+
+### ogom
+
+| File | Change |
+|------|--------|
+| `scripts/pack-graphics-payloads.sh` | Help lists dxvk2; gate on `lib/dxvk2`; stamp both DXVK families; `pack_payload dxvk2` |
+| `scripts/pack-engine-artifact.sh` | `--exclude 'lib/dxvk2'` |
+| `scripts/create-cyder-app.sh` | Require dxvk2 version/sha/archive sidecars; updated error message |
+| `tests/test-cyder-pack-graphics-payloads.sh` | dxvk2 fake tree + artifact asserts |
+| `tests/test-cyder-pack-dxmt-gate.sh` | exclude assert + dxvk2 integration |
+| `tests/test-cyder-app-payload.sh` | `dxvk2-version.txt` gate assert |
+
+### cyder-wine-engine (feat/cyder-dxvk2-graphics-backend)
+
+| File | Change |
+|------|--------|
+| `scripts/pack-engine-artifact.sh` | `--exclude 'lib/dxvk2'` (mirror ogom) |
+
+## Test Note
+
+Brief stamp assert used `name == dxvk || name == dxvk2` but implementation uses quoted `"$name"`. Test updated to assert `'"$name" == dxvk || "$name" == dxvk2'` to match actual bash syntax.
+
+## Out of Scope (per brief)
+
+- ensure-graphics / UI (Task 3+)
+- Unrelated dirty ogom files not staged

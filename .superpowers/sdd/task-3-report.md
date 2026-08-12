@@ -1,30 +1,50 @@
-# Task 3 Report: bundled zstd resolution
+# Task 3 Report: Ensure-graphics and shell launch preference
 
-## Status
+## Summary
 
-Done.
+Installed `current-dxvk2` + `$engine/lib/dxvk2` via `cyder_ensure_graphics`, and extended `cyder_apply_graphics_preference` to accept `dxvk2` with fail-closed behavior when `lib/dxvk2` is missing.
 
-## P1 follow-up
+## TDD Evidence
 
-- `scripts/cyder-ensure-graphics.sh` now resolves zstd through a local
-  `cyder_graphics_find_zstd` helper. It uses the same precedence as
-  `cyder_find_zstd`: `CYDER_ZSTD`, bundled `CYDER_OGOM/tools/zstd/zstd`,
-  script-adjacent `Resources/tools/zstd/zstd`, then `PATH`.
-- The helper is local because `cyder-common.sh` sources
-  `cyder-ensure-graphics.sh`; sourcing common back from this script would
-  recurse.
-- `tests/test-cyder-ensure-graphics.sh` unsets `CYDER_ZSTD`, constrains
-  `PATH`, and exposes a fake bundled `Resources/tools/zstd/zstd`. It confirms
-  both initial extraction and a DXVK payload update complete successfully.
+### RED (Step 2 — tests fail before implementation)
 
-## Verification
+```bash
+$ bash tests/test-cyder-ensure-graphics.sh
+ASSERT failed: test -f .../runtime/graphics/dxvk2/2.7.1/d3d11.dll
+# exit 1
 
-```text
-bash -n scripts/cyder-ensure-graphics.sh tests/test-cyder-ensure-graphics.sh
-bash tests/test-cyder-ensure-graphics.sh
-bash tests/test-universal-zstd.sh
-git diff --check
-
-PASS test-cyder-ensure-graphics
-PASS test-universal-zstd
+$ bash tests/test-cyder-settings-model.sh
+ASSERT_CONTAINS failed: shell preference helper must handle dxvk2
+  missing: dxvk2)
+# exit 1
 ```
+
+### GREEN (Step 4 — both pass after implementation)
+
+```bash
+$ bash tests/test-cyder-ensure-graphics.sh
+PASS test-cyder-ensure-graphics
+
+$ bash tests/test-cyder-settings-model.sh
+PASS test-cyder-settings-model
+```
+
+## Files Changed
+
+| File | Change |
+|------|--------|
+| `scripts/cyder-ensure-graphics.sh` | Install dxvk2 payload; symlink `engine/lib/dxvk2` → `current-dxvk2` |
+| `scripts/cyder-common.sh` | Add `cyder_engine_has_dxvk2_payload`; `dxvk2)` branch in `cyder_apply_graphics_preference` |
+| `tests/test-cyder-ensure-graphics.sh` | dxvk2 staging, install/symlink asserts, 1.x upgrade must not touch 2.x |
+| `tests/test-cyder-settings-model.sh` | Assert dxvk2 preference helper and fail-closed helper present |
+
+## Behavior
+
+- `cyder_ensure_graphics` now installs dxvk, dxvk2, and dxmt payloads and links all three under `engine/lib/`.
+- `cyder_apply_graphics_preference dxvk2` exports `CYDER_GRAPHICS_BACKEND=dxvk2` when `lib/dxvk2/x86_64-windows/d3d11.dll` exists; otherwise falls back to default with stderr warning.
+- DXVK 1.x version upgrades do not alter `current-dxvk2`.
+
+## Out of Scope (per brief)
+
+- Swift UI / schema changes
+- Unrelated dirty ogom files not staged

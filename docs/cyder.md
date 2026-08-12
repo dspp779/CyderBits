@@ -195,17 +195,15 @@ Winetricks 會直接修改 shared prefix，因此安裝前必須先關閉所有�
 
 這是 SharedPrefix 的進階手動工具，不會自動替每個遊戲建立隔離 bottle；需要隔離元件時，應使用遊戲 Profile／CyderBits。
 
-當共用 prefix 沒有執行中的 wineserver，啟動 EXE 前會以快速路徑直接修改 `user.reg`，不會為了套用設定先啟動 Wine。若 prefix 已在執行，EXE 啟動流程會略過 registry 套用並直接開啟遊戲；設定仍保存在 `settings.json`，等 prefix 停止後的下一次啟動再套用。`wine reg` 不會用於一般 EXE 啟動，只保留給「偏好設定 → 進階 → 套用所有設定」。
+當共用 prefix 沒有執行中的 wineserver，啟動 EXE 前會以快速路徑直接修改 `user.reg`，不會為了套用設定先啟動 Wine。若 prefix 已在執行，EXE 啟動流程會略過 registry 套用並直接開啟遊戲；顯示、字體與同步設定會在偏好設定按下「套用設定」後保存，等所有 Wine 程序結束、prefix 下次啟動時完整生效。圖形後端、HUD、幀率、診斷與其他啟動選項則會立即寫入 `settings.json`，供下一個 Windows process 使用。`wine reg` 不會用於一般 EXE 啟動，只保留給偏好設定的強制套用流程。
 
 Wine 的 macOS RetinaMode、DPI 與字體 registry 是整個 Wine session／bottle 的狀態，不能透過 `AppDefaults` 真正隔離到單一 EXE。Cyder 允許同一共用 prefix 同時開啟多個遊戲，不再以 session guard 阻擋；但執行中無法切換這些 registry 設定，因此同時執行的遊戲會沿用目前 wineserver 已載入的值。MSync、ESync、能源模式、環境變數與命令列參數仍會依各次啟動傳入，但最終相容性仍受 Wine 共用 wineserver 限制。
 
 個別遊戲可能需要不同的同步設定；例如皮卡丘打排球目前應關閉 MSync／ESync，並使用無空白的 Wine runtime。請參考 [依遊戲問題文件](games/pikachu-volleyball/README.md)。
 
-單獨開啟 `Cyder.app` 時會直接顯示進階設定。控制項一經變更就立即寫入 `settings.json`；未執行中的 prefix 會同步呼叫並等待原生 `sed` 修改 `user.reg`，不啟動 Wine 或 Rosetta。
+單獨開啟 `Cyder.app` 時會直接顯示偏好設定。沒有執行中的 Wine session 時，控制項一經變更就立即寫入 `settings.json`；未執行中的 prefix 會同步呼叫並等待原生 `sed` 修改 `user.reg`，不啟動 Wine 或 Rosetta。若有執行中的 Wine session，只有同步機制、Retina／DPI 與字體欄位會暫存為草稿；下方狀態列會醒目提示並顯示「套用設定」，其他欄位仍會立即保存。
 
-進階頁的 **套用所有設定** 會使用 Wine `reg` 完整重寫所有受管理設定，供疑難排解使用。若偵測到執行中的遊戲，必須先確認關閉所有遊戲；強制關閉可能造成尚未儲存的遊戲進度遺失。
-
-強制關閉可能造成尚未儲存的遊戲進度遺失，因此執行前會顯示警告。
+執行中的 Wine session 會讓「套用設定」按鈕只處理已修改的同步、顯示與字體草稿；它不會自動關閉遊戲。按下後仍須等所有 Wine 程序結束，再重新啟動 prefix，這些 session-level 設定才會完整生效。強制關閉可能造成尚未儲存的遊戲進度遺失，因此請使用一般頁的「關閉所有 Wine 程序」前先確認遊戲狀態。
 
 直接由 Finder 打開 `.exe` 時，Cyder **不會**安裝、升級或重建環境。若 engine 不存在、版本不同或預設 bottle 尚未完成 bootstrap，只顯示提示，要求使用者先單獨開啟 `Cyder.app` 完成設定與環境建置。
 

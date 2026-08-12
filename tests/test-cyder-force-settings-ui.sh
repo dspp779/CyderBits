@@ -11,10 +11,18 @@ assert_not_contains "$ui" "套用所有設定" "advanced tab should not expose l
 assert_not_contains "$ui" "applyAllSettings" "legacy apply-all action should be removed"
 assert_contains "$ui" "套用設定" "footer should expose apply while Wine is running"
 assert_contains "$ui" "applyRunningSettings" "apply button should have a dedicated action"
-assert_contains "$ui" "目前遊戲正在執行中，需套用設定才會儲存設定" \
-  "running status should explain apply + full restart"
+assert_contains "$ui" "待套用：同步機制、高解析度、字體設定" \
+  "running status should highlight deferred session settings"
+assert_not_contains "$ui" "presentRunningWineAlertIfNeeded" \
+  "opening preferences should not show a running-Wine alert"
+assert_not_contains "$ui" "didShowRunningAlert" \
+  "opening preferences should not track a one-time running-Wine alert"
 assert_contains "$ui" "wineIsRunning" "prefs should branch idle vs running Wine"
 assert_contains "$ui" "onApplyWhileRunning" "prefs should request live apply before saving JSON"
+assert_contains "$ui" "persistDeferredSettings" \
+  "running preferences should save immediate settings without committing deferred fields"
+assert_contains "$ui" "deferredChange" \
+  "preferences should distinguish deferred session settings from immediate settings"
 assert_contains "$ui" "Winetricks 元件…" "advanced tab should expose the native Winetricks component picker"
 assert_contains "$ui" "cyderWinetricksComponentGroups" "Winetricks picker should use a curated component catalog"
 assert_not_contains "$ui" 'CyderWinetricksComponent(title: "Steam"' \
@@ -28,7 +36,8 @@ assert_contains "$ui" 'CyderWinetricksComponent(title: ".NET Framework 4.8"' \
 assert_contains "$ui" 'CyderWinetricksComponent(title: "Visual Basic 6 Runtime"' \
   "VB6 runtime should remain available through Winetricks"
 assert_contains "$ui" "onImmediateSave" "controls should expose immediate save"
-assert_contains "$ui" "guard saveControls() else" "control changes should save immediately"
+assert_contains "$ui" "guard saveControls(persistDeferredSettings: !running) else" \
+  "control changes should save immediate fields while preserving deferred settings"
 assert_contains "$ui" "makeGraphicsTab()" "preferences should provide a graphics tab"
 assert_contains "$ui" "圖形轉譯" "graphics tab should expose a backend selector"
 assert_contains "$ui" "限制幀率" "graphics tab should expose DXVK frame-rate choices"
@@ -136,9 +145,12 @@ assert_contains "$(cat "$ROOT/scripts/cyder_settings.swift")" 'osMajorVersion >=
   "effectiveLaunchBackend must fail closed on DXMT below macOS 15"
 assert_contains "$(cat "$ROOT/scripts/cyder_settings.swift")" 'return (hasDxmt && osMajorVersion >= 15) ? .dxmt : nil' \
   "effectiveLaunchBackend must refuse DXMT without payload or OS support"
-assert_contains "$ui" 'saveImmediately(registrySetting: "dpi")' "DPI changes should invoke only the DPI sed path"
-assert_contains "$ui" 'saveImmediately(registrySetting: "display")' "Retina changes should invoke Retina and linked DPI paths"
-assert_contains "$ui" 'saveImmediately(registrySetting: "smoothing")' "smoothing changes should invoke the smoothing sed path"
+assert_contains "$ui" 'saveImmediately(registrySetting: "dpi", deferredChange: true)' \
+  "DPI changes should invoke only the DPI sed path"
+assert_contains "$ui" 'saveImmediately(registrySetting: "display", deferredChange: true)' \
+  "Retina changes should invoke Retina and linked DPI paths"
+assert_contains "$ui" 'saveImmediately(registrySetting: "smoothing", deferredChange: true)' \
+  "smoothing changes should invoke the smoothing sed path"
 assert_contains "$ui" '細明體取代' "global UI should label MingLiU replacement"
 assert_contains "$ui" '宋體取代' "global UI should label Songti replacement"
 settings_swift="$(cat "$ROOT/scripts/cyder_settings.swift")"
@@ -151,9 +163,9 @@ assert_contains "$library_ui" 'cyderFontTargetTitles' "game UI should use shared
 assert_contains "$ui" 'rebuildGraphicsHudMenu(selecting: value.graphicsHud)' \
   "reset-all should restore graphics HUD from defaults (off)"
 assert_contains "$settings_swift" 'var retinaMode = true' "Retina default on in settings model"
-assert_contains "$ui" 'saveImmediately(registrySetting: "font-mingliu")' \
+assert_contains "$ui" 'saveImmediately(registrySetting: "font-mingliu", deferredChange: true)' \
   "MingLiU popup should fast-apply mingliu family"
-assert_contains "$ui" 'saveImmediately(registrySetting: "font-songti")' \
+assert_contains "$ui" 'saveImmediately(registrySetting: "font-songti", deferredChange: true)' \
   "Songti popup should fast-apply songti family"
 assert_contains "$library_ui" '細明體取代' "game settings should label MingLiU replacement"
 assert_contains "$library_ui" '宋體取代' "game settings should label Songti replacement"

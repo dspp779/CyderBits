@@ -1,23 +1,57 @@
-# Task 5 Report: Graphics Preferences UI
+# Task 5 Report: Settings and game-library menus
 
-## Status
+## Summary
 
-DONE
+Replaced temporary `case .dxvk2: return 0` UI stubs with real DXVK 2 menu entries (after DXVK), payload grey-out via `hasDxvk2`, and limiter/HUD gating through `usesDxvkTranslation` for both DXVK families.
 
-## Delivered
+## TDD Evidence
 
-- Added a global Graphics tab with backend help, conditional DXVK frame-rate control, D3DMetal availability status, and GPTK install/remove actions.
-- Added per-game backend and frame-rate overrides, including the `跟隨全域` optional-field mapping and macOS 14+ D3DMetal gate.
-- Added UI-presence coverage for the graphics controls and GPTK actions.
+### RED (Step 2 — tests fail before implementation)
 
-## Verification
+```bash
+$ bash tests/test-cyder-force-settings-ui.sh
+ASSERT_CONTAINS failed: prefs graphics labels include DXVK 2 after DXVK
+  missing: return ["預設", "D3DMetal", "DXMT", "DXVK", "DXVK 2", "WineD3D"]
+# exit 1
+```
 
-- `bash tests/test-cyder-force-settings-ui.sh` — PASS.
-- `bash tests/test-cyder-game-library.sh` — PASS.
-- `bash tests/test-cyder-settings-swift.sh` — PASS.
-- Full Cyder Swift `swiftc -typecheck` — PASS.
-- `git diff --check` — PASS.
+### GREEN (Step 4 — UI + settings tests pass after implementation)
 
-## Concerns
+```bash
+$ bash tests/test-cyder-force-settings-ui.sh
+PASS test-cyder-force-settings-ui
 
-- Full app packaging was not run because the required pinned engine artifact is unavailable in this worktree.
+$ bash tests/test-cyder-settings-swift.sh
+PASS cyder-settings-harness
+PASS test-cyder-settings-swift
+
+$ bash tests/test-cyder-settings-model.sh
+PASS test-cyder-settings-model
+```
+
+## Files Changed
+
+| File | Change |
+|------|--------|
+| `tests/test-cyder-force-settings-ui.sh` | Assert DXVK 2 titles, `usesDxvkTranslation` limiter/HUD, GPTK hide for `.dxvk2`, tooltip + help strings |
+| `scripts/cyder_settings_ui.swift` | Titles + index map 0…5; `canSelectDxvk2` / `updateDxvk2MenuItemAvailability`; HUD/limiter/GPTK via `usesDxvkTranslation` |
+| `scripts/cyder_game_library_ui.swift` | Titles + index map 0…6; grey-out DXVK 2 at item 5; override/index for `.dxvk2` |
+
+## Behavior
+
+- Prefs menu: `預設`, `D3DMetal`, `DXMT`, `DXVK`, `DXVK 2`, `WineD3D` (index 4 = dxvk2, 5 = wined3d).
+- Game options: `跟隨全域` … `DXVK`, `DXVK 2`, `WineD3D` (index 5 = dxvk2, 6 = wined3d).
+- Missing payload: DXVK 2 disabled with tooltip `需要已安裝的 DXVK 2 圖形元件`; selection falls back like DXMT.
+- Frame-rate limiter + frametimes visibility for both `.dxvk` and `.dxvk2`; GPTK controls also hide for `.dxvk2`.
+- Leaving both DXVK families drops HUD `.dxvk` via `!usesDxvkTranslation`.
+
+## Out of Scope (per brief)
+
+- Pack / ensure / CompatDB
+- Unrelated dirty ogom files not staged
+
+## Commit
+
+```
+feat(ui): add DXVK 2 graphics translation option
+```

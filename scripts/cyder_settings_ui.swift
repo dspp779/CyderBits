@@ -41,7 +41,6 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
     private let store = CyderSettingsStore.shared
     private let applyButton = NSButton()
     private var wineIsRunning = false
-    private var didShowRunningAlert = false
     private let engineVersion = NSTextField(labelWithString: "")
     private let syncMode = NSPopUpButton()
     private let syncModeDescription = NSTextField(wrappingLabelWithString: "")
@@ -80,7 +79,7 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
     private var selectedProfileID: String?
     private var profileDrafts: [String: CyderExecutableSettings] = [:]
     private var deletedProfiles: Set<String> = []
-    private let status = NSTextField(labelWithString: "設定將於下次啟動遊戲時生效")
+    private let status = NSTextField(labelWithString: "設定已儲存")
     private var isDirty = false
 
     convenience init() {
@@ -477,57 +476,63 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
 
     func prepareForDisplay() {
         wineIsRunning = hasRunningExes?() ?? false
-        didShowRunningAlert = false
         reload()
-        if wineIsRunning {
-            presentRunningWineAlertIfNeeded()
-        }
     }
 
-    private func refreshRunningChrome() {
+    private func refreshRunningChrome(persistPendingWhenIdle: Bool = false) {
         wineIsRunning = hasRunningExes?() ?? false
-        applyButton.isHidden = !wineIsRunning
-        status.textColor = .secondaryLabelColor
-        if wineIsRunning {
-            status.stringValue = "目前遊戲正在執行中，需套用設定才會儲存設定，並且完全重開才會套用成功。"
-        } else if isDirty {
-            status.stringValue = "變更會立即儲存"
-        } else {
-            status.stringValue = "變更會立即儲存"
-        }
-    }
-
-    private func presentRunningWineAlertIfNeeded() {
-        guard wineIsRunning, !didShowRunningAlert else { return }
-        didShowRunningAlert = true
-        let alert = NSAlert()
-        alert.messageText = "目前遊戲正在執行中"
-        alert.informativeText = "需按「套用設定」才會儲存設定；Retina／DPI 等顯示設定需完全退出遊戲後再重開才會套用成功。"
-        alert.alertStyle = .informational
-        alert.addButton(withTitle: "知道了")
-        alert.runModal()
-    }
-
-    @objc private func markDirty() {
-        saveImmediately()
-    }
-
-    private func saveImmediately(registrySetting: String? = nil) {
-        if wineIsRunning || (hasRunningExes?() ?? false) {
-            wineIsRunning = true
-            isDirty = true
-            applyButton.isHidden = false
-            status.stringValue = "目前遊戲正在執行中，需套用設定才會儲存設定，並且完全重開才會套用成功。"
-            status.textColor = .secondaryLabelColor
+        if !wineIsRunning && persistPendingWhenIdle && deferredSettingsChanged() {
+            saveImmediately(registrySetting: "all", deferredChange: true)
             return
         }
-        let requiresPrefixApply = prefixSettingsChanged()
+        if wineIsRunning && deferredSettingsChanged() {
+            showDeferredSettingsNotice()
+        } else {
+            applyButton.isHidden = true
+            setNormalStatus()
+        }
+    }
+
+    private func setNormalStatus(_ message: String = "設定已儲存") {
+        status.stringValue = message
+        status.textColor = .secondaryLabelColor
+        status.font = .systemFont(ofSize: 11)
+    }
+
+    private func showDeferredSettingsNotice() {
+        applyButton.isHidden = false
+        status.stringValue = "待套用：同步機制、高解析度、字體設定。請關閉所有 Wine 程序後按「套用設定」。"
+        status.textColor = .systemOrange
+        status.font = .boldSystemFont(ofSize: 11)
+    }
+
+    private func saveImmediately(
+        registrySetting: String? = nil,
+        deferredChange: Bool = false
+    ) {
+        let running = wineIsRunning || (hasRunningExes?() ?? false)
+        wineIsRunning = running
+        if running && deferredChange && deferredSettingsChanged() {
+            isDirty = true
+            showDeferredSettingsNotice()
+            return
+        }
+
+        let requiresPrefixApply = !running && prefixSettingsChanged()
         isDirty = true
-        guard saveControls() else { return }
-        guard requiresPrefixApply else { return }
-        if onImmediateSave?(registrySetting ?? "all") == false {
+        guard saveControls(persistDeferredSettings: !running) else { return }
+        if !running && requiresPrefixApply,
+           onImmediateSave?(registrySetting ?? "all") == false {
             status.stringValue = "設定已儲存，但無法更新 Windows 環境"
             status.textColor = .systemRed
+            status.font = .systemFont(ofSize: 11)
+            return
+        }
+        isDirty = deferredSettingsChanged()
+        if running && isDirty {
+            showDeferredSettingsNotice()
+        } else {
+            setNormalStatus()
         }
     }
 
@@ -535,8 +540,7 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
         wineIsRunning = hasRunningExes?() ?? false
         guard wineIsRunning else {
             // Wine exited while the window was open — fall back to immediate save.
-            refreshRunningChrome()
-            saveImmediately(registrySetting: "all")
+            saveImmediately(registrySetting: "all", deferredChange: true)
             return
         }
         let draft = draftApplyEnvironment()
@@ -550,10 +554,10 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
             status.textColor = .systemRed
             return
         }
-        guard saveControls() else { return }
+        guard saveControls(persistDeferredSettings: true) else { return }
         isDirty = false
-        status.stringValue = "已寫入環境並儲存；請完全退出遊戲後再重開以完整套用。"
-        status.textColor = .secondaryLabelColor
+        applyButton.isHidden = true
+        setNormalStatus("設定已儲存；關閉所有 Wine 程序後重新啟動才會生效。")
     }
 
     private func draftApplyEnvironment() -> [String: String] {
@@ -579,15 +583,15 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
         let dpiValues = [96, 120, 144, 168, 192, 240]
         let targetDPI = retina.state == .on ? 192 : 96
         dpi.selectItem(at: dpiValues.firstIndex(of: targetDPI) ?? 0)
-        saveImmediately(registrySetting: "display")
+        saveImmediately(registrySetting: "display", deferredChange: true)
     }
 
     @objc private func dpiChanged() {
-        saveImmediately(registrySetting: "dpi")
+        saveImmediately(registrySetting: "dpi", deferredChange: true)
     }
 
     @objc private func smoothingChanged() {
-        saveImmediately(registrySetting: "smoothing")
+        saveImmediately(registrySetting: "smoothing", deferredChange: true)
     }
 
     @objc private func graphicsBackendChanged() {
@@ -675,7 +679,7 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
             DispatchQueue.main.async {
                 guard let self else { return }
                 self.stopAllWineButton.isEnabled = true
-                    self.refreshRunningChrome()
+                    self.refreshRunningChrome(persistPendingWhenIdle: ok)
                     if ok {
                         self.status.stringValue = "已關閉所有 Wine 程序"
                         self.status.textColor = .secondaryLabelColor
@@ -770,22 +774,25 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
 
     @objc private func syncModeChanged() {
         updateSyncModeDescription()
-        markDirty()
+        saveImmediately(deferredChange: true)
     }
 
-    private func saveControls() -> Bool {
+    private func saveControls(persistDeferredSettings: Bool = true) -> Bool {
         let dpiValues = [96, 120, 144, 168, 192, 240]
         let smoothingValues = ["off", "grayscale", "cleartype-rgb"]
         do {
             try store.update {
+                let previousProfiles = $0.perProfile
                 let mode = CyderSyncMode.allCases[max(0, min(syncMode.indexOfSelectedItem, CyderSyncMode.allCases.count - 1))]
-                $0.msync = mode == .msync
-                $0.esync = mode == .esync
-                $0.retinaMode = retina.state == .on
-                $0.dpi = dpiValues[max(0, dpi.indexOfSelectedItem)]
-                $0.fontMingLiuTarget = cyderFontTarget(at: fontMingLiu.indexOfSelectedItem)
-                $0.fontSongtiTarget = cyderFontTarget(at: fontSongti.indexOfSelectedItem)
-                $0.fontSmoothing = smoothingValues[max(0, smoothing.indexOfSelectedItem)]
+                if persistDeferredSettings {
+                    $0.msync = mode == .msync
+                    $0.esync = mode == .esync
+                    $0.retinaMode = retina.state == .on
+                    $0.dpi = dpiValues[max(0, dpi.indexOfSelectedItem)]
+                    $0.fontMingLiuTarget = cyderFontTarget(at: fontMingLiu.indexOfSelectedItem)
+                    $0.fontSongtiTarget = cyderFontTarget(at: fontSongti.indexOfSelectedItem)
+                    $0.fontSmoothing = smoothingValues[max(0, smoothing.indexOfSelectedItem)]
+                }
                 $0.graphicsBackend = graphicsBackendValue
                 $0.dxvkFrameRate = CyderDxvkFrameRate(menuIndex: dxvkFrameRate.indexOfSelectedItem)
                 $0.graphicsHud = graphicsHudValue
@@ -800,7 +807,18 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
                     $0.perProfile.removeValue(forKey: profileID)
                 }
                 for (profileID, rule) in profileDrafts where !deletedProfiles.contains(profileID) {
-                    $0.perProfile[profileID] = rule
+                    var next = rule
+                    if !persistDeferredSettings {
+                        let previous = previousProfiles[profileID]
+                        next.msync = previous?.msync
+                        next.esync = previous?.esync
+                        next.retinaMode = previous?.retinaMode
+                        next.dpi = previous?.dpi
+                        next.fontMingLiuTarget = previous?.fontMingLiuTarget
+                        next.fontSongtiTarget = previous?.fontSongtiTarget
+                        next.fontSmoothing = previous?.fontSmoothing
+                    }
+                    $0.perProfile[profileID] = next
                 }
             }
             status.stringValue = "已儲存"
@@ -827,11 +845,11 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
                 fontMingLiu.selectItem(at: cyderFontTargetIndex(store.value.fontMingLiuTarget))
             }
         }
-        saveImmediately(registrySetting: "font-mingliu")
+        saveImmediately(registrySetting: "font-mingliu", deferredChange: true)
     }
 
     @objc private func fontSongtiChanged() {
-        saveImmediately(registrySetting: "font-songti")
+        saveImmediately(registrySetting: "font-songti", deferredChange: true)
     }
 
     private var supportsD3DMetalOS: Bool {
@@ -1049,20 +1067,20 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
         selectedProfileID = nil
         executableName.stringValue = "尚未選擇 EXE"
         refreshExecutableList()
-        markDirty()
+        saveImmediately()
     }
 
-    @objc private func executableSettingChanged() {
+    @objc private func executableSettingChanged(deferredChange: Bool = false) {
         executableRecommendation.selectItem(at: 0)
         captureExecutableSettings()
-        markDirty()
+        saveImmediately(deferredChange: deferredChange)
     }
 
     @objc private func executableRetinaChanged() {
         let dpiValues = [96, 120, 144, 168, 192, 240]
         let targetDPI = executableRetina.state == .on ? 192 : 96
         executableDpi.selectItem(at: dpiValues.firstIndex(of: targetDPI) ?? 0)
-        executableSettingChanged()
+        executableSettingChanged(deferredChange: true)
     }
 
     @objc private func executableFontMingLiuChanged() {
@@ -1081,15 +1099,15 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
                 ))
             }
         }
-        executableSettingChanged()
+        executableSettingChanged(deferredChange: true)
     }
 
     @objc private func executableFontSongtiChanged() {
-        executableSettingChanged()
+        executableSettingChanged(deferredChange: true)
     }
 
     @objc private func executableSyncModeChanged() {
-        executableSettingChanged()
+        executableSettingChanged(deferredChange: true)
     }
 
     @objc private func applyExecutableRecommendation() {
@@ -1116,7 +1134,7 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
         profileDrafts[profileID] = rule
         loadExecutableSettings(profileID)
         executableRecommendation.selectItem(at: recommendation)
-        markDirty()
+        saveImmediately(deferredChange: true)
     }
 
     private func defaultExecutableSettings() -> CyderExecutableSettings {
@@ -1311,6 +1329,42 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
             || value.fontMingLiuTarget != cyderFontTarget(at: fontMingLiu.indexOfSelectedItem)
             || value.fontSongtiTarget != cyderFontTarget(at: fontSongti.indexOfSelectedItem)
             || value.fontSmoothing != smoothingValues[max(0, smoothing.indexOfSelectedItem)]
+    }
+
+    /// Settings that cannot be committed while a shared Wine session is live.
+    /// Keep this separate from graphics/HUD/diagnostics so those controls can
+    /// continue to save immediately while a game is running.
+    private func deferredSettingsChanged() -> Bool {
+        let value = store.value
+        let selectedMode = CyderSyncMode.allCases[max(0, min(syncMode.indexOfSelectedItem, CyderSyncMode.allCases.count - 1))]
+        if value.msync != (selectedMode == .msync)
+            || (value.esync ?? false) != (selectedMode == .esync) {
+            return true
+        }
+
+        let dpiValues = [96, 120, 144, 168, 192, 240]
+        let smoothingValues = ["off", "grayscale", "cleartype-rgb"]
+        if value.retinaMode != (retina.state == .on)
+            || value.dpi != dpiValues[max(0, dpi.indexOfSelectedItem)]
+            || value.fontMingLiuTarget != cyderFontTarget(at: fontMingLiu.indexOfSelectedItem)
+            || value.fontSongtiTarget != cyderFontTarget(at: fontSongti.indexOfSelectedItem)
+            || value.fontSmoothing != smoothingValues[max(0, smoothing.indexOfSelectedItem)] {
+            return true
+        }
+
+        for (profileID, rule) in profileDrafts where !deletedProfiles.contains(profileID) {
+            let stored = value.perProfile[profileID]
+            if stored?.msync != rule.msync
+                || stored?.esync != rule.esync
+                || stored?.retinaMode != rule.retinaMode
+                || stored?.dpi != rule.dpi
+                || stored?.fontMingLiuTarget != rule.fontMingLiuTarget
+                || stored?.fontSongtiTarget != rule.fontSongtiTarget
+                || stored?.fontSmoothing != rule.fontSmoothing {
+                return true
+            }
+        }
+        return false
     }
 
     private func sessionSettingsChanged() -> Bool {
