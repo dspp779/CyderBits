@@ -2399,7 +2399,11 @@ cyder_prepare_game_launch_settings() {
   local exe="$4"
   cyder_load_game_settings "$exe" "$engine_root"
   cyder_resolve_effective_graphics_backend "$engine_root"
-  [[ "$CYDER_GAME_SETTINGS_FOUND" -eq 1 ]] || return 0
+
+  # Global display/font settings are loaded before the launcher reaches this
+  # function.  They must still be applied when the EXE has no per-profile
+  # entry; otherwise a newly provisioned prefix keeps the bootstrap Retina
+  # Mode/DPI baseline until the user toggles the preference manually.
 
   local prefix_was_running=0
   cyder_has_running_prefix "$prefix" && prefix_was_running=1

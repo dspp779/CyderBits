@@ -7,16 +7,6 @@ private struct CyderWinetricksComponent {
 }
 
 private let cyderWinetricksComponentGroups: [(String, [CyderWinetricksComponent])] = [
-    ("Microsoft Visual C++ Redistributable", [
-        CyderWinetricksComponent(title: "Visual C++ 2005", verb: "vcrun2005"),
-        CyderWinetricksComponent(title: "Visual C++ 2008", verb: "vcrun2008"),
-        CyderWinetricksComponent(title: "Visual C++ 2010", verb: "vcrun2010"),
-        CyderWinetricksComponent(title: "Visual C++ 2012", verb: "vcrun2012"),
-        CyderWinetricksComponent(title: "Visual C++ 2013", verb: "vcrun2013"),
-        CyderWinetricksComponent(title: "Visual C++ 2015", verb: "vcrun2015"),
-        CyderWinetricksComponent(title: "Visual C++ 2019", verb: "vcrun2019"),
-        CyderWinetricksComponent(title: "Visual C++ 2022", verb: "vcrun2022"),
-    ]),
     (".NET Framework", [
         CyderWinetricksComponent(title: ".NET Framework 2.0", verb: "dotnet20"),
         CyderWinetricksComponent(title: ".NET Framework 3.5", verb: "dotnet35"),
@@ -24,20 +14,11 @@ private let cyderWinetricksComponentGroups: [(String, [CyderWinetricksComponent]
         CyderWinetricksComponent(title: ".NET Framework 4.5.2", verb: "dotnet452"),
         CyderWinetricksComponent(title: ".NET Framework 4.8", verb: "dotnet48"),
     ]),
-    (".NET Desktop Runtime", [
-        CyderWinetricksComponent(title: ".NET Desktop Runtime 6", verb: "dotnetdesktop6"),
-        CyderWinetricksComponent(title: ".NET Desktop Runtime 7", verb: "dotnetdesktop7"),
-        CyderWinetricksComponent(title: ".NET Desktop Runtime 8", verb: "dotnetdesktop8"),
-        CyderWinetricksComponent(title: ".NET Desktop Runtime 9", verb: "dotnetdesktop9"),
-    ]),
     ("Legacy multimedia", [
         CyderWinetricksComponent(title: "Windows Media Player 9", verb: "wmp9"),
         CyderWinetricksComponent(title: "Quartz DirectShow", verb: "quartz"),
         CyderWinetricksComponent(title: "DirectShow Devenum", verb: "devenum"),
         CyderWinetricksComponent(title: "Visual Basic 6 Runtime", verb: "vb6run"),
-    ]),
-    ("Apps", [
-        CyderWinetricksComponent(title: "Steam", verb: "steam"),
     ]),
 ]
 
@@ -226,7 +207,7 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
     @objc private func openWinetricks() {
         let alert = NSAlert()
         alert.messageText = "選擇要安裝的 Windows 元件"
-        alert.informativeText = "元件會安裝到 Cyder 的 shared prefix。請只選擇遊戲需要的版本；安裝前請先關閉所有遊戲。"
+        alert.informativeText = "元件會安裝到 Cyder 的 shared prefix。VC++ Redistributable 與 .NET Desktop Runtime 請下載官方 Windows installer，再直接用 Cyder 開啟；此處保留需要 Wine 專用處理的元件。安裝前請先關閉所有遊戲。"
         alert.alertStyle = .informational
 
         let stack = NSStackView()

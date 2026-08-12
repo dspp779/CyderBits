@@ -91,6 +91,37 @@ assert_eq "$(cat "$TMP/settings.log")" "0|1|0|96|mingliu|songti|grayscale|backgr
 assert_contains "$(cat "$TMP/wineserver.log")" "$TMP/support/bottles/shared|-k" \
   "per-game settings should stop the shared wineserver after editing"
 
+# A global Retina-off/DPI-96 setting must apply even when the EXE has no
+# per-profile entry. This is the first-launch path for a newly provisioned
+# prefix, whose golden baseline starts in Retina-on/DPI-192 mode.
+cat >"$TMP/support/settings.json" <<'JSON'
+{
+  "schemaVersion": 9,
+  "retinaMode": false,
+  "dpi": 96
+}
+JSON
+global_only_result=$(
+  CYDER_SUPPORT="$TMP/support" CYDER_SCRIPTS="$TMP/scripts" \
+    CYDER_TEST_SETTINGS_LOG="$TMP/global-settings.log" \
+    CYDER_TEST_WINESERVER_LOG="$TMP/global-wineserver.log" \
+    bash -c '
+      source "$1/scripts/cyder-common.sh"
+      cyder_init_paths "$1"
+      CYDER_SUPPORT="$2/support"
+      CYDER_SCRIPTS="$2/scripts"
+      CYDER_SHARED_PREFIX="$2/support/bottles/shared"
+      cyder_load_saved_settings
+      cyder_prepare_game_launch_settings "$2/engine/bin/wine" "$2/engine" "$CYDER_SHARED_PREFIX" "$3"
+      printf "%s|%s|%s" "$CYDER_GAME_SETTINGS_FOUND" "$CYDER_RETINA_MODE" "$CYDER_DPI"
+    ' _ "$ROOT" "$TMP" "$exe"
+)
+assert_eq "$global_only_result" "0|0|96" \
+  "global display settings should apply without a per-game rule"
+global_settings_line=$(cut -d '|' -f3-4 "$TMP/global-settings.log")
+assert_eq "$global_settings_line" "0|96" \
+  "global Retina-off/DPI-96 values should reach the fast registry path"
+
 # Native Cyder passes a complete per-game environment into the shell launcher.
 # Those explicit values must win over the global settings.json loaded at shell
 # startup, otherwise a saved Retina-off/DPI-96 rule silently becomes 1/192.

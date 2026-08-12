@@ -17,6 +17,16 @@ assert_contains "$ui" "wineIsRunning" "prefs should branch idle vs running Wine"
 assert_contains "$ui" "onApplyWhileRunning" "prefs should request live apply before saving JSON"
 assert_contains "$ui" "Winetricks 元件…" "advanced tab should expose the native Winetricks component picker"
 assert_contains "$ui" "cyderWinetricksComponentGroups" "Winetricks picker should use a curated component catalog"
+assert_not_contains "$ui" 'CyderWinetricksComponent(title: "Steam"' \
+  "Steam should not be offered by the built-in Winetricks picker"
+assert_not_contains "$ui" 'CyderWinetricksComponent(title: "Visual C++' \
+  "VC++ Redistributables should be installed from official installers"
+assert_not_contains "$ui" 'CyderWinetricksComponent(title: ".NET Desktop Runtime' \
+  ".NET Desktop Runtime should be installed from official installers"
+assert_contains "$ui" 'CyderWinetricksComponent(title: ".NET Framework 4.8"' \
+  ".NET Framework should remain available through Winetricks"
+assert_contains "$ui" 'CyderWinetricksComponent(title: "Visual Basic 6 Runtime"' \
+  "VB6 runtime should remain available through Winetricks"
 assert_contains "$ui" "onImmediateSave" "controls should expose immediate save"
 assert_contains "$ui" "guard saveControls() else" "control changes should save immediately"
 assert_contains "$ui" "makeGraphicsTab()" "preferences should provide a graphics tab"
