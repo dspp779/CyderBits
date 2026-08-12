@@ -27,7 +27,12 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
     // per-game arguments. A non-nil value came from the new application's argv
     // and replaces the saved arguments for this launch only.
     private var pendingLaunchArguments: [String]?
-    private var queuedExecutableFiles: [String] = []
+    private struct QueuedLaunch {
+        let executable: String
+        let arguments: [String]?
+    }
+
+    private var queuedLaunches: [QueuedLaunch] = []
     private var didFinishLaunch = false
     private var didRunLauncher = false
     private var libraryLaunchInProgress = false
@@ -39,6 +44,14 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
     private var environmentPreparationInProgress = false
     private var wineActivationWaiter: WineActivationWaiter?
     private var quitWhenSessionsEnd = false
+    private var isPrimaryInstance = true
+    private var secondaryForwardScheduled = false
+    private var secondaryRequestSent = false
+    private var deferredInstanceRequests: [CyderInstanceRequest] = []
+    private lazy var instanceCoordinator: CyderInstanceCoordinator = {
+        let coordinator = CyderInstanceCoordinator()
+        return coordinator
+    }()
     private lazy var statusItemController: CyderStatusItemController = {
         let controller = CyderStatusItemController()
         controller.onOpenPreferences = { [weak self] in self?.showSettings() }
@@ -274,6 +287,20 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         // promoted below; an EXE launch stays out of the Dock unless it needs
         // to ask the user a question or show an error.
         NSApp.setActivationPolicy(.accessory)
+        switch instanceCoordinator.start(onRequest: { [weak self] request in
+            self?.receiveInstanceRequest(request)
+        }) {
+        case .primary:
+            isPrimaryInstance = true
+        case .secondary:
+            isPrimaryInstance = false
+        case .unavailable:
+            // A read-only or otherwise unavailable support directory should
+            // not make the app unusable. Continue as primary, while accepting
+            // that the OS cannot enforce single-instance ownership here.
+            isPrimaryInstance = true
+            CyderDiagnostics.shared.warning("native instance lock unavailable; continuing without coordination")
+        }
     }
 
     func application(_ application: NSApplication, openFiles filenames: [String]) {
@@ -283,6 +310,12 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         )
         guard !executableFiles.isEmpty else {
             application.reply(toOpenOrPrint: .failure)
+            return
+        }
+        if !isPrimaryInstance {
+            pendingFiles.append(contentsOf: executableFiles)
+            scheduleSecondaryForward()
+            application.reply(toOpenOrPrint: .success)
             return
         }
         if gameLibraryController.window?.isVisible == true {
@@ -311,6 +344,11 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        if !isPrimaryInstance {
+            captureInvocationArguments()
+            scheduleSecondaryForward()
+            return
+        }
         DistributedNotificationCenter.default().addObserver(
             self,
             selector: #selector(wineAppWillActivate(_:)),
@@ -340,30 +378,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         // file intact here makes Bash the sole owner of effective launch
         // settings and Wine environment construction.
 
-        // Public argv contract: `Cyder [game.exe] [game argument ...]`.
-        // Normally LaunchServices sends game.exe through openFiles and argv
-        // contains only values following `open ... --args`. Cyder owns no
-        // command-line options; even values beginning with '-' belong to the
-        // Windows executable. The legacy -psn token is system-generated.
-        var applicationArguments = CommandLine.arguments.dropFirst().filter {
-            !$0.hasPrefix("-psn_")
-        }
-        if let first = applicationArguments.first,
-           let executable = normalizeExePaths([first]).first {
-            // Also accept direct invocation: `Cyder game.exe ARG...`.
-            pendingFiles.append(executable)
-            documentLaunchRequested = true
-            applicationArguments.removeFirst()
-            // Empty means "no dynamic argv", not "wipe saved/test arguments".
-            // Test launches open Cyder with only the .exe path, so this must
-            // stay nil for CYDER_TEST_SETTINGS_REQUEST.arguments to apply.
-            pendingLaunchArguments = applicationArguments.isEmpty
-                ? nil
-                : Array(applicationArguments)
-        } else if !applicationArguments.isEmpty {
-            // Association launch: EXE will arrive separately in openFiles.
-            pendingLaunchArguments = Array(applicationArguments)
-        }
+        captureInvocationArguments()
         if let outputPath = environment["CYDER_INVOCATION_SELF_TEST_OUTPUT"], !outputPath.isEmpty {
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
                 guard let self else { return }
@@ -415,14 +430,101 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
                 self.prepareEnvironmentAndShowSettings()
             }
         }
+        if !deferredInstanceRequests.isEmpty {
+            let requests = deferredInstanceRequests
+            deferredInstanceRequests.removeAll()
+            requests.forEach { receiveInstanceRequest($0) }
+        }
+    }
+
+    private func captureInvocationArguments() {
+        // Public argv contract: `Cyder [game.exe] [game argument ...]`.
+        // Normally LaunchServices sends game.exe through openFiles and argv
+        // contains only values following `open ... --args`. Cyder owns no
+        // command-line options; even values beginning with '-' belong to the
+        // Windows executable. The legacy -psn token is system-generated.
+        var applicationArguments = CommandLine.arguments.dropFirst().filter {
+            !$0.hasPrefix("-psn_")
+        }
+        if let first = applicationArguments.first,
+           let executable = normalizeExePaths([first]).first {
+            // Also accept direct invocation: `Cyder game.exe ARG...`.
+            pendingFiles.append(executable)
+            documentLaunchRequested = true
+            applicationArguments.removeFirst()
+            // Empty means "no dynamic argv", not "wipe saved/test arguments".
+            pendingLaunchArguments = applicationArguments.isEmpty
+                ? nil
+                : Array(applicationArguments)
+        } else if !applicationArguments.isEmpty {
+            // Association launch: EXE will arrive separately in openFiles.
+            pendingLaunchArguments = Array(applicationArguments)
+        }
+    }
+
+    private func scheduleSecondaryForward() {
+        guard !isPrimaryInstance, !secondaryForwardScheduled else { return }
+        secondaryForwardScheduled = true
+        // LaunchServices can deliver openFiles shortly after didFinishLaunching.
+        // Keep the secondary alive for one short turn so its argv and document
+        // event are forwarded as a single request.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak self] in
+            self?.forwardSecondaryInstance()
+        }
+    }
+
+    private func forwardSecondaryInstance() {
+        guard !secondaryRequestSent else { return }
+        secondaryRequestSent = true
+        let files = normalizeExePaths(pendingFiles)
+        let arguments = pendingLaunchArguments
+        let showUI = files.isEmpty && arguments == nil
+        instanceCoordinator.forward(files: files, arguments: arguments, showUI: showUI)
+        NSApp.terminate(nil)
+    }
+
+    private func receiveInstanceRequest(_ request: CyderInstanceRequest) {
+        guard isPrimaryInstance else { return }
+        guard didFinishLaunch else {
+            deferredInstanceRequests.append(request)
+            return
+        }
+        let files = normalizeExePaths(request.files)
+        if !files.isEmpty {
+            documentLaunchRequested = true
+            terminateWhenSettingsClose = false
+            if settingsController.window?.isVisible == true {
+                settingsController.close()
+            }
+            if didRunLauncher {
+                enqueueOrLaunch(files, arguments: request.arguments)
+            } else {
+                pendingFiles.append(contentsOf: files)
+                if request.arguments != nil {
+                    pendingLaunchArguments = request.arguments
+                }
+                scheduleRun()
+            }
+            return
+        }
+        guard request.showUI else { return }
+        terminateWhenSettingsClose = true
+        openLibraryOnLaunch = shouldOpenGameLibraryOnLaunch()
+        if openLibraryOnLaunch {
+            showGameLibrary()
+        } else {
+            showSettings()
+        }
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        instanceCoordinator.stop()
         DistributedNotificationCenter.default().removeObserver(self)
         CyderDiagnostics.shared.finish(outcome: "terminated")
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        guard isPrimaryInstance else { return .terminateNow }
         let prefixes = statusItemController.monitoredPrefixes
         guard !prefixes.isEmpty else { return .terminateNow }
         if !quitWhenSessionsEnd {
@@ -562,7 +664,11 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         return !CyderProfileStore(root: CyderPaths.support).listRecords().isEmpty
     }
 
-    private func launchGameFromLibrary(_ executable: URL, settings: CyderExecutableSettings?) {
+    private func launchGameFromLibrary(
+        _ executable: URL,
+        settings: CyderExecutableSettings?,
+        launchArguments: [String]? = nil
+    ) {
         guard !libraryLaunchInProgress else {
             showAlert("正在啟動另一個遊戲", "請等待目前的遊戲顯示視窗後再試一次。")
             return
@@ -602,6 +708,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
                     context: context,
                     exe: executable.path,
                     prefix: prefix,
+                    launchArguments: launchArguments,
                     launchEnvironment: launchEnvironment
                 )
             case .failure(let failure):
@@ -630,17 +737,23 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    private func enqueueOrLaunch(_ executableFiles: [String]) {
-        queuedExecutableFiles.append(contentsOf: executableFiles)
+    private func enqueueOrLaunch(_ executableFiles: [String], arguments: [String]? = nil) {
+        queuedLaunches.append(contentsOf: executableFiles.map {
+            QueuedLaunch(executable: $0, arguments: arguments)
+        })
         launchNextQueuedExecutableIfReady()
     }
 
     private func launchNextQueuedExecutableIfReady() {
         guard !libraryLaunchInProgress,
               wineActivationWaiter == nil,
-              !queuedExecutableFiles.isEmpty else { return }
-        let executable = queuedExecutableFiles.removeFirst()
-        launchGameFromLibrary(URL(fileURLWithPath: executable), settings: nil)
+              !queuedLaunches.isEmpty else { return }
+        let launch = queuedLaunches.removeFirst()
+        launchGameFromLibrary(
+            URL(fileURLWithPath: launch.executable),
+            settings: nil,
+            launchArguments: launch.arguments
+        )
     }
 
     @objc private func showSettingsModal() {
@@ -781,7 +894,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
                 self.launchNextQueuedExecutableIfReady()
                 if !self.statusItemController.hasActiveSessions,
                    !self.libraryLaunchInProgress,
-                   self.queuedExecutableFiles.isEmpty {
+                   self.queuedLaunches.isEmpty {
                     NSApp.terminate(nil)
                 }
             }
