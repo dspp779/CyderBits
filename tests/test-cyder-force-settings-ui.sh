@@ -77,11 +77,19 @@ assert_contains "$ui" '["60", "120", "144", "不限制"]' \
   "frame-rate menu should offer 60/120/144 and unlimited"
 assert_contains "$ui" 'let showFrameRate = backend.usesFrameLimiter' \
   "frame-rate limiter for DXVK families and DXMT"
-assert_contains "$ui" 'row("引擎版本"' "general tab should show the installed engine version"
+assert_contains "$ui" 'labelWithString: "引擎版本"' "general tab should show the installed engine version"
 assert_contains "$ui" 'engineVersion.textColor = .secondaryLabelColor' \
   "the engine version value should be gray"
-assert_contains "$ui" 'engineVersion.font = .systemFont(ofSize: 13)' \
-  "the engine version value should use the normal compact font"
+assert_contains "$ui" 'engineVersion.font = .systemFont(ofSize: 11)' \
+  "the engine version value should use a smaller compact font"
+assert_contains "$ui" 'engineVersion.alignment = .left' \
+  "the engine version value should align to the left"
+assert_contains "$ui" 'private func engineVersionFooter()' \
+  "the engine version should be laid out as a general-tab footer"
+assert_contains "$ui" 'stack.spacing = 8' \
+  "the engine version footer should use a compact title/value gap"
+assert_contains "$ui" 'engineFooterGap.heightAnchor.constraint(equalToConstant: 16)' \
+  "the engine version footer should sit below the regular settings rows"
 assert_not_contains "$ui" "目前已安裝的 Wine engine；開啟 Cyder.app 時會依打包版本升級。" \
   "general tab should not add explanatory text below the engine version"
 assert_contains "$ui" 'let showDxvkFrametimes = backend.usesDxvkTranslation' \
@@ -97,11 +105,9 @@ assert_not_contains "$(cat "$ROOT/scripts/cyder_settings.swift")" 'cascadePrefer
 assert_contains "$(cat "$ROOT/scripts/cyder_settings.swift")" 'graphicsHud' "settings schema should persist HUD preference"
 assert_contains "$(cat "$ROOT/scripts/cyder_settings.swift")" 'dxvkHudFrametimes' "settings schema should persist DXVK frametimes preference"
 assert_contains "$(cat "$ROOT/scripts/cyder_settings.swift")" 'wineDiagnostics' "settings schema should persist Wine diagnostics"
-assert_contains "$(cat "$ROOT/scripts/cyder_settings.swift")" 'provisionDxvkIntoPrefix' "OEM DXVK should provision prefix DLLs"
 assert_contains "$common" 'CX_GRAPHICS_BACKEND=' "CrossOver OEM needs CX_GRAPHICS_BACKEND"
-assert_contains "$common" 'cyder_oem_dxvk_dll_overrides' "shell launcher should expose OEM DXVK dll overrides helper"
 assert_contains "$common" 'args=(--dll "$dll_overrides" "${args[@]}")' "shell frontend args must prepend --dll overrides"
-assert_contains "$common" 'd3d11,dxgi=n,b' "OEM DXVK overrides should prefer native with builtin fallback"
+assert_not_contains "$common" 'd3d11,dxgi=n,b' "prepend graphics must not retain the old native-first DXVK override"
 assert_contains "$app" 'onStopAllWine' "settings stop-all Wine should wire to app delegate"
 assert_contains "$(cat "$ROOT/scripts/cyder_gptk.swift")" 'ensureEngineAppleGptkLink' "GPTK should link into engine lib64 for cxcompatdb"
 assert_contains "$common" 'unset DXVK_FRAME_RATE' "launch env should clear an unlimited DXVK frame rate"

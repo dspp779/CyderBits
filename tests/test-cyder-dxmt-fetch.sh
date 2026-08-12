@@ -28,8 +28,10 @@ mkdir -p \
   "$STAGE/x86_64-unix"
 printf 'd3d11\n' >"$STAGE/x86_64-windows/d3d11.dll"
 printf 'dxgi\n' >"$STAGE/x86_64-windows/dxgi.dll"
+printf 'winemetal\n' >"$STAGE/x86_64-windows/winemetal.dll"
 printf 'd3d11-32\n' >"$STAGE/i386-windows/d3d11.dll"
 printf 'dxgi-32\n' >"$STAGE/i386-windows/dxgi.dll"
+printf 'winemetal-32\n' >"$STAGE/i386-windows/winemetal.dll"
 printf 'so\n' >"$STAGE/x86_64-unix/winemetal.so"
 # Deliberately not the real MIT text: fetch-dxmt.sh must always overwrite
 # whatever (if anything) the upstream tarball provides with the pinned
@@ -51,8 +53,10 @@ CYDER_DXMT_SHA256="$GOOD_SHA" CYDER_DXMT_VERSION=v0.80-test \
 for eng in "$E2" "$E3"; do
   assert test -f "$eng/lib/dxmt/x86_64-windows/d3d11.dll"
   assert test -f "$eng/lib/dxmt/x86_64-windows/dxgi.dll"
+  assert test -f "$eng/lib/dxmt/x86_64-windows/winemetal.dll"
   assert test -f "$eng/lib/dxmt/i386-windows/d3d11.dll"
   assert test -f "$eng/lib/dxmt/i386-windows/dxgi.dll"
+  assert test -f "$eng/lib/dxmt/i386-windows/winemetal.dll"
   assert test -f "$eng/lib/dxmt/x86_64-unix/winemetal.so"
   assert_contains "$(cat "$eng/lib/dxmt/version")" "v0.80" "version pin file must record DXMT version"
   assert_contains "$(cat "$eng/lib/dxmt/version")" "$GOOD_SHA" "version pin file must record checksum"
@@ -74,6 +78,7 @@ mkdir -p \
   "$STAGE64/x86_64-unix"
 printf 'd3d11\n' >"$STAGE64/x86_64-windows/d3d11.dll"
 printf 'dxgi\n' >"$STAGE64/x86_64-windows/dxgi.dll"
+printf 'winemetal\n' >"$STAGE64/x86_64-windows/winemetal.dll"
 printf 'so\n' >"$STAGE64/x86_64-unix/winemetal.so"
 (
   cd "$STAGE64"
@@ -97,7 +102,9 @@ mkdir -p \
   "$STAGE_NO32DXGI/x86_64-unix"
 printf 'd3d11\n' >"$STAGE_NO32DXGI/x86_64-windows/d3d11.dll"
 printf 'dxgi\n' >"$STAGE_NO32DXGI/x86_64-windows/dxgi.dll"
+printf 'winemetal\n' >"$STAGE_NO32DXGI/x86_64-windows/winemetal.dll"
 printf 'd3d11-32\n' >"$STAGE_NO32DXGI/i386-windows/d3d11.dll"
+printf 'winemetal-32\n' >"$STAGE_NO32DXGI/i386-windows/winemetal.dll"
 printf 'so\n' >"$STAGE_NO32DXGI/x86_64-unix/winemetal.so"
 (
   cd "$STAGE_NO32DXGI"
@@ -134,8 +141,10 @@ mkdir -p \
   "$STAGE_NO64DXGI/i386-windows" \
   "$STAGE_NO64DXGI/x86_64-unix"
 printf 'd3d11\n' >"$STAGE_NO64DXGI/x86_64-windows/d3d11.dll"
+printf 'winemetal\n' >"$STAGE_NO64DXGI/x86_64-windows/winemetal.dll"
 printf 'd3d11-32\n' >"$STAGE_NO64DXGI/i386-windows/d3d11.dll"
 printf 'dxgi-32\n' >"$STAGE_NO64DXGI/i386-windows/dxgi.dll"
+printf 'winemetal-32\n' >"$STAGE_NO64DXGI/i386-windows/winemetal.dll"
 printf 'so\n' >"$STAGE_NO64DXGI/x86_64-unix/winemetal.so"
 (
   cd "$STAGE_NO64DXGI"

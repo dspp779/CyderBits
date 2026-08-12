@@ -55,8 +55,15 @@ SH
 chmod +x "$TMP/engine/bin/wineserver"
 
 stub_dxmt_engine_payload() {
-  mkdir -p "$1/lib/dxmt/x86_64-windows" "$1/lib/dxmt/x86_64-unix"
-  touch "$1/lib/dxmt/x86_64-windows/d3d11.dll" "$1/lib/dxmt/x86_64-unix/winemetal.so"
+  mkdir -p "$1/lib/dxmt/x86_64-windows" "$1/lib/dxmt/i386-windows" "$1/lib/dxmt/x86_64-unix"
+  touch \
+    "$1/lib/dxmt/x86_64-windows/d3d11.dll" \
+    "$1/lib/dxmt/x86_64-windows/dxgi.dll" \
+    "$1/lib/dxmt/x86_64-windows/winemetal.dll" \
+    "$1/lib/dxmt/i386-windows/d3d11.dll" \
+    "$1/lib/dxmt/i386-windows/dxgi.dll" \
+    "$1/lib/dxmt/i386-windows/winemetal.dll" \
+    "$1/lib/dxmt/x86_64-unix/winemetal.so"
 }
 stub_dxmt_engine_payload "$TMP/engine"
 

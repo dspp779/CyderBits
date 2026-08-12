@@ -162,8 +162,14 @@ JSON
 
 # Manual DXMT uses DXMT_CONFIG, not DXVK_FRAME_RATE, and merges existing keys.
 mkdir -p "$SETTINGS_ENGINES/$SETTINGS_ENGINE_NAME/lib/dxmt/x86_64-windows" \
+  "$SETTINGS_ENGINES/$SETTINGS_ENGINE_NAME/lib/dxmt/i386-windows" \
   "$SETTINGS_ENGINES/$SETTINGS_ENGINE_NAME/lib/dxmt/x86_64-unix"
 : >"$SETTINGS_ENGINES/$SETTINGS_ENGINE_NAME/lib/dxmt/x86_64-windows/d3d11.dll"
+: >"$SETTINGS_ENGINES/$SETTINGS_ENGINE_NAME/lib/dxmt/x86_64-windows/dxgi.dll"
+: >"$SETTINGS_ENGINES/$SETTINGS_ENGINE_NAME/lib/dxmt/x86_64-windows/winemetal.dll"
+: >"$SETTINGS_ENGINES/$SETTINGS_ENGINE_NAME/lib/dxmt/i386-windows/d3d11.dll"
+: >"$SETTINGS_ENGINES/$SETTINGS_ENGINE_NAME/lib/dxmt/i386-windows/dxgi.dll"
+: >"$SETTINGS_ENGINES/$SETTINGS_ENGINE_NAME/lib/dxmt/i386-windows/winemetal.dll"
 : >"$SETTINGS_ENGINES/$SETTINGS_ENGINE_NAME/lib/dxmt/x86_64-unix/winemetal.so"
 cat >"$SETTINGS_DIR/settings.json" <<'JSON'
 {

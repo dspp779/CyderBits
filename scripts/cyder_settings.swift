@@ -185,8 +185,9 @@ struct CyderGraphicsCapabilities: Equatable {
     var hasDxmt: Bool
 
     /// Probe local GPTK / DXVK / DXVK2 / DXMT availability. When `engineRoot` is nil,
-    /// DXVK family and DXMT are assumed present (0.8 engines ship them); launch paths
-    /// should pass the real root.
+    /// graphics payload availability is unknown, so the settings-only UI keeps the
+    /// options selectable until an engine root is available; launch paths should pass
+    /// the real root.
     static func current(engineRoot: URL? = nil) -> CyderGraphicsCapabilities {
         let osOK = ProcessInfo.processInfo.operatingSystemVersion.majorVersion >= 14
         let hasGptk = CyderGptk.preferredSource() != nil
@@ -252,8 +253,18 @@ struct CyderGraphicsCapabilities: Equatable {
         guard let root else { return true }
         let manager = FileManager.default
         let dxmtDLL = root.appendingPathComponent("lib/dxmt/x86_64-windows/d3d11.dll")
+        let dxmtDXGI = root.appendingPathComponent("lib/dxmt/x86_64-windows/dxgi.dll")
+        let dxmtWinemetal64 = root.appendingPathComponent("lib/dxmt/x86_64-windows/winemetal.dll")
+        let dxmtDLL32 = root.appendingPathComponent("lib/dxmt/i386-windows/d3d11.dll")
+        let dxmtDXGI32 = root.appendingPathComponent("lib/dxmt/i386-windows/dxgi.dll")
+        let dxmtWinemetal32 = root.appendingPathComponent("lib/dxmt/i386-windows/winemetal.dll")
         let winemetal = root.appendingPathComponent("lib/dxmt/x86_64-unix/winemetal.so")
         return manager.isReadableFile(atPath: dxmtDLL.path)
+            && manager.isReadableFile(atPath: dxmtDXGI.path)
+            && manager.isReadableFile(atPath: dxmtWinemetal64.path)
+            && manager.isReadableFile(atPath: dxmtDLL32.path)
+            && manager.isReadableFile(atPath: dxmtDXGI32.path)
+            && manager.isReadableFile(atPath: dxmtWinemetal32.path)
             && manager.isReadableFile(atPath: winemetal.path)
     }
 }
@@ -620,60 +631,6 @@ struct CyderSettings: Codable {
             return .off
         }
         return requested
-    }
-
-    /// Copy engine DXVK PE DLLs into the prefix system32/syswow64.
-    /// Required for CrossOver OEM: `--dll native` loads from the prefix, not
-    /// `lib/dxvk` alone, and builtin still wins without native overrides.
-    @discardableResult
-    static func provisionDxvkIntoPrefix(engineRoot: URL, prefix: URL) -> Bool {
-        let manager = FileManager.default
-        let moltenA = engineRoot.appendingPathComponent("lib/wine/x86_64-unix/libMoltenVK.dylib")
-        let moltenB = engineRoot.appendingPathComponent("lib64/libMoltenVK.dylib")
-        guard manager.isReadableFile(atPath: moltenA.path)
-            || manager.isReadableFile(atPath: moltenB.path) else {
-            return false
-        }
-        var installed = 0
-        let arches: [(String, String)] = [
-            ("x86_64-windows", "system32"),
-            ("i386-windows", "syswow64"),
-        ]
-        let modules = ["d3d9", "d3d10", "d3d10_1", "d3d10core", "d3d11", "dxgi"]
-        for (machine, windowsDir) in arches {
-            let source = engineRoot
-                .appendingPathComponent("lib/dxvk/\(machine)", isDirectory: true)
-            let destination = prefix
-                .appendingPathComponent("drive_c/windows/\(windowsDir)", isDirectory: true)
-            guard manager.fileExists(atPath: source.path) else { continue }
-            do {
-                try manager.createDirectory(at: destination, withIntermediateDirectories: true)
-            } catch {
-                return false
-            }
-            for module in modules {
-                let src = source.appendingPathComponent("\(module).dll")
-                let dst = destination.appendingPathComponent("\(module).dll")
-                guard manager.isReadableFile(atPath: src.path) else { return false }
-                let temp = destination.appendingPathComponent(".\(module).dll.cyder-new")
-                do {
-                    if manager.fileExists(atPath: temp.path) {
-                        try manager.removeItem(at: temp)
-                    }
-                    try manager.copyItem(at: src, to: temp)
-                    try manager.setAttributes([.posixPermissions: 0o644], ofItemAtPath: temp.path)
-                    if manager.fileExists(atPath: dst.path) {
-                        try manager.removeItem(at: dst)
-                    }
-                    try manager.moveItem(at: temp, to: dst)
-                    installed += 1
-                } catch {
-                    try? manager.removeItem(at: temp)
-                    return false
-                }
-            }
-        }
-        return installed > 0
     }
 
     static func isValidProfileID(_ value: String) -> Bool {

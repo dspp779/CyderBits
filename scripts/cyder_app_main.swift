@@ -1081,13 +1081,8 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func graphicsPayloadsPresent() -> Bool {
-        let engine = CyderPaths.engine
-        let dxvk = engine.appendingPathComponent("lib/dxvk/x86_64-windows/d3d11.dll")
-        let dxvk2 = engine.appendingPathComponent("lib/dxvk2/x86_64-windows/d3d11.dll")
-        let dxmt = engine.appendingPathComponent("lib/dxmt/x86_64-windows/d3d11.dll")
-        return FileManager.default.isReadableFile(atPath: dxvk.path)
-            || FileManager.default.isReadableFile(atPath: dxvk2.path)
-            || FileManager.default.isReadableFile(atPath: dxmt.path)
+        let capabilities = CyderGraphicsCapabilities.current(engineRoot: CyderPaths.engine)
+        return capabilities.hasDxvk || capabilities.hasDxvk2 || capabilities.hasDxmt
     }
 
     private func installWinetricks(_ verbs: [String]) {

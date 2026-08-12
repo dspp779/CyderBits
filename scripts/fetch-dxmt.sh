@@ -88,8 +88,10 @@ payload_complete() {
   local dir="$1"
   [[ -f "$dir/x86_64-windows/d3d11.dll" ]] || return 1
   [[ -f "$dir/x86_64-windows/dxgi.dll" ]] || return 1
+  [[ -f "$dir/x86_64-windows/winemetal.dll" ]] || return 1
   [[ -f "$dir/i386-windows/d3d11.dll" ]] || return 1
   [[ -f "$dir/i386-windows/dxgi.dll" ]] || return 1
+  [[ -f "$dir/i386-windows/winemetal.dll" ]] || return 1
   [[ -f "$dir/x86_64-unix/winemetal.so" ]] || return 1
   return 0
 }
@@ -100,8 +102,10 @@ payload_incomplete_error() {
   for rel in \
     x86_64-windows/d3d11.dll \
     x86_64-windows/dxgi.dll \
+    x86_64-windows/winemetal.dll \
     i386-windows/d3d11.dll \
     i386-windows/dxgi.dll \
+    i386-windows/winemetal.dll \
     x86_64-unix/winemetal.so
   do
     if [[ ! -f "$dir/$rel" ]]; then

@@ -971,12 +971,6 @@ cyder_is_maplestory_oem() {
      "${CYDER_BOTTLE_NAME:-}" == maplestory* ]]
 }
 
-cyder_oem_dxvk_dll_overrides() {
-  cyder_is_maplestory_oem || return 1
-  [[ "${CYDER_GRAPHICS_BACKEND:-}" == dxvk ]] || return 1
-  printf '%s\n' 'd3d11,dxgi=n,b'
-}
-
 cyder_wine_is_crossover_frontend() {
   local wine_bin="$1" resolved target engine_root launcher_wine
   [[ -n "$wine_bin" ]] || return 1
@@ -2098,6 +2092,11 @@ cyder_game_environment_key_is_allowed() {
 cyder_engine_has_dxmt_payload() {
   local engine_root="$1"
   [[ -r "$engine_root/lib/dxmt/x86_64-windows/d3d11.dll" \
+     && -r "$engine_root/lib/dxmt/x86_64-windows/dxgi.dll" \
+     && -r "$engine_root/lib/dxmt/x86_64-windows/winemetal.dll" \
+     && -r "$engine_root/lib/dxmt/i386-windows/d3d11.dll" \
+     && -r "$engine_root/lib/dxmt/i386-windows/dxgi.dll" \
+     && -r "$engine_root/lib/dxmt/i386-windows/winemetal.dll" \
      && -r "$engine_root/lib/dxmt/x86_64-unix/winemetal.so" ]]
 }
 
