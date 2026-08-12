@@ -187,11 +187,14 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
         stopAllWineButton.bezelStyle = .rounded
         stopAllWineButton.target = self
         stopAllWineButton.action = #selector(stopAllWine)
-        engineVersion.font = .systemFont(ofSize: 13)
+        engineVersion.font = .systemFont(ofSize: 11)
         engineVersion.textColor = .secondaryLabelColor
-        engineVersion.alignment = .right
+        engineVersion.alignment = .left
         engineVersion.isSelectable = true
         refreshEngineVersionLabel()
+        let engineFooterGap = NSView()
+        engineFooterGap.translatesAutoresizingMaskIntoConstraints = false
+        engineFooterGap.heightAnchor.constraint(equalToConstant: 16).isActive = true
         return tab("一般", rows: [
             gameLibrary,
             note("加入 Windows 遊戲、直接啟動，或管理每個遊戲的獨立 Wine prefix 與設定。"),
@@ -199,8 +202,21 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
             note("對目前 Cyder 使用的 Wine 環境執行 wineserver -k，並等待程序結束。"),
             row("同步機制", syncMode),
             syncModeDescription,
-            row("引擎版本", engineVersion),
+            engineFooterGap,
+            engineVersionFooter(),
         ])
+    }
+
+    private func engineVersionFooter() -> NSView {
+        let title = NSTextField(labelWithString: "引擎版本")
+        title.font = .systemFont(ofSize: 13)
+        title.textColor = .labelColor
+        let stack = NSStackView(views: [title, engineVersion])
+        stack.orientation = .horizontal
+        stack.alignment = .centerY
+        stack.spacing = 8
+        stack.widthAnchor.constraint(equalToConstant: 470).isActive = true
+        return stack
     }
 
     @objc private func openGameLibrary() {
