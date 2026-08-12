@@ -452,6 +452,10 @@ cyder_init_paths() {
   local here="$1"
   if cyder_resources_has_bundled_engine "$here"; then
     CYDER_OGOM="$here"
+    # `here` is the app's Resources directory when launched from the bundle.
+    # Keep it explicit so graphics payload discovery does not construct the
+    # invalid `$Contents/Contents/Resources` path from CYDER_APP.
+    CYDER_RESOURCES="${CYDER_RESOURCES:-$here}"
     CYDER_SCRIPTS="${CYDER_SCRIPTS:-$here/ogom-scripts}"
     CYDER_ENGINE_SRC="${CYDER_ENGINE_SRC:-$(cyder_default_engine_src "$here")}"
     CYDER_ENTITLEMENTS="${CYDER_ENTITLEMENTS:-$here/entitlements.plist}"
@@ -2028,6 +2032,17 @@ cyder_create_profile_prefix() {
     echo "Profile bottle provision failed: $bottle" >&2
     return 1
   fi
+  # Profile bottles are provisioned independently from the shared prefix. Keep
+  # the DXMT winemetal PE in sync here as well, so a newly-created profile can
+  # use the same runtime backend on its first launch.
+  if declare -F cyder_graphics_source_dir >/dev/null 2>&1 &&
+     cyder_graphics_source_dir >/dev/null 2>&1; then
+    cyder_ensure_graphics "$bottle" || {
+      cyder_remove_path "$bottle"
+      echo "Profile graphics payload setup failed: $bottle" >&2
+      return 1
+    }
+  fi
   if ! mkdir "$profile" || ! cyder_profile_write_metadata "$profile" "$id" "$canonical" "$base_template"; then
     cyder_remove_path "$bottle"
     cyder_remove_path "$profile"
@@ -2540,7 +2555,7 @@ cyder_prepare_graphics_prefix() {
   # when no app graphics payload has been packaged.
   if declare -F cyder_graphics_source_dir >/dev/null 2>&1 &&
      cyder_graphics_source_dir >/dev/null 2>&1; then
-    cyder_ensure_graphics || return $?
+    cyder_ensure_graphics "$prefix" || return $?
   fi
   if declare -F cyder_migrate_graphics_prefix >/dev/null 2>&1; then
     if cyder_has_running_prefix "$prefix"; then
@@ -2593,6 +2608,14 @@ cyder_bootstrap_shared_prefix() {
   else
     cyder_provision_prefix_baseline "$wine_bin" "$engine_root" "$CYDER_SHARED_PREFIX" || return $?
     printf 'revision=%s\n' "${CYDER_TEMPLATE_REVISION:-1}" >"$CYDER_BOOTSTRAP_MARKER"
+  fi
+
+  # A first-run prefix did not exist when prepare_graphics_prefix ran, so its
+  # DXMT PE gate could not install winemetal.dll. Run ensure once more after
+  # provisioning to populate the newly-created prefix.
+  if declare -F cyder_graphics_source_dir >/dev/null 2>&1 &&
+     cyder_graphics_source_dir >/dev/null 2>&1; then
+    cyder_ensure_graphics "$CYDER_SHARED_PREFIX" || return $?
   fi
 }
 

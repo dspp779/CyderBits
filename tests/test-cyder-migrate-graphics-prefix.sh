@@ -7,6 +7,9 @@ source "$ROOT/scripts/cyder-common.sh"
 
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/cyder-migrate-graphics-prefix.XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
+# Keep the migration fixture from discovering and mutating a developer's
+# real runtime graphics payload when testing the active-prefix deferral path.
+export CYDER_GRAPHICS_SRC="$TMP/no-graphics"
 ENGINE="$TMP/engine"
 PREFIX="$TMP/prefix"
 
@@ -42,8 +45,12 @@ assert_eq \
   "$(shasum -a 256 "$ENGINE/lib/wine/i386-windows/d3d11.dll" | awk '{print $1}')" \
   "syswow64 d3d11 must be restored from Wine built-ins"
 assert test ! -e "$PREFIX/.cyder-runtime/dxvk-payload"
-assert test ! -e "$PREFIX/drive_c/windows/system32/winemetal.dll"
-assert test ! -e "$PREFIX/drive_c/windows/syswow64/winemetal.dll"
+assert_eq "$(cat "$PREFIX/drive_c/windows/system32/winemetal.dll")" \
+  "old winemetal" \
+  "migration must leave winemetal for ensure-graphics to refresh"
+assert_eq "$(cat "$PREFIX/drive_c/windows/syswow64/winemetal.dll")" \
+  "old winemetal" \
+  "migration must leave 32-bit winemetal for ensure-graphics to refresh"
 
 ACTIVE_PREFIX="$TMP/active-prefix"
 mkdir -p \

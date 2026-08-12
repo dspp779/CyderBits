@@ -48,11 +48,14 @@ CrossOver 原始 ntdll。
 - 路徑可 canonicalize 為目錄，且不是 group/world writable；目錄 owner 必須是目前使用者或 root。
 - backend DLL 不是 symlink，具備 `MZ`／`PE\0\0`、目前 Wine process 的 PE machine，且 offset 64 有 `Wine builtin DLL` signature。
 - 至少有同一 machine 的 `d3d11.dll` 與 `dxgi.dll`。
-- DXVK／DXVK 2 可找到 engine 提供的 MoltenVK；DXMT 可找到 `winemetal.so`；D3DMetal 可找到 GPTK 的 `libd3dshared.dylib`。
+- DXVK／DXVK 2 可找到 engine 提供的 MoltenVK；DXMT 可找到兩個 PE 架構的
+  `d3d11.dll`、`dxgi.dll`、`winemetal.dll` 與 Unix 端的 `winemetal.so`；D3DMetal
+  可找到 GPTK 的 `libd3dshared.dylib`。
 
 檢查失敗會寫入 `cyder-cxcompatdb` warning/error log，該次 backend 回退到
-WineD3D；成功時 log 會記錄實際使用的 backend 路徑。這個直接路徑是 process-local
-設定，不會改寫 engine symlink 或 bottle DLL。
+WineD3D；成功時 log 會記錄實際使用的 backend 路徑。直接指定 backend path 是
+process-local 設定，不會改寫 engine symlink；prefix 中唯一由 ensure-graphics
+維護的圖形 PE 是 DXMT 對應的 `winemetal.dll`。
 
 ## 限幀 vs 遊戲內 VSync
 
@@ -117,8 +120,9 @@ D3DMetal 需要 Apple Game Porting Toolkit（GPTK）。**Cyder 不內建、不�
 ## 驗證狀態
 
 已由自動化 fixture／契約測試覆蓋：graphics archive 的 version 與 checksum、
-runtime 解壓與 `current-*`／engine symlink 更新、舊 bottle DLL 還原與
-`winemetal.dll` 移除、以及 Cyder 開啟與 Finder `.exe` 路徑的更新分流。
+runtime 解壓與 `current-*`／engine symlink 更新、ensure 以目前 DXMT payload
+覆蓋 prefix 的 `winemetal.dll`、migration 還原舊 bottle DLL 且保留
+`winemetal.dll`，以及 Cyder 開啟與 Finder `.exe` 路徑的更新分流。
 
 engine 端另有 `cxcompatdb.so` 的編譯、PE machine/signature、MoltenVK／DXMT
 dependency、builtin prepend 與 Wine smoke test；執行：

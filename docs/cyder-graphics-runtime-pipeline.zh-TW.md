@@ -109,7 +109,7 @@ flowchart LR
 | `scripts/import-engine-release.sh --apply` | 驗證 manifest／NTDLL SHA，寫入 `config/cyder-engine-*` |
 | `scripts/create-cyder-app.sh` | 複製 pin 住的 engine tar **與** 三組 graphics sidecar；缺一則失敗（`CYDER_ALLOW_MISSING_GRAPHICS=1` 除外） |
 
-Engine 升級（例如 `Cyder010-dxvk2`）會更新 Wine 與 engine 內的
+Engine 升級（例如 `Cyder010`）會更新 Wine 與 engine 內的
 `cxcompatdb.so`；圖形 payload 版本仍由 `lib/*/version` 與 sidecar 獨立演進。
 
 ---
@@ -146,11 +146,19 @@ Cyder.app/Contents/Resources/
     current-dxvk  → dxvk/1.10.3
     current-dxvk2 → dxvk2/2.7.1
     current-dxmt  → dxmt/0.80
+
+~/Library/Application Support/Cyder/bottles/shared/
+  drive_c/windows/system32/winemetal.dll  # DXMT x86_64-windows PE
+  drive_c/windows/syswow64/winemetal.dll  # DXMT i386-windows PE
 ```
 
 `cyder-ensure-graphics.sh`：比對 sidecar version 與
 `graphics/<name>/<ver>/.cyder-graphics-version`；不同才解壓。然後原子更新
-`current-*`，並把 engine `lib/<name>` 換成**相對** symlink。
+`current-*`，把 engine `lib/<name>` 換成**相對** symlink，並以該次 DXMT
+payload 的 `x86_64-windows/winemetal.dll`／`i386-windows/winemetal.dll`
+覆蓋目前要啟動的 prefix（shared 或 per-game）的 `system32`／`syswow64`
+對應檔案。`winemetal.so` 只留在
+engine `lib/dxmt/x86_64-unix/`，不複製進 prefix。
 在受管 `CYDER_ENGINES` 外若已是實體目錄，會拒絕 `rm -rf`。
 
 ---
@@ -173,8 +181,8 @@ sequenceDiagram
     L->>E: 比對 version + artifact SHA
     E-->>App: Engines/wine-x86_64
     App->>L: --ensure-graphics-only
-    L->>G: 解壓 payload、更新 current-*、symlink
-    L->>M: bottle 未在跑才還原舊拷入的 d3d*
+    L->>G: 解壓 payload、更新 current-*、symlink、覆蓋 winemetal.dll
+    L->>M: bottle 未在跑才還原舊拷入的 d3d*；保留 winemetal.dll
     Note over App,M: CYD-GFX-001 不擋進設定
   else Finder 開 .exe
     User->>App: 雙擊 exe
@@ -190,22 +198,31 @@ sequenceDiagram
 | 步驟 | 腳本／入口 | 條件 |
 |------|------------|------|
 | 1. 裝／升級 engine | `cyder_ensure_shared_engine` | version 不同，或同版但 SHA 不同 |
-| 2. 裝／升級 graphics | `cyder_ensure_graphics` | sidecar version ≠ 已解壓 marker |
+| 2. 裝／升級 graphics | `cyder_ensure_graphics` | sidecar version ≠ 已解壓 marker；每次也校正 DXMT `winemetal.dll` |
 | 3. 接線 | `lib/dxvk{,2}`、`lib/dxmt` → `current-*` | 每次 ensure-graphics |
-| 4. 遷移舊 bottle | `cyder_migrate_graphics_prefix` | 偵測舊 Cyder 拷入的 DXVK／DXMT PE；prefix 使用中則延後 |
-| 5. Bootstrap bottle | `cyder_bootstrap_shared_prefix` | 開 Cyder 且 marker 未齊；**不再**把 DXVK 拷進 system32 |
+| 4. DXMT PE gate | `cyder_ensure_dxmt_winemetal_prefix` | 將同版 64/32 位元 `winemetal.dll` 覆蓋 shared 或 per-game prefix；不複製 `winemetal.so` |
+| 5. 遷移舊 bottle | `cyder_migrate_graphics_prefix` | 偵測舊 Cyder 拷入的 DXVK／DXMT PE；prefix 使用中則延後，且不刪 `winemetal.dll` |
+| 6. Bootstrap bottle | `cyder_bootstrap_shared_prefix` | 開 Cyder 且 marker 未齊；**不再**把 DXVK 拷進 system32 |
 
 `cyder_prepare_graphics_prefix` 在有 graphics 貨源時會先跑 ensure，再開 Cyder
 的 `--ensure-graphics-only` 會再跑一次（第二次應是 no-op）。Finder 的
-`--launch-exe` **不**走這條。
+`--launch-exe` **不**走這條。若是首次建立 prefix，bootstrap 完成後會再跑一次
+ensure，補上建立前不存在、因此無法先安裝的 `winemetal.dll`。
 
 Engine 大版本升級會 `cyder_reset_shared_prefix`；圖形 payload 換版**不會**重做 bottle。
+
+Health check 只驗證 Wine engine、prefix registry／kernel32 與最小 `cmd` probe，
+不把可選的 DXVK／DXVK 2／DXMT 缺失當成 Windows 環境損壞。圖形後端是否可用由
+ensure-graphics 與啟動前 capability gate 個別檢查；DXMT 額外要求兩個 PE 架構的
+`winemetal.dll`、`d3d11.dll`、`dxgi.dll` 及 Unix 端 `winemetal.so`。
 
 ---
 
 ## 5. 啟動時如何載入轉譯層
 
-Bottle 的 `system32`／`syswow64` 維持 Wine 內建 `d3d*`／`dxgi`。真正換成 DXVK／DXMT
+Bottle 的 `system32`／`syswow64` 維持 Wine 內建 `d3d*`／`dxgi`；唯一的 DXMT
+例外是 `winemetal.dll`，它由 ensure-graphics 安裝同版 PE 作為 Wine loader
+可見的對應模組。真正換成 DXVK／DXMT
 是 **process-local**：Cyder 傳入環境變數，原始 CrossOver ntdll 的 loader hook 載入
 `cxcompatdb.so`，再由 plugin 呼叫既有 loader primitive 完成 prepend。
 
@@ -259,7 +276,7 @@ sequenceDiagram
 
 舊版已發布、未內含 `cxcompatdb.so` 的 engine 必須重新打包升級；不能藉由更新
 app 端環境變數讓舊 engine 自動取得此 plugin。現行 pin：
-`CX26.3.0-W11-Cyder010-dxvk2`。
+`CX26.3.0-W11-Cyder010`。
 
 ---
 

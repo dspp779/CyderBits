@@ -640,6 +640,13 @@ if [[ "$LAUNCH_ONLY" -eq 1 ]]; then
       }
     fi
   fi
+  # A per-game bottle may predate the current DXMT payload or have been
+  # created independently from the shared prefix. Refresh its DXMT winemetal
+  # PE and run the legacy migration before applying launch settings.
+  cyder_prepare_graphics_prefix "$wine" "$engine" "$prefix" || {
+    echo "Unable to prepare graphics payload for prefix: $prefix" >&2
+    exit 1
+  }
   cyder_set_stage settings-apply
   cyder_prepare_game_launch_settings "$wine" "$engine" "$prefix" "$exe" || {
     settings_status=$?

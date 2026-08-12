@@ -153,12 +153,40 @@ cyder_replace_engine_graphics_link() {
   ln -sfn "$relative" "$link"
 }
 
+cyder_ensure_dxmt_winemetal_prefix() {
+  local dxmt_root="$1" prefix="$2"
+  local arch source destination temporary
+
+  [[ -d "$prefix" ]] || return 0
+  for arch in x86_64 i386; do
+    source="$dxmt_root/${arch}-windows/winemetal.dll"
+    [[ -f "$source" ]] || {
+      echo "DXMT payload is missing $arch winemetal.dll: $source" >&2
+      return 1
+    }
+  done
+  for arch in x86_64 i386; do
+    source="$dxmt_root/${arch}-windows/winemetal.dll"
+    destination="$prefix/drive_c/windows/"
+    if [[ "$arch" == x86_64 ]]; then
+      destination+="system32/winemetal.dll"
+    else
+      destination+="syswow64/winemetal.dll"
+    fi
+    mkdir -p "$(dirname "$destination")"
+    temporary="$(mktemp "$(dirname "$destination")/.winemetal.dll.XXXXXX")"
+    cp "$source" "$temporary"
+    mv -f "$temporary" "$destination"
+  done
+}
+
 cyder_ensure_graphics() {
-  local source_dir runtime_root engines_root engine
+  local source_dir runtime_root engines_root engine prefix
   source_dir="$(cyder_graphics_source_dir)"
   runtime_root="${CYDER_RUNTIME_ROOT:-$HOME/.cyder/runtime}"
   engines_root="${CYDER_ENGINES:-$runtime_root/Engines}"
   engine="$engines_root/${CYDER_ENGINE_NAME:-wine-x86_64}"
+  prefix="${1:-${CYDER_SHARED_PREFIX:-}}"
 
   cyder_install_graphics_payload "$source_dir" "$runtime_root" dxvk
   cyder_install_graphics_payload "$source_dir" "$runtime_root" dxvk2
@@ -171,6 +199,7 @@ cyder_ensure_graphics() {
     "$engine/lib/dxvk2" "$runtime_root/graphics/current-dxvk2" "$engine" "$engines_root"
   cyder_replace_engine_graphics_link \
     "$engine/lib/dxmt" "$runtime_root/graphics/current-dxmt" "$engine" "$engines_root"
+  cyder_ensure_dxmt_winemetal_prefix "$runtime_root/graphics/current-dxmt" "$prefix"
 }
 
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then

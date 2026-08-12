@@ -60,7 +60,6 @@ cyder_migrate_graphics_prefix() {
         "$engine/lib/wine/$arch-windows/$module.dll" \
         "$prefix_dir/$module.dll"
     done
-    rm -f "$prefix_dir/winemetal.dll"
   done
   rm -f \
     "$prefix/.cyder-runtime/dxvk-payload" \

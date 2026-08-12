@@ -45,8 +45,8 @@
 | `cyder-copy-engine-artifact.sh` | 複製預建 engine artifact 進 app `Resources/` |
 | `create-cyder-app.sh` | `dist/Cyder.app`（`.exe` 啟動器 + engine artifact + graphics payload + bootstrap） |
 | `release-cyder.sh` | 測試／正式通道：建置、簽署、（正式）公證與 `Cyder.app.zip`；見 `docs/release-pipeline.zh-TW.md` |
-| `cyder-ensure-graphics.sh` | 將 app `Resources/graphics/` payload 依 version／SHA-256 安裝到 runtime，更新 `current-dxvk`／`current-dxvk2`／`current-dxmt`，並建立 engine `lib` 相對 symlink |
-| `cyder-migrate-graphics-prefix.sh` | 偵測舊 Cyder 拷入的 DXVK／DXMT DLL，還原 Wine 內建 `d3d*`／`dxgi`、移除 `winemetal.dll` 與舊 payload marker；不修改 DllOverrides registry |
+| `cyder-ensure-graphics.sh` | 將 app `Resources/graphics/` payload 依 version／SHA-256 安裝到 runtime，更新 `current-dxvk`／`current-dxvk2`／`current-dxmt`、建立 engine `lib` 相對 symlink，並以目前 DXMT payload 覆蓋 prefix 的 64/32 位元 `winemetal.dll` |
+| `cyder-migrate-graphics-prefix.sh` | 偵測舊 Cyder 拷入的 DXVK／DXMT DLL，還原 Wine 內建 `d3d*`／`dxgi`、清理舊 payload marker；保留 `winemetal.dll`，由 ensure-graphics 以目前 DXMT 版本覆蓋；不修改 DllOverrides registry |
 | `cyder_launcher.sh` | 解析 `.exe`、bootstrap `bottles/shared`、執行 Wine；`--ensure-engine-only` / `--ensure-graphics-only` / `--bootstrap-only` / `--launch-exe` 是 Cyder GUI 的內部維護介面，不是 Cyder.app 公開 argv；Finder `.exe` 路徑不升級 graphics payload |
 | `cyder-winetricks.sh` | 以 Cyder engine 的 unattended CLI 安裝固定版 Winetricks 元件；目標為 SharedPrefix，供 Cyder 原生元件選擇器呼叫 |
 | `cyder_app_main.swift` | 編譯為 `Cyder.app/Contents/MacOS/Cyder`（Universal）；無 `.exe` 時顯示設定頁，有 `.exe` 時直接啟動 Wine，收到 same-prefix 的 `ActivatingAppPID` Foreground 通知後 activate 並退出 |
@@ -116,7 +116,7 @@ run-bluecg.sh
 | `tests/test-cyder-graphics-prepend.sh` | 圖形 backend 路徑由 app 傳入，且不修改 CrossOver ntdll |
 | `tests/test-cyder-pack-graphics-payloads.sh` | DXVK／DXMT 獨立 archive、sidecar 與 DXVK PE signature |
 | `tests/test-cyder-ensure-graphics.sh` | runtime payload 安裝、版本切換與 engine symlink |
-| `tests/test-cyder-migrate-graphics-prefix.sh` | 舊 prefix 的 Wine builtin DLL 還原與 `winemetal.dll` 清除 |
+| `tests/test-cyder-migrate-graphics-prefix.sh` | 舊 prefix 的 Wine builtin DLL 還原，並確認 migration 不刪除 `winemetal.dll` |
 | `tests/test-strip-wine-install.sh` | `strip-wine-install.sh`（零風險剝離） |
 | `tests/test-universal-zstd.sh` | bundled zstd slices、deployment target、依賴與無外部工具解壓 |
 

@@ -10,16 +10,24 @@ trap 'rm -rf "$tmp"' EXIT
 resources_root="$tmp/Resources"
 resources="$resources_root/graphics"
 runtime="$tmp/runtime"
+prefix="$runtime/prefix"
 engine_name="wine-test"
 engine="$runtime/Engines/$engine_name"
 fake_zstd="$resources_root/tools/zstd/zstd"
-mkdir -p "$resources" "$resources_root/tools/zstd" "$tmp/staging/dxvk" "$tmp/staging/dxvk2" "$tmp/staging/dxmt"
+mkdir -p "$resources" "$resources_root/tools/zstd" \
+  "$tmp/staging/dxvk" "$tmp/staging/dxvk2" \
+  "$tmp/staging/dxmt/x86_64-windows" "$tmp/staging/dxmt/i386-windows" \
+  "$tmp/staging/dxmt/x86_64-unix" \
+  "$prefix/drive_c/windows/system32" "$prefix/drive_c/windows/syswow64"
 
 printf 'dxvk payload\n' >"$tmp/staging/dxvk/d3d11.dll"
 printf 'dxvk-1.2.3\n' >"$tmp/staging/dxvk/version"
 printf 'dxvk2 payload\n' >"$tmp/staging/dxvk2/d3d11.dll"
 printf 'dxvk2-2.7.1\n' >"$tmp/staging/dxvk2/version"
 printf 'dxmt payload\n' >"$tmp/staging/dxmt/d3d11.dll"
+printf 'dxmt x86_64 winemetal\n' >"$tmp/staging/dxmt/x86_64-windows/winemetal.dll"
+printf 'dxmt i386 winemetal\n' >"$tmp/staging/dxmt/i386-windows/winemetal.dll"
+printf 'dxmt unix winemetal\n' >"$tmp/staging/dxmt/x86_64-unix/winemetal.so"
 printf 'dxmt-4.5.6\n' >"$tmp/staging/dxmt/version"
 tar -cf "$resources/dxvk-1.2.3.tar.zst" -C "$tmp/staging" dxvk
 tar -cf "$resources/dxvk2-2.7.1.tar.zst" -C "$tmp/staging" dxvk2
@@ -49,6 +57,7 @@ env -u CYDER_ZSTD \
   CYDER_RUNTIME_ROOT="$runtime" \
   CYDER_ENGINES="$runtime/Engines" \
   CYDER_ENGINE_NAME="$engine_name" \
+  CYDER_SHARED_PREFIX="$prefix" \
   bash "$ROOT/scripts/cyder-ensure-graphics.sh"
 
 assert test -f "$runtime/graphics/dxvk/1.2.3/d3d11.dll"
@@ -66,6 +75,17 @@ assert_eq "$(readlink "$engine/lib/dxmt")" "../../../graphics/current-dxmt" \
 assert test -f "$engine/lib/dxvk/d3d11.dll"
 assert test -f "$engine/lib/dxvk2/d3d11.dll"
 assert test -f "$engine/lib/dxmt/d3d11.dll"
+assert_eq "$(cat "$prefix/drive_c/windows/system32/winemetal.dll")" \
+  "dxmt x86_64 winemetal" \
+  "ensure-graphics must install the DXMT 64-bit winemetal builtin into system32"
+assert_eq "$(cat "$prefix/drive_c/windows/syswow64/winemetal.dll")" \
+  "dxmt i386 winemetal" \
+  "ensure-graphics must install the DXMT 32-bit winemetal builtin into syswow64"
+assert test ! -e "$prefix/drive_c/windows/system32/winemetal.so"
+
+# Ensure is authoritative for the prefix copy: a stale file is replaced by
+# the current payload even when the graphics archive version is unchanged.
+printf 'stale winemetal\n' >"$prefix/drive_c/windows/system32/winemetal.dll"
 
 rm -rf "$tmp/staging/dxvk"
 mkdir -p "$tmp/staging/dxvk"
@@ -83,6 +103,7 @@ env -u CYDER_ZSTD \
   CYDER_RUNTIME_ROOT="$runtime" \
   CYDER_ENGINES="$runtime/Engines" \
   CYDER_ENGINE_NAME="$engine_name" \
+  CYDER_SHARED_PREFIX="$prefix" \
   bash "$ROOT/scripts/cyder-ensure-graphics.sh"
 
 assert_eq "$(<"$engine/lib/dxvk/d3d11.dll")" "updated dxvk payload" \
@@ -91,6 +112,9 @@ assert_eq "$(readlink "$runtime/graphics/current-dxvk")" "dxvk/1.2.4" \
   "DXVK current symlink must be updated atomically"
 assert_eq "$(readlink "$runtime/graphics/current-dxvk2")" "dxvk2/2.7.1" \
   "DXVK2 current symlink must remain unchanged when DXVK 1.x updates"
+assert_eq "$(cat "$prefix/drive_c/windows/system32/winemetal.dll")" \
+  "dxmt x86_64 winemetal" \
+  "ensure-graphics must overwrite a stale prefix winemetal builtin"
 
 # I6: refuse to rm -rf a real lib/dxvk outside managed Engines.
 outside_engine="$tmp/foreign-engine"
@@ -128,6 +152,7 @@ env -u CYDER_ZSTD \
   CYDER_RUNTIME_ROOT="$runtime" \
   CYDER_ENGINES="$alt_engines" \
   CYDER_ENGINE_NAME="wine-test" \
+  CYDER_SHARED_PREFIX="$prefix" \
   bash "$ROOT/scripts/cyder-ensure-graphics.sh"
 assert test -L "$alt_engine/lib/dxvk"
 assert test -f "$alt_engine/lib/dxvk/d3d11.dll"

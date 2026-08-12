@@ -125,7 +125,7 @@ actions:
 | `wined3d` | Wine 內建 DLL，不需額外 payload |
 | `dxvk` | `lib/dxvk/<arch>-windows/` 與 Engine 內的 MoltenVK |
 | `dxvk2` | `lib/dxvk2/<arch>-windows/` 與 Engine 內的 MoltenVK |
-| `dxmt` | `lib/dxmt/<arch>-windows/` 與 `x86_64-unix/winemetal.so` |
+| `dxmt` | `lib/dxmt/<arch>-windows/`（含 `d3d11.dll`、`dxgi.dll`、`winemetal.dll`）與 `x86_64-unix/winemetal.so`；ensure-graphics 同步將 `winemetal.dll` 放入 prefix 對應架構目錄 |
 | `d3dmetal` | `lib64/apple_gptk/wine/<arch>-windows/`、`libd3dshared.dylib` 與 `D3DMetal.framework` |
 
 `lib/dxvk`／`lib/dxvk2`／`lib/dxmt` 是 ensure-graphics 接到
