@@ -98,6 +98,9 @@ macOS 11+ 的 Cyder native launcher 會對每個 bundle/support root 維持一�
 選單中聚合狀態。不同 bundle 或 support root（例如 MapleStory OEM flavor）是刻意隔離
 的執行環境，因此各自擁有自己的 icon。
 
+選單列 session、Steam helper、同一 prefix 多程式，以及後續 process monitor 的設計
+記錄見 [Cyder Session 與 Windows 程序監控設計](cyder-session-process-monitoring.zh-TW.md)。
+
 也可不經 LaunchServices，直接使用 `EXE [ARG ...]` 呼叫 app executable：
 
 ```sh

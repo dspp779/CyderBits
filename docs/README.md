@@ -32,6 +32,7 @@
 | 文件 | 對象 | 內容 |
 |------|------|------|
 | [cyder.md](cyder.md) | 一般使用者 | Cyder 啟動器：開 `.exe`、SharedPrefix、bootstrap |
+| [cyder-session-process-monitoring.zh-TW.md](cyder-session-process-monitoring.zh-TW.md) | 開發 / 設計 | 選單列 session、Steam helper、同 prefix 多程式與 process monitor 設計 |
 | [cyder-graphics-backends.zh-TW.md](cyder-graphics-backends.zh-TW.md) | 一般使用者 | 圖形後端（WineD3D/DXVK/D3DMetal）、GPTK 安裝、DXVK 限幀 vs VSync |
 | [cyder-compatdb.zh-TW.md](cyder-compatdb.zh-TW.md) | 開發 / 發布 | CompatDB 架構、Engine 重包判斷、YAML 規則新增與本機測試 |
 | [cyder-wine-engine-project.md](cyder-wine-engine-project.md) | 開發 / 發布 | Wine engine 獨立專案邊界、manifest 契約與 Cyder 匯入流程 |
