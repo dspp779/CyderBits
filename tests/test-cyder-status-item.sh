@@ -34,10 +34,12 @@ assert_contains "$status_source" '結束所有 Cyder 程序…' \
   "the menu must expose an explicit whole-environment stop"
 assert_contains "$status_source" 'cyderBottleImage(' \
   "the menu bar must use Cyder's bottle silhouette"
-assert_contains "$status_source" 'windowCount:' \
-  "the status image API must retain its lifecycle state parameter"
+assert_not_contains "$status_source" 'windowCount:' \
+  "the pure decanter icon must not retain the removed window-pane state"
 assert_contains "$status_source" 'liquidLevel:' \
   "managed shutdown must animate the bottle liquid level"
+assert_contains "$status_source" 'forcedStopLiquidLevel' \
+  "managed shutdown must use the forced-stop liquid drain animation"
 assert_contains "$status_source" 'if clampedLiquidLevel >= 0.999' \
   "a full Cyder bottle must fill through the neck and shoulders"
 assert_contains "$status_source" 'smooth arced bottom' \

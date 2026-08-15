@@ -4,9 +4,9 @@
 
 # CyderBits
 
-**在 Mac 上跑經典 Windows 遊戲 — 先支援 DirectDraw 與 GDI。**
+**在 Mac 上跑經典 Windows 遊戲 — Cyder 0.10.0 以 DirectDraw 與 GDI 為驗證基準，並提供可選圖形 backend。**
 
-驗證路徑是傳統 2D Win32 圖形：**DirectDraw → Wine wined3d/OpenGL** 與 GDI。目前封裝的 `CX26.3.0-W11-Cyder007` engine 也包含 x86_64 **MoltenVK**（重新打包預設 `VULKAN_MODE=with` + `VULKAN_SOURCE=existing`），供 Wine Vulkan 使用；但 BlueCG 不走 Vulkan、DXVK、dxmt 或 D3DMetal。
+驗證路徑仍是傳統 2D Win32 圖形：**DirectDraw → Wine wined3d/OpenGL** 與 GDI。Cyder 0.10.0 使用 `CX26.3.0-W11-Cyder010` engine；DXVK／DXMT 以獨立 graphics payload 提供，D3DMetal 透過 GPTK 提供。實際遊戲相容性仍需依遊戲、macOS 版本與 backend 個別驗證。
 
 CyderBits 在 Apple Silicon 上自建 CrossOver 系 Wine，並提供兩個工具：**Cyder** — 一鍵啟動 `.exe` — 與 **CyderBits** — 把 `.exe` 包成可雙擊的 macOS `.app`。
 
@@ -63,9 +63,9 @@ bash scripts/run-bluecg.sh
 | **單機** | 小朋友齊打交 2 (1.9c) | 🟢 可玩 | 可直接執行遊玩 |
 | **單機** | 小朋友齊打交 2 (2.0a) | 🟡 需依賴庫 | 需透過 `winetricks` 安裝 `vcrun2005`, `wmp9`, `quartz`, `devenum`, `vb6run` |
 | **線上** | 水藍魔力 (BlueCG) | 🟢 可玩 | 專案驗證基準 (DirectDraw / GDI) |
-| **線上** | 新楓之谷 | 🟢 可玩 | 需 MapleStory Launcher 引擎 & 搭配 [CitrusGate](https://github.com/dspp779/CitrusGate) 傳送 OTP |
-| **線上** | 新楓之谷 經典版 | 🟢 可玩 | 需搭配 [CitrusGate](https://github.com/dspp779/CitrusGate) 傳送 OTP |
-| **線上** | 爆爆王 | 🟢 可玩 | 可正常遊玩 (台灣官方預計於 2026/08/13 結束營運) |
+| **線上** | 新楓之谷 | 🟡 部分驗證 | 需 MapleStory Launcher、[CitrusGate](https://github.com/dspp779/CitrusGate) 與有效 OTP；CX26 版本仍需完成地圖級驗收 |
+| **線上** | 新楓之谷 經典版 | 🟡 部分驗證 | 需 [CitrusGate](https://github.com/dspp779/CitrusGate) 傳送 OTP；QDO workaround 與背景程序清理仍有已知限制 |
+| **線上** | 爆爆王 | 🟡 歷史驗證 | 服務可用性與目前版本相容性未在 Cyder 0.10.0 重新驗證 |
 
 ## 圖形 backend 狀態
 
@@ -73,10 +73,10 @@ bash scripts/run-bluecg.sh
 |---|---|---|
 | DirectDraw / GDI | **支援且已驗證** | BlueCG 使用 DirectDraw；預設路徑是 wined3d/OpenGL，GDI 是相容性 fallback。 |
 | wined3d / OpenGL | **目前預設** | BlueCG 驗證用 engine 含已測試的 `winemac.drv` same-view backing 修復，可支援 Retina/DPI resize。 |
-| Vulkan / MoltenVK | **目前封裝 engine 已包含** | x86_64 Wine 內含 `libMoltenVK.dylib`（macOS 10.15 minos）；另外暫時打包 wait-poll shim，直到 MoltenVK 相關問題修復。這不是 BlueCG 的繪圖路徑。`pack-engine-artifact.sh` 預設保留 MoltenVK；從原始碼重建仍可用 `--without-vulkan`。 |
-| DXVK | **尚未整合** | 本 repo 沒有打包 DXVK runtime，也沒有遊戲驗證結果。 |
-| dxmt | **已整合（隨 engine 出貨）** | 封裝 engine 於 `lib/dxmt/` 內含上游 DXMT v0.80；需 macOS 15+ 方可選取（高於 D3DMetal 的 macOS 14+）。本 repo 未維護遊戲驗證結果。 |
-| D3DMetal | **不是產品 backend** | 只在歷史 source 實驗中被提及，尚未接入或驗證為 Cyder runtime 路徑。 |
+| Vulkan / MoltenVK | **由 Cyder010 engine 提供** | x86_64 Wine 內含 `libMoltenVK.dylib`（macOS 10.15 minos）；Cyder010 不使用舊的 `libMoltenVK.real.dylib` shim pair。這不是 BlueCG 的主要繪圖路徑。 |
+| DXVK | **已整合 runtime payload** | DXVK 由 Cyder.app 的 `Resources/graphics/` 外部 payload 提供，透過 CompatDB builtin + prepend 載入；DXVK 2 仍暫不出貨。 |
+| dxmt | **已整合 runtime payload** | DXMT 由 Cyder.app 的外部 payload 提供，需 macOS 15+；實際遊戲相容性需逐款驗證。 |
+| D3DMetal | **已接入產品 backend** | 透過 GPTK／Apple D3DMetal，需 macOS 14+ 與可用 GPTK；實際遊戲相容性需逐款驗證。 |
 
 詳見 [Wine configure 與圖形選項](docs/wine-configure-options.md)、
 [DXVK 編譯備忘](docs/build-dxvk.zh-TW.md)。
@@ -171,6 +171,7 @@ bash tests/test-verify-bluecg.sh
 
 - [Cyder 0.7.0 發布說明](docs/releases/v0.7.0.md) — CrossOver bottle 隔離、cabextract、新圖示、MapleStory OEM flavor
 - [Cyder 0.6.0 發布說明](docs/releases/v0.6.0.md) — CX26.3 engine、macOS 10.15 runtime、Winetricks、動態 argv
+- [Cyder 0.10.0 發布說明](docs/releases/v0.10.0.md) — Cyder010 engine、graphics payload、session 與診斷整合
 - [docs/README.md](docs/README.md) — 索引
 - [docs/cyder.md](docs/cyder.md) — Cyder 啟動器
 - [docs/cyderbits.md](docs/cyderbits.md) — CyderBits 打包器

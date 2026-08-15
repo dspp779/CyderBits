@@ -4,9 +4,9 @@
 
 # CyderBits
 
-**Run legacy Windows games on Mac — DirectDraw & GDI first.**
+**Run legacy Windows games on Mac — Cyder 0.10.0 uses DirectDraw and GDI as its validation baseline, with selectable graphics backends.**
 
-The validated path is classic 2D Win32 graphics: **DirectDraw → Wine wined3d/OpenGL** and GDI. The current packaged `CX26.3.0-W11-Cyder009` engine also contains an x86_64 **MoltenVK** runtime for Wine Vulkan (repacking defaults to `VULKAN_MODE=with` + `VULKAN_SOURCE=existing`), but BlueCG does not use Vulkan, DXVK, dxmt, or D3DMetal.
+The validated path remains classic 2D Win32 graphics: **DirectDraw → Wine wined3d/OpenGL** and GDI. Cyder 0.10.0 uses the `CX26.3.0-W11-Cyder010` engine; DXVK and DXMT are delivered as separate graphics payloads, while D3DMetal is available through GPTK. Actual compatibility still depends on the game, macOS version, and selected backend.
 
 CyderBits builds CrossOver-based Wine on Apple Silicon and ships two tools: **Cyder** — a one-click `.exe` launcher — and **CyderBits** — a packager that wraps `.exe` files as double-clickable macOS `.app` bundles.
 
@@ -63,9 +63,9 @@ Below is a summary of tested games on Cyder / CyderBits. For detailed configurat
 | **Single-player** | Little Fighter 2 (1.9c) | 🟢 Playable | Works directly out of the box |
 | **Single-player** | Little Fighter 2 (2.0a) | 🟡 Winetricks deps | Requires `vcrun2005`, `wmp9`, `quartz`, `devenum`, `vb6run` via winetricks |
 | **Online** | BlueCG (水藍魔力) | 🟢 Playable | Project baseline validation (DirectDraw / GDI) |
-| **Online** | MapleStory (新楓之谷) | 🟢 Playable | Uses MapleStory Launcher engine & [CitrusGate](https://github.com/dspp779/CitrusGate) for OTP |
-| **Online** | MapleStory Classic | 🟢 Playable | Uses [CitrusGate](https://github.com/dspp779/CitrusGate) for OTP handling |
-| **Online** | Crazy Arcade (爆爆王) | 🟢 Playable | Playable (TW official server sunsetting on 2026/08/13) |
+| **Online** | MapleStory (新楓之谷) | 🟡 Partially validated | Requires the MapleStory Launcher, [CitrusGate](https://github.com/dspp779/CitrusGate), and a valid OTP; CX26 still needs map-level validation |
+| **Online** | MapleStory Classic | 🟡 Partially validated | Requires [CitrusGate](https://github.com/dspp779/CitrusGate); QDO workaround and background-process cleanup remain limited |
+| **Online** | Crazy Arcade (爆爆王) | 🟡 Historical validation | Service availability and current-version compatibility were not revalidated for Cyder 0.10.0 |
 
 ## Graphics backend status
 
@@ -73,10 +73,10 @@ Below is a summary of tested games on Cyder / CyderBits. For detailed configurat
 |---|---|---|
 | DirectDraw / GDI | **Supported and validated** | BlueCG uses DirectDraw; the default path is wined3d/OpenGL. GDI is a compatibility fallback. |
 | wined3d / OpenGL | **Active default** | BlueCG's validated engine includes the tested `winemac.drv` same-view backing fix for Retina/DPI resize. |
-| Vulkan / MoltenVK | **Included in the current packaged engine** | `libMoltenVK.dylib` is bundled for x86_64 Wine Vulkan support (macOS 10.15 minos); it is not the BlueCG rendering path. `pack-engine-artifact.sh` keeps MoltenVK by default; fresh source builds may use `--without-vulkan`. |
-| DXVK | **Not integrated** | No DXVK runtime or game validation is shipped by this repository. |
-| dxmt | **Integrated (shipped in engine)** | Upstream DXMT v0.80 is bundled under `lib/dxmt/` in packaged CX26/OEM25 engines; macOS 15+ required to select in UI (higher than D3DMetal's macOS 14+). Game validation is not maintained in this repo. |
-| D3DMetal | **Not a product backend** | Only referenced by historical source experiments; it is not wired or validated as a Cyder runtime path. |
+| Vulkan / MoltenVK | **Provided by the Cyder010 engine** | `libMoltenVK.dylib` is bundled for x86_64 Wine Vulkan support (macOS 10.15 minos); Cyder010 does not use the obsolete `libMoltenVK.real.dylib` shim pair. It is not the primary BlueCG rendering path. |
+| DXVK | **Integrated as a runtime payload** | DXVK is delivered under `Resources/graphics/` and loaded through CompatDB builtin + prepend; DXVK 2 is still deferred. |
+| dxmt | **Integrated as a runtime payload** | DXMT is delivered as a separate Cyder payload and requires macOS 15+; game compatibility must be validated per title. |
+| D3DMetal | **Product backend** | Available through GPTK / Apple D3DMetal on macOS 14+ with a usable GPTK; game compatibility must be validated per title. |
 
 See [Wine configure and graphics options](docs/wine-configure-options.md) for build choices and limitations.
 
@@ -173,6 +173,7 @@ bash tests/test-verify-bluecg.sh
 
 ## Documentation
 
+- [Cyder 0.10.0 release notes](docs/releases/v0.10.0.md) — Cyder010 engine, graphics payloads, session lifecycle, and diagnostics
 - [Cyder 0.7.0 release notes](docs/releases/v0.7.0.en.md) — CrossOver bottle isolation, cabextract, new icon, MapleStory OEM flavor
 - [Cyder 0.6.0 release notes](docs/releases/v0.6.0.en.md) — CX26.3 engine, macOS 10.15 runtime, Winetricks, dynamic argv
 - [docs/README.md](docs/README.md) — index

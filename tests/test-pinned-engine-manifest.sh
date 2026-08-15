@@ -17,11 +17,11 @@ assert_eq "$(plutil -extract artifact raw -o - "$manifest")" \
   "$(basename "$archive")" \
   "pinned manifest and archive path should agree"
 assert_contains "$(cat "$manifest")" "cyder-wineserver-free-async-queue-null-fd.patch" \
-  "pinned Cyder009 manifest should include the latest free_async_queue guard"
+  "pinned Cyder010 manifest should include the latest free_async_queue guard"
 assert_contains "$(cat "$manifest")" "a6-final-same-view-backing-sync.patch" \
-  "pinned Cyder009 manifest should include the final A6 backing-sync patch"
+  "pinned Cyder010 manifest should include the final A6 backing-sync patch"
 assert_contains "$(cat "$manifest")" "cyder-ntdll-qdo-optnone-NtQueryDirectoryObject.patch" \
-  "pinned Cyder009 manifest should include the QDO optnone bandage"
+  "pinned Cyder010 manifest should include the QDO optnone bandage"
 
 if [[ ! -f "$archive" ]]; then
   echo "SKIP pinned engine payload checks: $archive is not present"
@@ -38,6 +38,9 @@ assert_eq "$(tar -xJOf "$archive" wine-x86_64/lib/wine/x86_64-windows/ntdll.dll 
   "$(plutil -extract ntdllSHA256 raw -o - "$manifest")" \
   "pinned NTDLL digest should match"
 tar -tJf "$archive" wine-x86_64/lib/wine/x86_64-unix/libMoltenVK.dylib >/dev/null
-tar -tJf "$archive" wine-x86_64/lib/wine/x86_64-unix/libMoltenVK.real.dylib >/dev/null
+if tar -tJf "$archive" wine-x86_64/lib/wine/x86_64-unix/libMoltenVK.real.dylib >/dev/null 2>&1; then
+  echo "FAIL: Cyder010 archive must not contain the obsolete libMoltenVK.real.dylib shim" >&2
+  exit 1
+fi
 
 echo "PASS test-pinned-engine-manifest"

@@ -13,6 +13,7 @@ swiftc -parse-as-library \
   -o "$TMP/harness" \
   "$ROOT/scripts/cyder_paths.swift" \
   "$ROOT/scripts/cyder_profiles.swift" \
+  "$ROOT/scripts/cyder_bottle_shortcuts.swift" \
   "$ROOT/scripts/cyder_game_library.swift" \
   "$ROOT/tests/fixtures/cyder_game_library_harness.swift"
 

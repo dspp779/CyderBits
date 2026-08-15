@@ -127,7 +127,7 @@ final class CyderStatusItemController: NSObject, NSMenuDelegate {
         guard statusItem == nil else { return }
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         if let button = item.button {
-            button.image = Self.cyderBottleImage(windowCount: 0, liquidLevel: 1, showsAttention: false)
+            button.image = Self.cyderBottleImage(liquidLevel: 1, showsAttention: false)
             button.image?.accessibilityDescription = "Cyder 正在執行"
         }
         let menu = NSMenu(title: "Cyder")
@@ -272,24 +272,21 @@ final class CyderStatusItemController: NSObject, NSMenuDelegate {
 
     private func updateStatusImage() {
         let reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
-        let parameters: (windows: Int, liquid: CGFloat, attention: Bool)
+        let parameters: (liquid: CGFloat, attention: Bool)
         switch visualState {
         case .starting:
-            parameters = (reduceMotion ? 2 : min(4, animationFrame + 1), 1, false)
+            parameters = (1, false)
         case .running:
-            parameters = (4, 1, false)
+            parameters = (1, false)
         case .background:
-            let remaining = reduceMotion ? 2 : max(0, 4 - ((animationFrame / 2) % 5))
-            parameters = (remaining, 1, false)
+            parameters = (1, false)
         case .stopping:
-            let liquid = reduceMotion ? 0.25 : max(0.12, 1 - CGFloat(animationFrame) * 0.14)
-            parameters = (0, liquid, false)
+            parameters = (Self.forcedStopLiquidLevel(animationFrame: animationFrame, reduceMotion: reduceMotion), false)
         case .attention:
             let visible = reduceMotion || animationFrame >= 8 || (animationFrame / 2).isMultiple(of: 2)
-            parameters = (0, 0.45, visible)
+            parameters = (0.45, visible)
         }
         statusItem?.button?.image = Self.cyderBottleImage(
-            windowCount: parameters.windows,
             liquidLevel: parameters.liquid,
             showsAttention: parameters.attention
         )
@@ -332,6 +329,13 @@ final class CyderStatusItemController: NSObject, NSMenuDelegate {
         if !prefixes.isEmpty { onStopPrefixes?(prefixes) }
     }
 
+    /// Drain the bottle only while the user-confirmed managed shutdown is in progress.
+    /// At 0.2s per frame this reaches the resting level in about 1.4 seconds.
+    private static func forcedStopLiquidLevel(animationFrame: Int, reduceMotion: Bool) -> CGFloat {
+        if reduceMotion { return 0.25 }
+        return max(0.12, 1 - CGFloat(animationFrame) / 7.0)
+    }
+
     private static func lifecycleState(at url: URL) -> String? {
         guard let text = try? String(contentsOf: url, encoding: .utf8) else { return nil }
         return text.split(whereSeparator: { $0.isNewline }).first { $0.hasPrefix("state=") }
@@ -346,16 +350,12 @@ final class CyderStatusItemController: NSObject, NSMenuDelegate {
     }
 
     private static func cyderBottleImage(
-        windowCount: Int,
         liquidLevel: CGFloat,
         showsAttention: Bool
     ) -> NSImage {
         let image = NSImage(size: NSSize(width: 18, height: 18), flipped: false) { _ in
             let bottle = NSBezierPath()
             // Simple tall-neck decanter silhouette with a smooth arced bottom.
-            // Keep the windowCount parameter for the lifecycle animation API,
-            // but the menu-bar mark itself is intentionally just the bottle.
-            _ = windowCount
             bottle.move(to: NSPoint(x: 6.4, y: 16.7))
             bottle.curve(to: NSPoint(x: 11.6, y: 16.7), controlPoint1: NSPoint(x: 6.5, y: 17.1), controlPoint2: NSPoint(x: 11.5, y: 17.1))
             bottle.line(to: NSPoint(x: 11.2, y: 16.0))
