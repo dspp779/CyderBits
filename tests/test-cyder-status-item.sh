@@ -35,17 +35,19 @@ assert_contains "$status_source" '結束所有 Cyder 程序…' \
 assert_contains "$status_source" 'cyderBottleImage(' \
   "the menu bar must use Cyder's bottle silhouette"
 assert_contains "$status_source" 'windowCount:' \
-  "the Cyder bottle must animate its Windows panes"
+  "the status image API must retain its lifecycle state parameter"
 assert_contains "$status_source" 'liquidLevel:' \
   "managed shutdown must animate the bottle liquid level"
 assert_contains "$status_source" 'if clampedLiquidLevel >= 0.999' \
   "a full Cyder bottle must fill through the neck and shoulders"
-assert_contains "$status_source" 'let paneSize: CGFloat = 2.4' \
-  "the Windows mark must remain compact at menu-bar size"
-assert_contains "$status_source" 'let paneYOffset: CGFloat = -1.4' \
-  "the Windows mark must sit low in the decanter bowl"
-assert_contains "$status_source" 'xRadius: 0.1, yRadius: 0.1' \
-  "the Windows panes must retain a crisp logo silhouette at menu-bar size"
+assert_contains "$status_source" 'smooth arced bottom' \
+  "the menu-bar decanter must use a smooth arced bottom"
+assert_contains "$status_source" 'bottle.curve(to: NSPoint(x: 6.0, y: 1.25)' \
+  "the menu-bar decanter must avoid a flat base"
+assert_not_contains "$status_source" 'let paneSize' \
+  "the menu-bar decanter must not draw Windows panes"
+assert_not_contains "$status_source" 'destinationOut' \
+  "the menu-bar decanter must not cut Windows panes from the silhouette"
 assert_contains "$status_source" 'accessibilityDisplayShouldReduceMotion' \
   "menu-bar animations must respect Reduce Motion"
 assert_contains "$status_source" '正在等待背景程序結束 ·' \

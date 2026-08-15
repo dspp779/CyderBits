@@ -352,8 +352,10 @@ final class CyderStatusItemController: NSObject, NSMenuDelegate {
     ) -> NSImage {
         let image = NSImage(size: NSSize(width: 18, height: 18), flipped: false) { _ in
             let bottle = NSBezierPath()
-            // Tall-neck decanter silhouette: a broad mouth, concave neck,
-            // low shoulder, and a wide heavy base that reads at 18pt.
+            // Simple tall-neck decanter silhouette with a smooth arced bottom.
+            // Keep the windowCount parameter for the lifecycle animation API,
+            // but the menu-bar mark itself is intentionally just the bottle.
+            _ = windowCount
             bottle.move(to: NSPoint(x: 6.4, y: 16.7))
             bottle.curve(to: NSPoint(x: 11.6, y: 16.7), controlPoint1: NSPoint(x: 6.5, y: 17.1), controlPoint2: NSPoint(x: 11.5, y: 17.1))
             bottle.line(to: NSPoint(x: 11.2, y: 16.0))
@@ -363,9 +365,9 @@ final class CyderStatusItemController: NSObject, NSMenuDelegate {
             bottle.curve(to: NSPoint(x: 12.4, y: 8.0), controlPoint1: NSPoint(x: 10.4, y: 10.1), controlPoint2: NSPoint(x: 11.4, y: 9.1))
             bottle.curve(to: NSPoint(x: 14.8, y: 6.1), controlPoint1: NSPoint(x: 13.5, y: 7.1), controlPoint2: NSPoint(x: 14.6, y: 6.6))
             bottle.curve(to: NSPoint(x: 14.9, y: 4.0), controlPoint1: NSPoint(x: 15.1, y: 5.3), controlPoint2: NSPoint(x: 15.0, y: 4.5))
-            bottle.curve(to: NSPoint(x: 12.0, y: 1.4), controlPoint1: NSPoint(x: 14.4, y: 2.8), controlPoint2: NSPoint(x: 13.4, y: 1.4))
-            bottle.line(to: NSPoint(x: 6.0, y: 1.4))
-            bottle.curve(to: NSPoint(x: 3.1, y: 4.0), controlPoint1: NSPoint(x: 4.6, y: 1.4), controlPoint2: NSPoint(x: 3.6, y: 2.8))
+            bottle.curve(to: NSPoint(x: 12.0, y: 1.25), controlPoint1: NSPoint(x: 14.7, y: 2.8), controlPoint2: NSPoint(x: 13.6, y: 1.35))
+            bottle.curve(to: NSPoint(x: 6.0, y: 1.25), controlPoint1: NSPoint(x: 10.6, y: 0.55), controlPoint2: NSPoint(x: 7.4, y: 0.55))
+            bottle.curve(to: NSPoint(x: 3.1, y: 4.0), controlPoint1: NSPoint(x: 4.4, y: 1.35), controlPoint2: NSPoint(x: 3.3, y: 2.8))
             bottle.curve(to: NSPoint(x: 3.2, y: 6.1), controlPoint1: NSPoint(x: 3.0, y: 4.5), controlPoint2: NSPoint(x: 3.1, y: 5.3))
             bottle.curve(to: NSPoint(x: 5.6, y: 8.0), controlPoint1: NSPoint(x: 3.4, y: 6.6), controlPoint2: NSPoint(x: 4.5, y: 7.1))
             bottle.curve(to: NSPoint(x: 7.85, y: 10.5), controlPoint1: NSPoint(x: 6.6, y: 9.1), controlPoint2: NSPoint(x: 7.6, y: 10.1))
@@ -392,29 +394,6 @@ final class CyderStatusItemController: NSObject, NSMenuDelegate {
 
             NSColor.black.setStroke()
             bottle.stroke()
-
-            // Keep the Windows mark compact and low in the broad lower bowl.
-            let paneSize: CGFloat = 2.4
-            let paneGap: CGFloat = 0.45
-            let paneLeftX: CGFloat = 6.4
-            let paneRightX = paneLeftX + paneSize + paneGap
-            let paneBottomY: CGFloat = 3.7
-            let paneTopY = paneBottomY + paneSize + paneGap
-            let paneYOffset: CGFloat = -1.4
-            let panes = [
-                NSRect(x: paneLeftX, y: paneTopY + paneYOffset, width: paneSize, height: paneSize),
-                NSRect(x: paneRightX, y: paneTopY + paneYOffset, width: paneSize, height: paneSize),
-                NSRect(x: paneLeftX, y: paneBottomY + paneYOffset, width: paneSize, height: paneSize),
-                NSRect(x: paneRightX, y: paneBottomY + paneYOffset, width: paneSize, height: paneSize),
-            ]
-            if windowCount > 0 {
-                NSGraphicsContext.saveGraphicsState()
-                NSGraphicsContext.current?.compositingOperation = .destinationOut
-                for pane in panes.prefix(min(4, windowCount)) {
-                    NSBezierPath(roundedRect: pane, xRadius: 0.1, yRadius: 0.1).fill()
-                }
-                NSGraphicsContext.restoreGraphicsState()
-            }
             if showsAttention {
                 let mark = NSBezierPath(roundedRect: NSRect(x: 14.6, y: 11.0, width: 1.5, height: 4.5), xRadius: 0.7, yRadius: 0.7)
                 mark.fill()
