@@ -376,7 +376,6 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate,
     }
 
     @available(macOS 11.0, *)
-    @available(macOS 11.0, *)
     private func makeURIHandlerTab() -> NSTabViewItem {
         uriHandlerStatusLabel.font = .systemFont(ofSize: 11)
         uriHandlerStatusLabel.textColor = .secondaryLabelColor
@@ -400,11 +399,11 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate,
         uriHandlerTable.translatesAutoresizingMaskIntoConstraints = false
 
         for (id, title, width) in [
+            ("enabled", "啟用", 44),
             ("uri", "URI", 110),
             ("exe", "EXE", 120),
             ("command", "命令", 180),
             ("version", "版本", 70),
-            ("enabled", "啟用", 44),
         ] {
             let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier(id))
             column.title = title
