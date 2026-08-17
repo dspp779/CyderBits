@@ -14,6 +14,8 @@ assert_contains "$status_source" 'NSStatusBar.system.statusItem' \
   "active Wine sessions must create a menu-bar item"
 assert_contains "$status_source" 'func setUIVisible(_ visible: Bool)' \
   "preferences and game-library windows must keep the menu-bar item visible"
+assert_contains "$status_source" 'func isMonitoring(prefix: String) -> Bool' \
+  "the app must expose monitored-prefix routing for later Wine activation"
 assert_contains "$status_source" 'var onOpenGameLibrary' \
   "the status menu must expose a game-library callback"
 assert_contains "$status_source" 'withTitle: "遊戲庫…"' \

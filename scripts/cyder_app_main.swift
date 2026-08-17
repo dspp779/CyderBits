@@ -1293,6 +1293,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         var launchActivated = false
         var monitoringStarted = false
         var winePID: Int32 = 0
+        var cleanPrimaryExitObserved = false
         defer {
             try? FileManager.default.removeItem(at: pidURL)
             if !launchActivated {
@@ -1369,12 +1370,27 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
                 return .success
             }
             if let exitStatus = detachedWineExitStatus(at: exitResultURL) {
-                return earlyWineExitFailure(
-                    executablePath: exe,
-                    winePID: winePID,
-                    exitStatus: exitStatus,
-                    fallbackLogURL: result.logURL
-                )
+                if exitStatus == 0 {
+                    if !cleanPrimaryExitObserved {
+                        cleanPrimaryExitObserved = true
+                        CyderDiagnostics.shared.info(
+                            "wine primary exited cleanly before activation pid=\(winePID); waiting for handoff or lifecycle completion"
+                        )
+                    }
+                    if detachedWineLifecycleState(at: lifecycleURL) == "stopped" {
+                        CyderDiagnostics.shared.info(
+                            "wine launch completed without activation pid=\(winePID)"
+                        )
+                        return .success
+                    }
+                } else {
+                    return earlyWineExitFailure(
+                        executablePath: exe,
+                        winePID: winePID,
+                        exitStatus: exitStatus,
+                        fallbackLogURL: result.logURL
+                    )
+                }
             }
             if winePID > 0, kill(winePID, 0) != 0 {
                 // The supervisor publishes the wait status immediately after
@@ -1382,6 +1398,10 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
                 // back to the generic early-exit failure.
                 for _ in 0..<5 {
                     if let exitStatus = detachedWineExitStatus(at: exitResultURL) {
+                        if exitStatus == 0 {
+                            cleanPrimaryExitObserved = true
+                            break
+                        }
                         return earlyWineExitFailure(
                             executablePath: exe,
                             winePID: winePID,
@@ -1391,12 +1411,24 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
                     }
                     Thread.sleep(forTimeInterval: 0.1)
                 }
-                return earlyWineExitFailure(
-                    executablePath: exe,
-                    winePID: winePID,
-                    exitStatus: nil,
-                    fallbackLogURL: result.logURL
-                )
+                if detachedWineLifecycleState(at: lifecycleURL) == "stopped",
+                   detachedWineExitStatus(at: lifecycleURL) == 0 {
+                    CyderDiagnostics.shared.info(
+                        "wine launch completed without activation pid=\(winePID)"
+                    )
+                    return .success
+                }
+                if detachedWineExitStatus(at: lifecycleURL) == 0 {
+                    cleanPrimaryExitObserved = true
+                }
+                if !cleanPrimaryExitObserved {
+                    return earlyWineExitFailure(
+                        executablePath: exe,
+                        winePID: winePID,
+                        exitStatus: detachedWineExitStatus(at: lifecycleURL),
+                        fallbackLogURL: result.logURL
+                    )
+                }
             }
         }
         CyderDiagnostics.shared.warning(
@@ -1467,17 +1499,24 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func detachedWineExitStatus(at resultURL: URL) -> Int32? {
-        guard let text = try? String(contentsOf: resultURL, encoding: .utf8) else {
+        guard let value = detachedWineSidecarValue("exit_status", at: resultURL) else {
             return nil
         }
-        for line in text.split(whereSeparator: { $0.isNewline }) {
-            guard line.hasPrefix("exit_status="),
-                  let value = Int32(line.dropFirst("exit_status=".count)) else {
-                continue
-            }
-            return value
+        return Int32(value)
+    }
+
+    private func detachedWineLifecycleState(at lifecycleURL: URL) -> String? {
+        detachedWineSidecarValue("state", at: lifecycleURL)
+    }
+
+    private func detachedWineSidecarValue(_ key: String, at url: URL) -> String? {
+        guard let text = try? String(contentsOf: url, encoding: .utf8) else {
+            return nil
         }
-        return nil
+        let prefix = "\(key)="
+        return text.split(whereSeparator: { $0.isNewline })
+            .first { $0.hasPrefix(prefix) }
+            .map { String($0.dropFirst(prefix.count)) }
     }
 
     private func earlyWineExitFailure(
@@ -1538,21 +1577,26 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         let prefix = userInfo["ActivatingAppPrefix"] as? String ?? ""
 
         let handle = { [weak self] in
-            guard let self,
-                  let waiter = self.wineActivationWaiter,
-                  pid > 0,
-                  !prefix.isEmpty,
-                  (prefix as NSString).standardizingPath == waiter.prefix,
+            guard let self, pid > 0, !prefix.isEmpty,
                   let application = NSRunningApplication(processIdentifier: pid),
-                  application.activationPolicy == .regular
-            else {
+                  application.activationPolicy == .regular else {
                 return
             }
 
+            let standardizedPrefix = (prefix as NSString).standardizingPath
+            let waiter = self.wineActivationWaiter
+            let matchesLaunchWaiter = waiter?.prefix == standardizedPrefix
+            let belongsToMonitoredSession = self.statusItemController.isMonitoring(prefix: standardizedPrefix)
+            guard matchesLaunchWaiter || belongsToMonitoredSession else { return }
+
             // The notification comes from the Wine Cocoa process that is
             // ready to become foreground. Cooperatively hand activation to it
-            // on macOS 14+, without PID searches or activation polling.
-            self.wineActivationWaiter = nil
+            // on macOS 14+, without PID searches or activation polling. Keep
+            // doing this for monitored sessions after the initial launch so a
+            // background Cyder instance can forward later focus requests.
+            if matchesLaunchWaiter {
+                self.wineActivationWaiter = nil
+            }
             if #available(macOS 14.0, *) {
                 let source = NSRunningApplication.current
                 NSApp.yieldActivation(to: application)
@@ -1560,7 +1604,13 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             } else {
                 _ = application.activate(options: [.activateAllWindows, .activateIgnoringOtherApps])
             }
-            waiter.semaphore.signal()
+            if matchesLaunchWaiter {
+                waiter?.semaphore.signal()
+            } else {
+                CyderDiagnostics.shared.info(
+                    "forwarded Wine activation pid=\(pid) prefix=\(standardizedPrefix)"
+                )
+            }
         }
         if Thread.isMainThread {
             handle()

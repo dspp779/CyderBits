@@ -123,6 +123,12 @@ final class CyderStatusItemController: NSObject, NSMenuDelegate {
         }
     }
 
+    func isMonitoring(prefix: String) -> Bool {
+        precondition(Thread.isMainThread)
+        let target = (prefix as NSString).standardizingPath
+        return sessions.values.contains { $0.prefix.path == target }
+    }
+
     private func installStatusItemIfNeeded() {
         guard statusItem == nil else { return }
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)

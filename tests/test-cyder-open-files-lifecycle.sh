@@ -31,6 +31,16 @@ assert_contains "$source_text" '"CYDER_WINE_RESULT_FILE": exitResultURL.path' \
   "Finder launches must request a per-launch Wine result sidecar"
 assert_contains "$source_text" 'if exitStatus == 53' \
   "protected-folder guidance must use Wine's captured wait status"
+assert_contains "$source_text" 'wine primary exited cleanly before activation' \
+  "clean launcher exits must wait for handoff instead of showing a spawn failure"
+assert_contains "$source_text" 'detachedWineLifecycleState(at: lifecycleURL) == "stopped"' \
+  "clean exits without a window must complete from the lifecycle sidecar"
+assert_contains "$source_text" 'completed without activation' \
+  "windowless utilities must be recorded as clean launches"
+assert_contains "$source_text" 'belongsToMonitoredSession' \
+  "background Wine activation must be routable after the initial launch"
+assert_contains "$source_text" 'forwarded Wine activation' \
+  "background activation forwarding must be diagnosed"
 assert_contains "$source_text" 'launchEnvironment: launchEnvironment' \
   "game-library test settings must flow into the monitored Bash launch"
 assert_not_contains "$source_text" 'launchLogShowsFolderAccessDenied()' \

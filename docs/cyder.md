@@ -221,7 +221,7 @@ Wine 的 macOS RetinaMode、DPI 與字體 registry 是整個 Wine session／bott
 
 正式啟動路徑不設定 `WINEDLLOVERRIDES`。DLL 相容性設定存放在 prefix Registry；目前僅為 `bluecg.exe` 設定 `HKCU\Software\Wine\AppDefaults\bluecg.exe\DllOverrides` 的 `ddraw=native,builtin`，不影響 BlueLauncher 或其他 EXE。
 
-Finder document event 啟動時，Swift relay 會在呼叫 bash 前監聽 CrossOver Wine 的 `WineAppWillActivateNotification`。收到與目標 prefix 相同、且 `ActivatingAppPID` 已登記為 `regular/Foreground` 的通知後，macOS 14 以上會由 Cyder 先讓出焦點，再透過 cooperative activation 將所有 Wine 視窗帶到前方；macOS 11–13 使用舊版 activation API。Wine PID 由 bash 透過 `CYDER_WINE_PID_FILE` 回報；Swift 不組裝 Wine 環境也不直接建立 Wine process。若 Wine 未發出通知，relay 最多等待 30 秒；Wine 仍在執行時只記錄 warning。
+Finder document event 啟動時，Swift relay 會在呼叫 bash 前監聽 CrossOver Wine 的 `WineAppWillActivateNotification`。收到與目標 prefix 相同、且 `ActivatingAppPID` 已登記為 `regular/Foreground` 的通知後，macOS 14 以上會由 Cyder 先讓出焦點，再透過 cooperative activation 將所有 Wine 視窗帶到前方；macOS 11–13 使用舊版 activation API。Wine PID 由 bash 透過 `CYDER_WINE_PID_FILE` 回報；Swift 不組裝 Wine 環境也不直接建立 Wine process。原始 Wine client 在 activation 前以 `status=0` 結束時，會等待 launcher handoff 或 lifecycle 完成，不視為 spawn failure；沒有視窗的工具正常結束也不顯示錯誤。Cyder 持續監控同一 prefix 時，後續 `WineAppWillActivateNotification` 也會轉送到對應 Wine application。
 
 命令列直接呼叫 `cyder_launcher.sh` 時仍以前景模式執行，方便腳本等待遊戲結束；Finder document event relay 會設定 `CYDER_WINE_DETACH=1`，由 bash 使用分離模式啟動。
 
