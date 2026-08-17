@@ -82,11 +82,10 @@ See [Wine configure and graphics options](docs/wine-configure-options.md) for bu
 
 ## Wine sources
 
-Wine is built from the **CrossOver open-source release** — place archives in `tools/archives/` (see [CodeWeavers CrossOver Source](https://www.codeweavers.com/crossover/source)); builds extract into `build/cx25/` or `build/cx26/`.
+Wine is built from the **CrossOver open-source release** — place archives in `tools/archives/` (see [CodeWeavers CrossOver Source](https://www.codeweavers.com/crossover/source)); builds extract into `build/cx26/`.
 
 ```bash
 bash scripts/build-wine.sh --cx 26
-bash scripts/build-wine.sh --cx 25
 bash scripts/sign-wine.sh
 ```
 
@@ -155,7 +154,6 @@ open dist/CyderBits.app
 ├── build/                      # Extracted sources + llvm-mingw (.gitignore)
 ├── .brew-x86/                  # Project-local x86_64 Homebrew (.gitignore)
 ├── install/
-│   ├── wine-cx25-x86_64/       # CX25 engine (.gitignore)
 │   └── wine-cx26-x86_64/       # CX26 engine (.gitignore)
 └── BlueCrossgateNew/           # BlueCG game + prefix (.gitignore)
 ```

@@ -1,11 +1,11 @@
 name: Cyder 問題回報
-description: 回報在 macOS 上使用 Cyder 或 Cyder-maplestory-oem 執行遊戲時遇到的問題。
+description: 回報在 macOS 上使用 Cyder 執行遊戲時遇到的問題。
 title: "[問題] "
 body:
   - type: markdown
     attributes:
       value: |
-        感謝協助回報問題。請先確認已使用最新版 **Cyder** 或 **Cyder-maplestory-oem**。
+        感謝協助回報問題。請先確認已使用最新版 **Cyder**。
 
         更新時請只刪除舊版 Cyder App 後再安裝最新版；除非教學另有說明，請勿刪除遊戲資料或 Cyder 容器。
 
@@ -45,7 +45,6 @@ body:
       label: 使用的 Cyder 類型
       options:
         - Cyder
-        - Cyder-maplestory-oem
         - 不確定
     validations:
       required: true
