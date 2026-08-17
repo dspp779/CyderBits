@@ -467,19 +467,23 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         }
         CyderDiagnostics.shared.enter(
             .appStart,
-            detail: documentLaunchRequested ? "finder-exe" : "settings"
+            detail: launchModeDetail()
         )
         CyderDiagnostics.shared.info(
             "launch-context args=\(CommandLine.arguments.count - 1) pending=\(pendingFiles.count) bundle=\(Bundle.main.bundlePath)"
         )
         // LaunchServices can deliver application(_:openFiles:) just after
         // applicationDidFinishLaunching. Defer the settings-mode decision one
-        // short turn so a document launch cannot start a competing health
-        // check or expose the settings window behind an EXE launch.
+        // short turn so a document or URI launch cannot start a competing
+        // health check or expose the settings window behind Wine.
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
             guard let self else { return }
             if self.documentLaunchRequested || !self.pendingFiles.isEmpty {
-                self.scheduleRun()
+                // URI launches are already queued; scheduleRun() is EXE-only
+                // and would otherwise prompt for a file when pendingFiles is empty.
+                if !self.pendingFiles.isEmpty {
+                    self.scheduleRun()
+                }
             } else {
                 self.terminateWhenSettingsClose = true
                 self.openLibraryOnLaunch = self.openLibraryOnLaunch || self.shouldOpenGameLibraryOnLaunch()
@@ -2149,10 +2153,26 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
 
     @available(macOS 11.0, *)
     private func enqueueOrLaunchURIs(_ uris: [String]) {
+        guard !uris.isEmpty else { return }
+        // Same cold-start contract as Finder EXE: do not fall through to
+        // prepareEnvironmentAndShowSettings() after the deferred mode decision.
+        documentLaunchRequested = true
+        terminateWhenSettingsClose = false
+        NSApp.setActivationPolicy(.accessory)
+        hideSetup()
+        if settingsController.window?.isVisible == true {
+            settingsController.close()
+        }
         for uri in uris {
             queuedLaunches.append(QueuedLaunch(executable: uri, arguments: nil, isURI: true))
         }
         launchNextQueuedExecutableIfReady()
+    }
+
+    private func launchModeDetail() -> String {
+        if !pendingFiles.isEmpty { return "finder-exe" }
+        if documentLaunchRequested { return "uri" }
+        return "settings"
     }
 
     @available(macOS 11.0, *)

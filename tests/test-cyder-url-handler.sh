@@ -18,6 +18,8 @@ assert_contains "$URI_SWIFT" 'CyderURIHandlerManager' "swift uri handler manager
 assert_contains "$URI_SWIFT" 'absoluteString' "design requires preserving uri absoluteString"
 assert_contains "$APP" 'application(_ application: NSApplication, open urls' "app must handle url open events"
 assert_contains "$APP" 'enqueueOrLaunchURIs' "app must queue uri launches"
+assert_contains "$APP" 'documentLaunchRequested = true' "uri launches must mark a document-style launch"
+assert_contains "$APP" 'URI launches are already queued' "cold-start uri launches must skip settings environment check"
 assert_contains "$SETTINGS" 'URI 協定' "settings must include uri handler tab"
 assert_contains "$SETTINGS" 'beginURIHandlerScan' "settings must scan uri handlers lazily on tab select"
 assert_contains "$SETTINGS" 'uriHandlerTable' "settings must list uri handlers in a table"
