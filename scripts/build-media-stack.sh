@@ -21,6 +21,10 @@ while [[ $# -gt 0 ]]; do
   shift
 done
 
+if [[ "$CX_VERSION" == 25 ]]; then
+  echo "CX25 support was retired; this tree only builds CrossOver 26." >&2
+  exit 1
+fi
 [[ "$CX_VERSION" == 26 ]] || {
   echo "The minimal media build is currently validated only with CX26." >&2
   exit 1

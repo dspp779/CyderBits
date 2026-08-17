@@ -34,7 +34,7 @@ Build graphics dependencies from CrossOver FOSS sources (MoltenVK; VKD3D optiona
 Installs into \$GRAPHICS_INSTALL (default: install/graphics-cx<ver>-x86_64/lib).
 
 Options:
-  --cx 25|26           CrossOver release (default: 26)
+  --cx 26              CrossOver release (default: 26)
   --install-deps       Install MoltenVK build tools via .brew-x86 (cmake, python3)
   --with-vkd3d         Also build VKD3D from CX sources (not implemented yet)
   --archs ARCH         macOS arch for MoltenVK dylib (default: x86_64 for Rosetta Wine)
@@ -85,9 +85,13 @@ while [[ $# -gt 0 ]]; do
 done
 
 case "$CX_VERSION" in
-  25 | 26) ;;
+  25)
+    echo "CX25 support was retired; this tree only builds CrossOver 26." >&2
+    exit 1
+    ;;
+  26) ;;
   *)
-    echo "Unknown --cx value: $CX_VERSION (expected 25 or 26)" >&2
+    echo "Unknown --cx value: $CX_VERSION (expected 26)" >&2
     exit 1
     ;;
 esac

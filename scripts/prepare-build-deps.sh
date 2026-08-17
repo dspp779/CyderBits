@@ -36,8 +36,8 @@ Usage: $(basename "$0") [options]
 Extract build inputs from $ARCHIVES_DIR into $BUILD_DIR.
 
 Options:
-  --cx 25|26       Prepare CrossOver sources for CX25 or CX26 (repeatable)
-  --all            Prepare CX25 and CX26 sources
+  --cx 26          Prepare CrossOver sources for CX26 (repeatable)
+  --all            Prepare CX26 sources
   --dry-run        Print commands without extracting
   --force          Re-extract even when markers already exist
   -h, --help       Show this help
@@ -46,10 +46,13 @@ EOF
 
 cx_archive_for() {
   case "$1" in
-    25) printf '%s\n' "$ARCHIVES_DIR/crossover-sources-25.1.1.tar.gz" ;;
+    25)
+      echo "CX25 support was retired; this tree only builds CrossOver 26." >&2
+      return 1
+      ;;
     26) printf '%s\n' "$ARCHIVES_DIR/crossover-sources-26.3.0.tar.gz" ;;
     *)
-      echo "Unknown CX version: $1 (expected 25 or 26)" >&2
+      echo "Unknown CX version: $1 (expected 26)" >&2
       return 1
       ;;
   esac
@@ -124,7 +127,7 @@ while [[ $# -gt 0 ]]; do
       shift 2
       ;;
     --all)
-      CX_VERSIONS+=(25 26)
+      CX_VERSIONS+=(26)
       shift
       ;;
     --dry-run) DRY_RUN=1; shift ;;
@@ -142,15 +145,19 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [[ ${#CX_VERSIONS[@]} -eq 0 ]]; then
-  CX_VERSIONS=(25 26)
+  CX_VERSIONS=(26)
 fi
 
 ensure_llvm_mingw
 for ver in "${CX_VERSIONS[@]}"; do
   case "$ver" in
-    25 | 26) ensure_cx_sources "$ver" ;;
+    25)
+      echo "CX25 support was retired; this tree only builds CrossOver 26." >&2
+      exit 1
+      ;;
+    26) ensure_cx_sources "$ver" ;;
     *)
-      echo "Unknown CX version: $ver (expected 25 or 26)" >&2
+      echo "Unknown CX version: $ver (expected 26)" >&2
       exit 1
       ;;
   esac

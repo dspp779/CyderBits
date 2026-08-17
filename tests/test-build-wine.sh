@@ -70,26 +70,12 @@ assert_contains "$output_vk_crossover" "build-graphics-stack.sh" "crossover path
 assert_contains "$output_vk_crossover" "require" "crossover path should check graphics install"
 assert_contains "$output_vk_crossover" "graphics-cx26-x86_64" "crossover path should use graphics prefix"
 
-output_cx25="$(bash "$ROOT/scripts/build-wine.sh" --cx 25 --prepare-only --dry-run 2>&1 || true)"
-if [[ "$output_cx25" != *"crossover-sources-25.1.1.tar.gz"* && "$output_cx25" != *"CX25 sources already present"* ]]; then
-  echo "ASSERT failed: CX25 prepare should reference CX25 archive" >&2
+retired_msg='CX25 support was retired; this tree only builds CrossOver 26.'
+if output_cx25="$(bash "$ROOT/scripts/build-wine.sh" --cx 25 --dry-run --without-vulkan 2>&1)"; then
+  echo "ASSERT failed: build-wine --cx 25 must fail" >&2
   exit 1
 fi
-assert_contains "$output_cx25" "build/cx25" "CX25 prepare should target cx25 tree"
-
-if [[ -d "$ROOT/build/cx26/sources/wine" ]]; then
-  output_cx25_build="$(
-    WINE_SRC="$ROOT/build/cx26/sources/wine" \
-    WINE_INSTALL="${TMPDIR:-/tmp}/cyder-test-wine-cx25" \
-      bash "$ROOT/scripts/build-wine.sh" --cx 25 --dry-run --without-vulkan 2>&1 || true
-  )"
-  if [[ "$output_cx25_build" == *"rtlwalkframechain-null-function.patch"* ||
-        "$output_cx25_build" == *"ntdll-frame-walk-page-fault-guard.patch"* ||
-        "$output_cx25_build" == *"obsolete/cyder-ntdll-frame-walk-guard.patch"* ]]; then
-    echo "ASSERT failed: CX25 builds must not migrate or apply CX26 frame-walk patches" >&2
-    exit 1
-  fi
-fi
+assert_contains "$output_cx25" "$retired_msg" "build-wine --cx 25 must print the retired message"
 
 
 echo "PASS test-build-wine"

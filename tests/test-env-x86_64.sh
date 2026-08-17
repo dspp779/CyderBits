@@ -40,14 +40,20 @@ HOMEBREW_PREFIX="$fake_prefix" brew_x86_ensure_local_tap
 [[ -f "$fake_prefix/Library/Taps/ogom/homebrew-local/Formula/gnutls.rb" ]] \
   || { echo "ASSERT failed: ensure_local_tap should copy Formula/gnutls.rb into the brew taps tree" >&2; exit 1; }
 
-export CX_VERSION=25
-unset WINE_SRC WINE_INSTALL CYDER_ENGINE_CX_PREFIX
-# shellcheck disable=SC1091
-source "$ROOT/scripts/env-x86_64.sh"
-assert_eq "$WINE_INSTALL" "$ROOT/install/wine-cx25-x86_64" "CX25 should use separate install prefix"
-assert_eq "$WINE_SRC" "$ROOT/build/cx25/sources/wine" "CX25 source tree should be isolated"
-assert_eq "$CYDER_ENGINE_CX_PREFIX" "CX25" "CX25 build should set engine prefix label"
+retired_msg='CX25 support was retired; this tree only builds CrossOver 26.'
+if cx25_env="$(
+  export CX_VERSION=25
+  unset WINE_SRC WINE_INSTALL CYDER_ENGINE_CX_PREFIX
+  # shellcheck disable=SC1091
+  source "$ROOT/scripts/env-x86_64.sh" 2>&1
+  echo SHOULD_NOT_REACH
+)"; then
+  echo "ASSERT failed: CX_VERSION=25 must fail in env-x86_64.sh" >&2
+  exit 1
+fi
+assert_contains "$cx25_env" "$retired_msg" "env-x86_64.sh must print the retired message for CX25"
 
+export CX_VERSION=26
 export HOMEBREW_PREFIX=/opt/homebrew
 unset WINE_SRC WINE_INSTALL CYDER_ENGINE_CX_PREFIX
 # shellcheck disable=SC1091
