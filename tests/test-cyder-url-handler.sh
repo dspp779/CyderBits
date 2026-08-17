@@ -19,6 +19,9 @@ assert_contains "$URI_SWIFT" 'absoluteString' "design requires preserving uri ab
 assert_contains "$APP" 'application(_ application: NSApplication, open urls' "app must handle url open events"
 assert_contains "$APP" 'enqueueOrLaunchURIs' "app must queue uri launches"
 assert_contains "$SETTINGS" 'URI 協定' "settings must include uri handler tab"
+assert_contains "$SETTINGS" 'beginURIHandlerScan' "settings must scan uri handlers lazily on tab select"
+assert_contains "$SETTINGS" 'uriHandlerTable' "settings must list uri handlers in a table"
+assert_contains "$URI_SWIFT" 'scanAsync' "uri handler scan must support async settings refresh"
 assert_contains "$BUILD" 'gamaniagames' "app payload must declare gamaniagames url scheme"
 assert_contains "$BUILD" 'cyder_uri_handler.swift' "app build must compile uri handler module"
 

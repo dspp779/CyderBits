@@ -22,7 +22,7 @@ private let cyderWinetricksComponentGroups: [(String, [CyderWinetricksComponent]
     ]),
 ]
 
-final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate {
+final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate, NSTabViewDelegate, NSTableViewDataSource, NSTableViewDelegate {
     var onImmediateSave: ((_ registrySetting: String) -> Bool)?
     /// Live Wine `reg add` with draft env; return true only after registry apply succeeds.
     var onApplyWhileRunning: ((_ draftEnvironment: [String: String]) -> Bool)?
@@ -32,9 +32,10 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
     var onOpenWinetricks: (([String]) -> Void)?
     var onExportLastGameLog: (() -> Void)?
     var onCleanDebugLogs: (() -> Void)?
-    var onRefreshURIHandler: (() -> (record: CyderURIHandlerRecord?, isCyderDefault: Bool))?
-    var onEnableURIHandler: (() -> Bool)?
+    var onScanURIHandlers: ((_ completion: @escaping (CyderURIHandlerRecord?, Bool) -> Void) -> Void)?
+    var onEnableURIHandler: ((_ record: CyderURIHandlerRecord) -> Bool)?
     var onDisableURIHandler: (() -> Bool)?
+    var onIsCyderURIHandlerDefault: (() -> Bool)?
     var onSaveStarted: (() -> Void)?
     var onSaveFailed: (() -> Void)?
     var onClose: (() -> Void)?
@@ -85,10 +86,17 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
     private var deletedProfiles: Set<String> = []
     private let status = NSTextField(labelWithString: "設定已儲存")
     private var isDirty = false
-    private let uriHandlerSummary = NSTextField(wrappingLabelWithString: "尚未掃描。")
-    private let uriHandlerDetail = NSTextField(wrappingLabelWithString: "")
-    private let uriHandlerEnableButton = NSButton()
-    private let uriHandlerDisableButton = NSButton()
+    private var settingsTabView: NSTabView?
+    private var uriHandlerTabItem: NSTabViewItem?
+    private var uriHandlerScanGeneration = 0
+    private struct CyderURIHandlerRow {
+        let record: CyderURIHandlerRecord
+        var isCyderDefault: Bool
+    }
+    private var uriHandlerRows: [CyderURIHandlerRow] = []
+    private let uriHandlerTable = NSTableView()
+    private let uriHandlerStatusLabel = NSTextField(labelWithString: "切換到此分頁以掃描 shared bottle。")
+    private let uriHandlerProgress = NSProgressIndicator()
     private let uriHandlerRescanButton = NSButton()
 
     convenience init() {
@@ -122,6 +130,8 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
         guard let content = window?.contentView else { return }
         let tabs = NSTabView()
         tabs.translatesAutoresizingMaskIntoConstraints = false
+        settingsTabView = tabs
+        tabs.delegate = self
         tabs.addTabViewItem(makeGeneralTab())
         tabs.addTabViewItem(makeDisplayTab())
         tabs.addTabViewItem(makeFontsTab())
@@ -366,85 +376,215 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
     }
 
     @available(macOS 11.0, *)
+    @available(macOS 11.0, *)
     private func makeURIHandlerTab() -> NSTabViewItem {
+        uriHandlerStatusLabel.font = .systemFont(ofSize: 11)
+        uriHandlerStatusLabel.textColor = .secondaryLabelColor
+
+        uriHandlerProgress.style = .spinning
+        uriHandlerProgress.controlSize = .small
+        uriHandlerProgress.isDisplayedWhenStopped = false
+        uriHandlerProgress.isHidden = true
+
         uriHandlerRescanButton.title = "重新掃描"
         uriHandlerRescanButton.bezelStyle = .rounded
         uriHandlerRescanButton.target = self
-        uriHandlerRescanButton.action = #selector(refreshURIHandlerPanel)
+        uriHandlerRescanButton.action = #selector(rescanURIHandlers)
 
-        uriHandlerEnableButton.title = "設為 Cyder 處理"
-        uriHandlerEnableButton.bezelStyle = .rounded
-        uriHandlerEnableButton.target = self
-        uriHandlerEnableButton.action = #selector(enableURIHandler)
+        uriHandlerTable.headerView = NSTableHeaderView()
+        uriHandlerTable.delegate = self
+        uriHandlerTable.dataSource = self
+        uriHandlerTable.rowHeight = 22
+        uriHandlerTable.usesAlternatingRowBackgroundColors = true
+        uriHandlerTable.columnAutoresizingStyle = .lastColumnOnlyAutoresizingStyle
+        uriHandlerTable.translatesAutoresizingMaskIntoConstraints = false
 
-        uriHandlerDisableButton.title = "停止 Cyder 處理"
-        uriHandlerDisableButton.bezelStyle = .rounded
-        uriHandlerDisableButton.target = self
-        uriHandlerDisableButton.action = #selector(disableURIHandler)
+        for (id, title, width) in [
+            ("uri", "URI", 110),
+            ("exe", "EXE", 120),
+            ("command", "命令", 180),
+            ("version", "版本", 70),
+            ("enabled", "啟用", 44),
+        ] {
+            let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier(id))
+            column.title = title
+            column.width = CGFloat(width)
+            if id == "enabled" {
+                let cell = NSButtonCell()
+                cell.title = ""
+                cell.setButtonType(.switch)
+                column.dataCell = cell
+            }
+            uriHandlerTable.addTableColumn(column)
+        }
 
-        uriHandlerSummary.font = .boldSystemFont(ofSize: 12)
-        uriHandlerDetail.font = .systemFont(ofSize: 11)
-        uriHandlerDetail.textColor = .secondaryLabelColor
+        let tableScroll = NSScrollView()
+        tableScroll.hasVerticalScroller = true
+        tableScroll.autohidesScrollers = true
+        tableScroll.borderType = .bezelBorder
+        tableScroll.documentView = uriHandlerTable
+        tableScroll.translatesAutoresizingMaskIntoConstraints = false
 
-        let buttons = NSStackView(views: [uriHandlerRescanButton, uriHandlerEnableButton, uriHandlerDisableButton])
-        buttons.orientation = .horizontal
-        buttons.spacing = 8
+        let loadingRow = NSStackView(views: [uriHandlerProgress, uriHandlerStatusLabel])
+        loadingRow.orientation = .horizontal
+        loadingRow.spacing = 8
+        loadingRow.alignment = .centerY
 
-        return tab("URI 協定", rows: [
-            uriHandlerSummary,
-            uriHandlerDetail,
-            buttons,
+        let item = NSTabViewItem(identifier: "URI 協定")
+        item.label = "URI 協定"
+        let stack = NSStackView(views: [
+            loadingRow,
+            tableScroll,
+            uriHandlerRescanButton,
             note("當 gamania Games Manager 在 shared bottle 註冊 gamaniagames:// 後，Cyder 可代為啟動 GGMWebStart.exe。URI 會原樣傳入 Windows，不做 percent-decoding。"),
         ])
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = 12
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        let container = NSView()
+        container.translatesAutoresizingMaskIntoConstraints = false
+        container.addSubview(stack)
+        NSLayoutConstraint.activate([
+            stack.topAnchor.constraint(equalTo: container.topAnchor, constant: 24),
+            stack.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 22),
+            stack.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -22),
+            stack.bottomAnchor.constraint(lessThanOrEqualTo: container.bottomAnchor, constant: -20),
+            tableScroll.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            tableScroll.heightAnchor.constraint(equalToConstant: 120),
+        ])
+        let scroll = NSScrollView()
+        scroll.hasVerticalScroller = true
+        scroll.autohidesScrollers = true
+        scroll.drawsBackground = false
+        scroll.documentView = container
+        NSLayoutConstraint.activate([
+            container.leadingAnchor.constraint(equalTo: scroll.contentView.leadingAnchor),
+            container.topAnchor.constraint(equalTo: scroll.contentView.topAnchor),
+            container.widthAnchor.constraint(equalTo: scroll.contentView.widthAnchor),
+        ])
+        item.view = scroll
+        uriHandlerTabItem = item
+        return item
     }
 
     @available(macOS 11.0, *)
-    @objc private func refreshURIHandlerPanel() {
-        guard let state = onRefreshURIHandler?() else {
-            uriHandlerSummary.stringValue = "Cyder 無法掃描 URI handler。"
-            uriHandlerEnableButton.isEnabled = false
-            uriHandlerDisableButton.isEnabled = false
+    func tabView(_ tabView: NSTabView, didSelect tabViewItem: NSTabViewItem?) {
+        guard tabViewItem === uriHandlerTabItem else { return }
+        beginURIHandlerScan()
+    }
+
+    @available(macOS 11.0, *)
+    @objc private func rescanURIHandlers() {
+        beginURIHandlerScan()
+    }
+
+    @available(macOS 11.0, *)
+    private func beginURIHandlerScan() {
+        guard onScanURIHandlers != nil else {
+            uriHandlerStatusLabel.stringValue = "Cyder 無法掃描 URI handler。"
+            uriHandlerRows = []
+            uriHandlerTable.reloadData()
             return
         }
-        if let record = state.record, record.isValid {
-            uriHandlerSummary.stringValue = "gamaniagames:// → \(record.executableName)"
-            var detail = "Windows 命令：\(record.windowsCommand)"
-            if !record.version.isEmpty {
-                detail += "\n版本：\(record.version)"
-            }
-            detail += state.isCyderDefault
-                ? "\nmacOS 狀態：由 Cyder 處理"
-                : "\nmacOS 狀態：尚未由 Cyder 處理"
-            uriHandlerDetail.stringValue = detail
-            uriHandlerEnableButton.isEnabled = !state.isCyderDefault
-            uriHandlerDisableButton.isEnabled = state.isCyderDefault
-        } else if let record = state.record {
-            uriHandlerSummary.stringValue = "gamaniagames:// 註冊無效（\(record.status)）"
-            uriHandlerDetail.stringValue = record.windowsCommand.isEmpty
-                ? "shared bottle 中找不到有效 handler。"
-                : record.windowsCommand
-            uriHandlerEnableButton.isEnabled = false
-            uriHandlerDisableButton.isEnabled = state.isCyderDefault
+        uriHandlerScanGeneration += 1
+        let generation = uriHandlerScanGeneration
+        uriHandlerProgress.isHidden = false
+        uriHandlerProgress.startAnimation(nil)
+        uriHandlerStatusLabel.stringValue = "掃描中…"
+        uriHandlerTable.isEnabled = false
+        uriHandlerRescanButton.isEnabled = false
+
+        onScanURIHandlers? { [weak self] record, isCyderDefault in
+            guard let self, generation == self.uriHandlerScanGeneration else { return }
+            self.applyURIHandlerScanResult(record: record, isCyderDefault: isCyderDefault)
+        }
+    }
+
+    @available(macOS 11.0, *)
+    private func applyURIHandlerScanResult(record: CyderURIHandlerRecord?, isCyderDefault: Bool) {
+        uriHandlerProgress.stopAnimation(nil)
+        uriHandlerProgress.isHidden = true
+        uriHandlerTable.isEnabled = true
+        uriHandlerRescanButton.isEnabled = true
+
+        if let record {
+            uriHandlerRows = [CyderURIHandlerRow(record: record, isCyderDefault: isCyderDefault)]
+            uriHandlerStatusLabel.stringValue = record.isValid
+                ? "共 1 個 URI handler"
+                : "gamaniagames:// 註冊無效（\(record.status)）"
         } else {
-            uriHandlerSummary.stringValue = "尚未偵測到 gamaniagames://"
-            uriHandlerDetail.stringValue = "請先在 shared bottle 安裝 gamania Games Manager。"
-            uriHandlerEnableButton.isEnabled = false
-            uriHandlerDisableButton.isEnabled = state.isCyderDefault
+            uriHandlerRows = []
+            uriHandlerStatusLabel.stringValue = "尚未偵測到 gamaniagames://；請先在 shared bottle 安裝 gamania Games Manager。"
+        }
+        uriHandlerTable.reloadData()
+    }
+
+    @available(macOS 11.0, *)
+    private func refreshURIHandlerCheckboxState() {
+        let isDefault = onIsCyderURIHandlerDefault?() ?? false
+        guard !uriHandlerRows.isEmpty else { return }
+        uriHandlerRows[0].isCyderDefault = isDefault
+        uriHandlerTable.reloadData()
+    }
+
+    @available(macOS 11.0, *)
+    func numberOfRows(in tableView: NSTableView) -> Int {
+        uriHandlerRows.count
+    }
+
+    @available(macOS 11.0, *)
+    func tableView(_ tableView: NSTableView, objectValueFor tableColumn: NSTableColumn?, row: Int) -> Any? {
+        guard row < uriHandlerRows.count, let id = tableColumn?.identifier.rawValue else { return nil }
+        let item = uriHandlerRows[row]
+        switch id {
+        case "uri":
+            return "\(item.record.scheme)://"
+        case "exe":
+            return item.record.executableName
+        case "command":
+            return item.record.windowsCommand
+        case "version":
+            return item.record.version.isEmpty ? "—" : item.record.version
+        case "enabled":
+            return item.isCyderDefault
+        default:
+            return nil
         }
     }
 
     @available(macOS 11.0, *)
-    @objc private func enableURIHandler() {
-        if onEnableURIHandler?() == true {
-            refreshURIHandlerPanel()
+    func tableView(_ tableView: NSTableView, setObjectValue object: Any?, for tableColumn: NSTableColumn?, row: Int) {
+        guard tableColumn?.identifier.rawValue == "enabled",
+              row < uriHandlerRows.count,
+              let wantsEnabled = object as? Bool else { return }
+        let record = uriHandlerRows[row].record
+        if wantsEnabled {
+            guard record.isValid else {
+                refreshURIHandlerCheckboxState()
+                return
+            }
+            if onEnableURIHandler?(record) != true {
+                refreshURIHandlerCheckboxState()
+                return
+            }
+        } else {
+            _ = onDisableURIHandler?()
         }
+        refreshURIHandlerCheckboxState()
     }
 
     @available(macOS 11.0, *)
-    @objc private func disableURIHandler() {
-        if onDisableURIHandler?() == true {
-            refreshURIHandlerPanel()
-        }
+    func tableView(_ tableView: NSTableView, shouldEdit tableColumn: NSTableColumn?, row: Int) -> Bool {
+        guard tableColumn?.identifier.rawValue == "enabled", row < uriHandlerRows.count else { return false }
+        let item = uriHandlerRows[row]
+        return item.record.isValid || item.isCyderDefault
+    }
+
+    @available(macOS 11.0, *)
+    func tableView(_ tableView: NSTableView, toolTipFor cell: NSCell, rect: NSRectPointer, tableColumn: NSTableColumn?, row: Int, mouseLocation: NSPoint) -> String {
+        guard row < uriHandlerRows.count, tableColumn?.identifier.rawValue == "command" else { return "" }
+        return uriHandlerRows[row].record.windowsCommand
     }
 
     private func makeDiagnosticsTab() -> NSTabViewItem {
@@ -575,9 +715,6 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
     func prepareForDisplay() {
         wineIsRunning = hasRunningExes?() ?? false
         reload()
-        if #available(macOS 11.0, *) {
-            refreshURIHandlerPanel()
-        }
     }
 
     private func refreshRunningChrome(persistPendingWhenIdle: Bool = false) {

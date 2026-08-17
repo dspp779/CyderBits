@@ -117,11 +117,18 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             self?.cleanDebugLogs()
         }
         if #available(macOS 11.0, *) {
-            controller.onRefreshURIHandler = { [weak self] in
-                self?.uriHandlerPanelState() ?? (nil, false)
+            controller.onScanURIHandlers = { [weak self] completion in
+                self?.scanURIHandlersForSettings(completion: completion)
             }
-            controller.onEnableURIHandler = { [weak self] in self?.enableURIHandlerFromSettings() ?? false }
-            controller.onDisableURIHandler = { [weak self] in self?.disableURIHandlerFromSettings() ?? false }
+            controller.onEnableURIHandler = { [weak self] record in
+                self?.enableURIHandlerFromSettings(record: record) ?? false
+            }
+            controller.onDisableURIHandler = { [weak self] in
+                self?.disableURIHandlerFromSettings() ?? false
+            }
+            controller.onIsCyderURIHandlerDefault = {
+                CyderURIHandlerManager.shared.isCyderDefaultHandler()
+            }
         }
         controller.onClose = { [weak self] in
             guard let self,
@@ -319,10 +326,16 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
 
     @available(macOS 11.0, *)
     func application(_ application: NSApplication, open urls: [URL]) {
+        let fileExecutables = urls.filter(\.isFileURL).flatMap {
+            normalizeExePaths([$0.path])
+        }
         let uriStrings = CyderURIHandlerManager.shared.filterHandledURLs(urls)
         CyderDiagnostics.shared.info(
-            "open-urls received=\(urls.count) gamaniagames=\(uriStrings.count)"
+            "open-urls received=\(urls.count) gamaniagames=\(uriStrings.count) file-exe=\(fileExecutables.count)"
         )
+        if !fileExecutables.isEmpty {
+            deliverExecutableFiles(fileExecutables)
+        }
         guard !uriStrings.isEmpty else { return }
         if !isPrimaryInstance {
             pendingURLs.append(contentsOf: uriStrings)
@@ -340,25 +353,34 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         CyderDiagnostics.shared.info(
             "open-files received=\(filenames.count) executable=\(executableFiles.count) bundle=\(Bundle.main.bundlePath)"
         )
-        guard !executableFiles.isEmpty else {
+        if executableFiles.isEmpty, let raw = filenames.first, !raw.isEmpty {
+            CyderDiagnostics.shared.info("open-files rejected raw=\(raw)")
+        }
+        guard deliverExecutableFiles(executableFiles, replyToOpen: application) else {
             application.reply(toOpenOrPrint: .failure)
             return
         }
+        application.reply(toOpenOrPrint: .success)
+    }
+
+    @discardableResult
+    private func deliverExecutableFiles(
+        _ executableFiles: [String],
+        replyToOpen application: NSApplication? = nil
+    ) -> Bool {
+        guard !executableFiles.isEmpty else { return false }
         if !isPrimaryInstance {
             pendingFiles.append(contentsOf: executableFiles)
             scheduleSecondaryForward()
-            application.reply(toOpenOrPrint: .success)
-            return
+            return true
         }
         if gameLibraryController.window?.isVisible == true {
             enqueueOrLaunch(executableFiles)
-            application.reply(toOpenOrPrint: .success)
-            return
+            return true
         }
         if didRunLauncher {
             enqueueOrLaunch(executableFiles)
-            application.reply(toOpenOrPrint: .success)
-            return
+            return true
         }
         documentLaunchRequested = true
         terminateWhenSettingsClose = false
@@ -367,12 +389,12 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             settingsController.close()
         }
         pendingFiles.append(contentsOf: executableFiles)
-        application.reply(toOpenOrPrint: .success)
         if ProcessInfo.processInfo.environment["CYDER_OPEN_FILES_SELF_TEST"] == "1"
             || ProcessInfo.processInfo.environment["CYDER_INVOCATION_SELF_TEST_OUTPUT"]?.isEmpty == false {
-            return
+            return true
         }
         scheduleRun()
+        return true
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -2168,29 +2190,25 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @available(macOS 11.0, *)
-    private func uriHandlerPanelState() -> (record: CyderURIHandlerRecord?, isCyderDefault: Bool) {
+    private func scanURIHandlersForSettings(
+        completion: @escaping (CyderURIHandlerRecord?, Bool) -> Void
+    ) {
         guard let resourcePath = Bundle.main.resourcePath else {
-            return (nil, false)
+            completion(nil, false)
+            return
         }
         let context = CyderLaunchContext(resourcePath: resourcePath)
-        let record = CyderURIHandlerManager.shared.scan(
+        CyderURIHandlerManager.shared.scanAsync(
             prefix: CyderPaths.sharedBottle,
             launcher: context.launcher
-        )
-        return (record, CyderURIHandlerManager.shared.isCyderDefaultHandler())
+        ) { record in
+            completion(record, CyderURIHandlerManager.shared.isCyderDefaultHandler())
+        }
     }
 
     @available(macOS 11.0, *)
-    private func enableURIHandlerFromSettings() -> Bool {
-        guard let resourcePath = Bundle.main.resourcePath else { return false }
-        let context = CyderLaunchContext(resourcePath: resourcePath)
-        guard let record = CyderURIHandlerManager.shared.scan(
-            prefix: CyderPaths.sharedBottle,
-            launcher: context.launcher
-        ), record.isValid else {
-            showAlert("無法啟用 URI 協定", "shared bottle 中找不到有效的 gamaniagames:// 註冊。")
-            return false
-        }
+    private func enableURIHandlerFromSettings(record: CyderURIHandlerRecord) -> Bool {
+        guard record.isValid else { return false }
         let ok = CyderURIHandlerManager.shared.enableCyderHandler(for: record)
         if !ok {
             showAlert("無法啟用 URI 協定", "macOS 未能將 Cyder 設為 gamaniagames:// 的預設處理程式。")

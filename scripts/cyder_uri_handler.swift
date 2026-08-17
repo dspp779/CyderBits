@@ -91,6 +91,19 @@ final class CyderURIHandlerManager {
         return records.first
     }
 
+    func scanAsync(
+        prefix: URL,
+        launcher: String,
+        completion: @escaping (CyderURIHandlerRecord?) -> Void
+    ) {
+        DispatchQueue.global(qos: .userInitiated).async {
+            let record = self.scan(prefix: prefix, launcher: launcher)
+            DispatchQueue.main.async {
+                completion(record)
+            }
+        }
+    }
+
     func regModificationTimes(prefix: URL) -> (system: Date, user: Date) {
         let system = prefix.appendingPathComponent("system.reg")
         let user = prefix.appendingPathComponent("user.reg")
@@ -172,9 +185,9 @@ final class CyderURIHandlerManager {
         if let previous = defaults.string(forKey: Self.previousHandlerDefaultsKey), !previous.isEmpty {
             let status = LSSetDefaultHandlerForURLScheme(Self.scheme as CFString, previous as CFString)
             defaults.removeObject(forKey: Self.previousHandlerDefaultsKey)
-            if status == noErr { return true }
-            CyderDiagnostics.shared.warning("uri-handler restore failed status=\(status)")
-            return false
+            if status != noErr {
+                CyderDiagnostics.shared.warning("uri-handler restore failed status=\(status)")
+            }
         }
         return true
     }

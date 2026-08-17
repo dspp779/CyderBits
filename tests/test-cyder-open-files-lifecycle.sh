@@ -15,6 +15,10 @@ assert_contains "$source_text" "libraryLaunchInProgress" \
   "the single Wine activation waiter must reject overlapping library startups"
 assert_contains "$source_text" "Association launch: EXE will arrive separately in openFiles" \
   "association launches should treat application argv exclusively as game arguments"
+assert_contains "$source_text" 'file-exe=' \
+  "open-url diagnostics must report file URL exe delivery"
+assert_contains "$source_text" 'isFileURL' \
+  "open-url events must accept file URLs for .exe launches"
 assert_contains "$source_text" "documentLaunchRequested = true" \
   "open-file requests must switch the app out of settings mode"
 assert_contains "$source_text" "asyncAfter(deadline: .now() + 0.2)" \
