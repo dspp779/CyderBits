@@ -4,9 +4,9 @@
 
 # CyderBits
 
-**Run legacy Windows games on Mac — the Cyder 0.10.1 test channel uses DirectDraw and GDI as its validation baseline, with selectable graphics backends.**
+**Run legacy Windows games on Mac — Cyder 0.11.1 uses DirectDraw and GDI as its validation baseline, with selectable graphics backends.**
 
-The validated path remains classic 2D Win32 graphics: **DirectDraw → Wine wined3d/OpenGL** and GDI. Cyder 0.10.1 uses the `CX26.3.0-W11-Cyder011` engine; DXVK and DXMT are delivered as separate graphics payloads, while D3DMetal is available through GPTK. Actual compatibility still depends on the game, macOS version, and selected backend.
+The validated path remains classic 2D Win32 graphics: **DirectDraw → Wine wined3d/OpenGL** and GDI. Cyder 0.11.1 uses the `CX26.3.0-W11-Cyder011` engine; DXVK and DXMT are delivered as separate graphics payloads, while D3DMetal is available through GPTK. Actual compatibility still depends on the game, macOS version, and selected backend.
 
 CyderBits builds CrossOver-based Wine on Apple Silicon and ships two tools: **Cyder** — a one-click `.exe` launcher — and **CyderBits** — a packager that wraps `.exe` files as double-clickable macOS `.app` bundles.
 
@@ -173,6 +173,7 @@ bash tests/test-verify-bluecg.sh
 
 ## Documentation
 
+- [Cyder 0.11.1 release notes](docs/releases/v0.11.1.md) — gamaniagames:// URI handler, open -n file URLs, and URI cold-start Preferences skip
 - [Cyder 0.10.1 test release notes](docs/releases/v0.10.1.md) — forced-stop liquid animation, MapleStory WZ adaptive cache, release tooling, tests, and documentation updates
 - [Cyder 0.10.0 release notes](docs/releases/v0.10.0.md) — Cyder010 engine, graphics payloads, session lifecycle, and diagnostics
 - [Cyder 0.7.0 release notes](docs/releases/v0.7.0.en.md) — CrossOver bottle isolation, cabextract, new icon, MapleStory OEM flavor
