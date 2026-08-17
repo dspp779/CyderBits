@@ -15,6 +15,10 @@ BUILD="$(cat "$ROOT/scripts/create-cyder-app.sh")"
 assert_contains "$COMMON" 'cyder_scan_uri_handlers' "common must expose uri handler scanner"
 assert_contains "$COMMON" 'cyder_reg_read_uri_scheme' "common must parse wine registry sections"
 assert_contains "$URI_SWIFT" 'CyderURIHandlerManager' "swift uri handler manager must exist"
+assert_contains "$URI_SWIFT" 'urlForApplication(toOpen:' \
+  "swift must query the default URL handler via NSWorkspace"
+assert_not_contains "$URI_SWIFT" 'LSCopyDefaultHandlerForURLScheme' \
+  "swift must not use deprecated LSCopyDefaultHandlerForURLScheme"
 assert_contains "$URI_SWIFT" 'absoluteString' "design requires preserving uri absoluteString"
 assert_contains "$APP" 'application(_ application: NSApplication, open urls' "app must handle url open events"
 assert_contains "$APP" 'enqueueOrLaunchURIs' "app must queue uri launches"

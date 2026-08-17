@@ -1,4 +1,5 @@
 // gamaniagames:// URI handler — registry scan, Launch Services, session diff.
+import AppKit
 import CoreServices
 import Foundation
 
@@ -160,8 +161,11 @@ final class CyderURIHandlerManager {
     }
 
     func currentDefaultHandlerBundleID() -> String? {
-        LSCopyDefaultHandlerForURLScheme(Self.scheme as CFString)?
-            .takeRetainedValue() as String?
+        guard let probe = URL(string: "\(Self.scheme):"),
+              let appURL = NSWorkspace.shared.urlForApplication(toOpen: probe) else {
+            return nil
+        }
+        return Bundle(url: appURL)?.bundleIdentifier
     }
 
     @discardableResult
