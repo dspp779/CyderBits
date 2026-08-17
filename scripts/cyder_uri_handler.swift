@@ -92,7 +92,6 @@ final class CyderURIHandlerManager {
     }
 
     func regModificationTimes(prefix: URL) -> (system: Date, user: Date) {
-        let fm = FileManager.default
         let system = prefix.appendingPathComponent("system.reg")
         let user = prefix.appendingPathComponent("user.reg")
         let systemDate = (try? system.resourceValues(forKeys: [.contentModificationDateKey]))?

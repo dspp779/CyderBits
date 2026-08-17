@@ -117,7 +117,9 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             self?.cleanDebugLogs()
         }
         if #available(macOS 11.0, *) {
-            controller.onRefreshURIHandler = { [weak self] in self?.uriHandlerPanelState() }
+            controller.onRefreshURIHandler = { [weak self] in
+                self?.uriHandlerPanelState() ?? (nil, false)
+            }
             controller.onEnableURIHandler = { [weak self] in self?.enableURIHandlerFromSettings() ?? false }
             controller.onDisableURIHandler = { [weak self] in self?.disableURIHandlerFromSettings() ?? false }
         }
