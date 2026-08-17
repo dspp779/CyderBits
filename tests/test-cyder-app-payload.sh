@@ -128,26 +128,17 @@ assert test -x "$ROOT/tools/winetricks/winetricks"
 assert test -x "$ROOT/tools/zstd/zstd"
 assert_contains "$(head -20 "$ROOT/tools/winetricks/winetricks")" "WINETRICKS_VERSION=20260125" \
   "bundled Winetricks version should be pinned"
-oem_build_script="$(cat "$ROOT/scripts/create-cyder-maplestory-oem-app.sh")"
-assert_contains "$oem_build_script" 'Set :CFBundleExecutable CyderMapleStoryOEM' \
-  "OEM packaging should set a distinct CFBundleExecutable"
-assert_contains "$oem_build_script" 'cp "$SCRIPT_DIR/cyder_maplestory_oem_main.sh" "$MACOS/CyderMapleStoryOEM"' \
-  "OEM packaging should rename its primary launcher executable"
-assert_contains "$oem_build_script" 'rm -f "$MACOS/Cyder"' \
-  "OEM packaging should remove the inherited base launcher"
-assert_contains "$oem_build_script" 'for helper in CyderOEMBootstrap CyderMapleStoryOEM; do' \
-  "OEM signing should include the renamed launcher"
-assert_contains "$oem_build_script" 'CYDER_GRAPHICS_BACKEND_PATH' \
-  "OEM packaging should validate the Cyder graphics backend hook"
-assert_contains "$oem_build_script" 'external Resources/graphics' \
-  "OEM packaging should keep graphics payloads external to the engine"
-assert_not_contains "$oem_build_script" 'DXVK_SRC' \
-  "OEM packaging must not inject a DXVK tree into the engine"
-assert_not_contains "$oem_build_script" 'cyder-oem-sync-dxvk.sh' \
-  "OEM packaging must not retain the removed DXVK repair path"
-if [[ "$oem_build_script" == *'*/MacOS/Cyder |'* ]]; then
-  echo "ASSERT failed: OEM payload signing should no longer whitelist the old Cyder launcher path" >&2
+[[ ! -e "$ROOT/scripts/create-cyder-maplestory-oem-app.sh" ]] || {
+  echo "ASSERT failed: MapleStory OEM app packer must be removed" >&2
   exit 1
-fi
+}
+[[ ! -e "$ROOT/scripts/cyder_maplestory_oem_main.sh" ]] || {
+  echo "ASSERT failed: MapleStory OEM launcher must be removed" >&2
+  exit 1
+}
+[[ ! -e "$ROOT/scripts/cyder_oem_bootstrap_main.sh" ]] || {
+  echo "ASSERT failed: OEM bootstrap helper must be removed" >&2
+  exit 1
+}
 
 echo "PASS test-cyder-app-payload"

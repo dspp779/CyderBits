@@ -7,7 +7,6 @@
 # - environment(): dxvk+60 sets CYDER_GRAPHICS_BACKEND=dxvk and DXVK_FRAME_RATE=60
 # - environment(): default sets neither CYDER_GRAPHICS_BACKEND nor DXVK_FRAME_RATE
 # - MapleStory default policy: DXMT on macOS 15+, DXVK below macOS 15
-# - OEM (CYDER_OEM_FLAVOR=maplestory): global default remains unchanged
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TMP="$(mktemp -d)"
@@ -16,7 +15,7 @@ CACHE="$TMP/module-cache"
 BIN="$TMP/cyder-settings-harness"
 export CYDER_SUPPORT="$TMP/support"
 mkdir -p "$CYDER_SUPPORT"
-unset CYDER_OEM_FLAVOR CYDER_ENGINE_NAME CYDER_BOTTLE_NAME
+unset CYDER_ENGINE_NAME CYDER_BOTTLE_NAME
 
 swiftc -O -module-cache-path "$CACHE" \
   "$ROOT/scripts/cyder_paths.swift" \
