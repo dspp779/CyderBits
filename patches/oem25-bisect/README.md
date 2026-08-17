@@ -1,5 +1,9 @@
 # OEM CX25 reverse-removal groups (G/W/L/P/S)
 
+> CX25 OEM 產品線與 `--cx 25` 建置已退役。現行路徑是正式 Cyder.app + CX26。本文保留為研究紀錄。
+
+Do not run `scripts/prepare-maplestory-oem25-reverse-group.sh` or `scripts/run-maplestory-cx25-source-ab.sh`; those trees are not built anymore.
+
 Used with `scripts/prepare-maplestory-oem25-reverse-group.sh` to reverse one
 patch group from a working OEM CX25 Wine tree toward retail CX25.0.1, then rebuild
 and A/B with `scripts/run-maplestory-cx25-source-ab.sh`.

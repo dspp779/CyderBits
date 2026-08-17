@@ -1,5 +1,7 @@
 # MapleStory OEM engine 與一般 Cyder／CrossOver 的差異
 
+> CX25 OEM 產品線與 `--cx 25` 建置已退役。現行路徑是正式 Cyder.app + CX26。本文保留為研究紀錄。
+
 最後更新：2026-07-20
 
 ## 結論
