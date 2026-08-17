@@ -11,6 +11,7 @@ import Foundation
 struct CyderInstanceRequest {
     let files: [String]
     let arguments: [String]?
+    let urls: [String]
     let showUI: Bool
 }
 
@@ -63,13 +64,14 @@ final class CyderInstanceCoordinator {
         return .secondary
     }
 
-    func forward(files: [String], arguments: [String]?, showUI: Bool) {
-        guard !files.isEmpty || arguments != nil || showUI else { return }
+    func forward(files: [String], arguments: [String]?, urls: [String] = [], showUI: Bool) {
+        guard !files.isEmpty || arguments != nil || !urls.isEmpty || showUI else { return }
         guard ensureDirectory(requestDirectory) else { return }
         let payload: [String: Any] = [
             "files": files,
             "arguments": arguments ?? [],
             "hasArguments": arguments != nil,
+            "urls": urls,
             "showUI": showUI,
             "createdAt": Date().timeIntervalSince1970,
         ]
@@ -167,7 +169,8 @@ final class CyderInstanceCoordinator {
             return nil
         }
         let arguments = (payload["hasArguments"] as? Bool) == true ? rawArguments : nil
-        return CyderInstanceRequest(files: rawFiles, arguments: arguments, showUI: showUI)
+        let rawURLs = payload["urls"] as? [String] ?? []
+        return CyderInstanceRequest(files: rawFiles, arguments: arguments, urls: rawURLs, showUI: showUI)
     }
 
     private func isRequestURL(_ url: URL) -> Bool {

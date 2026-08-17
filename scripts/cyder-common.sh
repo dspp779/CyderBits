@@ -3193,3 +3193,190 @@ cyder_bootstrap_error_dialog() {
   echo "$1" >"$log"
   osascript -e 'display alert "Cyder 初始化失敗" message "請查看 ~/Library/Application Support/Cyder/Logs/bootstrap-error.log" as warning' 2>/dev/null || true
 }
+
+# --- URI handler registry scanner (gamaniagames://) ---
+
+cyder_json_escape_string() {
+  local s=$1 c out='"'
+  local i
+  for ((i = 0; i < ${#s}; i++)); do
+    c=${s:i:1}
+    case "$c" in
+      \\) out+='\\' ;;
+      \") out+='\"' ;;
+      $'\n') out+='\n' ;;
+      $'\r') out+='\r' ;;
+      $'\t') out+='\t' ;;
+      *) out+="$c" ;;
+    esac
+  done
+  out+='"'
+  printf '%s' "$out"
+}
+
+cyder_reg_unquote_value() {
+  local raw=$1 val
+  if [[ "$raw" == @=* ]]; then
+    val="${raw#@=}"
+  elif [[ "$raw" == \"*\"=\"* ]]; then
+    val="${raw#*\"=\"}"
+  else
+    val="${raw#*=}"
+  fi
+  val="${val#\"}"
+  val="${val%\"}"
+  val="${val//\\\"/\"}"
+  val="${val//\\\\/\\}"
+  printf '%s' "$val"
+}
+
+cyder_resolve_windows_exe_path() {
+  local prefix="$1" winpath="$2"
+  local rest mac
+  [[ "$winpath" =~ ^\"(.*)\"$ ]] && winpath="${BASH_REMATCH[1]}"
+  [[ "$winpath" =~ ^[Cc]: ]] || return 1
+  rest="${winpath:2}"
+  rest="${rest//\\//}"
+  [[ "$rest" != /* ]] && rest="/$rest"
+  if [[ "$rest" == *".."* ]]; then
+    return 1
+  fi
+  mac="$prefix/drive_c$rest"
+  mac="$(cd "$(dirname "$mac")" 2>/dev/null && pwd -P)/$(basename "$mac")"
+  [[ -f "$mac" && ! -L "$mac" ]] || return 1
+  case "$(basename "$mac")" in
+    *.exe | *.EXE) ;;
+    *) return 1 ;;
+  esac
+  printf '%s' "$mac"
+}
+
+cyder_validate_uri_command() {
+  local cmd="$1" exe_win
+  [[ "$cmd" == \"*\"[[:space:]]*\"%1\" ]] || return 1
+  if [[ "$cmd" =~ ^\"(.+)\"[[:space:]]+\"%1\"$ ]]; then
+    exe_win="${BASH_REMATCH[1]}"
+  else
+    return 1
+  fi
+  shopt -s nocasematch
+  [[ "$exe_win" == *.exe ]] || { shopt -u nocasematch; return 1; }
+  [[ "$exe_win" != *cmd.exe* && "$exe_win" != *powershell* && "$exe_win" != *.bat \
+    && "$exe_win" != *.cmd ]] || { shopt -u nocasematch; return 1; }
+  shopt -u nocasematch
+  printf '%s' "$exe_win"
+}
+
+cyder_reg_read_uri_scheme() {
+  local regfile="$1" scheme="$2"
+  ROOT_TS=0 ROOT_URL_PROTOCOL=0 COMMAND="" COMMAND_TS=0 INSTALL_PATH="" VERSION=""
+  [[ -f "$regfile" && ! -L "$regfile" ]] || return 1
+
+  local root="Software\\\\Classes\\\\${scheme}"
+  local cmd="${root}\\\\shell\\\\open\\\\command"
+  local meta="Software\\\\gamaniaGamesManager"
+  local sect="" line ts in_root=0 in_cmd=0 in_meta=0 has_proto=0 root_ts=0 cmd_ts=0
+
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    if [[ "$line" == \[* ]]; then
+      in_root=0
+      in_cmd=0
+      in_meta=0
+      ts=0
+      if [[ "$line" =~ ^\[([^]]+)\][[:space:]]*([0-9]+)?[[:space:]]*$ ]]; then
+        sect="${BASH_REMATCH[1]}"
+        ts="${BASH_REMATCH[2]:-0}"
+      else
+        continue
+      fi
+      if [[ "$sect" == "$root" ]]; then
+        in_root=1
+        root_ts=$ts
+      elif [[ "$sect" == "$cmd" ]]; then
+        in_cmd=1
+        cmd_ts=$ts
+      elif [[ "$sect" == "$meta" ]]; then
+        in_meta=1
+      fi
+      continue
+    fi
+    if (( in_root )) && [[ "$line" == '"URL Protocol"'* ]]; then
+      has_proto=1
+      continue
+    fi
+    if (( in_cmd )) && [[ "$line" == @=* ]]; then
+      COMMAND="$(cyder_reg_unquote_value "$line")"
+      continue
+    fi
+    if (( in_meta )) && [[ "$line" == '"InstallPath"'* ]]; then
+      INSTALL_PATH="$(cyder_reg_unquote_value "$line")"
+      continue
+    fi
+    if (( in_meta )) && [[ "$line" == '"Version"'* ]]; then
+      VERSION="$(cyder_reg_unquote_value "$line")"
+      continue
+    fi
+  done <"$regfile"
+
+  [[ "$has_proto" -eq 1 && -n "$COMMAND" ]] || return 1
+  COMMAND_TS=$(( cmd_ts > root_ts ? cmd_ts : root_ts ))
+  ROOT_TS="$COMMAND_TS"
+  return 0
+}
+
+cyder_scan_uri_handlers() {
+  local prefix="$1" scheme="${2:-gamaniagames}"
+  local system_reg="$prefix/system.reg" user_reg="$prefix/user.reg"
+  local merged_cmd="" merged_ts=0 install_path="" version="" source=""
+  local system_cmd="" user_cmd="" system_ts=0 user_ts=0
+
+  if cyder_reg_read_uri_scheme "$user_reg" "$scheme"; then
+    user_cmd="$COMMAND"
+    user_ts="$COMMAND_TS"
+    merged_cmd="$user_cmd"
+    merged_ts="$user_ts"
+    install_path="$INSTALL_PATH"
+    version="$VERSION"
+    source="user"
+  fi
+  if cyder_reg_read_uri_scheme "$system_reg" "$scheme"; then
+    system_cmd="$COMMAND"
+    system_ts="$COMMAND_TS"
+    if [[ -z "$merged_cmd" ]]; then
+      merged_cmd="$system_cmd"
+      merged_ts="$system_ts"
+      install_path="$INSTALL_PATH"
+      version="$VERSION"
+      source="system"
+    fi
+  fi
+
+  local status="missing" windows_command="" resolved="" exe_win
+  if [[ -n "$merged_cmd" ]]; then
+    windows_command="$merged_cmd"
+    if exe_win="$(cyder_validate_uri_command "$merged_cmd")"; then
+      if resolved="$(cyder_resolve_windows_exe_path "$prefix" "$exe_win")"; then
+        status="valid"
+      else
+        status="stale"
+      fi
+    else
+      status="unsupported"
+    fi
+  fi
+
+  if [[ -z "$install_path" && -n "$exe_win" ]]; then
+    install_path="$exe_win"
+    install_path="${install_path%\\*}"
+  fi
+
+  printf '[{"scheme":%s,"sectionTimestamp":%s,"windowsCommand":%s,"resolvedExecutable":%s,"installPath":%s,"version":%s,"status":%s,"source":%s}]' \
+    "$(cyder_json_escape_string "$scheme")" \
+    "${merged_ts:-0}" \
+    "$(cyder_json_escape_string "$windows_command")" \
+    "$(cyder_json_escape_string "$resolved")" \
+    "$(cyder_json_escape_string "$install_path")" \
+    "$(cyder_json_escape_string "$version")" \
+    "$(cyder_json_escape_string "$status")" \
+    "$(cyder_json_escape_string "$source")"
+}

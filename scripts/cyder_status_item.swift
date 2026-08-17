@@ -28,6 +28,7 @@ final class CyderStatusItemController: NSObject, NSMenuDelegate {
     var onOpenTaskManager: ((URL) -> Void)?
     var onStopPrefixes: (([URL]) -> Void)?
     var onAllSessionsEnded: (() -> Void)?
+    var onSessionEnded: ((URL) -> Void)?
 
     private var sessions: [Int32: Session] = [:]
     private var statusItem: NSStatusItem?
@@ -154,6 +155,7 @@ final class CyderStatusItemController: NSObject, NSMenuDelegate {
                 survivors[pid] = session
             } else {
                 try? FileManager.default.removeItem(at: session.lifecycleURL)
+                onSessionEnded?(session.prefix)
             }
         }
         let hadSessions = !sessions.isEmpty

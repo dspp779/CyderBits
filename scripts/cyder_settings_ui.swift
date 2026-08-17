@@ -32,6 +32,9 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
     var onOpenWinetricks: (([String]) -> Void)?
     var onExportLastGameLog: (() -> Void)?
     var onCleanDebugLogs: (() -> Void)?
+    var onRefreshURIHandler: (() -> (record: CyderURIHandlerRecord?, isCyderDefault: Bool))?
+    var onEnableURIHandler: (() -> Bool)?
+    var onDisableURIHandler: (() -> Bool)?
     var onSaveStarted: (() -> Void)?
     var onSaveFailed: (() -> Void)?
     var onClose: (() -> Void)?
@@ -82,6 +85,11 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
     private var deletedProfiles: Set<String> = []
     private let status = NSTextField(labelWithString: "設定已儲存")
     private var isDirty = false
+    private let uriHandlerSummary = NSTextField(wrappingLabelWithString: "尚未掃描。")
+    private let uriHandlerDetail = NSTextField(wrappingLabelWithString: "")
+    private let uriHandlerEnableButton = NSButton()
+    private let uriHandlerDisableButton = NSButton()
+    private let uriHandlerRescanButton = NSButton()
 
     convenience init() {
         let window = NSWindow(
@@ -119,6 +127,9 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
         tabs.addTabViewItem(makeFontsTab())
         tabs.addTabViewItem(makeGraphicsTab())
         tabs.addTabViewItem(makeAdvancedTab())
+        if #available(macOS 11.0, *) {
+            tabs.addTabViewItem(makeURIHandlerTab())
+        }
         tabs.addTabViewItem(makeDiagnosticsTab())
 
         status.font = .systemFont(ofSize: 11)
@@ -354,6 +365,88 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
         ])
     }
 
+    @available(macOS 11.0, *)
+    private func makeURIHandlerTab() -> NSTabViewItem {
+        uriHandlerRescanButton.title = "重新掃描"
+        uriHandlerRescanButton.bezelStyle = .rounded
+        uriHandlerRescanButton.target = self
+        uriHandlerRescanButton.action = #selector(refreshURIHandlerPanel)
+
+        uriHandlerEnableButton.title = "設為 Cyder 處理"
+        uriHandlerEnableButton.bezelStyle = .rounded
+        uriHandlerEnableButton.target = self
+        uriHandlerEnableButton.action = #selector(enableURIHandler)
+
+        uriHandlerDisableButton.title = "停止 Cyder 處理"
+        uriHandlerDisableButton.bezelStyle = .rounded
+        uriHandlerDisableButton.target = self
+        uriHandlerDisableButton.action = #selector(disableURIHandler)
+
+        uriHandlerSummary.font = .boldSystemFont(ofSize: 12)
+        uriHandlerDetail.font = .systemFont(ofSize: 11)
+        uriHandlerDetail.textColor = .secondaryLabelColor
+
+        let buttons = NSStackView(views: [uriHandlerRescanButton, uriHandlerEnableButton, uriHandlerDisableButton])
+        buttons.orientation = .horizontal
+        buttons.spacing = 8
+
+        return tab("URI 協定", rows: [
+            uriHandlerSummary,
+            uriHandlerDetail,
+            buttons,
+            note("當 gamania Games Manager 在 shared bottle 註冊 gamaniagames:// 後，Cyder 可代為啟動 GGMWebStart.exe。URI 會原樣傳入 Windows，不做 percent-decoding。"),
+        ])
+    }
+
+    @available(macOS 11.0, *)
+    @objc private func refreshURIHandlerPanel() {
+        guard let state = onRefreshURIHandler?() else {
+            uriHandlerSummary.stringValue = "Cyder 無法掃描 URI handler。"
+            uriHandlerEnableButton.isEnabled = false
+            uriHandlerDisableButton.isEnabled = false
+            return
+        }
+        if let record = state.record, record.isValid {
+            uriHandlerSummary.stringValue = "gamaniagames:// → \(record.executableName)"
+            var detail = "Windows 命令：\(record.windowsCommand)"
+            if !record.version.isEmpty {
+                detail += "\n版本：\(record.version)"
+            }
+            detail += state.isCyderDefault
+                ? "\nmacOS 狀態：由 Cyder 處理"
+                : "\nmacOS 狀態：尚未由 Cyder 處理"
+            uriHandlerDetail.stringValue = detail
+            uriHandlerEnableButton.isEnabled = !state.isCyderDefault
+            uriHandlerDisableButton.isEnabled = state.isCyderDefault
+        } else if let record = state.record {
+            uriHandlerSummary.stringValue = "gamaniagames:// 註冊無效（\(record.status)）"
+            uriHandlerDetail.stringValue = record.windowsCommand.isEmpty
+                ? "shared bottle 中找不到有效 handler。"
+                : record.windowsCommand
+            uriHandlerEnableButton.isEnabled = false
+            uriHandlerDisableButton.isEnabled = state.isCyderDefault
+        } else {
+            uriHandlerSummary.stringValue = "尚未偵測到 gamaniagames://"
+            uriHandlerDetail.stringValue = "請先在 shared bottle 安裝 gamania Games Manager。"
+            uriHandlerEnableButton.isEnabled = false
+            uriHandlerDisableButton.isEnabled = state.isCyderDefault
+        }
+    }
+
+    @available(macOS 11.0, *)
+    @objc private func enableURIHandler() {
+        if onEnableURIHandler?() == true {
+            refreshURIHandlerPanel()
+        }
+    }
+
+    @available(macOS 11.0, *)
+    @objc private func disableURIHandler() {
+        if onDisableURIHandler?() == true {
+            refreshURIHandlerPanel()
+        }
+    }
+
     private func makeDiagnosticsTab() -> NSTabViewItem {
         wineDiagnostics.addItems(withTitles: ["安靜（預設）", "只記錄錯誤", "等待與凍結追蹤", "完整堆疊追蹤"])
         wineDiagnostics.target = self
@@ -482,6 +575,9 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate 
     func prepareForDisplay() {
         wineIsRunning = hasRunningExes?() ?? false
         reload()
+        if #available(macOS 11.0, *) {
+            refreshURIHandlerPanel()
+        }
     }
 
     private func refreshRunningChrome(persistPendingWhenIdle: Bool = false) {

@@ -20,6 +20,8 @@ assert_contains "$instance" 'requestPollTimer' \
   "the primary must recover requests when distributed notifications are delayed"
 assert_contains "$instance" 'hasArguments' \
   "forwarded requests must preserve the distinction between nil and empty argv"
+assert_contains "$instance" '"urls"' \
+  "forwarded requests must include url payloads"
 assert_contains "$instance" 'createdAt' \
   "stale forwarded requests must not launch unexpectedly after a crash"
 assert_contains "$instance" 'removeExactLock' \

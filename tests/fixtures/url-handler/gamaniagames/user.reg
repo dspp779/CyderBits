@@ -1,0 +1,12 @@
+WINE REGISTRY Version 2
+
+[Software\\Classes\\gamaniagames] 1740000000
+@="URL:gamania Games Manager Protocol"
+"URL Protocol"=""
+
+[Software\\Classes\\gamaniagames\\shell\\open\\command] 1740000100
+@="\"C:\\Program Files\\gamania Games\\gamania Games Manager\\GGMWebStart.exe\" \"%1\""
+
+[Software\\gamaniaGamesManager] 1740000000
+"InstallPath"="C:\\Program Files\\gamania Games\\gamania Games Manager"
+"Version"="1.5.0.2"

@@ -284,6 +284,7 @@ SWIFT_SOURCES=(
   "$SCRIPT_DIR/cyder_diagnostics.swift"
   "$SCRIPT_DIR/cyder_paths.swift"
   "$SCRIPT_DIR/cyder_instance.swift"
+  "$SCRIPT_DIR/cyder_uri_handler.swift"
   "$SCRIPT_DIR/cyder_gptk.swift"
   "$SCRIPT_DIR/cyder_settings.swift"
   "$SCRIPT_DIR/cyder_launch_support.swift"
@@ -422,6 +423,19 @@ cat > "$CONTENTS/Info.plist" <<PLIST
       <array>
         <string>com.microsoft.windows-executable</string>
       </array>
+    </dict>
+  </array>
+  <key>CFBundleURLTypes</key>
+  <array>
+    <dict>
+      <key>CFBundleURLName</key>
+      <string>gamania Games Manager Protocol</string>
+      <key>CFBundleURLSchemes</key>
+      <array>
+        <string>gamaniagames</string>
+      </array>
+      <key>CFBundleTypeRole</key>
+      <string>Viewer</string>
     </dict>
   </array>
   <key>UTImportedTypeDeclarations</key>
