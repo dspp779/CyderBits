@@ -95,8 +95,11 @@ SETTINGS_DIR="$TMP/support"
 SETTINGS_ENGINE_NAME=wine-x86_64
 SETTINGS_ENGINES="$TMP/settings-engines"
 mkdir -p "$SETTINGS_DIR" \
-  "$SETTINGS_ENGINES/$SETTINGS_ENGINE_NAME/lib/dxvk/x86_64-windows"
+  "$SETTINGS_ENGINES/$SETTINGS_ENGINE_NAME/lib/dxvk/x86_64-windows" \
+  "$SETTINGS_ENGINES/$SETTINGS_ENGINE_NAME/lib/wine/x86_64-unix"
 : >"$SETTINGS_ENGINES/$SETTINGS_ENGINE_NAME/lib/dxvk/x86_64-windows/d3d11.dll"
+: >"$SETTINGS_ENGINES/$SETTINGS_ENGINE_NAME/lib/dxvk/x86_64-windows/dxgi.dll"
+: >"$SETTINGS_ENGINES/$SETTINGS_ENGINE_NAME/lib/wine/x86_64-unix/libMoltenVK.dylib"
 cat >"$SETTINGS_DIR/settings.json" <<'JSON'
 {
   "schemaVersion": 6,

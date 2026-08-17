@@ -78,6 +78,8 @@ Options:
   --profile-resolve PATH  Resolve PATH to its per-game bottle and exit
   --profile-create PATH [pristine|golden]  Provision a fresh per-game bottle and exit
   --profile-remove PATH  Remove a per-game bottle/profile and exit
+  --scan-uri-handlers PREFIX [SCHEME]
+                      Print JSON array describing a bottle URI handler
   -h, --help          Show this help
 EOF
 }
@@ -113,6 +115,9 @@ EXE_ARGS=()
 FORWARDED_GAME_ARGUMENTS=()
 FORWARDED_GAME_ARGUMENTS_SET=0
 POSITIONAL_EXE=0
+SCAN_URI_HANDLERS=0
+SCAN_URI_PREFIX=""
+SCAN_URI_SCHEME="gamaniagames"
 
 cyder_write_machine_result() {
   local key="$1" value="$2" result_file="${CYDER_RESULT_FILE:-}"
@@ -248,6 +253,17 @@ while [[ $# -gt 0 ]]; do
       PROFILE_EXE="$2"
       shift 2
       ;;
+    --scan-uri-handlers)
+      [[ $# -ge 2 ]] || { echo "--scan-uri-handlers requires PREFIX" >&2; exit 1; }
+      SCAN_URI_HANDLERS=1
+      SCAN_URI_PREFIX="$2"
+      if [[ $# -ge 3 && "$3" != --* ]]; then
+        SCAN_URI_SCHEME="$3"
+        shift 3
+      else
+        shift 2
+      fi
+      ;;
     --engine-src)
       [[ $# -ge 2 ]] || {
         echo "--engine-src requires PATH" >&2
@@ -307,9 +323,17 @@ primary_actions=0
 [[ "$ENSURE_ENGINE_ONLY" -eq 1 ]] && primary_actions=$((primary_actions + 1))
 [[ "$ENSURE_GRAPHICS_ONLY" -eq 1 ]] && primary_actions=$((primary_actions + 1))
 [[ "$ENSURE_ROSETTA_ONLY" -eq 1 ]] && primary_actions=$((primary_actions + 1))
+[[ "$SCAN_URI_HANDLERS" -eq 1 ]] && primary_actions=$((primary_actions + 1))
 [[ "$DRY_RUN" -eq 1 ]] && primary_actions=$((primary_actions + 1))
 [[ "$POSITIONAL_EXE" -eq 1 && "$DRY_RUN" -eq 0 && "$LAUNCH_ONLY" -eq 0 ]] && primary_actions=$((primary_actions + 1))
 (( primary_actions <= 1 )) || { echo "Only one profile/session/settings action may be specified" >&2; exit 1; }
+
+if [[ "$SCAN_URI_HANDLERS" -eq 1 ]]; then
+  cyder_set_stage scan-uri-handlers
+  [[ -d "$SCAN_URI_PREFIX" ]] || { echo "prefix does not exist: $SCAN_URI_PREFIX" >&2; exit 1; }
+  cyder_scan_uri_handlers "$SCAN_URI_PREFIX" "$SCAN_URI_SCHEME"
+  exit 0
+fi
 
 if [[ -n "$PROFILE_ACTION" ]]; then
   cyder_set_stage profile-"$PROFILE_ACTION"

@@ -67,6 +67,15 @@ stub_dxmt_engine_payload() {
 }
 stub_dxmt_engine_payload "$TMP/engine"
 
+stub_dxvk_engine_payload() {
+  mkdir -p "$1/lib/dxvk/x86_64-windows" "$1/lib/wine/x86_64-unix"
+  touch \
+    "$1/lib/dxvk/x86_64-windows/d3d11.dll" \
+    "$1/lib/dxvk/x86_64-windows/dxgi.dll" \
+    "$1/lib/wine/x86_64-unix/libMoltenVK.dylib"
+}
+stub_dxvk_engine_payload "$TMP/engine"
+
 CYDER_SUPPORT="$TMP/support" \
 CYDER_SCRIPTS="$TMP/scripts" \
 CYDER_TEST_SETTINGS_LOG="$TMP/settings.log" \
@@ -225,6 +234,71 @@ dxmt_backend="$(
 assert_eq "$dxmt_backend" "dxmt|1|0" \
   "Bash graphics resolve should honor an explicit dxmt preference and apply the saved Metal HUD"
 
+# MapleStory's default graphics policy is resolved from the actual EXE and
+# host OS. It must prefer DXMT on macOS 15+, use DXVK below macOS 15, and keep
+# explicit user selections ahead of the automatic policy.
+maplestory_dxmt_auto="$(
+  CYDER_SUPPORT="$TMP/support" bash -c '
+    source "$1/scripts/cyder-common.sh"
+    cyder_macos_at_least() { return 0; }
+    export CYDER_GRAPHICS_PREFERENCE=default
+    cyder_resolve_effective_graphics_backend "$2/engine" "$3"
+    printf "%s|%s|%s" "$CYDER_GRAPHICS_PREFERENCE" "${CYDER_GRAPHICS_BACKEND:-<unset>}" "${CX_GRAPHICS_BACKEND:-<unset>}"
+  ' _ "$ROOT" "$TMP" "$TMP/MapleStory.exe"
+)"
+assert_eq "$maplestory_dxmt_auto" "dxmt|dxmt|dxmt" \
+  "MapleStory default graphics should choose DXMT on macOS 15+"
+
+maplestory_classic_dxvk_auto="$(
+  CYDER_SUPPORT="$TMP/support" bash -c '
+    source "$1/scripts/cyder-common.sh"
+    cyder_macos_at_least() { return 1; }
+    export CYDER_GRAPHICS_PREFERENCE=default
+    cyder_resolve_effective_graphics_backend "$2/engine" "$3"
+    printf "%s|%s|%s" "$CYDER_GRAPHICS_PREFERENCE" "${CYDER_GRAPHICS_BACKEND:-<unset>}" "${CX_GRAPHICS_BACKEND:-<unset>}"
+  ' _ "$ROOT" "$TMP" "$TMP/MAPLESTORY_CLASSIC.EXE"
+)"
+assert_eq "$maplestory_classic_dxvk_auto" "dxvk|dxvk|dxvk" \
+  "MapleStory Classic default graphics should choose DXVK below macOS 15"
+
+maplestory_manual_dxvk="$(
+  CYDER_SUPPORT="$TMP/support" bash -c '
+    source "$1/scripts/cyder-common.sh"
+    cyder_macos_at_least() { return 0; }
+    export CYDER_GRAPHICS_PREFERENCE=dxvk
+    cyder_resolve_effective_graphics_backend "$2/engine" "$3"
+    printf "%s|%s" "$CYDER_GRAPHICS_PREFERENCE" "${CYDER_GRAPHICS_BACKEND:-<unset>}"
+  ' _ "$ROOT" "$TMP" "$TMP/MapleStory.exe"
+)"
+assert_eq "$maplestory_manual_dxvk" "dxvk|dxvk" \
+  "an explicit DXVK selection should override MapleStory auto policy"
+
+mkdir -p "$TMP/engine-dxvk-only"
+stub_dxvk_engine_payload "$TMP/engine-dxvk-only"
+maplestory_dxvk_fallback="$(
+  CYDER_SUPPORT="$TMP/support" bash -c '
+    source "$1/scripts/cyder-common.sh"
+    cyder_macos_at_least() { return 0; }
+    export CYDER_GRAPHICS_PREFERENCE=default
+    cyder_resolve_effective_graphics_backend "$2/engine-dxvk-only" "$3"
+    printf "%s|%s" "$CYDER_GRAPHICS_PREFERENCE" "${CYDER_GRAPHICS_BACKEND:-<unset>}"
+  ' _ "$ROOT" "$TMP" "$TMP/MapleStory.exe"
+)"
+assert_eq "$maplestory_dxvk_fallback" "dxvk|dxvk" \
+  "MapleStory should fall back to DXVK when DXMT is unavailable"
+
+non_maplestory_default="$(
+  CYDER_SUPPORT="$TMP/support" bash -c '
+    source "$1/scripts/cyder-common.sh"
+    cyder_macos_at_least() { return 0; }
+    export CYDER_GRAPHICS_PREFERENCE=default
+    cyder_resolve_effective_graphics_backend "$2/engine" "$3"
+    printf "%s|%s" "$CYDER_GRAPHICS_PREFERENCE" "${CYDER_GRAPHICS_BACKEND:-<unset>}"
+  ' _ "$ROOT" "$TMP" "$TMP/other-game.exe"
+)"
+assert_eq "$non_maplestory_default" "default|<unset>" \
+  "non-MapleStory defaults must remain CompatDB-driven"
+
 mkdir -p "$TMP/engine-empty/bin"
 
 # Leftover dxmt preference must fail closed when macOS is below 15.
@@ -282,11 +356,12 @@ legacy_dxmt_game="$(
       CYDER_ENGINES="$2/engines" CYDER_ENGINE_NAME=test-engine
       mkdir -p "$CYDER_ENGINES/$CYDER_ENGINE_NAME"
       cyder_load_game_settings "$3" "$2/engine-empty"
+      cyder_resolve_effective_graphics_backend "$2/engine-empty" "$3"
       printf "%s|%s" "$CYDER_GRAPHICS_PREFERENCE" "${CYDER_GRAPHICS_BACKEND:-<unset>}"
     ' _ "$ROOT" "$TMP" "$exe"
 )"
 assert_eq "$legacy_dxmt_game" "default|<unset>" \
-  "per-game dxmt override must fail closed on macOS below 15"
+  "per-game dxmt override must fail closed on macOS below 15 without entering MapleStory auto policy"
 
 # A stale "auto" preference (from a pre-dxmt settings.json) must no longer
 # cascade to a concrete backend now that the auto cascade is gone.

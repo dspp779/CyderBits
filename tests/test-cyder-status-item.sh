@@ -14,6 +14,8 @@ assert_contains "$status_source" 'NSStatusBar.system.statusItem' \
   "active Wine sessions must create a menu-bar item"
 assert_contains "$status_source" 'func setUIVisible(_ visible: Bool)' \
   "preferences and game-library windows must keep the menu-bar item visible"
+assert_contains "$status_source" 'func isMonitoring(prefix: String) -> Bool' \
+  "the app must expose monitored-prefix routing for later Wine activation"
 assert_contains "$status_source" 'var onOpenGameLibrary' \
   "the status menu must expose a game-library callback"
 assert_contains "$status_source" 'withTitle: "遊戲庫…"' \
@@ -34,18 +36,22 @@ assert_contains "$status_source" '結束所有 Cyder 程序…' \
   "the menu must expose an explicit whole-environment stop"
 assert_contains "$status_source" 'cyderBottleImage(' \
   "the menu bar must use Cyder's bottle silhouette"
-assert_contains "$status_source" 'windowCount:' \
-  "the Cyder bottle must animate its Windows panes"
+assert_not_contains "$status_source" 'windowCount:' \
+  "the pure decanter icon must not retain the removed window-pane state"
 assert_contains "$status_source" 'liquidLevel:' \
   "managed shutdown must animate the bottle liquid level"
+assert_contains "$status_source" 'forcedStopLiquidLevel' \
+  "managed shutdown must use the forced-stop liquid drain animation"
 assert_contains "$status_source" 'if clampedLiquidLevel >= 0.999' \
   "a full Cyder bottle must fill through the neck and shoulders"
-assert_contains "$status_source" 'let paneSize: CGFloat = 2.4' \
-  "the Windows mark must remain compact at menu-bar size"
-assert_contains "$status_source" 'let paneYOffset: CGFloat = -1.4' \
-  "the Windows mark must sit low in the decanter bowl"
-assert_contains "$status_source" 'xRadius: 0.1, yRadius: 0.1' \
-  "the Windows panes must retain a crisp logo silhouette at menu-bar size"
+assert_contains "$status_source" 'smooth arced bottom' \
+  "the menu-bar decanter must use a smooth arced bottom"
+assert_contains "$status_source" 'bottle.curve(to: NSPoint(x: 6.0, y: 1.25)' \
+  "the menu-bar decanter must avoid a flat base"
+assert_not_contains "$status_source" 'let paneSize' \
+  "the menu-bar decanter must not draw Windows panes"
+assert_not_contains "$status_source" 'destinationOut' \
+  "the menu-bar decanter must not cut Windows panes from the silhouette"
 assert_contains "$status_source" 'accessibilityDisplayShouldReduceMotion' \
   "menu-bar animations must respect Reduce Motion"
 assert_contains "$status_source" '正在等待背景程序結束 ·' \

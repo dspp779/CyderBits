@@ -13,7 +13,8 @@
 
 | 版本 | 文件 | 重點 |
 |------|------|------|
-| 0.10.0 | [繁中](releases/v0.10.0.md) | Cyder010、DXVK／DXMT 圖形後端、單一選單列 instance、設定與啟動診斷收斂（目標版本） |
+| 0.10.1 | [繁中](releases/v0.10.1.md) | 測試版：強制結束液面動畫、MapleStory WZ adaptive cache、release tooling、manifest／遊戲庫測試與文件更新；process monitor 排定 0.11.0 |
+| 0.10.0 | [繁中](releases/v0.10.0.md) | Cyder010、DXVK／DXMT 圖形後端、單一選單列 instance、設定與啟動診斷收斂（已發布） |
 | 0.9.5 | [繁中](releases/v0.9.5.md) | Cyder009（QDO optnone）、高解析度預設開啟、啟動檢查文案 |
 | 0.9.4 | [繁中](releases/v0.9.4.md) | 雙字體取代選項收斂、顯示相關預設值修正 |
 | 0.9.3 | [繁中](releases/v0.9.3.md) | Cyder008（A6、free_async_queue、MoltenVK shim）、macOS 11 UI、Bash 單一路徑與啟動錯誤提示 |
@@ -34,6 +35,7 @@
 |------|------|------|
 | [project-development-dashboard.zh-TW.md](project-development-dashboard.zh-TW.md) | 開發 / 維護 | **專案開發狀態 dashboard**：待開發、已知錯誤、程序管理、MapleStory OEM、每遊戲設定與優先級 |
 | [cyder.md](cyder.md) | 一般使用者 | Cyder 啟動器：開 `.exe`、SharedPrefix、bootstrap |
+| [cyder-gamaniagames-url-handler.zh-TW.md](cyder-gamaniagames-url-handler.zh-TW.md) | 開發 / 設計 | gamania Games Manager 的 `gamaniagames://` 偵測、使用者同意、macOS URL handler 與 GGMWebStart.exe 啟動流程 |
 | [cyder-session-process-monitoring.zh-TW.md](cyder-session-process-monitoring.zh-TW.md) | 開發 / 設計 | 選單列 session、Steam helper、同 prefix 多程式與 process monitor 設計 |
 | [cyder-graphics-backends.zh-TW.md](cyder-graphics-backends.zh-TW.md) | 一般使用者 | 圖形後端（WineD3D/DXVK/D3DMetal）、GPTK 安裝、DXVK 限幀 vs VSync |
 | [cyder-compatdb.zh-TW.md](cyder-compatdb.zh-TW.md) | 開發 / 發布 | CompatDB 架構、Engine 重包判斷、YAML 規則新增與本機測試 |

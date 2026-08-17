@@ -8,7 +8,12 @@ unset HOMEBREW_PREFIX OGOM WINE_INSTALL ENTITLEMENTS_PLIST
 source "$SCRIPT_DIR/env-x86_64.sh"
 
 OUT_DIR="${OGOM}/dist"
-CYDER_APP_VERSION="${CYDER_APP_VERSION:-0.9.6}"
+CYDER_VERSION_FILE="$SCRIPT_DIR/../config/cyder-app-version.txt"
+[[ -r "$CYDER_VERSION_FILE" ]] || {
+  echo "Missing Cyder app version file: $CYDER_VERSION_FILE" >&2
+  exit 1
+}
+CYDER_APP_VERSION="${CYDER_APP_VERSION:-$(tr -d '[:space:]' <"$CYDER_VERSION_FILE")}"
 # Release identity by default; export SIGN_IDENTITY=- for an unsigned local build.
 SIGN_IDENTITY="${SIGN_IDENTITY:-Developer ID Application: Chun Ho Kwok (3U9565WWM2)}"
 if [[ "$SIGN_IDENTITY" == "-" ]]; then
@@ -279,6 +284,7 @@ SWIFT_SOURCES=(
   "$SCRIPT_DIR/cyder_diagnostics.swift"
   "$SCRIPT_DIR/cyder_paths.swift"
   "$SCRIPT_DIR/cyder_instance.swift"
+  "$SCRIPT_DIR/cyder_uri_handler.swift"
   "$SCRIPT_DIR/cyder_gptk.swift"
   "$SCRIPT_DIR/cyder_settings.swift"
   "$SCRIPT_DIR/cyder_launch_support.swift"
@@ -417,6 +423,19 @@ cat > "$CONTENTS/Info.plist" <<PLIST
       <array>
         <string>com.microsoft.windows-executable</string>
       </array>
+    </dict>
+  </array>
+  <key>CFBundleURLTypes</key>
+  <array>
+    <dict>
+      <key>CFBundleURLName</key>
+      <string>gamania Games Manager Protocol</string>
+      <key>CFBundleURLSchemes</key>
+      <array>
+        <string>gamaniagames</string>
+      </array>
+      <key>CFBundleTypeRole</key>
+      <string>Viewer</string>
     </dict>
   </array>
   <key>UTImportedTypeDeclarations</key>

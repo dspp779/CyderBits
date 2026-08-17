@@ -675,6 +675,7 @@ cyder_load_saved_settings() {
   # here used to replace Retina=0/DPI=96 with the global Retina=1/DPI=192.
   local keep_msync=0 keep_esync=0 keep_retina=0 keep_dpi=0
   local keep_mingliu=0 keep_songti=0 keep_smoothing=0 keep_power=0 keep_diagnostics=0
+  local keep_maplestory_wz_cache=0
   case "${CYDER_MSYNC-}" in 0|1) keep_msync=1 ;; esac
   case "${CYDER_ESYNC-}" in 0|1) keep_esync=1 ;; esac
   case "${CYDER_RETINA_MODE-}" in 0|1) keep_retina=1 ;; esac
@@ -688,6 +689,7 @@ cyder_load_saved_settings() {
   case "${CYDER_FONT_SMOOTHING-}" in off|grayscale|cleartype-rgb|cleartype-bgr) keep_smoothing=1 ;; esac
   case "${CYDER_POWER_MODE-}" in normal|background) keep_power=1 ;; esac
   case "${CYDER_WINE_DIAGNOSTICS-}" in quiet|errors|sync|unwind) keep_diagnostics=1 ;; esac
+  case "${CYDER_MAPLESTORY_FILE_CACHE_PREFERENCE-}" in 0|1) keep_maplestory_wz_cache=1 ;; esac
 
   export CYDER_MSYNC="${CYDER_MSYNC:-0}"
   export CYDER_ESYNC="${CYDER_ESYNC:-0}"
@@ -698,6 +700,7 @@ cyder_load_saved_settings() {
   export CYDER_FONT_SMOOTHING="${CYDER_FONT_SMOOTHING:-cleartype-rgb}"
   export CYDER_POWER_MODE="${CYDER_POWER_MODE:-normal}"
   export CYDER_WINE_DIAGNOSTICS="${CYDER_WINE_DIAGNOSTICS:-quiet}"
+  export CYDER_MAPLESTORY_FILE_CACHE_PREFERENCE="${CYDER_MAPLESTORY_FILE_CACHE_PREFERENCE:-1}"
   [[ -f "$settings" ]] || return 0
   command -v plutil >/dev/null 2>&1 || return 0
 
@@ -741,6 +744,13 @@ cyder_load_saved_settings() {
     case "$value" in
       quiet|errors|sync|unwind) export CYDER_WINE_DIAGNOSTICS="$value" ;;
       *) export CYDER_WINE_DIAGNOSTICS=quiet ;;
+    esac
+  fi
+  if [[ "$keep_maplestory_wz_cache" -eq 0 ]]; then
+    value="$(plutil -extract maplestoryWZCache raw -o - "$settings" 2>/dev/null || true)"
+    case "$value" in
+      true|1) export CYDER_MAPLESTORY_FILE_CACHE_PREFERENCE=1 ;;
+      false|0) export CYDER_MAPLESTORY_FILE_CACHE_PREFERENCE=0 ;;
     esac
   fi
   if [[ -z "${CYDER_GRAPHICS_BACKEND:-}" ]]; then
@@ -969,6 +979,22 @@ cyder_is_maplestory_oem() {
   [[ "${CYDER_OEM_FLAVOR:-}" == maplestory ||
      "${CYDER_ENGINE_NAME:-}" == maplestory*oem* ||
      "${CYDER_BOTTLE_NAME:-}" == maplestory* ]]
+}
+
+cyder_is_maplestory_executable() {
+  local exe="$1" basename lower
+  basename="${exe##*/}"
+  lower="$(printf '%s' "$basename" | tr '[:upper:]' '[:lower:]')"
+  [[ "$lower" == "maplestory.exe" ]]
+}
+
+cyder_apply_maplestory_wz_cache() {
+  local exe="$1"
+  if cyder_is_maplestory_oem || cyder_is_maplestory_executable "$exe"; then
+    export CYDER_MAPLESTORY_FILE_CACHE="${CYDER_MAPLESTORY_FILE_CACHE_PREFERENCE:-1}"
+  else
+    export CYDER_MAPLESTORY_FILE_CACHE=0
+  fi
 }
 
 cyder_wine_is_crossover_frontend() {
@@ -2082,11 +2108,18 @@ cyder_game_environment_key_is_allowed() {
     BASH_ENV|ENV|IFS|PATH|HOME|TMPDIR|SHELLOPTS|BASHOPTS|CDPATH|GLOBIGNORE) return 1 ;;
     DYLD_*|LD_*) return 1 ;;
     WINEPREFIX|WINESERVER|WINEARCH|WINEDEBUG|CX_ROOT|CX_BOTTLE|CX_APPLEGPTK_LIBD3DSHARED_PATH) return 1 ;;
-    CYDER_SUPPORT|CYDER_RUNTIME_ROOT|CYDER_ENGINES|CYDER_ENGINE_NAME|CYDER_ENGINE_SRC|CYDER_SCRIPTS|CYDER_APP) return 1 ;;
+    CYDER_SUPPORT|CYDER_RUNTIME_ROOT|CYDER_ENGINES|CYDER_ENGINE_NAME|CYDER_ENGINE_SRC|CYDER_SCRIPTS|CYDER_APP|CYDER_MAPLESTORY_FILE_CACHE|CYDER_MAPLESTORY_FILE_CACHE_PREFERENCE) return 1 ;;
     CYDER_WINE_*|CYDER_SESSION_*|CYDER_DIAGNOSTIC_*|CYDER_TEST_*|CYDER_RESULT_FILE|CYDER_PROGRESS_FILE) return 1 ;;
     CYDER_GPTK_ROOT|CYDER_GRAPHICS_*|CYDER_GAME_ARGUMENTS) return 1 ;;
   esac
   return 0
+}
+
+cyder_is_maplestory_graphics_executable() {
+  local exe="$1" basename lower
+  basename="${exe##*/}"
+  lower="$(printf '%s' "$basename" | tr '[:upper:]' '[:lower:]')"
+  [[ "$lower" == "maplestory.exe" || "$lower" == "maplestory_classic.exe" ]]
 }
 
 cyder_engine_has_dxmt_payload() {
@@ -2102,7 +2135,16 @@ cyder_engine_has_dxmt_payload() {
 
 cyder_engine_has_dxvk_payload() {
   local engine_root="$1"
-  [[ -r "$engine_root/lib/dxvk/x86_64-windows/d3d11.dll" ]]
+  local moltenvk_a="$engine_root/lib/wine/x86_64-unix/libMoltenVK.dylib"
+  local moltenvk_b="$engine_root/lib64/libMoltenVK.dylib"
+  [[ -r "$engine_root/lib/dxvk/x86_64-windows/d3d11.dll" \
+     && -r "$engine_root/lib/dxvk/x86_64-windows/dxgi.dll" \
+     && ( -r "$moltenvk_a" || -r "$moltenvk_b" ) ]]
+}
+
+cyder_dxvk_launch_allowed() {
+  local engine_root="$1"
+  cyder_engine_has_dxvk_payload "$engine_root"
 }
 
 cyder_dxmt_launch_allowed() {
@@ -2110,6 +2152,23 @@ cyder_dxmt_launch_allowed() {
   declare -F cyder_macos_at_least >/dev/null 2>&1 \
     && cyder_macos_at_least 15 0 \
     && cyder_engine_has_dxmt_payload "$engine_root"
+}
+
+cyder_maplestory_auto_graphics_backend() {
+  local exe="$1" engine_root="$2"
+  cyder_is_maplestory_graphics_executable "$exe" || return 1
+
+  # Prefer DXMT on macOS 15+; DXVK remains the compatibility path on older
+  # macOS and the fallback when the current engine lacks a usable DXMT payload.
+  if cyder_dxmt_launch_allowed "$engine_root"; then
+    printf 'dxmt\n'
+    return 0
+  fi
+  if cyder_dxvk_launch_allowed "$engine_root"; then
+    printf 'dxvk\n'
+    return 0
+  fi
+  return 1
 }
 
 cyder_apply_graphics_preference() {
@@ -2120,35 +2179,42 @@ cyder_apply_graphics_preference() {
       # A leftover "auto" (pre-dxmt settings.json) is treated as
       # "default" rather than kept as a distinct preference.
       export CYDER_GRAPHICS_PREFERENCE=default
+      export CYDER_GRAPHICS_AUTO_POLICY=1
       unset CYDER_GRAPHICS_BACKEND CX_GRAPHICS_BACKEND
       ;;
     wined3d|d3dmetal)
       export CYDER_GRAPHICS_PREFERENCE="$preference"
+      export CYDER_GRAPHICS_AUTO_POLICY=0
       export CYDER_GRAPHICS_BACKEND="$preference" CX_GRAPHICS_BACKEND="$preference"
       ;;
     dxvk)
       if cyder_engine_has_dxvk_payload "$engine_root"; then
         export CYDER_GRAPHICS_PREFERENCE=dxvk
+        export CYDER_GRAPHICS_AUTO_POLICY=0
         export CYDER_GRAPHICS_BACKEND=dxvk CX_GRAPHICS_BACKEND=dxvk
       else
         echo "DXVK is unavailable (engine lib/dxvk is missing); using default graphics backend." >&2
         export CYDER_GRAPHICS_PREFERENCE=default
+        export CYDER_GRAPHICS_AUTO_POLICY=0
         unset CYDER_GRAPHICS_BACKEND CX_GRAPHICS_BACKEND
       fi
       ;;
     dxmt)
       if cyder_dxmt_launch_allowed "$engine_root"; then
         export CYDER_GRAPHICS_PREFERENCE=dxmt
+        export CYDER_GRAPHICS_AUTO_POLICY=0
         export CYDER_GRAPHICS_BACKEND=dxmt CX_GRAPHICS_BACKEND=dxmt
       else
         echo "DXMT is unavailable (requires macOS 15+ and engine lib/dxmt); using default graphics backend." >&2
         export CYDER_GRAPHICS_PREFERENCE=default
+        export CYDER_GRAPHICS_AUTO_POLICY=0
         unset CYDER_GRAPHICS_BACKEND CX_GRAPHICS_BACKEND
       fi
       ;;
     *)
       echo "Unsupported graphics backend '$preference'; using default graphics backend." >&2
       export CYDER_GRAPHICS_PREFERENCE=default
+      export CYDER_GRAPHICS_AUTO_POLICY=0
       unset CYDER_GRAPHICS_BACKEND CX_GRAPHICS_BACKEND
       ;;
   esac
@@ -2156,7 +2222,14 @@ cyder_apply_graphics_preference() {
 
 cyder_resolve_effective_graphics_backend() {
   local engine_root="$1"
+  local exe="${2:-}"
   local preference="${CYDER_GRAPHICS_PREFERENCE:-${CYDER_GRAPHICS_BACKEND:-default}}"
+  if [[ "$preference" == default || "$preference" == auto || -z "$preference" ]] \
+    && [[ "${CYDER_GRAPHICS_AUTO_POLICY:-1}" == 1 ]] \
+    && cyder_is_maplestory_graphics_executable "$exe"; then
+    preference="$(cyder_maplestory_auto_graphics_backend "$exe" "$engine_root" || true)"
+    preference="${preference:-default}"
+  fi
   cyder_apply_graphics_preference "$preference" "$engine_root"
   cyder_apply_graphics_runtime_preferences
 }
@@ -2388,7 +2461,8 @@ cyder_prepare_game_launch_settings() {
   local prefix="$3"
   local exe="$4"
   cyder_load_game_settings "$exe" "$engine_root"
-  cyder_resolve_effective_graphics_backend "$engine_root"
+  cyder_apply_maplestory_wz_cache "$exe"
+  cyder_resolve_effective_graphics_backend "$engine_root" "$exe"
 
   # Global display/font settings are loaded before the launcher reaches this
   # function.  They must still be applied when the EXE has no per-profile
@@ -3118,4 +3192,191 @@ cyder_bootstrap_error_dialog() {
   mkdir -p "$(dirname "$log")"
   echo "$1" >"$log"
   osascript -e 'display alert "Cyder 初始化失敗" message "請查看 ~/Library/Application Support/Cyder/Logs/bootstrap-error.log" as warning' 2>/dev/null || true
+}
+
+# --- URI handler registry scanner (gamaniagames://) ---
+
+cyder_json_escape_string() {
+  local s=$1 c out='"'
+  local i
+  for ((i = 0; i < ${#s}; i++)); do
+    c=${s:i:1}
+    case "$c" in
+      \\) out+='\\' ;;
+      \") out+='\"' ;;
+      $'\n') out+='\n' ;;
+      $'\r') out+='\r' ;;
+      $'\t') out+='\t' ;;
+      *) out+="$c" ;;
+    esac
+  done
+  out+='"'
+  printf '%s' "$out"
+}
+
+cyder_reg_unquote_value() {
+  local raw=$1 val
+  if [[ "$raw" == @=* ]]; then
+    val="${raw#@=}"
+  elif [[ "$raw" == \"*\"=\"* ]]; then
+    val="${raw#*\"=\"}"
+  else
+    val="${raw#*=}"
+  fi
+  val="${val#\"}"
+  val="${val%\"}"
+  val="${val//\\\"/\"}"
+  val="${val//\\\\/\\}"
+  printf '%s' "$val"
+}
+
+cyder_resolve_windows_exe_path() {
+  local prefix="$1" winpath="$2"
+  local rest mac
+  [[ "$winpath" =~ ^\"(.*)\"$ ]] && winpath="${BASH_REMATCH[1]}"
+  [[ "$winpath" =~ ^[Cc]: ]] || return 1
+  rest="${winpath:2}"
+  rest="${rest//\\//}"
+  [[ "$rest" != /* ]] && rest="/$rest"
+  if [[ "$rest" == *".."* ]]; then
+    return 1
+  fi
+  mac="$prefix/drive_c$rest"
+  mac="$(cd "$(dirname "$mac")" 2>/dev/null && pwd -P)/$(basename "$mac")"
+  [[ -f "$mac" && ! -L "$mac" ]] || return 1
+  case "$(basename "$mac")" in
+    *.exe | *.EXE) ;;
+    *) return 1 ;;
+  esac
+  printf '%s' "$mac"
+}
+
+cyder_validate_uri_command() {
+  local cmd="$1" exe_win
+  [[ "$cmd" == \"*\"[[:space:]]*\"%1\" ]] || return 1
+  if [[ "$cmd" =~ ^\"(.+)\"[[:space:]]+\"%1\"$ ]]; then
+    exe_win="${BASH_REMATCH[1]}"
+  else
+    return 1
+  fi
+  shopt -s nocasematch
+  [[ "$exe_win" == *.exe ]] || { shopt -u nocasematch; return 1; }
+  [[ "$exe_win" != *cmd.exe* && "$exe_win" != *powershell* && "$exe_win" != *.bat \
+    && "$exe_win" != *.cmd ]] || { shopt -u nocasematch; return 1; }
+  shopt -u nocasematch
+  printf '%s' "$exe_win"
+}
+
+cyder_reg_read_uri_scheme() {
+  local regfile="$1" scheme="$2"
+  ROOT_TS=0 ROOT_URL_PROTOCOL=0 COMMAND="" COMMAND_TS=0 INSTALL_PATH="" VERSION=""
+  [[ -f "$regfile" && ! -L "$regfile" ]] || return 1
+
+  local root="Software\\\\Classes\\\\${scheme}"
+  local cmd="${root}\\\\shell\\\\open\\\\command"
+  local meta="Software\\\\gamaniaGamesManager"
+  local sect="" line ts in_root=0 in_cmd=0 in_meta=0 has_proto=0 root_ts=0 cmd_ts=0
+
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    if [[ "$line" == \[* ]]; then
+      in_root=0
+      in_cmd=0
+      in_meta=0
+      ts=0
+      if [[ "$line" =~ ^\[([^]]+)\][[:space:]]*([0-9]+)?[[:space:]]*$ ]]; then
+        sect="${BASH_REMATCH[1]}"
+        ts="${BASH_REMATCH[2]:-0}"
+      else
+        continue
+      fi
+      if [[ "$sect" == "$root" ]]; then
+        in_root=1
+        root_ts=$ts
+      elif [[ "$sect" == "$cmd" ]]; then
+        in_cmd=1
+        cmd_ts=$ts
+      elif [[ "$sect" == "$meta" ]]; then
+        in_meta=1
+      fi
+      continue
+    fi
+    if (( in_root )) && [[ "$line" == '"URL Protocol"'* ]]; then
+      has_proto=1
+      continue
+    fi
+    if (( in_cmd )) && [[ "$line" == @=* ]]; then
+      COMMAND="$(cyder_reg_unquote_value "$line")"
+      continue
+    fi
+    if (( in_meta )) && [[ "$line" == '"InstallPath"'* ]]; then
+      INSTALL_PATH="$(cyder_reg_unquote_value "$line")"
+      continue
+    fi
+    if (( in_meta )) && [[ "$line" == '"Version"'* ]]; then
+      VERSION="$(cyder_reg_unquote_value "$line")"
+      continue
+    fi
+  done <"$regfile"
+
+  [[ "$has_proto" -eq 1 && -n "$COMMAND" ]] || return 1
+  COMMAND_TS=$(( cmd_ts > root_ts ? cmd_ts : root_ts ))
+  ROOT_TS="$COMMAND_TS"
+  return 0
+}
+
+cyder_scan_uri_handlers() {
+  local prefix="$1" scheme="${2:-gamaniagames}"
+  local system_reg="$prefix/system.reg" user_reg="$prefix/user.reg"
+  local merged_cmd="" merged_ts=0 install_path="" version="" source=""
+  local system_cmd="" user_cmd="" system_ts=0 user_ts=0
+
+  if cyder_reg_read_uri_scheme "$user_reg" "$scheme"; then
+    user_cmd="$COMMAND"
+    user_ts="$COMMAND_TS"
+    merged_cmd="$user_cmd"
+    merged_ts="$user_ts"
+    install_path="$INSTALL_PATH"
+    version="$VERSION"
+    source="user"
+  fi
+  if cyder_reg_read_uri_scheme "$system_reg" "$scheme"; then
+    system_cmd="$COMMAND"
+    system_ts="$COMMAND_TS"
+    if [[ -z "$merged_cmd" ]]; then
+      merged_cmd="$system_cmd"
+      merged_ts="$system_ts"
+      install_path="$INSTALL_PATH"
+      version="$VERSION"
+      source="system"
+    fi
+  fi
+
+  local status="missing" windows_command="" resolved="" exe_win
+  if [[ -n "$merged_cmd" ]]; then
+    windows_command="$merged_cmd"
+    if exe_win="$(cyder_validate_uri_command "$merged_cmd")"; then
+      if resolved="$(cyder_resolve_windows_exe_path "$prefix" "$exe_win")"; then
+        status="valid"
+      else
+        status="stale"
+      fi
+    else
+      status="unsupported"
+    fi
+  fi
+
+  if [[ -z "$install_path" && -n "$exe_win" ]]; then
+    install_path="$exe_win"
+    install_path="${install_path%\\*}"
+  fi
+
+  printf '[{"scheme":%s,"sectionTimestamp":%s,"windowsCommand":%s,"resolvedExecutable":%s,"installPath":%s,"version":%s,"status":%s,"source":%s}]' \
+    "$(cyder_json_escape_string "$scheme")" \
+    "${merged_ts:-0}" \
+    "$(cyder_json_escape_string "$windows_command")" \
+    "$(cyder_json_escape_string "$resolved")" \
+    "$(cyder_json_escape_string "$install_path")" \
+    "$(cyder_json_escape_string "$version")" \
+    "$(cyder_json_escape_string "$status")" \
+    "$(cyder_json_escape_string "$source")"
 }

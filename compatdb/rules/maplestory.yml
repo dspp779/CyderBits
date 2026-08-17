@@ -3,9 +3,11 @@ schema_version: 1
 rules:
   - id: game.maplestory-classic.dxvk
     description: >
-      Prefer DXVK for MapleStory Classic (Maplestory_Classic.exe). With Cyder
-      global graphics set to 預設/default, CompatDB selects DXVK; explicit
-      D3DMetal/DXVK/WineD3D (or 自動) App settings still override this rule.
+      Prefer DXVK for MapleStory Classic (Maplestory_Classic.exe) when no
+      Cyder executable-specific platform policy has already selected a
+      backend. Cyder itself selects DXMT on macOS 15+ and DXVK below macOS 15
+      for MapleStory.exe and Maplestory_Classic.exe; this rule remains the
+      direct-Wine/default fallback.
     priority: 100
     enabled: true
     stability: stable
@@ -23,7 +25,7 @@ rules:
 
     tests:
       matches:
-        - name: Classic launcher selects DXVK under default App graphics
+        - name: Direct CompatDB fallback selects DXVK for Classic
           executable: 'C:\Games\MapleStory Classic\Maplestory_Classic.exe'
           command_line:
             - Maplestory_Classic.exe

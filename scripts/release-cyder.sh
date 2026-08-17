@@ -4,6 +4,12 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+CYDER_VERSION_FILE="$ROOT/config/cyder-app-version.txt"
+[[ -r "$CYDER_VERSION_FILE" ]] || {
+  echo "Missing Cyder app version file: $CYDER_VERSION_FILE" >&2
+  exit 1
+}
+DEFAULT_CYDER_VERSION="$(tr -d '[:space:]' <"$CYDER_VERSION_FILE")"
 
 CHANNEL=""
 OUT_DIR="$ROOT/dist"
@@ -27,8 +33,8 @@ Channels:
 
 Options:
   --channel CHANNEL       test | release (required)
-  --version VERSION       CFBundle version (test default: 0.9.6-dev;
-                          release default: 0.9.6 or CYDER_APP_VERSION)
+  --version VERSION       CFBundle version (test default: ${DEFAULT_CYDER_VERSION}-dev;
+                          release default: ${DEFAULT_CYDER_VERSION} or CYDER_APP_VERSION)
   --engine-archive PATH   Bundle this engine tarball (else pinned config path)
   --sign-identity ID      codesign identity ('-' for ad-hoc). test defaults to
                           '-'; release defaults to Developer ID Application.
@@ -217,7 +223,7 @@ case "$CHANNEL" in
     if [[ "$SIGN_IDENTITY" != "-" ]]; then
       echo "NOTE: test channel with non-adhoc SIGN_IDENTITY=$SIGN_IDENTITY (no notarization)"
     fi
-    CYDER_APP_VERSION="${APP_VERSION:-${CYDER_APP_VERSION:-0.9.6-dev}}"
+    CYDER_APP_VERSION="${APP_VERSION:-${CYDER_APP_VERSION:-${DEFAULT_CYDER_VERSION}-dev}}"
     export CYDER_APP_VERSION
     if [[ "$SKIP_BUILD" -eq 1 ]]; then
       echo "test channel ignores --skip-build (nothing to notarize)" >&2
@@ -230,13 +236,21 @@ case "$CHANNEL" in
     if [[ -n "$SIGN_IDENTITY_OVERRIDE" ]]; then
       export SIGN_IDENTITY="$SIGN_IDENTITY_OVERRIDE"
     fi
-    CYDER_APP_VERSION="${APP_VERSION:-${CYDER_APP_VERSION:-0.9.6}}"
+    CYDER_APP_VERSION="${APP_VERSION:-${CYDER_APP_VERSION:-$DEFAULT_CYDER_VERSION}}"
     export CYDER_APP_VERSION
     [[ "$CYDER_APP_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || {
       echo "Release channel requires a stable semantic version: $CYDER_APP_VERSION" >&2
       exit 1
     }
-    require_developer_id
+    if [[ "$DRY_RUN" -eq 1 ]]; then
+      if [[ "$SIGN_IDENTITY_OVERRIDE" == "-" ]]; then
+        echo "release channel refuses SIGN_IDENTITY=- (use --channel test)" >&2
+        exit 1
+      fi
+      export SIGN_IDENTITY="${SIGN_IDENTITY_OVERRIDE:-${SIGN_IDENTITY:-$DEFAULT_RELEASE_IDENTITY}}"
+    else
+      require_developer_id
+    fi
     if [[ -z "$ENGINE_ARCHIVE" ]]; then
       if ! ENGINE_ARCHIVE="$(resolve_pinned_engine)"; then
         echo "Missing pinned engine archive (config/cyder-engine-archive.txt)." >&2
@@ -249,6 +263,10 @@ case "$CHANNEL" in
       build_app
     else
       echo "==> Skipping build; using existing $APP"
+    fi
+    if [[ "$DRY_RUN" -eq 1 ]]; then
+      echo "==> Release dry-run complete; no App, keychain, notarization, or network operation was performed."
+      exit 0
     fi
     verify_release_app_contract
     if [[ "$SKIP_NOTARIZE" -eq 1 ]]; then

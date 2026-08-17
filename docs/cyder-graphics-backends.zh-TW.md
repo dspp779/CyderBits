@@ -6,13 +6,25 @@
 
 | 選項 | 說明 |
 |------|------|
-| **default** | 跟隨 CompatDB／引擎預設；不注入強制後端覆寫。某個 CompatDB rule 仍可為特定程式選 backend |
+| **default** | 跟隨 CompatDB／引擎預設；不注入一般強制後端覆寫。MapleStory.exe 與 Maplestory_Classic.exe 會另外依 macOS 版本自動選 DXMT／DXVK |
 | **wined3d** | Wine 內建 Direct3D；相容性較廣，效能通常較差 |
 | **dxvk** | Vulkan→Metal（MoltenVK）；需 Cyder 已安裝 DXVK runtime payload |
 | **dxmt** | Direct3D→Metal（DXMT）；需 Cyder 已安裝 DXMT runtime payload 與 macOS 15+ |
 | **d3dmetal** | Apple D3DMetal／GPTK；需 macOS 14+ 且本機有可用 GPTK |
 
 個別遊戲可覆寫全域設定；選「跟隨全域」表示不覆寫。
+
+### MapleStory 自動 backend
+
+當這兩個 executable 使用 **default** 時，Cyder 在實際啟動前套用平台策略：
+
+- macOS 15+：優先使用 DXMT；若 DXMT payload 不完整，回退到可用的 DXVK。
+- macOS 14 以下：使用 DXVK。
+- 明確選擇 DXVK、DXMT、D3DMetal 或 WineD3D 時，手動設定優先於自動策略。
+- 解析結果不寫回設定檔，因此同一份設定可在不同 macOS 版本安全搬移。
+
+這項策略只由 Cyder launcher 依實際 EXE 套用；CompatDB 的 MapleStory Classic
+DXVK 規則仍保留，供未經 Cyder 策略解析的直接 Wine 啟動作為 fallback。
 
 ## Runtime 圖形元件與啟動方式
 

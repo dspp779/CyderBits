@@ -10,6 +10,21 @@ touch "$FAKE"
 output="$(bash "$ROOT/scripts/cyder_launcher.sh" "$FAKE" --dry-run 2>&1)"
 assert_contains "$output" "bottles/shared" "dry-run should use the shared bottle"
 assert_contains "$output" "game.exe" "dry-run should show exe path"
+
+cache_scope="$(CYDER_MAPLESTORY_FILE_CACHE_PREFERENCE=1 bash -c \
+  'source "$1/scripts/cyder-common.sh"; cyder_apply_maplestory_wz_cache "$2"; printf "%s|%s\\n" "$CYDER_MAPLESTORY_FILE_CACHE" "$CYDER_MAPLESTORY_FILE_CACHE_PREFERENCE"' \
+  _ "$ROOT" "$TMP/MapleStory.exe")"
+assert_eq "$cache_scope" "1|1" "MapleStory launches should enable the WZ cache by default"
+cache_scope="$(CYDER_MAPLESTORY_FILE_CACHE_PREFERENCE=1 bash -c \
+  'source "$1/scripts/cyder-common.sh"; cyder_apply_maplestory_wz_cache "$2"; printf "%s\\n" "$CYDER_MAPLESTORY_FILE_CACHE"' \
+  _ "$ROOT" "$TMP/other-game.exe")"
+assert_eq "$cache_scope" "0" "non-MapleStory launches must disable the WZ cache"
+mkdir -p "$TMP/cache-support"
+printf '{"graphicsBackend":"default","maplestoryWZCache":false}\n' >"$TMP/cache-support/settings.json"
+cache_scope="$(CYDER_SUPPORT="$TMP/cache-support" bash -c \
+  'source "$1/scripts/cyder-common.sh"; cyder_init_paths "$1"; cyder_load_saved_settings; cyder_apply_maplestory_wz_cache "$2"; printf "%s\\n" "$CYDER_MAPLESTORY_FILE_CACHE"' \
+  _ "$ROOT" "$TMP/MapleStory.exe")"
+assert_eq "$cache_scope" "0" "saved preference should disable the MapleStory WZ cache"
 set +e
 launch_out="$(bash "$ROOT/scripts/cyder_launcher.sh" --launch-exe /nonexistent/missing.exe 2>&1)"
 launch_status=$?

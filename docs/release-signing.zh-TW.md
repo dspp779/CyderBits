@@ -141,7 +141,7 @@ OEM25 測試版（adhoc，不會公證）可用：
 
 ```bash
 CYDER_OEM_APP_OUT_DIR="$PWD/dist/oem-dev" \
-CYDER_APP_VERSION=0.10.0-maplestory-oem25 \
+CYDER_APP_VERSION=0.10.1-maplestory-oem25 \
 CYDER_OEM_ENGINE_VERSION='CX25.0.1.38865-OEM25-dev' \
 SIGN_IDENTITY=- CYDER_VERIFY_ENGINE_SHA256=1 \
   bash scripts/create-cyder-maplestory-oem-app.sh
@@ -211,7 +211,7 @@ OEM 版 (`Cyder-maplestory-oem25.app`) 與正式版使用相同的 Developer ID 
 bash scripts/create-cyder-maplestory-oem-app.sh
 ```
 
-產出為 `dist/Cyder-maplestory-oem25.app`（測試版目前使用 `0.10.0-maplestory-oem25`）。公證步驟與正式版相同，僅替換 App 名稱：
+產出為 `dist/Cyder-maplestory-oem25.app`（測試版目前使用 `0.10.1-maplestory-oem25`）。公證步驟與正式版相同，僅替換 App 名稱：
 
 ```bash
 codesign --verify --deep --strict --verbose=2 dist/Cyder-maplestory-oem25.app

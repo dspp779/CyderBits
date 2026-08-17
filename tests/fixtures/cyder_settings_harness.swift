@@ -6,12 +6,13 @@ struct CyderSettingsHarness {
         let path = URL(fileURLWithPath: CommandLine.arguments[1])
         let store = CyderSettingsStore(url: path)
         let profileID = "profile-0123456789abcdef01234567"
-        precondition(store.value.schemaVersion == 10)
+        precondition(store.value.schemaVersion == 11)
         precondition(store.value.graphicsBackend == .default)
         precondition(store.value.dxvkFrameRate == .sixty)
         precondition(store.value.graphicsHud == .off)
         precondition(store.value.dxvkHudFrametimes)
         precondition(store.value.wineDiagnostics == .quiet)
+        precondition(store.value.maplestoryWZCache)
         precondition(store.environment["CYDER_WINE_DIAGNOSTICS"] == "quiet")
         precondition(store.environment["CYDER_DPI"] == "480")
         let profileEnvironment = store.environment(profileID: profileID, legacyBasename: "game.exe")
@@ -33,6 +34,7 @@ struct CyderSettingsHarness {
         try store.update { settings in
             settings.dpi = 144
             settings.msync = true
+            settings.maplestoryWZCache = false
             settings.perExecutable["game.exe"] = CyderExecutableSettings(
                 arguments: ["--windowed", "中文 \"測試\"", "bad\nvalue"], environment: ["GAME_PROFILE": "test"],
                 msync: false, esync: true, retinaMode: false, dpi: 96,
@@ -53,6 +55,7 @@ struct CyderSettingsHarness {
         let lastModified = saved["lastModified"] as! [String: String]
         precondition(lastModified["global.dpi"] == updatedAt)
         precondition(lastModified["global.msync"] == updatedAt)
+        precondition(lastModified["global.maplestoryWZCache"] == updatedAt)
         precondition(lastModified["executable:game.exe"] == updatedAt)
         let profiles = saved["perProfile"] as! [String: Any]
         precondition(profiles["not-a-profile"] == nil)
@@ -60,7 +63,8 @@ struct CyderSettingsHarness {
         let environment = profile["environment"] as! [String: Any]
         precondition(environment["NOT VALID"] == nil)
         let reloaded = CyderSettingsStore(url: path)
-        precondition(reloaded.value.schemaVersion == 10)
+        precondition(reloaded.value.schemaVersion == 11)
+        precondition(!reloaded.value.maplestoryWZCache)
         precondition(reloaded.value.revision == 1)
 
         try store.update { settings in
@@ -243,13 +247,45 @@ struct CyderSettingsHarness {
         precondition(defaultEnv["DXVK_HUD"] == "0")
         precondition(defaultEnv["MTL_HUD_ENABLED"] == nil)
 
-        // No cascade: `default` never resolves to a concrete backend regardless
-        // of what capabilities are available.
+        // General `default` still defers to CompatDB, while the two MapleStory
+        // executables use the platform policy when their basename is known.
         precondition(
             CyderSettings.effectiveLaunchBackend(
                 preference: .default, hasD3DMetal: true, hasDxvk: true, hasDxmt: true
             ) == nil
         )
+        precondition(
+            CyderSettings.effectiveLaunchBackend(
+                preference: .default, hasD3DMetal: true, hasDxvk: true, hasDxmt: true,
+                osMajorVersion: 15, executableBasename: "MapleStory.exe"
+            ) == .dxmt
+        )
+        let mapleAutoEnvironment = store.environment(
+            profileID: nil,
+            legacyBasename: "MapleStory.exe",
+            capabilities: CyderGraphicsCapabilities(
+                hasD3DMetal: true, hasDxvk: true, hasDxmt: true
+            )
+        )
+        // The real host version is not stubbed in this harness; the explicit
+        // resolver checks above cover both OS branches. This assertion only
+        // verifies that an executable-specific backend, when resolved, drives
+        // the same frame-limiter path as a manual backend.
+        precondition(mapleAutoEnvironment["DXVK_FRAME_RATE"] == nil)
+        precondition(
+            CyderSettings.effectiveLaunchBackend(
+                preference: .default, hasD3DMetal: true, hasDxvk: true, hasDxmt: true,
+                osMajorVersion: 14, executableBasename: "MAPLESTORY_CLASSIC.EXE"
+            ) == .dxvk
+        )
+        precondition(
+            CyderSettings.effectiveLaunchBackend(
+                preference: .default, hasD3DMetal: true, hasDxvk: true, hasDxmt: true,
+                osMajorVersion: 15, executableBasename: "OtherGame.exe"
+            ) == nil
+        )
+        precondition(CyderSettings.isMapleStoryGraphicsExecutable("C:\\Games\\Maplestory_Classic.exe"))
+        precondition(!CyderSettings.isMapleStoryGraphicsExecutable("C:\\Games\\OtherGame.exe"))
         precondition(
             CyderSettings.effectiveLaunchBackend(
                 preference: .dxvk, hasD3DMetal: true, hasDxvk: true, hasDxmt: true

@@ -64,8 +64,10 @@ enum CyderProduct {
         ProcessInfo.processInfo.environment["CYDER_OEM_FLAVOR"] == "maplestory"
     }
 
-    /// Official and OEM builds both leave `default` to CompatDB / Wine's own
-    /// selection; there is no App-side cascade.
+    /// Official and OEM builds leave the global `default` value unchanged.
+    /// MapleStory's executable-specific platform policy is resolved only at
+    /// launch time, after the actual executable and payload capabilities are
+    /// known.
     static var defaultGraphicsBackend: CyderGraphicsBackend { .default }
 }
 
@@ -211,9 +213,11 @@ struct CyderGraphicsCapabilities: Equatable {
         guard let root else { return true }
         let manager = FileManager.default
         let dxvkDLL = root.appendingPathComponent("lib/dxvk/x86_64-windows/d3d11.dll")
+        let dxvkDXGI = root.appendingPathComponent("lib/dxvk/x86_64-windows/dxgi.dll")
         let moltenA = root.appendingPathComponent("lib/wine/x86_64-unix/libMoltenVK.dylib")
         let moltenB = root.appendingPathComponent("lib64/libMoltenVK.dylib")
         return manager.isReadableFile(atPath: dxvkDLL.path)
+            && manager.isReadableFile(atPath: dxvkDXGI.path)
             && (manager.isReadableFile(atPath: moltenA.path) || manager.isReadableFile(atPath: moltenB.path))
     }
 
@@ -351,13 +355,13 @@ struct CyderExecutableSettings: Codable {
 }
 
 struct CyderSettings: Codable {
-    // Schema 10 removes the experimental dxvk2 graphics backend. Schema 9 added
+    // Schema 11 adds the MapleStory WZ cache preference. Schema 10 removes the experimental dxvk2 graphics backend. Schema 9 added
     // that backend; old settings are migrated to the default backend on decode.
     // Schema 8 replaces fontPreset with fontMingLiuTarget/fontSongtiTarget.
     // Schema 7 adds wineDiagnostics. Schema 6 adds dxvkHudFrametimes. Schema 5 adds graphicsHud.
     // Schema 4 adds graphics backend and DXVK frame rate. Schema 3 adds profile-keyed overrides. Keep perExecutable as a
     // legacy basename fallback; never infer a profile from a basename.
-    var schemaVersion = 10
+    var schemaVersion = 11
     var revision = 0
     /// Wall-clock time of the most recent effective settings change. Kept in
     /// settings.json so the state and its provenance travel together.
@@ -377,6 +381,8 @@ struct CyderSettings: Codable {
     var graphicsHud: CyderGraphicsHud = .off
     var dxvkHudFrametimes = true
     var wineDiagnostics: CyderWineDiagnostics = .quiet
+    /// Enable MapleStory-only read-ahead for read-only WZ/MS files.
+    var maplestoryWZCache = true
     var perExecutable: [String: CyderExecutableSettings] = [:]
     var perProfile: [String: CyderExecutableSettings] = [:]
 
@@ -386,6 +392,7 @@ struct CyderSettings: Codable {
         case schemaVersion, revision, updatedAt, lastModified, msync, esync, retinaMode, dpi
         case fontMingLiuTarget, fontSongtiTarget, fontSmoothing
         case graphicsBackend, dxvkFrameRate, graphicsHud, dxvkHudFrametimes, wineDiagnostics
+        case maplestoryWZCache
         case perExecutable, perProfile
         case fontPreset
     }
@@ -410,10 +417,10 @@ struct CyderSettings: Codable {
     init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
         let version = try values.decodeIfPresent(Int.self, forKey: .schemaVersion) ?? 1
-        guard version <= 10 else { throw DecodingError.dataCorruptedError(
+        guard version <= 11 else { throw DecodingError.dataCorruptedError(
             forKey: .schemaVersion, in: values, debugDescription: "unsupported settings schema \(version)"
         ) }
-        schemaVersion = 10
+        schemaVersion = 11
         revision = try values.decodeIfPresent(Int.self, forKey: .revision) ?? 0
         updatedAt = try values.decodeIfPresent(String.self, forKey: .updatedAt)
         lastModified = try values.decodeIfPresent([String: String].self, forKey: .lastModified) ?? [:]
@@ -445,6 +452,7 @@ struct CyderSettings: Codable {
         wineDiagnostics = Self.sanitizedWineDiagnostics(
             try values.decodeIfPresent(String.self, forKey: .wineDiagnostics)
         )
+        maplestoryWZCache = try values.decodeIfPresent(Bool.self, forKey: .maplestoryWZCache) ?? true
         perExecutable = try values.decodeIfPresent([String: CyderExecutableSettings].self, forKey: .perExecutable) ?? [:]
         let decodedProfiles = try values.decodeIfPresent([String: CyderExecutableSettings].self, forKey: .perProfile) ?? [:]
         perProfile = decodedProfiles.reduce(into: [:]) { result, item in
@@ -484,6 +492,7 @@ struct CyderSettings: Codable {
         try container.encode(graphicsHud, forKey: .graphicsHud)
         try container.encode(dxvkHudFrametimes, forKey: .dxvkHudFrametimes)
         try container.encode(wineDiagnostics, forKey: .wineDiagnostics)
+        try container.encode(maplestoryWZCache, forKey: .maplestoryWZCache)
         try container.encode(perExecutable, forKey: .perExecutable)
         try container.encode(perProfile, forKey: .perProfile)
     }
@@ -576,7 +585,9 @@ struct CyderSettings: Codable {
     }
 
     /// Concrete backend to inject into Wine, or `nil` to leave CompatDB alone.
-    /// No cascade: `default` always defers to CompatDB / Wine's own choice.
+    /// `default` remains CompatDB-driven except for the two MapleStory
+    /// executables, whose platform policy is resolved when the executable name
+    /// is available.
     ///
     /// DXMT additionally fails closed on `hasDxmt` + `osMajorVersion`: a stale
     /// or hand-edited `dxmt` preference must never launch DXMT on an engine
@@ -587,16 +598,38 @@ struct CyderSettings: Codable {
         hasD3DMetal: Bool,
         hasDxvk: Bool,
         hasDxmt: Bool,
-        osMajorVersion: Int = ProcessInfo.processInfo.operatingSystemVersion.majorVersion
+        osMajorVersion: Int = ProcessInfo.processInfo.operatingSystemVersion.majorVersion,
+        executableBasename: String? = nil
     ) -> CyderGraphicsBackend? {
         switch preference {
         case .default:
+            if isMapleStoryGraphicsExecutable(executableBasename) {
+                if osMajorVersion >= 15, hasDxmt {
+                    return .dxmt
+                }
+                if hasDxvk {
+                    return .dxvk
+                }
+            }
             return nil
         case .dxmt:
             return (hasDxmt && osMajorVersion >= 15) ? .dxmt : nil
         case .wined3d, .dxvk, .d3dmetal:
             return preference
         }
+    }
+
+    /// Return true for the exact MapleStory executables that use the
+    /// platform-dependent automatic graphics policy. Normalize both POSIX and
+    /// Windows separators because callers may pass a basename or a Wine path.
+    static func isMapleStoryGraphicsExecutable(_ value: String?) -> Bool {
+        guard let value, !value.isEmpty else { return false }
+        let basename = value
+            .split(whereSeparator: { $0 == "/" || $0 == "\\" })
+            .last
+            .map(String.init)?
+            .lowercased()
+        return basename == "maplestory.exe" || basename == "maplestory_classic.exe"
     }
 
     /// HUD choice after applying the "DXVK HUD only with DXVK-family backends" rule.
@@ -699,6 +732,7 @@ struct CyderSettings: Codable {
         mark("graphicsHud", before.graphicsHud.rawValue != after.graphicsHud.rawValue)
         mark("dxvkHudFrametimes", before.dxvkHudFrametimes != after.dxvkHudFrametimes)
         mark("wineDiagnostics", before.wineDiagnostics.rawValue != after.wineDiagnostics.rawValue)
+        mark("maplestoryWZCache", before.maplestoryWZCache != after.maplestoryWZCache)
 
         let profileIDs = Set(before.perProfile.keys).union(after.perProfile.keys)
         for profileID in profileIDs {
@@ -742,7 +776,7 @@ final class CyderSettingsStore {
         do {
             let data = try Data(contentsOf: url)
             let decoded = try JSONDecoder().decode(CyderSettings.self, from: data)
-            guard decoded.schemaVersion <= 10 else {
+            guard decoded.schemaVersion <= 11 else {
                 CyderDiagnostics.shared.warning("unsupported settings schema=\(decoded.schemaVersion); using defaults")
                 value = .defaults
                 return
@@ -758,7 +792,7 @@ final class CyderSettingsStore {
         CyderDiagnostics.shared.enter(.settingsSave)
         var next = value
         work(&next)
-        next.schemaVersion = 10
+        next.schemaVersion = 11
         next.perProfile = next.perProfile.reduce(into: [:]) { result, item in
             guard CyderSettings.isValidProfileID(item.key) else { return }
             result[item.key] = CyderSettings.sanitized(item.value)
@@ -818,12 +852,14 @@ final class CyderSettingsStore {
             preference: graphics.backend,
             hasD3DMetal: caps.hasD3DMetal,
             hasDxvk: caps.hasDxvk,
-            hasDxmt: caps.hasDxmt
+            hasDxmt: caps.hasDxmt,
+            executableBasename: legacyBasename
         )
         if let effective {
             result["CYDER_GRAPHICS_BACKEND"] = effective.rawValue
         }
-        switch resolvedGraphicsHud(preference: graphics.backend) {
+        let runtimeBackend = effective ?? graphics.backend
+        switch resolvedGraphicsHud(preference: runtimeBackend) {
         case .metal:
             result["MTL_HUD_ENABLED"] = "1"
             result["DXVK_HUD"] = "0"
@@ -847,7 +883,7 @@ final class CyderSettingsStore {
         }
         // Apply after per-game env so DXMT_CONFIG keys merge instead of clobber.
         CyderSettings.applyGraphicsFrameLimiter(
-            &result, backend: graphics.backend, rate: graphics.dxvkFrameRate
+            &result, backend: runtimeBackend, rate: graphics.dxvkFrameRate
         )
         return result
     }

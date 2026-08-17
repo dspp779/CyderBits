@@ -17,7 +17,8 @@ assert_contains "$common" 'mingliu|songti|pingfang' "common should only accept s
 assert_contains "$settings" 'var retinaMode = true' "Retina should default on"
 assert_contains "$settings" 'var dpi = 192' "DPI should default to 192"
 assert_contains "$settings" 'var graphicsHud: CyderGraphicsHud = .off' "graphics HUD should default off"
-assert_contains "$settings" 'schemaVersion = 10' "schema version 10"
+assert_contains "$settings" 'schemaVersion = 11' "schema version 11"
+assert_contains "$settings" 'var maplestoryWZCache = true' "MapleStory WZ cache should default on"
 assert_contains "$settings" 'var updatedAt: String?' "settings should persist the last update time"
 assert_contains "$settings" 'var lastModified: [String: String]' "settings should persist per-scope modification times"
 assert_contains "$settings" 'case wined3d, dxvk, dxmt, d3dmetal' \
@@ -41,11 +42,19 @@ assert_contains "$common" 'fontMingLiuTarget' "common should read MingLiU target
 assert_contains "$common" 'fontSongtiTarget' "common should read Songti target from settings"
 assert_contains "$common" 'CYDER_RETINA_MODE:-1' "shell Retina default should be on"
 assert_contains "$common" 'CYDER_DPI:-192' "shell DPI default should be 192"
+assert_contains "$common" 'maplestoryWZCache' "shell should read the MapleStory WZ cache preference"
+assert_contains "$common" 'cyder_apply_maplestory_wz_cache' "shell should scope WZ cache to MapleStory launches"
 
 assert_contains "$common" 'cyder_apply_graphics_preference' \
   "shell settings loader must route graphicsBackend through shared preference helper"
 assert_contains "$common" 'cyder_dxmt_launch_allowed' \
   "shell launch path must fail closed on DXMT availability"
+assert_contains "$common" 'cyder_maplestory_auto_graphics_backend' \
+  "shell launch path must provide MapleStory platform graphics policy"
+assert_contains "$common" 'cyder_is_maplestory_graphics_executable' \
+  "shell graphics policy must identify both MapleStory executables"
+assert_contains "$settings" 'isMapleStoryGraphicsExecutable' \
+  "Swift settings model must share MapleStory executable matching"
 assert_contains "$common" 'cyder_macos_at_least 15 0' \
   "shell DXMT gate must require macOS 15+"
 assert_not_contains "$common" 'preference=auto' \

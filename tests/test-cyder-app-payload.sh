@@ -36,6 +36,12 @@ assert_contains "$build_script" '<key>NSNetworkVolumesUsageDescription</key>' \
   "Info.plist must explain on-demand network-volume access"
 assert_contains "$build_script" '<key>CFBundleTypeIconFile</key>' \
   "Info.plist must declare a document icon for .exe"
+assert_contains "$build_script" '<key>CFBundleURLTypes</key>' \
+  "Info.plist must declare custom URL schemes"
+assert_contains "$build_script" '<string>gamaniagames</string>' \
+  "Info.plist must declare gamaniagames url scheme"
+assert_contains "$build_script" 'cyder_uri_handler.swift' \
+  "CyderSwift build must include the uri handler module"
 assert_contains "$build_script" '<key>UTImportedTypeDeclarations</key>' \
   "Info.plist must import the Windows executable UTI with an icon"
 assert_contains "$build_script" '<key>UTTypeIconFile</key>' \
