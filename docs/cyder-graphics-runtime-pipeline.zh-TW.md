@@ -32,7 +32,7 @@ flowchart TB
     INSTALL --> PACKG["pack-graphics-payloads.sh"]
     PACKG --> GART["dist/artifacts/graphics/<br/>dxvk / dxmt *.tar.zst"]
     INSTALL --> PACKE["pack-engine-artifact.sh<br/>排除 lib/dxvk|dxmt（另排除舊 dxvk2）"]
-    PACKE --> EART["engine-*-Cyder010-*.tar.xz<br/>含 MoltenVK，無圖形 PE"]
+    PACKE --> EART["engine-*-Cyder011-*.tar.xz<br/>含 MoltenVK，無圖形 PE"]
   end
 
   subgraph pin["ogom pin"]
@@ -104,7 +104,7 @@ flowchart LR
 | `scripts/import-engine-release.sh --apply` | 驗證 manifest／NTDLL SHA，寫入 `config/cyder-engine-*` |
 | `scripts/create-cyder-app.sh` | 複製 pin 住的 engine tar **與** DXVK／DXMT graphics sidecar；缺一則失敗（`CYDER_ALLOW_MISSING_GRAPHICS=1` 除外） |
 
-Engine 升級（例如 `Cyder010`）會更新 Wine 與 engine 內的
+Engine 升級（例如 `Cyder011`）會更新 Wine 與 engine 內的
 `cxcompatdb.so`；圖形 payload 版本仍由 `lib/*/version` 與 sidecar 獨立演進。
 
 ---
@@ -247,13 +247,17 @@ sequenceDiagram
 
 | 變數 | 角色 |
 |------|------|
-| `CYDER_GRAPHICS_BACKEND` | `dxvk`／`dxmt`／`wined3d`／`d3dmetal`；`default` 不強制，交給 CompatDB 規則 |
+| `CYDER_GRAPHICS_BACKEND` | `dxvk`／`dxmt`／`wined3d`／`d3dmetal`；一般 `default` 交給 CompatDB，兩個 MapleStory executable 的 `default` 由 launcher 依 macOS 版本解析 |
 | `CYDER_GRAPHICS_BACKENDS_ROOT` | 設成 **engine 根**（`bin/wine` 的上一層），讓 `lib/%s` 與 MoltenVK 同一棵樹 |
 | `CYDER_GRAPHICS_BACKEND_PATH` | 可選；直接指定 backend 目錄。`cxcompatdb.so` 會 canonicalize，檢查目前 PE machine、builtin signature、必要 DLL 與 host dependency，失敗回退 WineD3D |
 | `CX_GRAPHICS_BACKEND` | 與上者同步，供既有 CrossOver 相容環境辨識；Cyder plugin 的主控制變數是 `CYDER_GRAPHICS_BACKEND` |
 | `DXVK_FRAME_RATE`／`DXVK_HUD` | 僅手動 DXVK（60／120／144） |
 | `DXMT_CONFIG` | 僅手動 DXMT；合併 `d3d11.preferredMaxFrameRate` |
 | `CYDER_ACTIVE_GRAPHICS_BACKEND_PATH` | plugin 成功後寫入實際 canonical path，供診斷 log／子流程觀察 |
+
+MapleStory 平台策略只在 `cyder_prepare_game_launch_settings` 知道實際 EXE 後
+執行：macOS 15+ 優先 DXMT，舊版 macOS 使用 DXVK；payload capability gate
+失敗時回退到另一個可用 backend，再由 `cxcompatdb.so` 做最後的模組驗證。
 
 ### `cxcompatdb.so` 的責任
 
@@ -266,7 +270,7 @@ sequenceDiagram
 
 舊版已發布、未內含 `cxcompatdb.so` 的 engine 必須重新打包升級；不能藉由更新
 app 端環境變數讓舊 engine 自動取得此 plugin。現行 pin：
-`CX26.3.0-W11-Cyder010`。
+`CX26.3.0-W11-Cyder011`。
 
 ---
 

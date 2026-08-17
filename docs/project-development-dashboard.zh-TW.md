@@ -1,15 +1,16 @@
 # Cyder 專案開發狀態 Dashboard
 
-> 最後整理：2026-08-12  
-> 基準：`main` @ `b7898fc`（Cyder 0.10.0 test channel）  
+> 最後整理：2026-08-17
+> 基準：Cyder `0.10.1` test channel 工作版本
 > 讀法：本頁是跨文件的狀態總覽；實作行為以程式碼與測試為準，研究結論以各主題文件為準。
 
 ## 一句話結論
 
 Cyder／CyderBits 的核心啟動器、遊戲庫、每遊戲設定、圖形 backend、診斷記錄與單一選單列
-instance 已經形成可測試的產品骨架；目前離「可以放心宣告 0.10.0」最近的工作，不是再加
+instance 已經形成可測試的產品骨架；目前離「可以放心宣告 0.10.1」最近的工作，不是再加
 功能，而是完成 DXMT／Steam／反作弊遊戲的實機回歸，以及把目前保守的
-prefix-level 程序等待，升級成能辨識每個遊戲與 helper 的 LaunchGroup monitor。
+prefix-level 程序等待，升級成能辨識每個遊戲與 helper 的 LaunchGroup monitor；後者排定於 0.11.0，
+不列入 0.10.1 release gate。
 
 最需要持續追蹤的兩個技術風險是：
 
@@ -34,22 +35,23 @@ prefix-level 程序等待，升級成能辨識每個遊戲與 helper 的 LaunchG
 
 | 工作線 | 目前狀態 | 重要性 | 目前判斷 |
 |---|---|---:|---|
-| Cyder 0.10.0 release | 🟡 test channel，待實機回歸 | P0 | `CX26.3.0-W11-Cyder010` 已 pin；DXMT、Steam／反作弊仍要逐款驗證；DXVK 2 已列入待開發 |
+| Cyder 0.10.1 release | 🟡 test channel，待實機回歸 | P0 | `CX26.3.0-W11-Cyder011` 已 pin；MapleStory WZ adaptive cache 預設開啟且可於進階關閉；DXMT、Steam／反作弊仍要逐款驗證；DXVK 2 已列入待開發 |
 | 啟動器／遊戲庫／設定 | 🟢 核心已落地 | P1 | 已有 per-profile、圖形 backend、環境變數、argv、診斷與執行中套用流程 |
-| 執行中的程序管理 | 🟡 部分完成 | P0 | 單一 primary icon、session sidecar、背景等待已存在；真正的 per-game process monitor 尚未實作 |
+| 執行中的程序管理 | 🟡 部分完成 | P1／0.11.0 | 單一 primary icon、session sidecar、背景等待已存在；真正的 per-game process monitor 延後至 0.11.0 |
 | 台版 MapleStory OEM | 🟡 OEM baseline 可玩；CX26 port 待完整畫面驗收 | P0 | OEM25 已實玩；CX26 第一層／G 組 patch 可建置，仍缺有效 OTP 的地圖級驗收 |
 | MapleStory Classic directory query | 🟠 Cyder009 bandage 已出貨 | P0 | QDO `optnone` 可消除已觀察 livelock；HID／`\??` 目錄語意與 session 清理仍開放 |
 | 每遊戲客制設定 | 🟢 基本能力已完成；邊界固定 | P1 | 可覆寫 backend、高解析度、字體、環境變數、argv；MSync／ESync／能源模式仍是 global |
-| 遊戲相容性矩陣 | 🟡 有廣度，需跟 0.10 engine 重跑 | P1 | 老遊戲 workaround 已文件化，但新版 graphics payload 尚未逐款宣布通過 |
-| Wine Engine 瘦身／CyderBits Bash 化 | ⚪ 文件化待開發 | P2 | 不阻擋目前 Cyder 0.10；若涉及 Wine engine，工作應移至 sibling checkout |
+| 遊戲相容性矩陣 | 🟡 有廣度，需跟 0.10.1 artifact 重跑 | P1 | 老遊戲 workaround 已文件化，但新版 graphics payload 尚未逐款宣布通過 |
+| Wine Engine 瘦身／CyderBits Bash 化 | ⚪ 文件化待開發 | P2 | 不阻擋目前 Cyder 0.10.1；若涉及 Wine engine，工作應移至 sibling checkout |
 
 ## 1. Release 與產品主線
 
 ### 現況
 
-- 目標版本為 **Cyder 0.10.0**，目前以 test channel 驗證。
-- Engine pin 為 `CX26.3.0-W11-Cyder010`。
-- DXMT／D3DMetal runtime 已接上 ensure、capability gate、設定與 launch path。
+- 目標版本為 **Cyder 0.10.1**，目前以 test channel 驗證。
+- Engine pin 為 `CX26.3.0-W11-Cyder011`。
+- MapleStory WZ adaptive cache 只處理唯讀 `.wz` 小讀取；正式 engine 不含 ring／summary／timeline／mmap／prewarm 診斷 patch，Cyder 預設開啟並可在進階設定關閉。
+- DXMT／D3DMetal runtime 已接上 ensure、capability gate、設定與 launch path；MapleStory.exe／Maplestory_Classic.exe 在 default 下於 macOS 15+ 自動選 DXMT，舊版選 DXVK。
 - 設定套用、單一選單列 instance、session 狀態與診斷 log 已有實作。
 - 目前 release note 明確保留的缺口是：DXMT、Steam 與反作弊程序的實際啟動、
   離場、長跑與背景程序清理。
@@ -62,12 +64,12 @@ D3DMetal 要求 macOS 14+，不能只依編譯或 payload 存在判定成功。
 
 ### 下一個完成條件（P0）
 
-- 以 `Cyder010` test artifact 實測 BlueCG、Steam、台版 MapleStory、MapleStory Classic，
+- 以 `Cyder011` test artifact 實測 BlueCG、Steam、台版 MapleStory、MapleStory Classic，
   覆蓋啟動、畫面、輸入、長跑、正常退出與異常退出。
 - 對 DXMT、D3DMetal 各保留一輪可追溯的 engine／macOS／遊戲／設定紀錄。
 - 在 release checklist 中把「視窗建立」與「畫面真的不是黑屏」分開驗收；後者需要人工看畫面。
 
-參考：[0.10.0 release note](releases/v0.10.0.md)、[圖形 backend 文件](cyder-graphics-backends.zh-TW.md)。
+參考：[0.10.1 test release note](releases/v0.10.1.md)、[0.10.0 release note](releases/v0.10.0.md)、[圖形 backend 文件](cyder-graphics-backends.zh-TW.md)。
 
 ## 2. 執行中的程序管理
 
@@ -90,7 +92,7 @@ D3DMetal 要求 macOS 14+，不能只依編譯或 payload 存在判定成功。
 - 同一個 shared prefix 同時跑 Steam 與楓之谷時，哪一組程序可以先從 UI 消失；
 - 某個 helper reparent 或 PID 重用後，是否會被誤算到另一個遊戲。
 
-### 目標方案與驗收（P0）
+### 目標方案與驗收（0.11.0）
 
 以 `LaunchGroup` 綁定 root executable、已觀察 PID 歷史、parent tree、foreground PID 與
 每次啟動 sidecar：
@@ -101,7 +103,7 @@ D3DMetal 要求 macOS 14+，不能只依編譯或 payload 存在判定成功。
 4. 所有 LaunchGroup 結束後 monitor 先退出，再由 `wineserver -w` 做最後排空，避免 monitor 自己讓 wineserver 永遠不空。
 5. 特別驗收 Steam helper、MapleStory Classic GRAP／NGS、同 prefix 多遊戲、PID 重用與 monitor crash。
 
-設計文件目前標記為「設計記錄，尚未實作」：[Cyder Session 與 Windows 程序監控設計](cyder-session-process-monitoring.zh-TW.md)。
+這是 0.11.0 規劃，0.10.1 不納入。設計文件目前標記為「設計記錄，尚未實作」：[Cyder Session 與 Windows 程序監控設計](cyder-session-process-monitoring.zh-TW.md)。
 
 ## 3. 台版 MapleStory OEM 新楓之谷移植
 
@@ -171,7 +173,7 @@ grap-core64.aes
 ### 收斂策略
 
 1. 短期：保留 QDO bandage，release 中明確標示它不是根因修復。
-2. 產品層：先完成 LaunchGroup monitor、啟動前殘留提示、grace → TERM → 必要時 KILL 的
+2. **0.11.0 產品層**：完成 LaunchGroup monitor、啟動前殘留提示、grace → TERM → 必要時 KILL 的
    **本輪 GRAP／NGS PID 樹**清理；不要直接修改遊戲檔案或繞過防作弊。
 3. 引擎層：再以 Windows／Wine HID directory enumeration 對照確認 QDO 語意與 `VID_845E`
    symlink 行為；必要的 engine patch 在 sibling repo 完成。
@@ -224,7 +226,7 @@ Retina、DPI、字體與部分 registry 是共用 wineserver／bottle 狀態，�
 | ID | 問題 | 影響 | 狀態 | 優先 |
 |---|---|---|---|---:|
 | BUG-01 | Classic 離場 QDO／directory query livelock | 高 CPU、grap／wineserver 殘留、可能污染下次啟動 | Cyder009 bandage；根因與產品清理未完成 | P0 |
-| BUG-02 | Steam／多程序的 session 歸屬過於保守 | 主程序退出後 UI 可能一直顯示背景等待，或難以分辨不同遊戲 | sidecar + `wineserver -w` 後備；LaunchGroup monitor 待實作 | P0 |
+| BUG-02 | Steam／多程序的 session 歸屬過於保守 | 主程序退出後 UI 可能一直顯示背景等待，或難以分辨不同遊戲 | 0.10.1 保留 sidecar + `wineserver -w` 後備；LaunchGroup monitor 排定 0.11.0 | P1／0.11.0 |
 | BUG-03 | CX26 MapleStory port 曾有 D3D11 feature-level 退出／黑畫面 | 不能以「視窗存在」當作可玩；會直接阻擋 OEM 移植發布 | MoltenVK capability 問題已定位；G 組 patch 有實驗驗證，人工地圖驗收未完成 | P0 |
 | BUG-04 | BlueCG `dmsynth underrun` | 可能是音效雜訊，也可能是未量測的音效問題 | 曾觀察；尚無聽感／失敗關聯證據 | P2 |
 | BUG-05 | 含空白的 Wine engine 實體路徑 | 皮卡丘 demo 附近可能 page fault；`WINESERVER` 不一致也會放大問題 | 正式 runtime 放在 `~/.cyder/runtime/Engines/wine-x86_64` workaround | P1 |
@@ -234,8 +236,8 @@ Retina、DPI、字體與部分 registry 是共用 wineserver／bottle 狀態，�
 
 | 順序 | 工作 | 完成定義 |
 |---:|---|---|
-| 1 | **P0：0.10 實機 release regression** | DXMT／Steam／台版 MapleStory／Classic 完成啟動、畫面、長跑、退出紀錄 |
-| 2 | **P0：LaunchGroup process monitor** | Steam helper、GRAP／NGS、同 prefix 多遊戲、reparent／PID reuse／monitor crash 均有測試 |
+| 1 | **P0：0.10.1 實機 release regression** | DXMT／Steam／台版 MapleStory／Classic 完成啟動、畫面、長跑、退出紀錄 |
+| 2 | **P1／0.11.0：LaunchGroup process monitor** | Steam helper、GRAP／NGS、同 prefix 多遊戲、reparent／PID reuse／monitor crash 均有測試 |
 | 3 | **P0：MapleStory CX26 port** | 有效 OTP 進地圖，畫面／滑鼠／UI 正常，BlackCipher 存活，20 分鐘後正常退出 |
 | 4 | **P0：Classic 殘留清理** | 只清本輪可歸屬程序；啟動前能提示殘留；不以整瓶 kill 影響其他遊戲 |
 | 5 | **P1：遊戲 profile 回歸化** | 將相容性矩陣中的固定 workaround 映射成可測試的 profile／CompatDB 規則，並保留人工覆寫 |
@@ -259,6 +261,7 @@ Retina、DPI、字體與部分 registry 是共用 wineserver／bottle 狀態，�
 ## 相關入口
 
 - [Cyder 使用指南](cyder.md)
+- [Cyder 0.10.1 test release note](releases/v0.10.1.md)
 - [Cyder 0.10.0 release note](releases/v0.10.0.md)
 - [遊戲相容性矩陣](games/compatibility-matrix.md)
 - [Session 與 Windows 程序監控設計](cyder-session-process-monitoring.zh-TW.md)

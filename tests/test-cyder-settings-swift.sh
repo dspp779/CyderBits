@@ -6,8 +6,8 @@
 # - resolve: global wined3d + profile default → default (explicit profile default wins)
 # - environment(): dxvk+60 sets CYDER_GRAPHICS_BACKEND=dxvk and DXVK_FRAME_RATE=60
 # - environment(): default sets neither CYDER_GRAPHICS_BACKEND nor DXVK_FRAME_RATE
-# - auto cascade: d3dmetal → dxvk → wined3d at App resolve (CompatDB not consulted)
-# - OEM (CYDER_OEM_FLAVOR=maplestory): defaults to auto; legacy default → auto
+# - MapleStory default policy: DXMT on macOS 15+, DXVK below macOS 15
+# - OEM (CYDER_OEM_FLAVOR=maplestory): global default remains unchanged
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TMP="$(mktemp -d)"

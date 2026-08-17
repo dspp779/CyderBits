@@ -105,7 +105,7 @@ grep -Fq '1.4.0' "$moltenvk_strings" || {
   exit 1
 }
 
-export CYDER_APP_VERSION="${CYDER_APP_VERSION:-0.10.0-maplestory-oem25}"
+export CYDER_APP_VERSION="${CYDER_APP_VERSION:-0.10.1-maplestory-oem25}"
 export CYDER_BUNDLED_ENGINE_VERSION="${CYDER_BUNDLED_ENGINE_VERSION:-$ENGINE_VERSION}"
 # Match create-cyder-app.sh: Developer ID by default; SIGN_IDENTITY=- for ad-hoc.
 export SIGN_IDENTITY="${SIGN_IDENTITY:-Developer ID Application: Chun Ho Kwok (3U9565WWM2)}"

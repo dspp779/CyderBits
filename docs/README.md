@@ -13,6 +13,7 @@
 
 | 版本 | 文件 | 重點 |
 |------|------|------|
+| 0.10.1 | [繁中](releases/v0.10.1.md) | 測試版：強制結束液面動畫、MapleStory WZ adaptive cache、release tooling、manifest／遊戲庫測試與文件更新；process monitor 排定 0.11.0 |
 | 0.10.0 | [繁中](releases/v0.10.0.md) | Cyder010、DXVK／DXMT 圖形後端、單一選單列 instance、設定與啟動診斷收斂（已發布） |
 | 0.9.5 | [繁中](releases/v0.9.5.md) | Cyder009（QDO optnone）、高解析度預設開啟、啟動檢查文案 |
 | 0.9.4 | [繁中](releases/v0.9.4.md) | 雙字體取代選項收斂、顯示相關預設值修正 |

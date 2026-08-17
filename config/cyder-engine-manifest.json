@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
-  "engineId": "cx26.3-w11-cyder010",
-  "versionLabel": "CX26.3.0-W11-Cyder010",
+  "engineId": "cx26.3-w11-cyder011",
+  "versionLabel": "CX26.3.0-W11-Cyder011",
   "base": {
     "crossover": "26.3.0",
     "wine": "11.0"
@@ -25,13 +25,29 @@
     "cyder-wineserver-free-async-queue-null-fd.patch",
     "cyder-wineserver-pipe-end-disconnect-null-fd.patch",
     "cyder-wineserver-add-completion-guard.patch",
-    "cyder-ntdll-qdo-optnone-NtQueryDirectoryObject.patch"
+    "cyder-ntdll-qdo-optnone-NtQueryDirectoryObject.patch",
+    "maplestory-cx26-message-wait-handoff.patch",
+    "maplestory-cx26-core.patch",
+    "maplestory-cx26-window-resizable-flag.patch",
+    "maplestory-cx26-tmp-module-name.patch",
+    "maplestory-cx26-dbghelp-dwarf-guard.patch",
+    "maplestory-cx26-d3d11-shared-texture-test.patch",
+    "maplestory-cx26-d3dmetal-legacy-surface.patch",
+    "maplestory-cx26-plain-metal-layer.patch",
+    "maplestory-cx26-d3d11-full-clear.patch",
+    "maplestory-cx26-dxgi-shared-handle.patch",
+    "maplestory-cx26-texture-user-memory-reload.patch",
+    "maplestory-cx26-blackxchg-foreground.patch",
+    "maplestory-cx26-fullscreen-restore.patch",
+    "maplestory-cx26-no-sched-yield.patch",
+    "maplestory-cx26-file-cache-adaptive.patch",
+    "maplestory-cx26-file-cache-capacity.patch"
   ],
   "components": [
     "runtime/cxcompatdb/cxcompatdb.c"
   ],
-  "notes": "Cyder uses an open cxcompatdb.so loaded by the original CrossOver ntdll hook. It owns current-process CompatDB arguments, DLL overrides, graphics backend validation and runtime prepend; Cyder no longer patches ntdll for CompatDB. Graphics payloads are shipped separately. The graphics build is pinned to upstream MoltenVK 1.4.0 with the Cyder CrossOver capability patch plus timeline-wait and present autoreleasepool patches.",
-  "ntdllSHA256": "fc597d07c7305d23dac1ee49dd42ee10da642b14b2bf91a1c8cbe4ae63f8c295",
-  "artifact": "engine-wine-x86_64-CX26-3-0-W11-Cyder010.tar.xz",
-  "artifactSHA256": "2ba11ece8407326da852f48fbdcca27f859fb9e3a37f53086d9d899b4c625b6a"
+  "notes": "Cyder uses an open cxcompatdb.so loaded by the original CrossOver ntdll hook. It owns current-process CompatDB arguments, DLL overrides, graphics backend validation and runtime prepend; Cyder no longer patches ntdll for CompatDB. The MapleStory stack is D3DMetal-neutral; MoltenVK feature-level validation applies only to the optional DXVK path. Graphics payloads are shipped separately. The release stack includes only the MapleStory adaptive read-ahead cache for read-only WZ files and its 512-slot capacity tuning; ring, summary, timeline, cache-stats, section-map, mmap and prewarm patches remain development diagnostics and are not shipped in the release engine. The graphics build is pinned to upstream MoltenVK 1.4.0 with the Cyder CrossOver capability patch plus timeline-wait and present autoreleasepool patches.",
+  "ntdllSHA256": "a361cf85184066b07d50f3bc2095ce61650b48ded781a6468bf16f1334ac81fc",
+  "artifact": "engine-wine-x86_64-CX26-3-0-W11-Cyder011.tar.xz",
+  "artifactSHA256": "b44fa66d7195ce2ccf8be9eba668c0f657ba5f6104163ba1c67825258a2d37f9"
 }
