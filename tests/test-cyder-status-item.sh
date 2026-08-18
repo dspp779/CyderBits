@@ -20,14 +20,18 @@ assert_contains "$status_source" 'var onOpenGameLibrary' \
   "the status menu must expose a game-library callback"
 assert_contains "$status_source" 'withTitle: "遊戲庫…"' \
   "the status menu must expose the game library"
-assert_contains "$status_source" 'lifecycleState(at:' \
-  "menu-bar lifecycle must consume the supervisor state contract"
-assert_contains "$status_source" 'lifecycleState == "background"' \
-  "the primary exit must transition into background cleanup"
-assert_contains "$status_source" 'lifecycleState != "stopped"' \
-  "the icon must remain until wineserver wait completes"
-assert_contains "$status_source" '正在等待背景程序結束' \
-  "the menu must distinguish Wine background cleanup"
+assert_contains "$status_source" 'func beginLaunch(' \
+  "menu-bar lifecycle must consume sentinel launch callbacks"
+assert_contains "$status_source" '已結束，等待背景程序退出' \
+  "the primary window exit must transition into leftover-process cleanup"
+assert_contains "$status_source" 'func adoptWindowedProcess(pid:' \
+  "GGM-style handoff must attach the later windowed process to the same launch"
+assert_contains "$status_source" 'rootDisplayName' \
+  "the launcher EXE name must yield to a later windowed process after it exits"
+assert_contains "$app_source" 'statusItemController.adoptWindowedProcess' \
+  "Wine activation must attach MapleStory-style handoff PIDs to the monitored launch"
+assert_contains "$status_source" '正在啟動' \
+  "the menu must distinguish a launch that has not shown a window yet"
 assert_contains "$status_source" '正在結束 Windows 程序' \
   "the menu must expose an in-progress managed shutdown"
 assert_contains "$status_source" '工作管理員…' \
@@ -54,8 +58,8 @@ assert_not_contains "$status_source" 'destinationOut' \
   "the menu-bar decanter must not cut Windows panes from the silhouette"
 assert_contains "$status_source" 'accessibilityDisplayShouldReduceMotion' \
   "menu-bar animations must respect Reduce Motion"
-assert_contains "$status_source" '正在等待背景程序結束 ·' \
-  "background cleanup must expose elapsed time"
+assert_contains "$status_source" '等待 ' \
+  "named leftover processes must appear in the waiting label"
 assert_contains "$status_source" 'quit.isEnabled = !prefixes.isEmpty && !sessions.values.contains' \
   "managed shutdown must reject duplicate stop requests"
 assert_not_contains "$status_source" 'gamecontroller.fill' \
@@ -70,6 +74,16 @@ assert_contains "$app_source" 'statusItemController.markActivated' \
   "the status item must transition out of its launch animation"
 assert_contains "$app_source" 'controller.onOpenGameLibrary' \
   "the app delegate must route the status-menu game library action"
+assert_contains "$status_source" 'func markLaunchStarted()' \
+  "external launches must install the menu-bar item before Wine has a PID"
+assert_contains "$app_source" 'presentExternalLaunchStarting()' \
+  "URI and Finder EXE launches must show starting UI immediately"
+assert_contains "$app_source" 'showSetup("正在啟動程式…")' \
+  "program launches must show a starting progress panel"
+assert_not_contains "$app_source" 'setActivationPolicy(.regular)' \
+  "native Cyder must never promote itself into the Dock"
+assert_not_contains "$(cat "$ROOT/scripts/cyder_launch_support.swift")" 'setActivationPolicy(dockVisible ? .regular' \
+  "activateCyderUI must not promote Cyder to a Dock app"
 assert_contains "$app_source" 'statusItemController.setUIVisible(true)' \
   "opening preferences or the game library must install the menu-bar item"
 assert_contains "$app_source" 'statusItemController.setUIVisible(false)' \

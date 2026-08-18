@@ -12,8 +12,8 @@ assert_contains "$build" 'cyder_instance.swift' \
   "native Cyder build must include the cross-process coordinator"
 assert_contains "$instance" 'menu-bar item' \
   "instance coordinator source should document menu-bar ownership"
-assert_contains "$instance" 'native-instance-' \
-  "instances must use a stable per-bundle owner lock"
+assert_contains "$instance" 'CyderSentinelServer' \
+  "instances must use the sentinel socket as the owner lock"
 assert_contains "$instance" 'DistributedNotificationCenter' \
   "secondary instances must forward requests to the primary"
 assert_contains "$instance" 'requestPollTimer' \
@@ -24,8 +24,8 @@ assert_contains "$instance" '"urls"' \
   "forwarded requests must include url payloads"
 assert_contains "$instance" 'createdAt' \
   "stale forwarded requests must not launch unexpectedly after a crash"
-assert_contains "$instance" 'removeExactLock' \
-  "stale owner locks must be recoverable"
+assert_not_contains "$instance" '.native-instance-' \
+  "the mkdir pid lock must not remain the owner lock"
 assert_contains "$app" 'isPrimaryInstance' \
   "the native app must distinguish primary and secondary processes"
 assert_contains "$app" 'scheduleSecondaryForward' \

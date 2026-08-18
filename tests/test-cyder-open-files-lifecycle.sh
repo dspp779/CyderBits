@@ -41,6 +41,16 @@ assert_contains "$source_text" 'detachedWineLifecycleState(at: lifecycleURL) == 
   "clean exits without a window must complete from the lifecycle sidecar"
 assert_contains "$source_text" 'completed without activation' \
   "windowless utilities must be recorded as clean launches"
+assert_contains "$source_text" 'wineProcessHasOnscreenWindow(pid: winePID)' \
+  "a visible Wine window must finish starting even without an activation notification"
+assert_contains "$source_text" 'detail: "window-visible"' \
+  "onscreen Wine windows must be diagnosed separately from Cocoa activation"
+assert_contains "$source_text" 'wineRegularAppsLaunched(since:' \
+  "a Wine Dock app from a reparented handoff process must finish starting"
+assert_contains "$source_text" 'detail: "dock-app-visible"' \
+  "Wine Dock icons must be diagnosed when the original wine PID has already exited"
+assert_not_contains "$source_text" 'application.activationPolicy == .regular else' \
+  "starting UI must dismiss even when Wine stays a non-Dock accessory process"
 assert_contains "$source_text" 'belongsToMonitoredSession' \
   "background Wine activation must be routable after the initial launch"
 assert_contains "$source_text" 'forwarded Wine activation' \
@@ -58,8 +68,12 @@ assert_contains "$source_text" 'FileManager.default.createDirectory(at: games' \
 assert_contains "$source_text" 'args: [context.launcher' \
   "native operations must invoke the bundled Bash launcher"
 support_text="$(cat "$ROOT/scripts/cyder_launch_support.swift")"
-assert_contains "$source_text" "NSApp.setActivationPolicy(.accessory)" \
-  "document launches must remain UI-capable without adding a Dock icon"
+assert_contains "$support_text" 'func wineRegularAppsLaunched' \
+  "launch support must recognize reparented Wine Dock apps"
+assert_contains "$source_text" 'presentExternalLaunchStarting()' \
+  "Finder and URI launches must install the menu bar and starting panel immediately"
+assert_contains "$source_text" 'showSetup("正在啟動程式…")' \
+  "program launches must show a starting progress panel"
 assert_contains "$support_text" "NSRunningApplication.current.activate" \
   "setup and error panels must explicitly activate Cyder"
 assert_contains "$support_text" "anchorWindow: NSWindow? = nil" \

@@ -1,5 +1,6 @@
 // Cyder.app entry — phased setup UI, then launch Windows EXE directly with Wine.
 import Cocoa
+import Darwin
 import Foundation
 import UniformTypeIdentifiers
 
@@ -313,6 +314,28 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         }) {
         case .primary:
             isPrimaryInstance = true
+            instanceCoordinator.sentinel.onLaunch = { [weak self] launch in
+                self?.statusItemController.beginLaunch(
+                    id: launch.id,
+                    prefix: URL(fileURLWithPath: launch.prefix, isDirectory: true),
+                    executableName: launch.rootName,
+                    pid: launch.pid
+                )
+            }
+            instanceCoordinator.sentinel.onLaunchUpdate = { [weak self] launch in
+                guard let self else { return }
+                self.statusItemController.updateLaunch(
+                    id: launch.id,
+                    pid: launch.pid,
+                    holders: launch.holders
+                )
+                if launch.holders.contains(where: \.hasWindow) {
+                    self.hideSetup()
+                }
+            }
+            instanceCoordinator.sentinel.onLaunchEnded = { [weak self] id in
+                self?.statusItemController.endLaunch(id: id)
+            }
         case .secondary:
             isPrimaryInstance = false
         case .unavailable:
@@ -375,19 +398,16 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             return true
         }
         if gameLibraryController.window?.isVisible == true {
+            presentExternalLaunchStarting()
             enqueueOrLaunch(executableFiles)
             return true
         }
         if didRunLauncher {
+            presentExternalLaunchStarting()
             enqueueOrLaunch(executableFiles)
             return true
         }
-        documentLaunchRequested = true
-        terminateWhenSettingsClose = false
-        NSApp.setActivationPolicy(.accessory)
-        if settingsController.window?.isVisible == true {
-            settingsController.close()
-        }
+        presentExternalLaunchStarting()
         pendingFiles.append(contentsOf: executableFiles)
         if ProcessInfo.processInfo.environment["CYDER_OPEN_FILES_SELF_TEST"] == "1"
             || ProcessInfo.processInfo.environment["CYDER_INVOCATION_SELF_TEST_OUTPUT"]?.isEmpty == false {
@@ -763,6 +783,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             }
         }
         let context = CyderLaunchContext(resourcePath: resourcePath)
+        presentExternalLaunchStarting()
         libraryLaunchInProgress = true
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             guard let self else { return }
@@ -782,6 +803,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             }
             DispatchQueue.main.async {
                 self.libraryLaunchInProgress = false
+                self.hideSetup()
                 switch outcome {
                 case .success, .cancelled:
                     break
@@ -913,7 +935,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             return
         }
         didRunLauncher = true
-        NSApp.setActivationPolicy(.accessory)
+        presentExternalLaunchStarting()
 
         guard let resourcePath = Bundle.main.resourcePath else {
             let failure = CyderFailure(
@@ -1130,6 +1152,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func prepareEnvironmentAndShowSettings() {
+        statusItemController.setUIVisible(true)
         guard let resourcePath = Bundle.main.resourcePath else {
             showSettings()
             return
@@ -1438,6 +1461,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
                 }
             }
         }
+        let launchedAt = Date()
         let deadline = Date().addingTimeInterval(30)
         while Date() < deadline {
             if activationWaiter.semaphore.wait(timeout: .now() + 0.2) == .success {
@@ -1445,6 +1469,42 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
                 FileManager.default.createFile(atPath: activatedURL.path, contents: Data())
                 CyderDiagnostics.shared.enter(.wineActivation, detail: "notification-received")
                 onMainThread { statusItemController.markActivated(pid: winePID) }
+                return .success
+            }
+            if winePID > 0, wineProcessHasOnscreenWindow(pid: winePID) {
+                launchActivated = true
+                FileManager.default.createFile(atPath: activatedURL.path, contents: Data())
+                CyderDiagnostics.shared.enter(.wineActivation, detail: "window-visible")
+                onMainThread { statusItemController.markActivated(pid: winePID) }
+                return .success
+            }
+            let dockApps = wineRegularAppsLaunched(since: launchedAt)
+            let handoffWindows = wineHandoffOnscreenWindows(since: launchedAt)
+            if !dockApps.isEmpty || !handoffWindows.isEmpty {
+                launchActivated = true
+                FileManager.default.createFile(atPath: activatedURL.path, contents: Data())
+                if dockApps.isEmpty {
+                    CyderDiagnostics.shared.enter(.wineActivation, detail: "window-visible")
+                } else {
+                    CyderDiagnostics.shared.enter(.wineActivation, detail: "dock-app-visible")
+                }
+                onMainThread {
+                    for app in dockApps {
+                        statusItemController.adoptWindowedProcess(
+                            pid: app.processIdentifier,
+                            prefix: prefix.path,
+                            name: app.localizedName
+                        )
+                    }
+                    for window in handoffWindows {
+                        statusItemController.adoptWindowedProcess(
+                            pid: window.pid,
+                            prefix: prefix.path,
+                            name: window.ownerName
+                        )
+                    }
+                    statusItemController.markActivated(pid: winePID)
+                }
                 return .success
             }
             if let exitStatus = detachedWineExitStatus(at: exitResultURL) {
@@ -1655,11 +1715,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         let prefix = userInfo["ActivatingAppPrefix"] as? String ?? ""
 
         let handle = { [weak self] in
-            guard let self, pid > 0, !prefix.isEmpty,
-                  let application = NSRunningApplication(processIdentifier: pid),
-                  application.activationPolicy == .regular else {
-                return
-            }
+            guard let self, pid > 0, !prefix.isEmpty else { return }
 
             let standardizedPrefix = (prefix as NSString).standardizingPath
             let waiter = self.wineActivationWaiter
@@ -1667,13 +1723,30 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             let belongsToMonitoredSession = self.statusItemController.isMonitoring(prefix: standardizedPrefix)
             guard matchesLaunchWaiter || belongsToMonitoredSession else { return }
 
+            // Dismiss starting UI as soon as Wine reports an activating
+            // process. Some Win32 dialogs never become a Dock/.regular app.
+            if matchesLaunchWaiter {
+                self.wineActivationWaiter = nil
+                waiter?.semaphore.signal()
+            }
+
+            // Attach the visible Wine process to the existing session so a
+            // launcher like GGMWebStart can exit without looking like "background
+            // cleanup" while MapleStory (or another windowed EXE) is running.
+            self.statusItemController.adoptWindowedProcess(
+                pid: pid,
+                prefix: standardizedPrefix,
+                name: NSRunningApplication(processIdentifier: pid)?.localizedName
+            )
+
             // The notification comes from the Wine Cocoa process that is
             // ready to become foreground. Cooperatively hand activation to it
             // on macOS 14+, without PID searches or activation polling. Keep
             // doing this for monitored sessions after the initial launch so a
             // background Cyder instance can forward later focus requests.
-            if matchesLaunchWaiter {
-                self.wineActivationWaiter = nil
+            guard let application = NSRunningApplication(processIdentifier: pid) else { return }
+            if application.activationPolicy != .regular {
+                return
             }
             if #available(macOS 14.0, *) {
                 let source = NSRunningApplication.current
@@ -1682,9 +1755,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             } else {
                 _ = application.activate(options: [.activateAllWindows, .activateIgnoringOtherApps])
             }
-            if matchesLaunchWaiter {
-                waiter?.semaphore.signal()
-            } else {
+            if !matchesLaunchWaiter {
                 CyderDiagnostics.shared.info(
                     "forwarded Wine activation pid=\(pid) prefix=\(standardizedPrefix)"
                 )
@@ -2154,19 +2225,22 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
     @available(macOS 11.0, *)
     private func enqueueOrLaunchURIs(_ uris: [String]) {
         guard !uris.isEmpty else { return }
-        // Same cold-start contract as Finder EXE: do not fall through to
-        // prepareEnvironmentAndShowSettings() after the deferred mode decision.
-        documentLaunchRequested = true
-        terminateWhenSettingsClose = false
-        NSApp.setActivationPolicy(.accessory)
-        hideSetup()
-        if settingsController.window?.isVisible == true {
-            settingsController.close()
-        }
+        presentExternalLaunchStarting()
         for uri in uris {
             queuedLaunches.append(QueuedLaunch(executable: uri, arguments: nil, isURI: true))
         }
         launchNextQueuedExecutableIfReady()
+    }
+
+    private func presentExternalLaunchStarting() {
+        documentLaunchRequested = true
+        terminateWhenSettingsClose = false
+        NSApp.setActivationPolicy(.accessory)
+        statusItemController.markLaunchStarted()
+        showSetup("正在啟動程式…")
+        if settingsController.window?.isVisible == true {
+            settingsController.close()
+        }
     }
 
     private func launchModeDetail() -> String {
@@ -2182,6 +2256,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         let prefix = CyderPaths.sharedBottle
         switch CyderURIHandlerManager.shared.validateLaunch(prefix: prefix, launcher: context.launcher) {
         case .failure(let error):
+            hideSetup()
             showAlert("無法開啟 gamaniagames://", error.localizedDescription)
             launchNextQueuedExecutableIfReady()
             return
@@ -2200,6 +2275,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
                 )
                 DispatchQueue.main.async {
                     self.libraryLaunchInProgress = false
+                    self.hideSetup()
                     if case .failure(let failure) = outcome {
                         self.presentFailure(failure)
                     }
@@ -2245,11 +2321,14 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
 @main
 struct CyderMain {
     static func main() {
+        if CommandLine.arguments.dropFirst().contains("--sentinel-connect") {
+            exit(CyderSentinelConnect.run(arguments: CommandLine.arguments))
+        }
         _ = CyderDiagnostics.shared
         let app = NSApplication.shared
         let delegate = CyderAppDelegate()
         app.delegate = delegate
-        app.setActivationPolicy(.regular)
+        app.setActivationPolicy(.accessory)
         app.run()
     }
 }

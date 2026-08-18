@@ -36,8 +36,8 @@ assert_contains "$build_script" '<key>NSNetworkVolumesUsageDescription</key>' \
   "Info.plist must explain on-demand network-volume access"
 assert_contains "$build_script" '<key>CFBundleTypeIconFile</key>' \
   "Info.plist must declare a document icon for .exe"
-assert_contains "$build_script" '<key>CFBundleURLTypes</key>' \
-  "Info.plist must declare custom URL schemes"
+assert_contains "$build_script" '<key>LSUIElement</key>' \
+  "Info.plist must declare Cyder as a menu-bar agent without a Dock icon"
 assert_contains "$build_script" '<string>gamaniagames</string>' \
   "Info.plist must declare gamaniagames url scheme"
 assert_contains "$build_script" 'cyder_uri_handler.swift' \

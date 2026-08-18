@@ -12,15 +12,18 @@ final class CyderStatusItemController: NSObject, NSMenuDelegate {
     }
 
     private struct Session {
-        let pid: Int32
+        let id: String
+        var pid: Int32
         let prefix: URL
-        let displayName: String
-        let lifecycleURL: URL
+        let rootDisplayName: String
+        let fromSentinel: Bool
         let startedAt = Date()
+        var displayName: String
         var activated = false
-        var primaryExited = false
-        var backgroundSince: Date?
+        var hasForeground = false
+        var leftoverNames: [String] = []
         var isStopping = false
+        var adoptedPIDs: Set<Int32>
     }
 
     var onOpenPreferences: (() -> Void)?
@@ -30,7 +33,7 @@ final class CyderStatusItemController: NSObject, NSMenuDelegate {
     var onAllSessionsEnded: (() -> Void)?
     var onSessionEnded: ((URL) -> Void)?
 
-    private var sessions: [Int32: Session] = [:]
+    private var sessions: [String: Session] = [:]
     private var statusItem: NSStatusItem?
     private var pollTimer: Timer?
     private var animationTimer: Timer?
@@ -55,16 +58,39 @@ final class CyderStatusItemController: NSObject, NSMenuDelegate {
         }
     }
 
+    func markLaunchStarted() {
+        precondition(Thread.isMainThread)
+        visualState = .starting
+        installStatusItemIfNeeded()
+        refresh()
+    }
+
+    func adoptWindowedProcess(pid: Int32, prefix: String, name: String?) {
+        precondition(Thread.isMainThread)
+        guard pid > 0 else { return }
+        let target = (prefix as NSString).standardizingPath
+        var changed = false
+        for (key, var session) in sessions where session.prefix.path == target {
+            session.adoptedPIDs.insert(pid)
+            applyWindowedHandoff(&session, preferredName: name)
+            sessions[key] = session
+            changed = true
+        }
+        if changed { refresh() }
+    }
+
     func markActivated(pid: Int32) {
-        guard var session = sessions[pid] else { return }
+        guard let key = sessions.first(where: { $0.value.pid == pid || $0.value.adoptedPIDs.contains(pid) })?.key,
+              var session = sessions[key] else { return }
         session.activated = true
-        sessions[pid] = session
+        session.hasForeground = true
+        sessions[key] = session
         refresh()
     }
 
     func cancelMonitoring(pid: Int32, notifyWhenEmpty: Bool = true) {
-        guard let session = sessions.removeValue(forKey: pid) else { return }
-        try? FileManager.default.removeItem(at: session.lifecycleURL)
+        guard let key = sessions.first(where: { $0.value.pid == pid })?.key,
+              sessions.removeValue(forKey: key) != nil else { return }
         refresh()
         if notifyWhenEmpty {
             finishIfEmpty(hadSessions: true)
@@ -79,55 +105,114 @@ final class CyderStatusItemController: NSObject, NSMenuDelegate {
 
     func markStopping(prefixes: [URL]) {
         let targets = Set(prefixes.map { $0.resolvingSymlinksInPath().standardizedFileURL })
-        for (pid, var session) in sessions where targets.contains(session.prefix) {
+        for (key, var session) in sessions where targets.contains(session.prefix) {
             session.isStopping = true
-            sessions[pid] = session
+            sessions[key] = session
         }
         refresh()
     }
 
     func markStopFailed(prefix: URL) {
         let target = prefix.resolvingSymlinksInPath().standardizedFileURL
-        for (pid, var session) in sessions where session.prefix == target {
+        for (key, var session) in sessions where session.prefix == target {
             session.isStopping = false
-            sessions[pid] = session
+            sessions[key] = session
         }
         refresh()
     }
 
     func markPrefixStopped(prefix: URL) {
         let target = prefix.resolvingSymlinksInPath().standardizedFileURL
-        let removed = sessions.values.filter { $0.prefix == target }
-        for session in removed {
-            sessions.removeValue(forKey: session.pid)
-            try? FileManager.default.removeItem(at: session.lifecycleURL)
+        let removed = sessions.filter { $0.value.prefix == target }
+        for key in removed.keys {
+            sessions.removeValue(forKey: key)
         }
         refresh()
         finishIfEmpty(hadSessions: !removed.isEmpty)
     }
 
+    func beginLaunch(id: String, prefix: URL, executableName: String, pid: Int32) {
+        precondition(Thread.isMainThread)
+        let name = executableName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let display = name.isEmpty ? "Wine" : name
+        sessions[id] = Session(
+            id: id,
+            pid: pid,
+            prefix: prefix.resolvingSymlinksInPath().standardizedFileURL,
+            rootDisplayName: display,
+            fromSentinel: true,
+            displayName: display,
+            adoptedPIDs: pid > 0 ? [pid] : []
+        )
+        installStatusItemIfNeeded()
+        ensurePollTimer()
+        refresh()
+    }
+
+    func updateLaunch(id: String, pid: Int32, holders: [CyderSentinelHolder]) {
+        precondition(Thread.isMainThread)
+        guard var session = sessions[id] else { return }
+        if pid > 0 { session.pid = pid }
+        for holder in holders where holder.pid > 0 {
+            session.adoptedPIDs.insert(holder.pid)
+        }
+        let windowed = holders.filter(\.hasWindow)
+        if let preferred = windowed.compactMap({ cyderUsefulWindowOwnerName($0.name) })
+            .first(where: { $0.caseInsensitiveCompare(session.rootDisplayName) != .orderedSame })
+            ?? windowed.compactMap({ cyderUsefulWindowOwnerName($0.name) }).first {
+            applyWindowedHandoff(&session, preferredName: preferred)
+        } else if !windowed.isEmpty {
+            applyWindowedHandoff(&session, preferredName: nil)
+        } else {
+            session.hasForeground = false
+            session.leftoverNames = holders.compactMap { holder in
+                cyderUsefulWindowOwnerName(holder.name)
+            }.filter { $0.caseInsensitiveCompare(session.displayName) != .orderedSame }
+        }
+        sessions[id] = session
+        refresh()
+    }
+
+    func endLaunch(id: String) {
+        precondition(Thread.isMainThread)
+        guard let session = sessions.removeValue(forKey: id) else { return }
+        onSessionEnded?(session.prefix)
+        refresh()
+        finishIfEmpty(hadSessions: true)
+    }
+
     func beginMonitoring(pid: Int32, prefix: URL, executablePath: String, lifecycleURL: URL) {
         precondition(Thread.isMainThread)
         guard pid > 0 else { return }
-        sessions[pid] = Session(
+        if isMonitoring(prefix: prefix.path) { return }
+        _ = lifecycleURL
+        let name = URL(fileURLWithPath: executablePath).deletingPathExtension().lastPathComponent
+        let id = "pid:\(pid)"
+        sessions[id] = Session(
+            id: id,
             pid: pid,
             prefix: prefix.resolvingSymlinksInPath().standardizedFileURL,
-            displayName: URL(fileURLWithPath: executablePath).deletingPathExtension().lastPathComponent,
-            lifecycleURL: lifecycleURL
+            rootDisplayName: name,
+            fromSentinel: false,
+            displayName: name,
+            adoptedPIDs: [pid]
         )
         installStatusItemIfNeeded()
+        ensurePollTimer()
         refresh()
-        if pollTimer == nil {
-            let timer = Timer(timeInterval: 1, target: self, selector: #selector(poll), userInfo: nil, repeats: true)
-            RunLoop.main.add(timer, forMode: .common)
-            pollTimer = timer
-        }
     }
 
     func isMonitoring(prefix: String) -> Bool {
         precondition(Thread.isMainThread)
         let target = (prefix as NSString).standardizingPath
         return sessions.values.contains { $0.prefix.path == target }
+    }
+
+    private func ensurePollTimer() {
+        guard pollTimer == nil else { return }
+        let timer = Timer(timeInterval: 1, target: self, selector: #selector(poll), userInfo: nil, repeats: true)
+        RunLoop.main.add(timer, forMode: .common)
+        pollTimer = timer
     }
 
     private func installStatusItemIfNeeded() {
@@ -144,17 +229,18 @@ final class CyderStatusItemController: NSObject, NSMenuDelegate {
     }
 
     @objc private func poll() {
-        var survivors: [Int32: Session] = [:]
-        for (pid, var session) in sessions {
-            let lifecycleState = Self.lifecycleState(at: session.lifecycleURL)
-            if lifecycleState == "background" || lifecycleState == "attention" {
-                session.primaryExited = true
-                if session.backgroundSince == nil { session.backgroundSince = Date() }
+        var survivors: [String: Session] = [:]
+        for (id, var session) in sessions {
+            refreshPresentation(&session)
+            if session.fromSentinel {
+                survivors[id] = session
+                continue
             }
-            if lifecycleState != "stopped" {
-                survivors[pid] = session
+            let pidAlive = session.pid > 0 && kill(session.pid, 0) == 0
+            let adoptedAlive = session.adoptedPIDs.contains { kill($0, 0) == 0 }
+            if session.hasForeground || pidAlive || adoptedAlive {
+                survivors[id] = session
             } else {
-                try? FileManager.default.removeItem(at: session.lifecycleURL)
                 onSessionEnded?(session.prefix)
             }
         }
@@ -162,6 +248,44 @@ final class CyderStatusItemController: NSObject, NSMenuDelegate {
         sessions = survivors
         refresh()
         finishIfEmpty(hadSessions: hadSessions)
+    }
+
+    private func refreshPresentation(_ session: inout Session) {
+        let windows = wineOnscreenWindows(ownedBy: session.adoptedPIDs)
+        let dockApps = wineRegularAppsLaunched(since: session.startedAt)
+        if !windows.isEmpty {
+            for window in windows {
+                session.adoptedPIDs.insert(window.pid)
+            }
+            let preferred = windows.compactMap { cyderUsefulWindowOwnerName($0.ownerName) }
+                .first { $0.caseInsensitiveCompare(session.rootDisplayName) != .orderedSame }
+                ?? windows.compactMap { cyderUsefulWindowOwnerName($0.ownerName) }.first
+            applyWindowedHandoff(&session, preferredName: preferred)
+        } else if !dockApps.isEmpty {
+            for app in dockApps {
+                session.adoptedPIDs.insert(app.processIdentifier)
+            }
+            applyWindowedHandoff(
+                &session,
+                preferredName: dockApps.compactMap(\.localizedName).first
+            )
+        } else {
+            session.hasForeground = false
+            session.leftoverNames = session.adoptedPIDs.compactMap { pid in
+                guard kill(pid, 0) == 0 else { return nil }
+                return cyderWineArgvName(pid: pid)
+            }.filter { $0.caseInsensitiveCompare(session.displayName) != .orderedSame }
+        }
+    }
+
+    private func applyWindowedHandoff(_ session: inout Session, preferredName: String?) {
+        session.activated = true
+        session.hasForeground = true
+        session.leftoverNames = []
+        if let useful = preferredName.flatMap(cyderUsefulWindowOwnerName),
+           useful.caseInsensitiveCompare(session.rootDisplayName) != .orderedSame {
+            session.displayName = useful
+        }
     }
 
     private func finishIfEmpty(hadSessions: Bool) {
@@ -207,13 +331,18 @@ final class CyderStatusItemController: NSObject, NSMenuDelegate {
         menu.removeAllItems()
         let ordered = sessions.values.sorted { $0.displayName.localizedStandardCompare($1.displayName) == .orderedAscending }
         for session in ordered {
-            let lifecycleState = Self.lifecycleState(at: session.lifecycleURL)
-            let state = session.isStopping
-                ? "正在結束 Windows 程序"
-                : lifecycleState == "attention" ? "無法確認背景程序已結束"
-                : session.primaryExited
-                    ? "正在等待背景程序結束 · \(Self.elapsed(since: session.backgroundSince))"
-                    : session.activated ? "執行中" : "正在啟動"
+            let state: String
+            if session.isStopping {
+                state = "正在結束 Windows 程序"
+            } else if session.hasForeground {
+                state = "執行中"
+            } else if !session.activated {
+                state = "正在啟動"
+            } else if let leftover = session.leftoverNames.first {
+                state = "等待 \(leftover) 退出"
+            } else {
+                state = "已結束，等待背景程序退出"
+            }
             let item = NSMenuItem(title: "\(session.displayName) — \(state)", action: nil, keyEquivalent: "")
             item.isEnabled = false
             menu.addItem(item)
@@ -251,12 +380,9 @@ final class CyderStatusItemController: NSObject, NSMenuDelegate {
     }
 
     private var currentVisualState: VisualState {
-        if sessions.values.contains(where: { Self.lifecycleState(at: $0.lifecycleURL) == "attention" }) {
-            return .attention
-        }
         if sessions.values.contains(where: { $0.isStopping }) { return .stopping }
-        if sessions.values.contains(where: { $0.primaryExited }) { return .background }
-        if sessions.values.contains(where: { !$0.activated }) { return .starting }
+        if sessions.values.contains(where: { !$0.activated && !$0.hasForeground }) { return .starting }
+        if sessions.values.contains(where: { $0.activated && !$0.hasForeground }) { return .background }
         return .running
     }
 
@@ -301,10 +427,13 @@ final class CyderStatusItemController: NSObject, NSMenuDelegate {
     }
 
     private func tooltip(for state: VisualState) -> String {
-        let count = Set(sessions.values.map { $0.prefix }).count
         switch state {
         case .starting: return "Cyder 正在啟動 Windows 環境"
-        case .running: return "\(count) 個 Cyder Windows 環境執行中"
+        case .running:
+            if sessions.count == 1, let name = sessions.values.first?.displayName {
+                return "\(name) 執行中"
+            }
+            return "\(sessions.count) 個程式執行中"
         case .background: return "Cyder 正在等待背景程序結束"
         case .stopping: return "Cyder 正在結束 Windows 程序"
         case .attention: return "Cyder 無法確認背景程序已結束"
@@ -342,19 +471,6 @@ final class CyderStatusItemController: NSObject, NSMenuDelegate {
     private static func forcedStopLiquidLevel(animationFrame: Int, reduceMotion: Bool) -> CGFloat {
         if reduceMotion { return 0.25 }
         return max(0.12, 1 - CGFloat(animationFrame) / 7.0)
-    }
-
-    private static func lifecycleState(at url: URL) -> String? {
-        guard let text = try? String(contentsOf: url, encoding: .utf8) else { return nil }
-        return text.split(whereSeparator: { $0.isNewline }).first { $0.hasPrefix("state=") }
-            .map { String($0.dropFirst("state=".count)) }
-    }
-
-    private static func elapsed(since date: Date?) -> String {
-        guard let date else { return "0 秒" }
-        let seconds = max(0, Int(Date().timeIntervalSince(date)))
-        if seconds < 60 { return "\(seconds) 秒" }
-        return "\(seconds / 60) 分 \(seconds % 60) 秒"
     }
 
     private static func cyderBottleImage(

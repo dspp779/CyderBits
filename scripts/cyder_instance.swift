@@ -23,14 +23,13 @@ final class CyderInstanceCoordinator {
     }
 
     private let support: URL
-    private let bundleID: String
-    private let lockURL: URL
     private let requestDirectory: URL
     private let notificationName = Notification.Name("local.cyder.app.instance-request")
     private var observer: NSObjectProtocol?
     private var requestPollTimer: Timer?
     private var ownsLock = false
     private var onRequest: ((CyderInstanceRequest) -> Void)?
+    let sentinel: CyderSentinelServer
 
     init(
         support: URL = CyderPaths.support,
@@ -39,14 +38,8 @@ final class CyderInstanceCoordinator {
             ?? "local.cyder.app"
     ) {
         self.support = support
-        self.bundleID = bundleID
-        let identity = bundleID.replacingOccurrences(
-            of: "[^A-Za-z0-9._-]",
-            with: "_",
-            options: .regularExpression
-        )
-        lockURL = support.appendingPathComponent(".native-instance-\(identity).lock", isDirectory: true)
         requestDirectory = support.appendingPathComponent("native-instance-requests", isDirectory: true)
+        sentinel = CyderSentinelServer(support: support, bundleID: bundleID)
     }
 
     @discardableResult
@@ -55,13 +48,17 @@ final class CyderInstanceCoordinator {
         guard ensureDirectory(support), ensureDirectory(requestDirectory) else {
             return .unavailable
         }
-        if acquireLock() {
+        switch sentinel.becomePrimary() {
+        case .primary:
             ownsLock = true
             installObserver()
             drainRequests()
             return .primary
+        case .secondary:
+            return .secondary
+        case .unavailable:
+            return .unavailable
         }
-        return .secondary
     }
 
     func forward(files: [String], arguments: [String]?, urls: [String] = [], showUI: Bool) {
@@ -103,8 +100,7 @@ final class CyderInstanceCoordinator {
         }
         guard ownsLock else { return }
         ownsLock = false
-        guard lockOwnerPID() == Int32(getpid()) else { return }
-        removeExactLock()
+        sentinel.stop()
     }
 
     deinit { stop() }
@@ -191,67 +187,5 @@ final class CyderInstanceCoordinator {
             let values = try? url.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey])
             return values?.isDirectory == true && values?.isSymbolicLink != true
         }
-    }
-
-    private func acquireLock() -> Bool {
-        do {
-            try FileManager.default.createDirectory(at: lockURL, withIntermediateDirectories: false)
-            let pidURL = lockURL.appendingPathComponent("pid")
-            try Data("\(getpid())\n".utf8).write(to: pidURL, options: .atomic)
-            try FileManager.default.setAttributes([.posixPermissions: NSNumber(value: 0o600)], ofItemAtPath: pidURL.path)
-            return true
-        } catch {
-            guard isStaleLock() else { return false }
-            removeExactLock()
-            do {
-                try FileManager.default.createDirectory(at: lockURL, withIntermediateDirectories: false)
-                let pidURL = lockURL.appendingPathComponent("pid")
-                try Data("\(getpid())\n".utf8).write(to: pidURL, options: .atomic)
-                try FileManager.default.setAttributes([.posixPermissions: NSNumber(value: 0o600)], ofItemAtPath: pidURL.path)
-                return true
-            } catch {
-                return false
-            }
-        }
-    }
-
-    private func isStaleLock() -> Bool {
-        guard let values = try? lockURL.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey]),
-              values.isDirectory == true,
-              values.isSymbolicLink != true else {
-            return false
-        }
-        guard let pid = lockOwnerPID() else {
-            let age = (try? lockURL.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
-                .map { Date().timeIntervalSince($0) } ?? 0
-            return age > 5
-        }
-        let probe = kill(pid, 0)
-        if probe == 0 {
-            // A reused PID belonging to another application is not allowed to
-            // block Cyder forever. A live process with no AppKit identity is
-            // treated conservatively as the owner.
-            if let app = NSRunningApplication(processIdentifier: pid) {
-                return app.bundleIdentifier == bundleID
-            }
-            return true
-        }
-        if errno == EPERM { return false }
-        return errno == ESRCH
-    }
-
-    private func lockOwnerPID() -> Int32? {
-        let pidURL = lockURL.appendingPathComponent("pid")
-        guard let raw = try? String(contentsOf: pidURL, encoding: .utf8),
-              let pid = Int32(raw.trimmingCharacters(in: .whitespacesAndNewlines)),
-              pid > 0 else { return nil }
-        return pid
-    }
-
-    private func removeExactLock() {
-        guard let values = try? lockURL.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey]),
-              values.isDirectory == true,
-              values.isSymbolicLink != true else { return }
-        try? FileManager.default.removeItem(at: lockURL)
     }
 }

@@ -2686,6 +2686,61 @@ cyder_bootstrap_shared_prefix() {
   fi
 }
 
+cyder_swift_bin() {
+  if [[ -n "${CYDER_SWIFT:-}" && -x "${CYDER_SWIFT}" ]]; then
+    printf '%s\n' "$CYDER_SWIFT"
+    return 0
+  fi
+  local candidate="${CYDER_APP:-}/Contents/MacOS/CyderSwift"
+  if [[ -x "$candidate" ]]; then
+    printf '%s\n' "$candidate"
+    return 0
+  fi
+  return 1
+}
+
+# Open an inheritable wait fifo and start CyderSwift --sentinel-connect.
+# Sets CYDER_SENTINEL_PID and CYDER_SENTINEL_WATCH_FILE; leaves fd 3 as the write end.
+cyder_sentinel_attach() {
+  local prefix="$1" exe_path="$2"
+  local swift wait_dir wait_fifo exe_name
+  CYDER_SENTINEL_PID=""
+  CYDER_SENTINEL_WATCH_FILE=""
+  swift="$(cyder_swift_bin)" || return 1
+  wait_dir="$(mktemp -d "${TMPDIR:-/tmp}/cyder-sentinel.XXXXXX")" || return 1
+  wait_fifo="$wait_dir/wait"
+  CYDER_SENTINEL_WATCH_FILE="$wait_dir/watch.pid"
+  mkfifo "$wait_fifo" || {
+    rm -rf "$wait_dir"
+    return 1
+  }
+  exe_name="$(basename "${exe_path%.*}")"
+  # Opening the fifo read/write does not block: this process is already both
+  # ends. A write-only open would deadlock until the helper finished dyld.
+  exec 3<>"$wait_fifo" || {
+    rm -rf "$wait_dir"
+    return 1
+  }
+  "$swift" --sentinel-connect \
+    --prefix "$prefix" \
+    --exe "$exe_name" \
+    --fifo "$wait_fifo" \
+    --pid-file "$CYDER_SENTINEL_WATCH_FILE" &
+  CYDER_SENTINEL_PID=$!
+  return 0
+}
+
+cyder_sentinel_publish_pid() {
+  local pid="$1"
+  if [[ -n "${CYDER_SENTINEL_WATCH_FILE:-}" ]]; then
+    printf '%s\n' "$pid" >"$CYDER_SENTINEL_WATCH_FILE"
+  fi
+}
+
+cyder_sentinel_close_write() {
+  exec 3>&- 2>/dev/null || true
+}
+
 cyder_run_wine_exe() {
   local wine_bin="$1"
   local exe="$2"
@@ -2911,8 +2966,11 @@ cyder_run_wine_exe() {
       # atomically published; Swift never needs to parse the shared Wine log.
       detached_session_id="${session_id:-}"
       (
+        cyder_sentinel_attach "$prefix" "$exe" || true
         cyder_exec_game >>"$log_file" 2>&1 &
         wine_pid=$!
+        cyder_sentinel_publish_pid "$wine_pid"
+        cyder_sentinel_close_write
         printf '%s\n' "$wine_pid" >"${pid_file}.tmp"
         mv -f "${pid_file}.tmp" "$pid_file"
         if [[ -n "$detached_session_id" ]]; then
@@ -2972,12 +3030,15 @@ cyder_run_wine_exe() {
           detached_session_id=""
           session_id=""
         fi
+        if [[ -n "${CYDER_SENTINEL_WATCH_FILE:-}" ]]; then
+          rm -rf "$(dirname "$CYDER_SENTINEL_WATCH_FILE")"
+        fi
       ) &
       # The supervisor now owns both the Wine child and runtime session.
       session_id=""
       # Keep the launcher handshake synchronous: Swift reads the PID as soon
       # as this function returns, while the later exit result stays async.
-      for _ in {1..100}; do
+      for _ in {1..250}; do
         [[ -s "$pid_file" ]] && break
         sleep 0.01
       done
