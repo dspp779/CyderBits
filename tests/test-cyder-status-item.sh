@@ -90,6 +90,8 @@ assert_contains "$app_source" 'statusItemController.setUIVisible(false)' \
   "closing both Cyder windows must release the UI-only menu-bar item"
 assert_contains "$app_source" '!self.statusItemController.hasActiveSessions' \
   "successful launches must keep native Cyder alive while Wine is active"
+assert_contains "$app_source" 'hasActiveSessions || self.libraryLaunchInProgress' \
+  "closing Cyder windows must not drop the menu bar during an in-flight library launch"
 assert_contains "$app_source" 'quitWhenSessionsEnd' \
   "closing native windows must not abandon an active menu-bar session"
 assert_contains "$app_source" '#selector(quitFromMenu)' \
@@ -104,5 +106,10 @@ assert_contains "$wrapper_source" 'exec "$SELF/CyderSwift" "$exe" "${game_args[@
   "macOS 11 explicit EXE launches must enter the native lifecycle agent"
 assert_contains "$wrapper_source" 'Catalina deliberately retains the shell-only fallback' \
   "Catalina must keep the existing Bash-only behavior"
+
+assert_contains "$app_source" 'attachRootPID(id: launchID' \
+  "library and Finder launches must attach the pid file to the LaunchGroup created for that relay"
+assert_contains "$status_source" 'func attachRootPID(id: String, pid: Int32)' \
+  "status item must expose id-keyed root PID attach"
 
 echo "PASS test-cyder-status-item"

@@ -40,10 +40,51 @@ assert_contains "$status" '已結束，等待背景程序退出' \
 assert_contains "$status" '等待 ' \
   "named leftover processes must appear in the waiting label"
 assert_contains "$status" 'func beginLaunch(' \
-  "the menu bar must track launches from sentinel callbacks, not lifecycle files"
+  "the menu bar must track launches as LaunchGroups with a stable id"
+assert_not_contains "$app" 'sentinel.onLaunch = { [weak self] launch in
+                self?.statusItemController.beginLaunch(' \
+  "helper hello must not create a second LaunchGroup"
 assert_not_contains "$status" 'lifecycleState(at:' \
   "menu-bar liveness must not poll lifecycle sidecar files"
 assert_contains "$app" 'sentinel.onLaunch' \
   "the app delegate must install sentinel launch callbacks"
+assert_not_contains "$sentinel" 'usleep(400_000)' \
+  "the sentinel helper must not poll Wine windows on an interval"
+assert_not_contains "$sentinel" 'func currentHolders' \
+  "the sentinel helper must not scan every onscreen window for WINEPREFIX"
+assert_contains "$sentinel" 'makeReadSource' \
+  "fifo EOF must wake the helper through kqueue rather than a sleep loop"
+assert_contains "$status" 'makeProcessSource' \
+  "the menu bar must watch Wine PIDs with process-exit/fork events"
+assert_contains "$status" 'forMode: .default' \
+  "menu-bar timers must not run during menu tracking"
+assert_not_contains "$status" 'forMode: .common' \
+  "menu tracking must not fire Wine window polls"
+assert_contains "$status" 'menuWillOpen' \
+  "opening the status menu must pause animation"
+assert_contains "$status" 'noteHelperDisconnected' \
+  "a crashed sentinel helper must not drop a still-running Wine launch"
+assert_not_contains "$status" 'if isMonitoring(prefix: prefix.path) { return }' \
+  "a published Wine PID must attach to the existing sentinel launch instead of being ignored"
+assert_contains "$status" 'attachPublishedPID' \
+  "beginMonitoring must watch the Wine PID even when the sentinel launch already exists"
+assert_contains "$app" 'hasActiveSessions || self.libraryLaunchInProgress' \
+  "closing the game library must keep the menu bar while a launch or Wine session is active"
+
+assert_contains "$app" 'statusItemController.beginLaunch(' \
+  "Swift must create the LaunchGroup when the Wine relay starts, not wait for helper hello"
+assert_contains "$app" 'attachRootPID(id: launchID' \
+  "the pid file must attach to this launch id, not to whichever group shares the prefix"
+assert_not_contains "$app" 'sentinel.onLaunchEnded = { [weak self] id in
+                self?.statusItemController.endLaunch(id: id)' \
+  "helper disconnect must not endLaunch"
+assert_not_contains "$app" 'self?.statusItemController.endLaunch(id: id)' \
+  "onLaunchEnded must not call endLaunch"
+assert_contains "$status" 'func attachRootPID(id: String, pid: Int32)' \
+  "root PID attach is keyed by launch id"
+assert_contains "$status" 'exactlyOneStartingGroup' \
+  "window adoption must prefer the single starting group, not every group with the same prefix"
+assert_not_contains "$status" 'for (key, var session) in sessions where session.prefix.path == target' \
+  "adoptWindowedProcess must not dump a PID into every LaunchGroup that shares the bottle"
 
 echo "PASS test-cyder-sentinel"
