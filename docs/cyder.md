@@ -92,11 +92,12 @@ LaunchServices，並把 `--args` 後的每一個值原樣轉送給 Windows 程�
 省略 `-n` 可能只把 EXE 的 open event 送到既有 Cyder，而遺失這次參數。
 
 macOS 11+ 的 Cyder native launcher 會對每個 bundle/support root 維持一個 primary
- instance。即使 `open -n` 建立了額外的短暫 instance，它也不會建立第二個選單列 icon；
-該 instance 會把 EXE、動態參數或「顯示 Cyder」要求透過暫存 request 轉送給 primary，
-再自行結束。primary 統一啟動 Wine、監控所有 lifecycle sidecar，並在同一個 icon 的
-選單中聚合狀態。不同 bundle 或 support root（例如 MapleStory OEM flavor）是刻意隔離
-的執行環境，因此各自擁有自己的 icon。
+ instance。primary 以 Unix domain socket bind 取得所有權；即使 `open -n` 建立了額外的
+短暫 instance，它也連不上第二個 listen，因此不會建立第二個選單列 icon。該 instance
+會把 EXE、動態參數或「顯示 Cyder」要求透過暫存 request 轉送給 primary，再自行結束。
+每次 Wine launch 另開一根可繼承 fifo，由 `CyderSwift --sentinel-connect` 接到 primary；
+連線斷開代表該 launch 的 process tree 已結束。選單列顯示前景程式名稱，而不是 session
+編號。不同 bundle 或 support root 是刻意隔離的執行環境，因此各自擁有自己的 icon。
 
 選單列 session、Steam helper、同一 prefix 多程式，以及後續 process monitor 的設計
 記錄見 [Cyder Session 與 Windows 程序監控設計](cyder-session-process-monitoring.zh-TW.md)。
@@ -225,7 +226,7 @@ Finder document event 啟動時，Swift relay 會在呼叫 bash 前監聽 CrossO
 
 命令列直接呼叫 `cyder_launcher.sh` 時仍以前景模式執行，方便腳本等待遊戲結束；Finder document event relay 會設定 `CYDER_WINE_DETACH=1`，由 bash 使用分離模式啟動。
 
-EXE 模式會將 Cyder activation policy 設為 `prohibited`，所以 Dock 不會留下 Cyder 圖示。CX26 的 Wine Mac driver 會嘗試從 EXE 資源讀取應用程式圖示；若遊戲沒有可用的 Windows 圖示，Dock 可能顯示 Wine 的預設圖示。
+EXE 啟動時 Cyder 不出現在 Dock（`LSUIElement` + accessory）；選單列會立刻出現醒酒瓶，並顯示「正在啟動程式…」。CX26 的 Wine Mac driver 會嘗試從 EXE 資源讀取應用程式圖示；若遊戲沒有可用的 Windows 圖示，Dock 可能顯示 Wine 的預設圖示。
 
 若要比較 Wine 的 ShellExecute 啟動路徑，可暫時設定
 `CYDER_WINE_START_MODE=start`；此時會執行 `wine start /wait /unix <exe>`。預設仍是直接執行
