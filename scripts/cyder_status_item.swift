@@ -23,7 +23,9 @@ final class CyderStatusItemController: NSObject, NSMenuDelegate {
         var hasForeground = false
         var leftoverNames: [String] = []
         var isStopping = false
+        var helperConnected: Bool
         var adoptedPIDs: Set<Int32>
+        var foregroundPIDs: Set<Int32> = []
     }
 
     var onOpenPreferences: (() -> Void)?
@@ -35,11 +37,13 @@ final class CyderStatusItemController: NSObject, NSMenuDelegate {
 
     private var sessions: [String: Session] = [:]
     private var statusItem: NSStatusItem?
-    private var pollTimer: Timer?
     private var animationTimer: Timer?
     private var visualState: VisualState = .starting
     private var animationFrame = 0
     private var uiVisible = false
+    private var menuIsOpen = false
+    private var processSources: [Int32: DispatchSourceProcess] = [:]
+    private let processQueue = DispatchQueue(label: "local.cyder.status-proc")
 
     var hasActiveSessions: Bool { !sessions.isEmpty }
 
@@ -69,14 +73,32 @@ final class CyderStatusItemController: NSObject, NSMenuDelegate {
         precondition(Thread.isMainThread)
         guard pid > 0 else { return }
         let target = (prefix as NSString).standardizingPath
-        var changed = false
-        for (key, var session) in sessions where session.prefix.path == target {
-            session.adoptedPIDs.insert(pid)
-            applyWindowedHandoff(&session, preferredName: name)
-            sessions[key] = session
-            changed = true
+        let key: String?
+        if let existing = sessions.first(where: { $0.value.adoptedPIDs.contains(pid) })?.key {
+            key = existing
+        } else {
+            let starting = sessions.filter {
+                $0.value.prefix.path == target && !$0.value.activated && !$0.value.hasForeground
+            }
+            let exactlyOneStartingGroup = starting.count == 1
+            if exactlyOneStartingGroup {
+                key = starting.first?.key
+            } else if let treeOwner = sessions.first(where: { session in
+                session.value.prefix.path == target
+                    && session.value.adoptedPIDs.contains(where: { wineProcessTreeIDs(root: $0).contains(pid) })
+            })?.key {
+                key = treeOwner
+            } else {
+                key = nil
+            }
         }
-        if changed { refresh() }
+        guard let key, var session = sessions[key] else { return }
+        session.adoptedPIDs.insert(pid)
+        session.foregroundPIDs.insert(pid)
+        applyWindowedHandoff(&session, preferredName: name)
+        sessions[key] = session
+        watchPID(pid)
+        refresh()
     }
 
     func markActivated(pid: Int32) {
@@ -95,8 +117,6 @@ final class CyderStatusItemController: NSObject, NSMenuDelegate {
         if notifyWhenEmpty {
             finishIfEmpty(hadSessions: true)
         } else if sessions.isEmpty {
-            pollTimer?.invalidate()
-            pollTimer = nil
             animationTimer?.invalidate()
             animationTimer = nil
             removeStatusItemIfUnused()
@@ -142,35 +162,37 @@ final class CyderStatusItemController: NSObject, NSMenuDelegate {
             rootDisplayName: display,
             fromSentinel: true,
             displayName: display,
+            helperConnected: true,
             adoptedPIDs: pid > 0 ? [pid] : []
         )
         installStatusItemIfNeeded()
-        ensurePollTimer()
+        watchPID(pid)
         refresh()
     }
 
     func updateLaunch(id: String, pid: Int32, holders: [CyderSentinelHolder]) {
         precondition(Thread.isMainThread)
         guard var session = sessions[id] else { return }
-        if pid > 0 { session.pid = pid }
-        for holder in holders where holder.pid > 0 {
-            session.adoptedPIDs.insert(holder.pid)
+        _ = holders
+        if pid > 0 {
+            session.pid = pid
+            session.adoptedPIDs.insert(pid)
+            sessions[id] = session
+            watchPID(pid)
         }
-        let windowed = holders.filter(\.hasWindow)
-        if let preferred = windowed.compactMap({ cyderUsefulWindowOwnerName($0.name) })
-            .first(where: { $0.caseInsensitiveCompare(session.rootDisplayName) != .orderedSame })
-            ?? windowed.compactMap({ cyderUsefulWindowOwnerName($0.name) }).first {
-            applyWindowedHandoff(&session, preferredName: preferred)
-        } else if !windowed.isEmpty {
-            applyWindowedHandoff(&session, preferredName: nil)
-        } else {
-            session.hasForeground = false
-            session.leftoverNames = holders.compactMap { holder in
-                cyderUsefulWindowOwnerName(holder.name)
-            }.filter { $0.caseInsensitiveCompare(session.displayName) != .orderedSame }
-        }
+    }
+
+    func noteProcessExited(_ pid: Int32) {
+        precondition(Thread.isMainThread)
+        handleProcessExit(pid)
+    }
+
+    func noteHelperDisconnected(id: String) {
+        precondition(Thread.isMainThread)
+        guard var session = sessions[id] else { return }
+        session.helperConnected = false
         sessions[id] = session
-        refresh()
+        finishSessionIfIdle(id)
     }
 
     func endLaunch(id: String) {
@@ -181,10 +203,19 @@ final class CyderStatusItemController: NSObject, NSMenuDelegate {
         finishIfEmpty(hadSessions: true)
     }
 
+    func attachRootPID(id: String, pid: Int32) {
+        precondition(Thread.isMainThread)
+        guard pid > 0, var session = sessions[id] else { return }
+        session.pid = pid
+        session.adoptedPIDs.insert(pid)
+        sessions[id] = session
+        watchPID(pid)
+        refresh()
+    }
+
     func beginMonitoring(pid: Int32, prefix: URL, executablePath: String, lifecycleURL: URL) {
         precondition(Thread.isMainThread)
         guard pid > 0 else { return }
-        if isMonitoring(prefix: prefix.path) { return }
         _ = lifecycleURL
         let name = URL(fileURLWithPath: executablePath).deletingPathExtension().lastPathComponent
         let id = "pid:\(pid)"
@@ -195,10 +226,11 @@ final class CyderStatusItemController: NSObject, NSMenuDelegate {
             rootDisplayName: name,
             fromSentinel: false,
             displayName: name,
+            helperConnected: false,
             adoptedPIDs: [pid]
         )
         installStatusItemIfNeeded()
-        ensurePollTimer()
+        watchPID(pid)
         refresh()
     }
 
@@ -208,11 +240,142 @@ final class CyderStatusItemController: NSObject, NSMenuDelegate {
         return sessions.values.contains { $0.prefix.path == target }
     }
 
-    private func ensurePollTimer() {
-        guard pollTimer == nil else { return }
-        let timer = Timer(timeInterval: 1, target: self, selector: #selector(poll), userInfo: nil, repeats: true)
-        RunLoop.main.add(timer, forMode: .common)
-        pollTimer = timer
+    private func watchPID(_ pid: Int32) {
+        guard pid > 0 else { return }
+        processQueue.async { [weak self] in
+            self?.watchPIDOnQueue(pid)
+        }
+    }
+
+    private func watchPIDOnQueue(_ pid: Int32) {
+        guard processSources[pid] == nil else { return }
+        if kill(pid, 0) != 0 {
+            DispatchQueue.main.async { [weak self] in
+                self?.handleProcessExit(pid)
+            }
+            return
+        }
+        let source = DispatchSource.makeProcessSource(
+            identifier: pid,
+            eventMask: [.exit, .fork, .exec],
+            queue: processQueue
+        )
+        source.setEventHandler { [weak self, weak source] in
+            guard let self, let source else { return }
+            let events = source.data
+            if events.contains(.fork) || events.contains(.exec) {
+                let children = wineProcessTreeIDs(root: pid)
+                for child in children {
+                    self.watchPIDOnQueue(child)
+                }
+                DispatchQueue.main.async {
+                    self.handleProcessSpawn(root: pid, children: children)
+                }
+            }
+            if events.contains(.exit) {
+                source.cancel()
+                self.processSources.removeValue(forKey: pid)
+                DispatchQueue.main.async {
+                    self.handleProcessExit(pid)
+                }
+            }
+        }
+        processSources[pid] = source
+        source.resume()
+    }
+
+    private func handleProcessSpawn(root: Int32, children: Set<Int32>) {
+        precondition(Thread.isMainThread)
+        var changed = false
+        var probePIDs = Set<Int32>()
+        var probePrefix = ""
+        for (key, var session) in sessions {
+            let related = session.adoptedPIDs.contains(root)
+                || !session.adoptedPIDs.isDisjoint(with: children)
+            guard related else { continue }
+            session.adoptedPIDs.insert(root)
+            session.adoptedPIDs.formUnion(children)
+            sessions[key] = session
+            probePIDs = session.adoptedPIDs
+            probePrefix = session.prefix.path
+            changed = true
+        }
+        if changed {
+            refresh()
+            probeWindows(ownedBy: probePIDs, prefix: probePrefix)
+        }
+    }
+
+    private func handleProcessExit(_ pid: Int32) {
+        precondition(Thread.isMainThread)
+        let affected = sessions.filter { $0.value.adoptedPIDs.contains(pid) || $0.value.pid == pid }
+        for (id, _) in affected {
+            guard var session = sessions[id] else { continue }
+            session.adoptedPIDs.remove(pid)
+            if session.pid == pid { session.pid = 0 }
+            session.foregroundPIDs.remove(pid)
+            let live = session.adoptedPIDs.filter { kill($0, 0) == 0 }
+            session.adoptedPIDs = live
+            session.foregroundPIDs = session.foregroundPIDs.intersection(live)
+            if !session.foregroundPIDs.isEmpty {
+                sessions[id] = session
+            } else if !live.isEmpty {
+                session.hasForeground = false
+                session.leftoverNames = leftoverNames(for: session)
+                sessions[id] = session
+            } else {
+                session.hasForeground = false
+                session.leftoverNames = []
+                sessions[id] = session
+                finishSessionIfIdle(id)
+            }
+        }
+        if !affected.isEmpty { refresh() }
+    }
+
+    private func leftoverNames(for session: Session) -> [String] {
+        session.adoptedPIDs.compactMap { pid -> String? in
+            guard kill(pid, 0) == 0 else { return nil }
+            return cyderWineArgvName(pid: pid)
+        }.filter { $0.caseInsensitiveCompare(session.displayName) != .orderedSame }
+    }
+
+    private func finishSessionIfIdle(_ id: String) {
+        guard var session = sessions[id] else { return }
+        let live = session.adoptedPIDs.filter { kill($0, 0) == 0 }
+        session.adoptedPIDs = live
+        if !live.isEmpty {
+            session.hasForeground = false
+            session.leftoverNames = leftoverNames(for: session)
+            sessions[id] = session
+            refresh()
+            return
+        }
+        if session.helperConnected {
+            session.hasForeground = false
+            session.leftoverNames = []
+            sessions[id] = session
+            refresh()
+            return
+        }
+        endLaunch(id: id)
+    }
+
+    private func probeWindows(ownedBy pids: Set<Int32>, prefix: String) {
+        guard !pids.isEmpty, !prefix.isEmpty else { return }
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            let windows = wineOnscreenWindows(ownedBy: pids)
+            guard !windows.isEmpty else { return }
+            DispatchQueue.main.async {
+                for window in windows {
+                    self?.adoptWindowedProcess(
+                        pid: window.pid,
+                        prefix: prefix,
+                        name: window.ownerName
+                    )
+                }
+            }
+        }
     }
 
     private func installStatusItemIfNeeded() {
@@ -228,56 +391,6 @@ final class CyderStatusItemController: NSObject, NSMenuDelegate {
         statusItem = item
     }
 
-    @objc private func poll() {
-        var survivors: [String: Session] = [:]
-        for (id, var session) in sessions {
-            refreshPresentation(&session)
-            if session.fromSentinel {
-                survivors[id] = session
-                continue
-            }
-            let pidAlive = session.pid > 0 && kill(session.pid, 0) == 0
-            let adoptedAlive = session.adoptedPIDs.contains { kill($0, 0) == 0 }
-            if session.hasForeground || pidAlive || adoptedAlive {
-                survivors[id] = session
-            } else {
-                onSessionEnded?(session.prefix)
-            }
-        }
-        let hadSessions = !sessions.isEmpty
-        sessions = survivors
-        refresh()
-        finishIfEmpty(hadSessions: hadSessions)
-    }
-
-    private func refreshPresentation(_ session: inout Session) {
-        let windows = wineOnscreenWindows(ownedBy: session.adoptedPIDs)
-        let dockApps = wineRegularAppsLaunched(since: session.startedAt)
-        if !windows.isEmpty {
-            for window in windows {
-                session.adoptedPIDs.insert(window.pid)
-            }
-            let preferred = windows.compactMap { cyderUsefulWindowOwnerName($0.ownerName) }
-                .first { $0.caseInsensitiveCompare(session.rootDisplayName) != .orderedSame }
-                ?? windows.compactMap { cyderUsefulWindowOwnerName($0.ownerName) }.first
-            applyWindowedHandoff(&session, preferredName: preferred)
-        } else if !dockApps.isEmpty {
-            for app in dockApps {
-                session.adoptedPIDs.insert(app.processIdentifier)
-            }
-            applyWindowedHandoff(
-                &session,
-                preferredName: dockApps.compactMap(\.localizedName).first
-            )
-        } else {
-            session.hasForeground = false
-            session.leftoverNames = session.adoptedPIDs.compactMap { pid in
-                guard kill(pid, 0) == 0 else { return nil }
-                return cyderWineArgvName(pid: pid)
-            }.filter { $0.caseInsensitiveCompare(session.displayName) != .orderedSame }
-        }
-    }
-
     private func applyWindowedHandoff(_ session: inout Session, preferredName: String?) {
         session.activated = true
         session.hasForeground = true
@@ -290,8 +403,6 @@ final class CyderStatusItemController: NSObject, NSMenuDelegate {
 
     private func finishIfEmpty(hadSessions: Bool) {
         guard hadSessions, sessions.isEmpty else { return }
-        pollTimer?.invalidate()
-        pollTimer = nil
         animationTimer?.invalidate()
         animationTimer = nil
         if uiVisible {
@@ -310,11 +421,24 @@ final class CyderStatusItemController: NSObject, NSMenuDelegate {
         statusItem = nil
     }
 
+    func menuWillOpen(_ menu: NSMenu) {
+        menuIsOpen = true
+        animationTimer?.invalidate()
+        animationTimer = nil
+        rebuild(menu)
+    }
+
+    func menuDidClose(_ menu: NSMenu) {
+        menuIsOpen = false
+        refresh()
+    }
+
     func menuNeedsUpdate(_ menu: NSMenu) {
         rebuild(menu)
     }
 
     private func refresh() {
+        if menuIsOpen { return }
         guard let menu = statusItem?.menu else { return }
         rebuild(menu)
         let nextState = currentVisualState
@@ -388,10 +512,10 @@ final class CyderStatusItemController: NSObject, NSMenuDelegate {
 
     private func updateAnimationTimer() {
         let reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
-        let shouldAnimate = !reduceMotion && visualState != .running
+        let shouldAnimate = !reduceMotion && visualState != .running && !menuIsOpen
         if shouldAnimate, animationTimer == nil {
             let timer = Timer(timeInterval: 0.2, target: self, selector: #selector(advanceAnimation), userInfo: nil, repeats: true)
-            RunLoop.main.add(timer, forMode: .common)
+            RunLoop.main.add(timer, forMode: .default)
             animationTimer = timer
         } else if !shouldAnimate {
             animationTimer?.invalidate()
