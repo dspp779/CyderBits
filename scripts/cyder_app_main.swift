@@ -1390,6 +1390,11 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         var cleanPrimaryExitObserved = false
         defer {
             try? FileManager.default.removeItem(at: pidURL)
+            keepLaunchGroupIfLiveOrClaimed(
+                id: launchID,
+                launchActivated: &launchActivated,
+                activatedURL: activatedURL
+            )
             if !launchActivated {
                 try? FileManager.default.removeItem(at: exitResultURL)
                 try? FileManager.default.removeItem(at: activatedURL)
@@ -1528,25 +1533,39 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         CyderDiagnostics.shared.warning(
             "wine activation timed out after 30s pid=\(winePID); process remains detached"
         )
-        // Spec §3.3: timeout is success only if the process still lives or the
+        // Spec §3.3: timeout is success only if watched PIDs still live or the
         // group already claimed a window. An empty starting group must fall
         // through to defer endLaunch so it cannot linger as「正在啟動」.
-        var keepGroup = winePID > 0 && kill(winePID, 0) == 0
+        keepLaunchGroupIfLiveOrClaimed(
+            id: launchID,
+            launchActivated: &launchActivated,
+            activatedURL: activatedURL
+        )
+        return .success
+    }
+
+    /// Shared by the 30s timeout and the launch defer so an early Wine exit
+    /// cannot destroy a LaunchGroup that already adopted live PIDs or a window.
+    private func keepLaunchGroupIfLiveOrClaimed(
+        id launchID: String,
+        launchActivated: inout Bool,
+        activatedURL: URL
+    ) {
+        guard !launchActivated else { return }
+        var keepGroup = false
         onMainThread {
-            keepGroup = keepGroup
-                || statusItemController.hasLiveWatchedPIDs(id: launchID)
+            keepGroup = statusItemController.hasLiveWatchedPIDs(id: launchID)
                 || statusItemController.hasClaimedWindow(id: launchID)
             if keepGroup {
                 statusItemController.markActivated(id: launchID)
             }
         }
         if keepGroup {
-            // Observation stops after the compatibility timeout; let the Bash
-            // supervisor consume the eventual sidecar just like an activation.
+            // Observation stops; let the Bash supervisor consume the sidecar
+            // just like an activation.
             launchActivated = true
             FileManager.default.createFile(atPath: activatedURL.path, contents: Data())
         }
-        return .success
     }
 
     private func runPrefixAction(_ action: String, prefix: URL, operation: String) {

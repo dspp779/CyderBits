@@ -223,6 +223,7 @@ final class CyderStatusItemController: NSObject, NSMenuDelegate {
     func endLaunch(id: String) {
         precondition(Thread.isMainThread)
         guard let session = sessions.removeValue(forKey: id) else { return }
+        cancelOrphanedProcessSources(removed: session)
         onSessionEnded?(session.prefix)
         refresh()
         finishIfEmpty(hadSessions: true)
@@ -263,6 +264,28 @@ final class CyderStatusItemController: NSObject, NSMenuDelegate {
         precondition(Thread.isMainThread)
         let target = (prefix as NSString).standardizingPath
         return sessions.values.contains { $0.prefix.path == target }
+    }
+
+    private func cancelOrphanedProcessSources(removed session: Session) {
+        var removedPIDs = session.adoptedPIDs
+        if session.pid > 0 {
+            removedPIDs.insert(session.pid)
+        }
+        removedPIDs.formUnion(session.foregroundPIDs)
+        let stillWatched = Set(sessions.values.flatMap { other -> [Int32] in
+            var ids = Array(other.adoptedPIDs)
+            if other.pid > 0 { ids.append(other.pid) }
+            ids.append(contentsOf: other.foregroundPIDs)
+            return ids
+        })
+        let orphaned = removedPIDs.subtracting(stillWatched)
+        guard !orphaned.isEmpty else { return }
+        processQueue.async { [weak self] in
+            guard let self else { return }
+            for pid in orphaned {
+                self.processSources.removeValue(forKey: pid)?.cancel()
+            }
+        }
     }
 
     private func watchPID(_ pid: Int32) {

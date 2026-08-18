@@ -86,6 +86,11 @@ assert_not_contains "$status" 'for (key, var session) in sessions where session.
   "adoptWindowedProcess must not dump a PID into every LaunchGroup that shares the bottle"
 assert_contains "$app" 'endLaunch(id: launchID)' \
   "a failed Wine relay must tear down the LaunchGroup created for that launch id"
+assert_contains "$app" 'keepLaunchGroupIfLiveOrClaimed(' \
+  "timeout and early-return defer must share one LaunchGroup lifetime helper"
+keep_helper_refs="$(printf '%s\n' "$app" | grep -c 'keepLaunchGroupIfLiveOrClaimed(' || true)"
+assert_eq "$keep_helper_refs" "3" \
+  "helper definition plus timeout and defer call sites must all use keepLaunchGroupIfLiveOrClaimed"
 assert_not_contains "$app" 'cancelMonitoring(pid: winePID' \
   "failed launches must not cancel monitoring by pid after the group is keyed by launch id"
 assert_contains "$status" 'if !session.activated {
@@ -102,8 +107,15 @@ assert_contains "$status" 'func markActivated(id: String)' \
 assert_contains "$app" 'markActivated(id: launchID)' \
   "the Wine relay must activate the LaunchGroup by launch id, not only by a possibly-exited root pid"
 assert_contains "$app" 'hasLiveWatchedPIDs(id: launchID)' \
-  "30s timeout must not treat the launch as activated unless watched PIDs are still live"
+  "timeout and defer must not keep the LaunchGroup unless watched PIDs are still live"
 assert_contains "$app" 'hasClaimedWindow(id: launchID)' \
-  "30s timeout must keep the group only if a window was claimed or a process still lives"
+  "timeout and defer must keep the group only if a window was claimed or a process still lives"
+assert_contains "$app" 'keepLaunchGroupIfLiveOrClaimed(
+                id: launchID,
+                launchActivated: &launchActivated,
+                activatedURL: activatedURL
+            )
+            if !launchActivated {' \
+  "early-return defer must run the same keepGroup helper before endLaunch"
 
 echo "PASS test-cyder-sentinel"
