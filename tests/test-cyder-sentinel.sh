@@ -66,8 +66,6 @@ assert_contains "$status" 'noteHelperDisconnected' \
   "a crashed sentinel helper must not drop a still-running Wine launch"
 assert_not_contains "$status" 'if isMonitoring(prefix: prefix.path) { return }' \
   "a published Wine PID must attach to the existing sentinel launch instead of being ignored"
-assert_contains "$status" 'attachPublishedPID' \
-  "beginMonitoring must watch the Wine PID even when the sentinel launch already exists"
 assert_contains "$app" 'hasActiveSessions || self.libraryLaunchInProgress' \
   "closing the game library must keep the menu bar while a launch or Wine session is active"
 
@@ -86,5 +84,13 @@ assert_contains "$status" 'exactlyOneStartingGroup' \
   "window adoption must prefer the single starting group, not every group with the same prefix"
 assert_not_contains "$status" 'for (key, var session) in sessions where session.prefix.path == target' \
   "adoptWindowedProcess must not dump a PID into every LaunchGroup that shares the bottle"
+assert_contains "$app" 'endLaunch(id: launchID)' \
+  "a failed Wine relay must tear down the LaunchGroup created for that launch id"
+assert_not_contains "$app" 'cancelMonitoring(pid: winePID' \
+  "failed launches must not cancel monitoring by pid after the group is keyed by launch id"
+assert_contains "$status" 'fromSentinel: true,
+            displayName: display,
+            helperConnected: false,' \
+  "Swift-created LaunchGroups must not wait on helper hello to stay alive"
 
 echo "PASS test-cyder-sentinel"

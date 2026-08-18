@@ -1,8 +1,9 @@
 // Unix-domain sentinel for a single Cyder primary and per-launch Wine trees.
 //
-// The primary binds `sentinel.sock`. Each launch helper connects, holds the
-// socket until its wait fifo hits EOF (and the watched Wine PID exits), then
-// the kernel closes the fd. The primary treats disconnect as "this launch ended".
+// The primary binds `sentinel.sock`. Each launch helper connects and holds the
+// socket until its wait fifo hits EOF. Disconnect means the helper is gone;
+// Wine may still be running, so the UI keeps the launch until process-exit
+// events (and helper disconnect) both say it is finished.
 import Darwin
 import Foundation
 
@@ -323,13 +324,13 @@ enum CyderSentinelConnect {
         if !fifo.isEmpty {
             fifoFD = open(fifo, O_RDONLY)
         }
-        defer { if fifoFD >= 0 { close(fifoFD) } }
+        let socketFD = connectSocket()
+        guard socketFD >= 0 else {
+            if fifoFD >= 0 { close(fifoFD) }
+            return 1
+        }
 
-        let fd = connectSocket()
-        guard fd >= 0 else { return 1 }
-        defer { close(fd) }
-
-        send(fd: fd, [
+        send(fd: socketFD, [
             "v": 1,
             "kind": "hello",
             "id": id,
@@ -339,44 +340,128 @@ enum CyderSentinelConnect {
             "holders": [],
         ])
 
-        var fifoEOF = fifoFD < 0
-        var idleWithoutHolders = 0
-        while true {
-            if watchPID <= 0, !pidFile.isEmpty {
-                if let text = try? String(contentsOfFile: pidFile, encoding: .utf8),
-                   let value = Int32(text.trimmingCharacters(in: .whitespacesAndNewlines)),
-                   value > 0 {
-                    watchPID = value
-                }
-            }
-            if !fifoEOF, fifoFD >= 0 {
-                fifoEOF = fifoHasEOF(fifoFD)
-            }
-            let holders = currentHolders(prefix: prefix, watchPID: watchPID)
-            send(fd: fd, [
+        let queue = DispatchQueue(label: "local.cyder.sentinel-connect")
+        let finished = DispatchSemaphore(value: 0)
+        var pidSource: DispatchSourceFileSystemObject?
+        var fifoSource: DispatchSourceRead?
+
+        var processSource: DispatchSourceProcess?
+        var fifoClosed = false
+
+        func publishPID(_ pid: Int32) {
+            guard pid > 0 else { return }
+            watchPID = pid
+            send(fd: socketFD, [
                 "v": 1,
                 "kind": "update",
                 "id": id,
                 "prefix": prefix,
                 "exe": exe,
-                "pid": watchPID,
-                "holders": holders.map {
-                    ["pid": $0.pid, "name": $0.name, "window": $0.hasWindow]
-                },
+                "pid": pid,
+                "holders": [],
             ])
-            let pidAlive = watchPID > 0 && kill(watchPID, 0) == 0
-            if !pidAlive && fifoEOF {
-                if holders.isEmpty {
-                    idleWithoutHolders += 1
-                    if idleWithoutHolders >= 3 { break }
-                } else {
-                    idleWithoutHolders = 0
-                }
-            } else {
-                idleWithoutHolders = 0
-            }
-            usleep(400_000)
+            watchProcess(pid)
         }
+
+        func watchProcess(_ pid: Int32) {
+            guard pid > 0, processSource == nil else { return }
+            if kill(pid, 0) != 0 {
+                if fifoClosed { finished.signal() }
+                return
+            }
+            let source = DispatchSource.makeProcessSource(
+                identifier: pid,
+                eventMask: .exit,
+                queue: queue
+            )
+            source.setEventHandler {
+                source.cancel()
+                if fifoClosed { finished.signal() }
+            }
+            processSource = source
+            source.resume()
+        }
+
+        func finishIfIdle() {
+            let pid = watchPID > 0 ? watchPID : readPIDFile()
+            if pid > 0, kill(pid, 0) == 0 {
+                publishPID(pid)
+                return
+            }
+            finished.signal()
+        }
+
+        func readPIDFile() -> Int32 {
+            guard !pidFile.isEmpty,
+                  let text = try? String(contentsOfFile: pidFile, encoding: .utf8),
+                  let pid = Int32(text.trimmingCharacters(in: .whitespacesAndNewlines)),
+                  pid > 0 else { return 0 }
+            return pid
+        }
+
+        if watchPID <= 0 {
+            watchPID = readPIDFile()
+        }
+        if watchPID > 0 {
+            publishPID(watchPID)
+        } else if !pidFile.isEmpty {
+            let directory = (pidFile as NSString).deletingLastPathComponent
+            let directoryFD = open(directory, O_EVTONLY)
+            if directoryFD >= 0 {
+                let source = DispatchSource.makeFileSystemObjectSource(
+                    fileDescriptor: directoryFD,
+                    eventMask: [.write, .extend, .attrib, .link, .rename],
+                    queue: queue
+                )
+                source.setEventHandler {
+                    let pid = readPIDFile()
+                    guard pid > 0 else { return }
+                    publishPID(pid)
+                    source.cancel()
+                }
+                source.setCancelHandler { close(directoryFD) }
+                pidSource = source
+                source.resume()
+            }
+        }
+
+        if fifoFD >= 0 {
+            let flags = fcntl(fifoFD, F_GETFL)
+            if flags >= 0 {
+                _ = fcntl(fifoFD, F_SETFL, flags | O_NONBLOCK)
+            }
+            let source = DispatchSource.makeReadSource(fileDescriptor: fifoFD, queue: queue)
+            source.setEventHandler {
+                var buffer = [UInt8](repeating: 0, count: 64)
+                while true {
+                    let count = read(fifoFD, &buffer, buffer.count)
+                    if count == 0 {
+                        fifoClosed = true
+                        source.cancel()
+                        finishIfIdle()
+                        return
+                    }
+                    if count < 0 {
+                        if errno == EAGAIN || errno == EWOULDBLOCK { return }
+                        fifoClosed = true
+                        source.cancel()
+                        finishIfIdle()
+                        return
+                    }
+                }
+            }
+            source.setCancelHandler { close(fifoFD) }
+            fifoSource = source
+            source.resume()
+        } else {
+            finished.signal()
+        }
+
+        finished.wait()
+        pidSource?.cancel()
+        fifoSource?.cancel()
+        processSource?.cancel()
+        close(socketFD)
         return 0
     }
 
@@ -431,46 +516,6 @@ enum CyderSentinelConnect {
         }
     }
 
-    private static func fifoHasEOF(_ fd: Int32) -> Bool {
-        var pollFD = pollfd(fd: fd, events: Int16(POLLIN | POLLHUP), revents: 0)
-        let ready = poll(&pollFD, 1, 0)
-        guard ready > 0 else { return false }
-        if pollFD.revents & Int16(POLLHUP) != 0 {
-            var byte: UInt8 = 0
-            let n = read(fd, &byte, 1)
-            return n <= 0
-        }
-        if pollFD.revents & Int16(POLLIN) != 0 {
-            var byte: UInt8 = 0
-            let n = read(fd, &byte, 1)
-            return n == 0
-        }
-        return false
-    }
-
-    private static func currentHolders(prefix: String, watchPID: Int32) -> [CyderSentinelHolder] {
-        var pids = Set<Int32>()
-        if watchPID > 0, kill(watchPID, 0) == 0 {
-            pids.formUnion(wineProcessTreeIDs(root: watchPID))
-        }
-        let windows = wineOnscreenWindows(matchingPrefix: prefix, extraPIDs: pids)
-        for window in windows where window.pid > 0 {
-            pids.insert(window.pid)
-        }
-        if watchPID <= 0 || kill(watchPID, 0) != 0 {
-            for window in wineOnscreenWindows(matchingPrefix: prefix) {
-                pids.insert(window.pid)
-            }
-        }
-        let windowByPID = Dictionary(uniqueKeysWithValues: windows.map { ($0.pid, $0) })
-        return pids.sorted().compactMap { pid in
-            guard pid > 0, kill(pid, 0) == 0 else { return nil }
-            if !isWineLoaderPID(pid), windowByPID[pid] == nil { return nil }
-            let windowName = windowByPID[pid].flatMap { cyderUsefulWindowOwnerName($0.ownerName) }
-            let name = windowName ?? cyderWineArgvName(pid: pid) ?? ""
-            return CyderSentinelHolder(pid: pid, name: name, hasWindow: windowByPID[pid] != nil)
-        }
-    }
 }
 
 private func unixSocketAddress(_ path: String) -> sockaddr_un? {

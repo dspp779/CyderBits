@@ -41,14 +41,14 @@ assert_contains "$source_text" 'detachedWineLifecycleState(at: lifecycleURL) == 
   "clean exits without a window must complete from the lifecycle sidecar"
 assert_contains "$source_text" 'completed without activation' \
   "windowless utilities must be recorded as clean launches"
-assert_contains "$source_text" 'wineProcessHasOnscreenWindow(pid: winePID)' \
-  "a visible Wine window must finish starting even without an activation notification"
-assert_contains "$source_text" 'detail: "window-visible"' \
-  "onscreen Wine windows must be diagnosed separately from Cocoa activation"
-assert_contains "$source_text" 'wineRegularAppsLaunched(since:' \
-  "a Wine Dock app from a reparented handoff process must finish starting"
-assert_contains "$source_text" 'detail: "dock-app-visible"' \
-  "Wine Dock icons must be diagnosed when the original wine PID has already exited"
+assert_not_contains "$source_text" 'wineProcessHasOnscreenWindow(pid: winePID)' \
+  "the launch waiter must not poll CGWindowList on a timer"
+assert_not_contains "$source_text" 'wineHandoffOnscreenWindows(since: launchedAt)' \
+  "handoff must arrive from activation events, not a window-list poll"
+assert_not_contains "$source_text" 'wineRegularAppsLaunched(since: launchedAt)' \
+  "Dock-app handoff must arrive from NSWorkspace, not a launch-date scan"
+assert_contains "$source_text" 'didActivateApplicationNotification' \
+  "a Wine Dock app must finish starting from an activation notification"
 assert_not_contains "$source_text" 'application.activationPolicy == .regular else' \
   "starting UI must dismiss even when Wine stays a non-Dock accessory process"
 assert_contains "$source_text" 'belongsToMonitoredSession' \

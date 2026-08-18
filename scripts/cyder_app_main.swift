@@ -137,7 +137,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
                   !self.openingGameLibrary,
                   self.gameLibraryController.window?.isVisible != true else { return }
             self.statusItemController.setUIVisible(false)
-            if self.statusItemController.hasActiveSessions {
+            if self.statusItemController.hasActiveSessions || self.libraryLaunchInProgress {
                 NSApp.setActivationPolicy(.accessory)
                 return
             }
@@ -165,7 +165,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
                   self.settingsController.window?.isVisible != true,
                   !self.gameLibraryController.isGameSettingsVisible else { return }
             self.statusItemController.setUIVisible(false)
-            if self.statusItemController.hasActiveSessions {
+            if self.statusItemController.hasActiveSessions || self.libraryLaunchInProgress {
                 NSApp.setActivationPolicy(.accessory)
                 return
             }
@@ -314,27 +314,8 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         }) {
         case .primary:
             isPrimaryInstance = true
-            instanceCoordinator.sentinel.onLaunch = { [weak self] launch in
-                self?.statusItemController.beginLaunch(
-                    id: launch.id,
-                    prefix: URL(fileURLWithPath: launch.prefix, isDirectory: true),
-                    executableName: launch.rootName,
-                    pid: launch.pid
-                )
-            }
-            instanceCoordinator.sentinel.onLaunchUpdate = { [weak self] launch in
-                guard let self else { return }
-                self.statusItemController.updateLaunch(
-                    id: launch.id,
-                    pid: launch.pid,
-                    holders: launch.holders
-                )
-                if launch.holders.contains(where: \.hasWindow) {
-                    self.hideSetup()
-                }
-            }
             instanceCoordinator.sentinel.onLaunchEnded = { [weak self] id in
-                self?.statusItemController.endLaunch(id: id)
+                self?.statusItemController.noteHelperDisconnected(id: id)
             }
         case .secondary:
             isPrimaryInstance = false
@@ -429,6 +410,18 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             name: Notification.Name("WineAppWillActivateNotification"),
             object: nil,
             suspensionBehavior: .deliverImmediately
+        )
+        NSWorkspace.shared.notificationCenter.addObserver(
+            self,
+            selector: #selector(wineWorkspaceDidActivate(_:)),
+            name: NSWorkspace.didActivateApplicationNotification,
+            object: nil
+        )
+        NSWorkspace.shared.notificationCenter.addObserver(
+            self,
+            selector: #selector(wineWorkspaceDidTerminate(_:)),
+            name: NSWorkspace.didTerminateApplicationNotification,
+            object: nil
         )
         installMainMenu()
         didFinishLaunch = true
@@ -1379,12 +1372,20 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         }
 
         let launchID = UUID().uuidString
+        let executableName = URL(fileURLWithPath: exe).deletingPathExtension().lastPathComponent
+        onMainThread {
+            statusItemController.beginLaunch(
+                id: launchID,
+                prefix: prefix,
+                executableName: executableName,
+                pid: 0
+            )
+        }
         let pidURL = requestDirectory.appendingPathComponent("wine-\(launchID).pid")
         let exitResultURL = requestDirectory.appendingPathComponent("wine-\(launchID).result")
         let activatedURL = requestDirectory.appendingPathComponent("wine-\(launchID).activated")
         let lifecycleURL = requestDirectory.appendingPathComponent("wine-\(launchID).lifecycle")
         var launchActivated = false
-        var monitoringStarted = false
         var winePID: Int32 = 0
         var cleanPrimaryExitObserved = false
         defer {
@@ -1393,10 +1394,8 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
                 try? FileManager.default.removeItem(at: exitResultURL)
                 try? FileManager.default.removeItem(at: activatedURL)
                 try? FileManager.default.removeItem(at: lifecycleURL)
-                if monitoringStarted {
-                    onMainThread {
-                        statusItemController.cancelMonitoring(pid: winePID, notifyWhenEmpty: false)
-                    }
+                onMainThread {
+                    statusItemController.endLaunch(id: launchID)
                 }
             }
         }
@@ -1443,14 +1442,8 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             return value
         }()
         if winePID > 0 {
-            monitoringStarted = true
             onMainThread {
-                statusItemController.beginMonitoring(
-                    pid: winePID,
-                    prefix: prefix,
-                    executablePath: exe,
-                    lifecycleURL: lifecycleURL
-                )
+                statusItemController.attachRootPID(id: launchID, pid: winePID)
                 if #available(macOS 11.0, *),
                    let resourcePath = Bundle.main.resourcePath {
                     let context = CyderLaunchContext(resourcePath: resourcePath)
@@ -1461,50 +1454,13 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
                 }
             }
         }
-        let launchedAt = Date()
         let deadline = Date().addingTimeInterval(30)
         while Date() < deadline {
-            if activationWaiter.semaphore.wait(timeout: .now() + 0.2) == .success {
+            if activationWaiter.semaphore.wait(timeout: .now() + 0.5) == .success {
                 launchActivated = true
                 FileManager.default.createFile(atPath: activatedURL.path, contents: Data())
                 CyderDiagnostics.shared.enter(.wineActivation, detail: "notification-received")
                 onMainThread { statusItemController.markActivated(pid: winePID) }
-                return .success
-            }
-            if winePID > 0, wineProcessHasOnscreenWindow(pid: winePID) {
-                launchActivated = true
-                FileManager.default.createFile(atPath: activatedURL.path, contents: Data())
-                CyderDiagnostics.shared.enter(.wineActivation, detail: "window-visible")
-                onMainThread { statusItemController.markActivated(pid: winePID) }
-                return .success
-            }
-            let dockApps = wineRegularAppsLaunched(since: launchedAt)
-            let handoffWindows = wineHandoffOnscreenWindows(since: launchedAt)
-            if !dockApps.isEmpty || !handoffWindows.isEmpty {
-                launchActivated = true
-                FileManager.default.createFile(atPath: activatedURL.path, contents: Data())
-                if dockApps.isEmpty {
-                    CyderDiagnostics.shared.enter(.wineActivation, detail: "window-visible")
-                } else {
-                    CyderDiagnostics.shared.enter(.wineActivation, detail: "dock-app-visible")
-                }
-                onMainThread {
-                    for app in dockApps {
-                        statusItemController.adoptWindowedProcess(
-                            pid: app.processIdentifier,
-                            prefix: prefix.path,
-                            name: app.localizedName
-                        )
-                    }
-                    for window in handoffWindows {
-                        statusItemController.adoptWindowedProcess(
-                            pid: window.pid,
-                            prefix: prefix.path,
-                            name: window.ownerName
-                        )
-                    }
-                    statusItemController.markActivated(pid: winePID)
-                }
                 return .success
             }
             if let exitStatus = detachedWineExitStatus(at: exitResultURL) {
@@ -1729,6 +1685,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
                 self.wineActivationWaiter = nil
                 waiter?.semaphore.signal()
             }
+            self.hideSetup()
 
             // Attach the visible Wine process to the existing session so a
             // launcher like GGMWebStart can exit without looking like "background
@@ -1765,6 +1722,47 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             handle()
         } else {
             DispatchQueue.main.async(execute: handle)
+        }
+    }
+
+    @objc private func wineWorkspaceDidActivate(_ notification: Notification) {
+        guard let application = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication,
+              isWineMacApplication(application) else { return }
+        let pid = application.processIdentifier
+        let handle = { [weak self] in
+            guard let self, pid > 0 else { return }
+            let prefix = winePrefix(forProcess: pid) ?? self.wineActivationWaiter?.prefix ?? ""
+            guard !prefix.isEmpty else { return }
+            let standardizedPrefix = (prefix as NSString).standardizingPath
+            let waiter = self.wineActivationWaiter
+            let matchesLaunchWaiter = waiter?.prefix == standardizedPrefix
+            let belongsToMonitoredSession = self.statusItemController.isMonitoring(prefix: standardizedPrefix)
+            guard matchesLaunchWaiter || belongsToMonitoredSession else { return }
+
+            if matchesLaunchWaiter {
+                self.wineActivationWaiter = nil
+                waiter?.semaphore.signal()
+            }
+            self.statusItemController.adoptWindowedProcess(
+                pid: pid,
+                prefix: standardizedPrefix,
+                name: application.localizedName
+            )
+            self.hideSetup()
+        }
+        if Thread.isMainThread {
+            handle()
+        } else {
+            DispatchQueue.main.async(execute: handle)
+        }
+    }
+
+    @objc private func wineWorkspaceDidTerminate(_ notification: Notification) {
+        guard let application = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication,
+              isWineMacApplication(application) else { return }
+        let pid = application.processIdentifier
+        DispatchQueue.main.async { [weak self] in
+            self?.statusItemController.noteProcessExited(pid)
         }
     }
 

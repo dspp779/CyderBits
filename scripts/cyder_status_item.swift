@@ -162,7 +162,7 @@ final class CyderStatusItemController: NSObject, NSMenuDelegate {
             rootDisplayName: display,
             fromSentinel: true,
             displayName: display,
-            helperConnected: true,
+            helperConnected: false,
             adoptedPIDs: pid > 0 ? [pid] : []
         )
         installStatusItemIfNeeded()
@@ -179,6 +179,7 @@ final class CyderStatusItemController: NSObject, NSMenuDelegate {
             session.adoptedPIDs.insert(pid)
             sessions[id] = session
             watchPID(pid)
+            refresh()
         }
     }
 
@@ -189,9 +190,11 @@ final class CyderStatusItemController: NSObject, NSMenuDelegate {
 
     func noteHelperDisconnected(id: String) {
         precondition(Thread.isMainThread)
+        CyderDiagnostics.shared.info("sentinel helper disconnected id=\(id)")
         guard var session = sessions[id] else { return }
         session.helperConnected = false
         sessions[id] = session
+        if !session.activated && !session.hasForeground { return }
         finishSessionIfIdle(id)
     }
 
