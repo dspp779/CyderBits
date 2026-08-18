@@ -95,9 +95,14 @@ macOS 11+ 的 Cyder native launcher 會對每個 bundle/support root 維持一�
  instance。primary 以 Unix domain socket bind 取得所有權；即使 `open -n` 建立了額外的
 短暫 instance，它也連不上第二個 listen，因此不會建立第二個選單列 icon。該 instance
 會把 EXE、動態參數或「顯示 Cyder」要求透過暫存 request 轉送給 primary，再自行結束。
-每次 Wine launch 另開一根可繼承 fifo，由 `CyderSwift --sentinel-connect` 接到 primary；
-連線斷開代表該 launch 的 process tree 已結束。選單列顯示前景程式名稱，而不是 session
-編號。不同 bundle 或 support root 是刻意隔離的執行環境，因此各自擁有自己的 icon。
+每次由 Cyder 啟動的 EXE 在 primary 建立一個 LaunchGroup（穩定 id）。
+選單列與 Cyder 進程是否還在，只問「設定／遊戲庫是否開著」或「是否還有未結束的 LaunchGroup」。
+根 Unix PID 來自 `CYDER_WINE_PID_FILE` 並用 process-exit／fork 事件監看；後來的視窗 PID
+由 Wine／Dock 啟動通知認領，且同一 bottle 兩場啟動不得用 prefix 掃窗互搶。
+`--sentinel-connect` fifo 仍可存在，但 EOF／helper 斷線不代表遊戲結束。
+`wineserver -w` 只用於 supervisor 的 bottle 排空，不決定選單列。
+前景名稱來自 Wine 啟動通知與 Dock activation，而不是對 `CGWindowList` 做定時輪詢。
+不同 bundle 或 support root 是刻意隔離的執行環境，因此各自擁有自己的 icon。
 
 選單列 session、Steam helper、同一 prefix 多程式，以及後續 process monitor 的設計
 記錄見 [Cyder Session 與 Windows 程序監控設計](cyder-session-process-monitoring.zh-TW.md)。
@@ -222,7 +227,7 @@ Wine 的 macOS RetinaMode、DPI 與字體 registry 是整個 Wine session／bott
 
 正式啟動路徑不設定 `WINEDLLOVERRIDES`。DLL 相容性設定存放在 prefix Registry；目前僅為 `bluecg.exe` 設定 `HKCU\Software\Wine\AppDefaults\bluecg.exe\DllOverrides` 的 `ddraw=native,builtin`，不影響 BlueLauncher 或其他 EXE。
 
-Finder document event 啟動時，Swift relay 會在呼叫 bash 前監聽 CrossOver Wine 的 `WineAppWillActivateNotification`。收到與目標 prefix 相同、且 `ActivatingAppPID` 已登記為 `regular/Foreground` 的通知後，macOS 14 以上會由 Cyder 先讓出焦點，再透過 cooperative activation 將所有 Wine 視窗帶到前方；macOS 11–13 使用舊版 activation API。Wine PID 由 bash 透過 `CYDER_WINE_PID_FILE` 回報；Swift 不組裝 Wine 環境也不直接建立 Wine process。原始 Wine client 在 activation 前以 `status=0` 結束時，會等待 launcher handoff 或 lifecycle 完成，不視為 spawn failure；沒有視窗的工具正常結束也不顯示錯誤。Cyder 持續監控同一 prefix 時，後續 `WineAppWillActivateNotification` 也會轉送到對應 Wine application。
+Finder document event 啟動時，Swift relay 會在呼叫 bash 前監聽 CrossOver Wine 的 `WineAppWillActivateNotification`，以及 `NSWorkspace` 的應用程式啟動／結束。收到與目標 prefix 相同的啟動通知後，會關掉「正在啟動程式…」、把該 PID 接到同一筆 launch，並在 macOS 14 以上先讓出焦點再 cooperative activate；macOS 11–13 使用舊版 activation API。Wine PID 由 bash 透過 `CYDER_WINE_PID_FILE` 回報後立刻用 kqueue 監看，不輪詢視窗清單。原始 Wine client 在 activation 前以 `status=0` 結束時，會等待 launcher handoff 或 lifecycle 完成，不視為 spawn failure；沒有視窗的工具正常結束也不顯示錯誤。Cyder 持續監控同一 prefix 時，後續啟動通知也會轉送到對應 Wine application。
 
 命令列直接呼叫 `cyder_launcher.sh` 時仍以前景模式執行，方便腳本等待遊戲結束；Finder document event relay 會設定 `CYDER_WINE_DETACH=1`，由 bash 使用分離模式啟動。
 
