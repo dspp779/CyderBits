@@ -88,9 +88,14 @@ assert_contains "$app" 'endLaunch(id: launchID)' \
   "a failed Wine relay must tear down the LaunchGroup created for that launch id"
 assert_not_contains "$app" 'cancelMonitoring(pid: winePID' \
   "failed launches must not cancel monitoring by pid after the group is keyed by launch id"
-assert_contains "$status" 'fromSentinel: true,
-            displayName: display,
-            helperConnected: false,' \
-  "Swift-created LaunchGroups must not wait on helper hello to stay alive"
+assert_contains "$status" 'if !session.activated {
+            session.hasForeground = false
+            session.leftoverNames = []
+            sessions[id] = session
+            refresh()
+            return
+        }
+        endLaunch(id: id)' \
+  "finishSessionIfIdle must not endLaunch while the LaunchGroup is still starting"
 
 echo "PASS test-cyder-sentinel"

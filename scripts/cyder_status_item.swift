@@ -354,7 +354,7 @@ final class CyderStatusItemController: NSObject, NSMenuDelegate {
             refresh()
             return
         }
-        if session.helperConnected {
+        if !session.activated {
             session.hasForeground = false
             session.leftoverNames = []
             sessions[id] = session
