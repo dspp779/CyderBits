@@ -110,6 +110,28 @@ final class CyderStatusItemController: NSObject, NSMenuDelegate {
         refresh()
     }
 
+    func markActivated(id: String) {
+        precondition(Thread.isMainThread)
+        guard var session = sessions[id] else { return }
+        session.activated = true
+        session.hasForeground = true
+        sessions[id] = session
+        refresh()
+    }
+
+    func hasLiveWatchedPIDs(id: String) -> Bool {
+        precondition(Thread.isMainThread)
+        guard let session = sessions[id] else { return false }
+        if session.pid > 0, kill(session.pid, 0) == 0 { return true }
+        return session.adoptedPIDs.contains { kill($0, 0) == 0 }
+    }
+
+    func hasClaimedWindow(id: String) -> Bool {
+        precondition(Thread.isMainThread)
+        guard let session = sessions[id] else { return false }
+        return session.hasForeground || !session.foregroundPIDs.isEmpty
+    }
+
     func cancelMonitoring(pid: Int32, notifyWhenEmpty: Bool = true) {
         guard let key = sessions.first(where: { $0.value.pid == pid })?.key,
               sessions.removeValue(forKey: key) != nil else { return }

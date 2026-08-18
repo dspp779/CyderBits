@@ -1460,7 +1460,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
                 launchActivated = true
                 FileManager.default.createFile(atPath: activatedURL.path, contents: Data())
                 CyderDiagnostics.shared.enter(.wineActivation, detail: "notification-received")
-                onMainThread { statusItemController.markActivated(pid: winePID) }
+                onMainThread { statusItemController.markActivated(id: launchID) }
                 return .success
             }
             if let exitStatus = detachedWineExitStatus(at: exitResultURL) {
@@ -1528,11 +1528,24 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         CyderDiagnostics.shared.warning(
             "wine activation timed out after 30s pid=\(winePID); process remains detached"
         )
-        // Observation stops after the compatibility timeout; let the Bash
-        // supervisor consume the eventual sidecar just like an activation.
-        launchActivated = true
-        FileManager.default.createFile(atPath: activatedURL.path, contents: Data())
-        onMainThread { statusItemController.markActivated(pid: winePID) }
+        // Spec §3.3: timeout is success only if the process still lives or the
+        // group already claimed a window. An empty starting group must fall
+        // through to defer endLaunch so it cannot linger as「正在啟動」.
+        var keepGroup = winePID > 0 && kill(winePID, 0) == 0
+        onMainThread {
+            keepGroup = keepGroup
+                || statusItemController.hasLiveWatchedPIDs(id: launchID)
+                || statusItemController.hasClaimedWindow(id: launchID)
+            if keepGroup {
+                statusItemController.markActivated(id: launchID)
+            }
+        }
+        if keepGroup {
+            // Observation stops after the compatibility timeout; let the Bash
+            // supervisor consume the eventual sidecar just like an activation.
+            launchActivated = true
+            FileManager.default.createFile(atPath: activatedURL.path, contents: Data())
+        }
         return .success
     }
 

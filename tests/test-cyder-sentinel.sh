@@ -97,5 +97,13 @@ assert_contains "$status" 'if !session.activated {
         }
         endLaunch(id: id)' \
   "finishSessionIfIdle must not endLaunch while the LaunchGroup is still starting"
+assert_contains "$status" 'func markActivated(id: String)' \
+  "LaunchGroup activation after root PID exit must be keyed by launch id"
+assert_contains "$app" 'markActivated(id: launchID)' \
+  "the Wine relay must activate the LaunchGroup by launch id, not only by a possibly-exited root pid"
+assert_contains "$app" 'hasLiveWatchedPIDs(id: launchID)' \
+  "30s timeout must not treat the launch as activated unless watched PIDs are still live"
+assert_contains "$app" 'hasClaimedWindow(id: launchID)' \
+  "30s timeout must keep the group only if a window was claimed or a process still lives"
 
 echo "PASS test-cyder-sentinel"
