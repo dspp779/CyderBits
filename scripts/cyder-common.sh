@@ -2699,7 +2699,9 @@ cyder_swift_bin() {
   return 1
 }
 
-# Open an inheritable wait fifo and start CyderSwift --sentinel-connect.
+# Open a wait fifo and start CyderSwift --sentinel-connect.
+# The supervisor keeps the write end on fd 3. Helper and Wine must not inherit
+# it: an inherited RDWR fifo lets the helper keep itself alive forever.
 # Sets CYDER_SENTINEL_PID and CYDER_SENTINEL_WATCH_FILE; leaves fd 3 as the write end.
 cyder_sentinel_attach() {
   local prefix="$1" exe_path="$2"
@@ -2725,7 +2727,7 @@ cyder_sentinel_attach() {
     --prefix "$prefix" \
     --exe "$exe_name" \
     --fifo "$wait_fifo" \
-    --pid-file "$CYDER_SENTINEL_WATCH_FILE" &
+    --pid-file "$CYDER_SENTINEL_WATCH_FILE" 3>&- &
   CYDER_SENTINEL_PID=$!
   return 0
 }
@@ -2967,7 +2969,7 @@ cyder_run_wine_exe() {
       detached_session_id="${session_id:-}"
       (
         cyder_sentinel_attach "$prefix" "$exe" || true
-        cyder_exec_game >>"$log_file" 2>&1 &
+        cyder_exec_game >>"$log_file" 2>&1 3>&- &
         wine_pid=$!
         cyder_sentinel_publish_pid "$wine_pid"
         cyder_sentinel_close_write

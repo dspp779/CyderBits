@@ -30,11 +30,17 @@ assert_not_contains "$instance" '.native-instance-' \
 assert_contains "$common" 'cyder_sentinel_attach' \
   "the Wine supervisor must attach a per-launch sentinel helper"
 assert_contains "$common" 'mkfifo' \
-  "the supervisor must create an inheritable wait fifo for the Wine tree"
+  "the supervisor must create a wait fifo for the sentinel helper"
 assert_contains "$common" '--sentinel-connect' \
   "the supervisor must launch CyderSwift --sentinel-connect"
 assert_contains "$common" 'exec 3<>' \
   "the wait fifo write end must open read-write so attach cannot deadlock on helper dyld"
+assert_contains "$common" '--pid-file "$CYDER_SENTINEL_WATCH_FILE" 3>&-' \
+  "the helper argv must close fd 3 so it cannot inherit the fifo write end"
+assert_contains "$common" 'cyder_exec_game >>"$log_file" 2>&1 3>&-' \
+  "Wine must not inherit the fifo write end"
+assert_contains "$sentinel" 'closeInheritedHelperFileDescriptors' \
+  "the sentinel helper must drop inherited fds so it cannot hold its own fifo write end"
 assert_contains "$status" '已結束，等待背景程序退出' \
   "menu items must describe leftover processes after the window closes"
 assert_contains "$status" '等待 ' \

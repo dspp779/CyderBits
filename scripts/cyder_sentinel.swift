@@ -286,6 +286,7 @@ final class CyderSentinelServer {
 
 enum CyderSentinelConnect {
     static func run(arguments: [String]) -> Int32 {
+        closeInheritedHelperFileDescriptors()
         var prefix = ""
         var exe = "Wine"
         var fifo = ""
@@ -463,6 +464,18 @@ enum CyderSentinelConnect {
         processSource?.cancel()
         close(socketFD)
         return 0
+    }
+
+    /// Drop fds inherited from the supervisor (`exec 3<>fifo`). An RDWR fifo
+    /// kept by this helper is a writer, so the read watch never sees EOF.
+    private static func closeInheritedHelperFileDescriptors() {
+        let rawLimit = getdtablesize()
+        let limit: Int32 = rawLimit > 3 ? min(rawLimit, 256) : 3
+        var fd: Int32 = 3
+        while fd < limit {
+            _ = Darwin.close(fd)
+            fd += 1
+        }
     }
 
     static func canConnect(to url: URL) -> Bool {
