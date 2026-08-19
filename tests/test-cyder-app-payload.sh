@@ -53,8 +53,10 @@ assert_contains "$build_script" '<key>UTTypeIconFile</key>' \
   "imported Windows executable UTI must reference AppIcon"
 assert_contains "$build_script" 'cp "$SCRIPT_DIR/cyder-edit-user-reg.sh" "$RES/ogom-scripts/"' \
   "Cyder.app must bundle the fast registry editor"
-assert_contains "$build_script" 'cp "$SCRIPT_DIR/cyder_create_game_app.py" "$RES/ogom-scripts/"' \
-  "Cyder.app must bundle the PE icon extraction helper"
+assert_contains "$build_script" 'cp "$SCRIPT_DIR/cyder-extract-exe-icon.sh" "$RES/ogom-scripts/"' \
+  "Cyder.app must bundle the winemenubuilder icon helper"
+assert_contains "$build_script" 'chmod +x "$RES/ogom-scripts/cyder-extract-exe-icon.sh"' \
+  "icon helper must be executable in the app bundle"
 assert_contains "$build_script" 'cp "$SCRIPT_DIR/cyder-winetricks.sh" "$RES/ogom-scripts/"' \
   "Cyder.app must bundle the Winetricks launcher"
 assert_contains "$build_script" 'cp "$OGOM/tools/winetricks/winetricks" "$RES/ogom-scripts/"' \

@@ -227,6 +227,8 @@ if [[ -f "$OGOM/tools/cabextract/COPYING" ]]; then
 fi
 
 cp "$SCRIPT_DIR/cyder-profile.sh" "$RES/ogom-scripts/"
+cp "$SCRIPT_DIR/cyder-extract-exe-icon.sh" "$RES/ogom-scripts/"
+chmod +x "$RES/ogom-scripts/cyder-extract-exe-icon.sh"
 cp "$SCRIPT_DIR/cyder_create_game_app.py" "$RES/ogom-scripts/"
 cp "$SCRIPT_DIR/cyder_common.py" "$RES/ogom-scripts/"
 chmod +x "$RES/ogom-scripts/cyder_launcher.sh"

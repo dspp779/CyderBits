@@ -26,6 +26,12 @@ assert_contains "$ui" "importBottleShortcuts" "opening the library should import
 assert_contains "$app" "onOpenPreferences" "app should wire library preferences to settings"
 assert_contains "$pack" "cyder_bottle_shortcuts.swift" \
   "app bundle must compile the shortcut scanner source"
+assert_not_contains "$icon" "/usr/bin/python3" \
+  "game library icon extraction must not invoke the CLT python3 stub"
+assert_contains "$icon" "cyder-extract-exe-icon.sh" \
+  "game library must call the bundled winemenubuilder helper"
+assert_contains "$icon" "45" \
+  "icon extraction timeout must be 45 seconds for cold wineserver"
 
 parsed="$(
   python3 - <<'PY'

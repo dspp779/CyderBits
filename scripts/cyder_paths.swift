@@ -61,5 +61,7 @@ enum CyderPaths {
         }()
         return support.appendingPathComponent("bottles/\(bottleName)", isDirectory: true)
     }()
+    static let iconExtractRoot: URL = support
+        .appendingPathComponent("icon-extract", isDirectory: true)
     static let bootstrapMarker = sharedBottle.appendingPathComponent(".cyder-bootstrap-v1")
 }

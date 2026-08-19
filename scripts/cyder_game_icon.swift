@@ -1,7 +1,7 @@
 import AppKit
 import Foundation
 
-/// Loads cached PE icons and asks the bundled Python PE parser to extract a
+/// Loads cached PE icons and asks the bundled winemenubuilder helper to extract a
 /// missing icon off the main thread. Never falls back to macOS's generic
 /// `.exe` document icon (`NSWorkspace`); tiles use a neutral SF Symbol until
 /// the PE resource is available.
@@ -32,8 +32,9 @@ final class CyderGameIconStore {
     }
 
     /// Call immediately after NSOpenPanel returns so the app opens the EXE
-    /// while its user-granted file access is active. The child parser receives
-    /// an inherited descriptor and never reopens the protected source path.
+    /// while its user-granted file access is active. The helper receives a
+    /// staged copy written from the granted file handle and never reopens the
+    /// protected source path.
     func extractSelectedGame(_ game: CyderGameRecord, completion: @escaping () -> Void) {
         failed.remove(game.id)
         ensureExtracted(game, force: true, completion: completion)
@@ -61,7 +62,7 @@ final class CyderGameIconStore {
             completion?()
             return
         }
-        let helper = resources.appendingPathComponent("ogom-scripts/cyder_create_game_app.py")
+        let helper = resources.appendingPathComponent("ogom-scripts/cyder-extract-exe-icon.sh")
         guard FileManager.default.fileExists(atPath: helper.path) else {
             completion?()
             return
@@ -126,19 +127,66 @@ final class CyderGameIconStore {
                 at: cacheURL.deletingLastPathComponent(),
                 withIntermediateDirectories: true
             )
+            let scratch = CyderPaths.iconExtractRoot
+                .appendingPathComponent(game.id, isDirectory: true)
+            let stagedExe = scratch.appendingPathComponent("game.exe")
+            try? FileManager.default.createDirectory(at: scratch, withIntermediateDirectories: true)
+            do {
+                if FileManager.default.fileExists(atPath: stagedExe.path) {
+                    try FileManager.default.removeItem(at: stagedExe)
+                }
+                FileManager.default.createFile(atPath: stagedExe.path, contents: nil)
+                let dest = try FileHandle(forWritingTo: stagedExe)
+                defer { try? dest.close() }
+                while true {
+                    let chunk = executable.readData(ofLength: 1024 * 1024)
+                    if chunk.isEmpty { break }
+                    dest.write(chunk)
+                }
+            } catch {
+                try? executable.close()
+                try? FileManager.default.removeItem(at: scratch)
+                DispatchQueue.main.async {
+                    self.pending.remove(game.id)
+                    self.failed.insert(game.id)
+                    CyderDiagnostics.shared.warning("game-icon stage-failed id=\(game.id)")
+                    completion()
+                }
+                return
+            }
+            try? executable.close()
+
+            let wine = CyderPaths.engine.appendingPathComponent("bin/wine")
             let process = Process()
-            process.executableURL = URL(fileURLWithPath: "/usr/bin/python3")
-            process.arguments = [helper.path, "--extract-icon-stdin", cacheURL.path]
+            process.executableURL = URL(fileURLWithPath: "/bin/bash")
+            process.arguments = [
+                helper.path,
+                "--exe", stagedExe.path,
+                "--png", cacheURL.path,
+                "--wine", wine.path,
+                "--scratch", scratch.path,
+            ]
+            process.environment = ProcessInfo.processInfo.environment.merging([
+                "WINEPREFIX": CyderPaths.sharedBottle.path,
+                "WINESERVER": CyderPaths.engine.appendingPathComponent("bin/wineserver").path,
+            ]) { _, new in new }
             process.standardOutput = FileHandle.nullDevice
             process.standardError = FileHandle.nullDevice
             var status: Int32 = -1
             do {
-                defer { try? executable.close() }
-                process.standardInput = executable
+                if !FileManager.default.fileExists(atPath: CyderPaths.bootstrapMarker.path)
+                    || !FileManager.default.fileExists(atPath: wine.path) {
+                    try? FileManager.default.removeItem(at: scratch)
+                    DispatchQueue.main.async {
+                        self.pending.remove(game.id)
+                        completion()
+                    }
+                    return
+                }
                 let finished = DispatchSemaphore(value: 0)
                 process.terminationHandler = { _ in finished.signal() }
                 try process.run()
-                if finished.wait(timeout: .now() + 15) == .success {
+                if finished.wait(timeout: .now() + 45) == .success {
                     status = process.terminationStatus
                 } else {
                     process.terminate()
@@ -147,6 +195,7 @@ final class CyderGameIconStore {
             } catch {
                 // Keep the neutral placeholder when extraction is unavailable.
             }
+            try? FileManager.default.removeItem(at: scratch)
             DispatchQueue.main.async {
                 self.pending.remove(game.id)
                 let extracted = status == 0 ? NSImage(contentsOf: cacheURL) : nil
