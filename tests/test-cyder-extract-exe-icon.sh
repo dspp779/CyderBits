@@ -52,11 +52,12 @@ if [[ -f "$PIKA" && -x "$WINE" && -f "$PREFIX/.cyder-bootstrap-v1" ]]; then
     arch -x86_64 "$WINE" winemenubuilder.exe -t "$scratch/../nope.exe" "$tmp/direct.png" >/dev/null 2>&1
   # Recreate a copy only to prove -t on exe still fails:
   cp "$PIKA" "$tmp/direct.exe"
-  WINEDEBUG="-all" WINEPREFIX="$PREFIX" WINESERVER="${WINE%/wine}/wineserver" \
+  WINEDEBUG="+menubuilder,err+all" WINEPREFIX="$PREFIX" WINESERVER="${WINE%/wine}/wineserver" \
     arch -x86_64 "$WINE" winemenubuilder.exe -t "$tmp/direct.exe" "$tmp/direct.png" >"$tmp/direct.log" 2>&1
   set -e
   assert test ! -s "$tmp/direct.png"
-  assert_contains "$(cat "$tmp/direct.log")" "could not read .lnk" \
+  direct_log="$(cat "$tmp/direct.log")"
+  assert_contains "$direct_log" "could not read .lnk" \
     "winemenubuilder -t on an exe must still fail"
 else
   echo "SKIP wine integration (need dist/皮卡丘打排球.exe, wine, and bootstrapped prefix)" >&2
