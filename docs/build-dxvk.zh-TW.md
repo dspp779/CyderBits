@@ -86,7 +86,7 @@ PY
 ## 1.x（`lib/dxvk`）
 
 來源是 CrossOver 25 FOSS tarball 裡的 snapshot，不是 GitHub `doitsujin/dxvk`
-的 1.10.3 tag。預設 work dir：`build/maplestory-oem25/`。
+的 1.10.3 tag。預設 work dir：`build/dxvk-cx26/`。
 
 目前安裝模組（win64 + win32）：
 

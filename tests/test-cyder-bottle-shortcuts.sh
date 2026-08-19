@@ -44,6 +44,11 @@ assert_not_contains "$icon" "iconExtractPrefix" \
   "icon extraction must not create a dedicated Wine prefix"
 assert_not_contains "$icon" "CYDER_ICON_EXTRACT_ISOLATED" \
   "shared-prefix extracts must not wineserver -k"
+paths="$(cat "$ROOT/scripts/cyder_paths.swift")"
+assert_not_contains "$paths" "iconExtractPrefix" \
+  "CyderPaths must not expose a scratch Wine prefix for icons"
+assert_not_contains "$paths" "MapleStory OEM" \
+  "path comments must not describe the retired OEM flavor"
 
 python3 - "$ROOT/scripts/cyder_game_icon.swift" <<'PY'
 from pathlib import Path

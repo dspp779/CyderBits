@@ -19,9 +19,8 @@ enum CyderPaths {
         }
         return home.appendingPathComponent(".cyder/runtime", isDirectory: true)
     }()
-    /// Regular Cyder uses `wine-x86_64`; MapleStory OEM special sets
-    /// `CYDER_ENGINE_NAME` so the flavor can share `~/.cyder/runtime` without
-    /// colliding with the official engine tree.
+    /// Default engine directory under `~/.cyder/runtime/Engines`. Override with
+    /// `CYDER_ENGINE_NAME` to point at a non-default engine tree.
     static let engineName: String = {
         if let override = ProcessInfo.processInfo.environment["CYDER_ENGINE_NAME"], !override.isEmpty {
             return override
@@ -61,6 +60,7 @@ enum CyderPaths {
         }()
         return support.appendingPathComponent("bottles/\(bottleName)", isDirectory: true)
     }()
+    /// Temporary copies of EXEs during icon extraction. Not a Wine prefix.
     static let iconExtractRoot: URL = support
         .appendingPathComponent("icon-extract", isDirectory: true)
     static let bootstrapMarker = sharedBottle.appendingPathComponent(".cyder-bootstrap-v1")

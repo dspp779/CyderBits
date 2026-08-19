@@ -48,5 +48,9 @@ assert_contains "$build_dxvk" 'lib/dxvk/version' \
   "build-dxvk.sh must write lib/dxvk/version for graphics pack"
 assert_contains "$build_dxvk" '__MINGW64_VERSION_MAJOR < 15' \
   "build-dxvk.sh must skip dummy D3DDEVINFO_RESOURCEMANAGER on MinGW-w64 15+"
+assert_contains "$build_dxvk" 'install/wine-cx26-x86_64' \
+  "build-dxvk.sh default engine must be the CX26 install prefix"
+assert_not_contains "$build_dxvk" 'maplestory-oem25' \
+  "build-dxvk.sh must not default to the retired OEM work tree"
 
 echo "PASS test-cyder-dxvk"
