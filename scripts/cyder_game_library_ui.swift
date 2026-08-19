@@ -309,15 +309,24 @@ final class CyderGameTileItem: NSCollectionViewItem {
     var onContextMenu: (() -> NSMenu?)?
 
     override func loadView() {
-        let tile = CyderGameTileView(frame: NSRect(x: 0, y: 0, width: 96, height: 96))
+        let tile = CyderGameTileView(frame: NSRect(x: 0, y: 0, width: 96, height: 114))
         view = tile
 
         icon.imageScaling = .scaleProportionallyUpOrDown
         icon.translatesAutoresizingMaskIntoConstraints = false
         nameLabel.alignment = .center
-        nameLabel.maximumNumberOfLines = 1
-        nameLabel.lineBreakMode = .byTruncatingTail
+        nameLabel.usesSingleLineMode = false
+        nameLabel.maximumNumberOfLines = 2
+        // byTruncatingTail never wraps; byWordWrapping also fails for CJK .lnk
+        // names with no spaces. Wrap by character, then ellipsize line 2.
+        if let cell = nameLabel.cell as? NSTextFieldCell {
+            cell.wraps = true
+            cell.isScrollable = false
+            cell.lineBreakMode = .byCharWrapping
+            cell.truncatesLastVisibleLine = true
+        }
         nameLabel.translatesAutoresizingMaskIntoConstraints = false
+        nameLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         status.alignment = .center
         status.font = .systemFont(ofSize: 10, weight: .medium)
         status.textColor = .secondaryLabelColor
@@ -335,6 +344,7 @@ final class CyderGameTileItem: NSCollectionViewItem {
             nameLabel.leadingAnchor.constraint(equalTo: tile.leadingAnchor, constant: 6),
             nameLabel.trailingAnchor.constraint(equalTo: tile.trailingAnchor, constant: -6),
             nameLabel.topAnchor.constraint(equalTo: icon.bottomAnchor, constant: 4),
+            nameLabel.heightAnchor.constraint(equalToConstant: 28),
             status.leadingAnchor.constraint(equalTo: tile.leadingAnchor, constant: 6),
             status.trailingAnchor.constraint(equalTo: tile.trailingAnchor, constant: -6),
             status.topAnchor.constraint(equalTo: nameLabel.bottomAnchor, constant: 1),
@@ -342,6 +352,14 @@ final class CyderGameTileItem: NSCollectionViewItem {
         tile.onClick = { [weak self] in self?.onClick?() }
         tile.onDoubleClick = { [weak self] in self?.onDoubleClick?() }
         tile.onContextMenu = { [weak self] in self?.onContextMenu?() }
+    }
+
+    override func viewDidLayout() {
+        super.viewDidLayout()
+        let width = nameLabel.bounds.width
+        if width > 1, abs(nameLabel.preferredMaxLayoutWidth - width) > 0.5 {
+            nameLabel.preferredMaxLayoutWidth = width
+        }
     }
 
     func configure(record: CyderGameRecord, independent: Bool, image: NSImage?) {
@@ -372,7 +390,7 @@ final class CyderGameTileItem: NSCollectionViewItem {
 /// A compact five-column grid. Every game owns one fifth of the available row
 /// and incomplete rows continue from the leading edge.
 private final class CyderFiveColumnGridLayout: NSCollectionViewLayout {
-    private let itemHeight: CGFloat = 96
+    private let itemHeight: CGFloat = 114
     private let horizontalPadding: CGFloat = 10
     private let topPadding: CGFloat = 10
     private let bottomPadding: CGFloat = 10
