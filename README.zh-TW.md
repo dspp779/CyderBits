@@ -8,7 +8,9 @@
 
 驗證路徑仍是傳統 2D Win32 圖形：**DirectDraw → Wine wined3d/OpenGL** 與 GDI。Cyder 0.11.1 使用 `CX26.3.0-W11-Cyder011` engine；DXVK／DXMT 以獨立 graphics payload 提供，D3DMetal 透過 GPTK 提供。實際遊戲相容性仍需依遊戲、macOS 版本與 backend 個別驗證。
 
-CyderBits 在 Apple Silicon 上自建 CrossOver 系 Wine，並提供兩個工具：**Cyder** — 一鍵啟動 `.exe` — 與 **CyderBits** — 把 `.exe` 包成可雙擊的 macOS `.app`。
+本 repo（CyderBits）目前主要是**應用層**：Cyder 啟動器、遊戲庫、設定、CompatDB 與打包器。實際執行 Windows `.exe` 的 Wine 核心在獨立專案 [cyder-wine-engine](https://github.com/dspp779/cyder-wine-engine)。
+
+本專案提供兩個工具：**Cyder** — 一鍵啟動 `.exe` — 與 **CyderBits** — 把 `.exe` 包成可雙擊的 macOS `.app`。
 
 **語言：** [English](README.md) · [繁體中文](README.zh-TW.md)
 
@@ -81,9 +83,9 @@ bash scripts/run-bluecg.sh
 詳見 [Wine configure 與圖形選項](docs/wine-configure-options.md)、
 [DXVK 編譯備忘](docs/build-dxvk.zh-TW.md)。
 
-## Wine 原始碼
+## Wine 引擎
 
-Wine 來自 **CrossOver 開源釋出** — 將 archive 放在 `tools/archives/`（見 [CodeWeavers CrossOver Source](https://www.codeweavers.com/crossover/source)），建置時解壓至 `build/cx26/`。
+實際執行 `.exe` 的核心在 [cyder-wine-engine](https://github.com/dspp779/cyder-wine-engine)。Wine 來自 **CrossOver 開源釋出**（見 [CodeWeavers CrossOver Source](https://www.codeweavers.com/crossover/source)）；正式建置、patch 與打包請在該 repo 進行。本 repo 仍留有相容建置腳本副本；archive 放在 `tools/archives/`，建置時解壓至 `build/cx26/`。專案邊界見 [docs/cyder-wine-engine-project.md](docs/cyder-wine-engine-project.md)。
 
 ```bash
 bash scripts/build-wine.sh --cx 26
@@ -100,7 +102,7 @@ bash scripts/sign-wine.sh
 
 ## 快速開始
 
-### 1. 建 Wine（首次，耗時長）
+### 1. 建 Wine（首次，耗時長；正式流程在 cyder-wine-engine）
 
 ```bash
 bash scripts/build-wine.sh --cx 26 --install-deps   # 首次（含 bootstrap brew）
@@ -173,6 +175,7 @@ bash tests/test-verify-bluecg.sh
 - [Cyder 0.10.1 測試版說明](docs/releases/v0.10.1.md) — 強制結束液面動畫、MapleStory WZ adaptive cache、release tooling、測試與文件更新
 - [Cyder 0.10.0 發布說明](docs/releases/v0.10.0.md) — Cyder010 engine、graphics payload、session 與診斷整合
 - [docs/README.md](docs/README.md) — 索引
+- [docs/cyder-wine-engine-project.md](docs/cyder-wine-engine-project.md) — 應用層 vs [cyder-wine-engine](https://github.com/dspp779/cyder-wine-engine)
 - [docs/cyder.md](docs/cyder.md) — Cyder 啟動器
 - [docs/cyderbits.md](docs/cyderbits.md) — CyderBits 打包器
 - [docs/bluecg.md](docs/bluecg.md) — BlueCG 流程

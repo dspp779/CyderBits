@@ -2,7 +2,7 @@
 
 端到端說明：**引擎 artifact → pin → 編譯 Cyder.app → 簽署 →（正式）公證**。  
 簽署與公證的憑證細節見 [`release-signing.zh-TW.md`](release-signing.zh-TW.md)。  
-引擎專案邊界見 [`cyder-wine-engine-project.md`](cyder-wine-engine-project.md)。
+引擎專案：[cyder-wine-engine](https://github.com/dspp779/cyder-wine-engine)；邊界見 [`cyder-wine-engine-project.md`](cyder-wine-engine-project.md)。本 repo 是應用層。
 
 一鍵腳本：
 

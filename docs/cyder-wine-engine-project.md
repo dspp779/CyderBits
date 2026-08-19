@@ -1,15 +1,18 @@
 # Cyder Wine Engine 專案拆分
 
+公開 repo：[cyder-wine-engine](https://github.com/dspp779/cyder-wine-engine)。  
+本 repo（CyderBits / ogom）目前主要是**應用層**（啟動器、遊戲庫、設定、CompatDB、打包）；實際執行 Windows `.exe` 的核心在該引擎專案。
+
 ## 第一階段狀態
 
 Wine 引擎的 source preparation、patch、建置、runtime 測試、strip、簽署與 artifact
-封裝已整理為獨立的 sibling 專案 `cyder-wine-engine`。Cyder 專案暫時保留原有建置腳本
+封裝已整理為獨立專案 [cyder-wine-engine](https://github.com/dspp779/cyder-wine-engine)。Cyder 專案暫時保留原有建置腳本
 作為相容副本，正式 App 也仍內嵌明確 pin 住的 engine artifact；本階段不加入執行期間
 自動下載或「latest」更新。
 
 責任邊界如下：
 
-| `cyder-wine-engine` | Cyder／CyderBits |
+| Wine 核心（[cyder-wine-engine](https://github.com/dspp779/cyder-wine-engine)） | 應用層（CyderBits / ogom） |
 |---|---|
 | CrossOver source 與工具鏈準備 | App UI、遊戲庫與偏好設定 |
 | Wine patch set 與套用順序 | Prefix 建立與生命週期 |

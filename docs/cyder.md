@@ -2,9 +2,11 @@
 
 **Cyder** 是 Windows `.exe` 一鍵啟動器：裝一次，直接執行任何 `.exe`。目前所有遊戲共用預設 bottle `bottles/shared`；路徑結構已預留未來加入多個 bottle。若要包成獨立的 macOS 遊戲 `.app`，請改用 [CyderBits 打包器](cyderbits.md)。
 
+Cyder 本身是應用層；實際執行 `.exe` 的 Wine 核心在 [cyder-wine-engine](https://github.com/dspp779/cyder-wine-engine)。見 [cyder-wine-engine-project.md](cyder-wine-engine-project.md)。
+
 ## 安裝 Cyder.app
 
-需先在本機建好 Wine：
+需先有可用的 Wine engine（正式建置／打包在 [cyder-wine-engine](https://github.com/dspp779/cyder-wine-engine)；本 repo 的 `scripts/build-wine.sh` 是相容副本）：
 
 ```bash
 bash scripts/build-wine.sh

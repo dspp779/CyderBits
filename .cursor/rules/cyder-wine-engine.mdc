@@ -5,9 +5,9 @@ alwaysApply: true
 
 # Cyder Wine engine (sibling repo)
 
-Incremental Wine builds, engine patches, minOS, and packing are owned by
-`../cyder-wine-engine` (or `/Users/jjc/cyder-wine-engine`), not this Cyder app
-repo.
+This CyderBits repo is the application layer. The Wine engine that actually
+runs `.exe` files is [cyder-wine-engine](https://github.com/dspp779/cyder-wine-engine)
+(`../cyder-wine-engine` or `/Users/jjc/cyder-wine-engine`).
 
 Before engine / wineserver / ntdll / pack work:
 

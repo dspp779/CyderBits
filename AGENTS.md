@@ -1,12 +1,13 @@
 # Agent instructions (Cyder / ogom)
 
-This repository owns the Cyder app, bottles, CompatDB, and game UX. It does
-**not** own the Wine engine build pipeline.
+This repository (CyderBits / ogom) owns the **application layer**: the Cyder
+app, bottles, CompatDB, and game UX. It does **not** own the Wine engine that
+actually runs Windows `.exe` files.
 
 ## Wine engine / incremental builds / patches
 
-Do that work in the sibling checkout **`cyder-wine-engine`** (often
-`/Users/jjc/cyder-wine-engine` or `../cyder-wine-engine`).
+Do that work in **[cyder-wine-engine](https://github.com/dspp779/cyder-wine-engine)**
+(sibling checkout, often `/Users/jjc/cyder-wine-engine` or `../cyder-wine-engine`).
 
 Before any wineserver / ntdll / host `make` / engine pack task:
 

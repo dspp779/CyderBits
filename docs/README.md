@@ -2,7 +2,7 @@
 
 > 專案根目錄：[README.md](../README.md)（English · **CyderBits**）· [README.zh-TW.md](../README.zh-TW.md)（繁中）
 
-**CyderBits** — DirectDraw / GDI 舊遊戲 on Mac；**Cyder** — 一鍵啟動 `.exe`；**CyderBits.app** — 包裝 `.exe` 為 game `.app`。
+**CyderBits**（本 repo）目前主要是應用層：Cyder 啟動器、遊戲庫與打包器。實際執行 Windows `.exe` 的 Wine 核心在 [cyder-wine-engine](https://github.com/dspp779/cyder-wine-engine)。**Cyder** — 一鍵啟動 `.exe`；**CyderBits.app** — 包裝 `.exe` 為 game `.app`。
 
 ## 發布資訊
 
@@ -40,7 +40,7 @@
 | [cyder-session-process-monitoring.zh-TW.md](cyder-session-process-monitoring.zh-TW.md) | 開發 / 設計 | 選單列 session、Steam helper、同 prefix 多程式與 process monitor 設計 |
 | [cyder-graphics-backends.zh-TW.md](cyder-graphics-backends.zh-TW.md) | 一般使用者 | 圖形後端（WineD3D/DXVK/D3DMetal）、GPTK 安裝、DXVK 限幀 vs VSync |
 | [cyder-compatdb.zh-TW.md](cyder-compatdb.zh-TW.md) | 開發 / 發布 | CompatDB 架構、Engine 重包判斷、YAML 規則新增與本機測試 |
-| [cyder-wine-engine-project.md](cyder-wine-engine-project.md) | 開發 / 發布 | Wine engine 獨立專案邊界、manifest 契約與 Cyder 匯入流程 |
+| [cyder-wine-engine-project.md](cyder-wine-engine-project.md) | 開發 / 發布 | 應用層 vs Wine 核心邊界；[cyder-wine-engine](https://github.com/dspp779/cyder-wine-engine) manifest 契約與 Cyder 匯入流程 |
 | [upstream-prs/README.zh-TW.md](upstream-prs/README.zh-TW.md) | 開發 / upstream | 各 Wine patch 的 PR dossier、重現方式、嚴重性、完整修正／workaround 判定與提交順序 |
 | [cyderbits.md](cyderbits.md) | 一般使用者 | CyderBits 打包器：建立 game `.app`、選項與疑難排解 |
 | [bluecg.md](bluecg.md) | 開發 / 驗證 | BlueCG 自建 Wine、執行、高解析度與已知問題 |

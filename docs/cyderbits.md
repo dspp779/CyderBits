@@ -2,11 +2,13 @@
 
 **CyderBits.app** 把 Windows `.exe` 包成可雙擊的 macOS `.app`，可自訂 bottle、是否內嵌引擎、是否複製遊戲檔等。Phase 1 仍使用 `~/Library/Application Support/Cyder/Bottles/<uuid>/` 作為預設 prefix。
 
+CyderBits 是應用層打包器；實際執行 `.exe` 的 Wine 核心在 [cyder-wine-engine](https://github.com/dspp779/cyder-wine-engine)。見 [cyder-wine-engine-project.md](cyder-wine-engine-project.md)。
+
 若只需快速執行 `.exe`、不需產生 game app，請改用 [Cyder 啟動器](cyder.md)。
 
 ## 安裝 CyderBits.app
 
-需先在本機建好 Wine：
+需先有可用的 Wine engine（正式建置／打包在 [cyder-wine-engine](https://github.com/dspp779/cyder-wine-engine)；本 repo 的 `scripts/build-wine.sh` 是相容副本）：
 
 ```bash
 bash scripts/build-wine.sh

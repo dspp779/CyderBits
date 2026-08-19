@@ -6,6 +6,9 @@
 
 ## 一句話結論
 
+本 repo（CyderBits / ogom）目前主要是應用層；實際執行 `.exe` 的 Wine 核心在
+[cyder-wine-engine](https://github.com/dspp779/cyder-wine-engine)。
+
 Cyder／CyderBits 的核心啟動器、遊戲庫、每遊戲設定、圖形 backend、診斷記錄與單一選單列
 instance 已經形成可測試的產品骨架；目前離「可以放心宣告 0.10.1」最近的工作，不是再加
 功能，而是完成 DXMT／Steam／反作弊遊戲的實機回歸，以及把目前保守的

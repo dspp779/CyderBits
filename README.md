@@ -8,7 +8,9 @@
 
 The validated path remains classic 2D Win32 graphics: **DirectDraw → Wine wined3d/OpenGL** and GDI. Cyder 0.11.1 uses the `CX26.3.0-W11-Cyder011` engine; DXVK and DXMT are delivered as separate graphics payloads, while D3DMetal is available through GPTK. Actual compatibility still depends on the game, macOS version, and selected backend.
 
-CyderBits builds CrossOver-based Wine on Apple Silicon and ships two tools: **Cyder** — a one-click `.exe` launcher — and **CyderBits** — a packager that wraps `.exe` files as double-clickable macOS `.app` bundles.
+This repo (CyderBits) is currently the **application layer**: the Cyder launcher, game library, settings, CompatDB, and packager. The Wine engine that actually runs Windows `.exe` files lives in [cyder-wine-engine](https://github.com/dspp779/cyder-wine-engine).
+
+This project ships two tools: **Cyder** — a one-click `.exe` launcher — and **CyderBits** — a packager that wraps `.exe` files as double-clickable macOS `.app` bundles.
 
 **Languages:** [English](README.md) · [繁體中文](README.zh-TW.md)
 
@@ -80,17 +82,12 @@ Below is a summary of tested games on Cyder / CyderBits. For detailed configurat
 
 See [Wine configure and graphics options](docs/wine-configure-options.md) for build choices and limitations.
 
-## Wine sources
+## Wine engine
 
-Wine is built from the **CrossOver open-source release** — place archives in `tools/archives/` (see [CodeWeavers CrossOver Source](https://www.codeweavers.com/crossover/source)); builds extract into `build/cx26/`.
+The runtime that actually executes `.exe` files is [cyder-wine-engine](https://github.com/dspp779/cyder-wine-engine). Wine is built from the **CrossOver open-source release** (see [CodeWeavers CrossOver Source](https://www.codeweavers.com/crossover/source)); canonical build, patch, and pack work happens in that repo. This tree still keeps compatibility copies of the build scripts; place archives in `tools/archives/` and builds extract into `build/cx26/`. See [docs/cyder-wine-engine-project.md](docs/cyder-wine-engine-project.md).
 
 ```bash
 bash scripts/build-wine.sh --cx 26
-bash scripts/sign-wine.sh
-```
-
-```bash
-bash scripts/build-wine.sh
 bash scripts/sign-wine.sh
 ```
 
@@ -104,7 +101,7 @@ bash scripts/sign-wine.sh
 
 ## Quick start
 
-### 1. Build Wine (first time; slow)
+### 1. Build Wine (first time; slow; canonical flow is in cyder-wine-engine)
 
 ```bash
 bash scripts/build-wine.sh --cx 26 --install-deps
@@ -177,6 +174,7 @@ bash tests/test-verify-bluecg.sh
 - [Cyder 0.7.0 release notes](docs/releases/v0.7.0.en.md) — CrossOver bottle isolation, cabextract, new icon, MapleStory OEM flavor
 - [Cyder 0.6.0 release notes](docs/releases/v0.6.0.en.md) — CX26.3 engine, macOS 10.15 runtime, Winetricks, dynamic argv
 - [docs/README.md](docs/README.md) — index
+- [docs/cyder-wine-engine-project.md](docs/cyder-wine-engine-project.md) — application layer vs [cyder-wine-engine](https://github.com/dspp779/cyder-wine-engine)
 - [docs/cyder.md](docs/cyder.md) — Cyder launcher
 - [docs/cyderbits.md](docs/cyderbits.md) — CyderBits packager
 - [docs/bluecg.md](docs/bluecg.md) — BlueCG workflow
