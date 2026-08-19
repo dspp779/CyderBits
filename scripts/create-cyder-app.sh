@@ -393,6 +393,11 @@ cat > "$CONTENTS/Info.plist" <<PLIST
   <string>10.15</string>
   <key>LSUIElement</key>
   <true/>
+  <key>LSArchitecturePriority</key>
+  <array>
+    <string>arm64</string>
+    <string>x86_64</string>
+  </array>
   <key>NSHighResolutionCapable</key>
   <true/>
   <key>CyderRecommendedGamesDirectory</key>

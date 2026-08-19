@@ -95,7 +95,7 @@ done
 if [[ -n "$exe" ]]; then
   if cyder_macos_at_least 11 0 && [[ -x "$SELF/CyderSwift" ]] \
      && /usr/bin/file -b "$SELF/CyderSwift" 2>/dev/null | grep -q 'Mach-O'; then
-    exec "$SELF/CyderSwift" "$exe" "${game_args[@]}"
+    cyder_exec_cyder_swift "$SELF/CyderSwift" "$exe" "${game_args[@]}"
   fi
   if ! cyder_macos_at_least 11 0 && ! cyder_catalina_environment_ready; then
     cyder_start_catalina_bootstrap "$exe" "${game_args[@]}"
@@ -112,7 +112,7 @@ fi
 # relays that event to cyder_launcher.sh and never launches Wine itself.
 if cyder_macos_at_least 11 0 && [[ -x "$SELF/CyderSwift" ]]; then
   if /usr/bin/file -b "$SELF/CyderSwift" 2>/dev/null | grep -q 'Mach-O'; then
-    exec "$SELF/CyderSwift" "$@"
+    cyder_exec_cyder_swift "$SELF/CyderSwift" "$@"
   fi
 fi
 

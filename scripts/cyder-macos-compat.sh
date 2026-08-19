@@ -39,3 +39,27 @@ cyder_apply_moltenvk_os_floor() {
   fi
   echo "MoltenVK disabled: macOS $(cyder_macos_product_version) is below 10.15" >&2
 }
+
+# `uname -m` is x86_64 inside Rosetta, so it cannot decide the CyderSwift slice.
+cyder_host_is_apple_silicon() {
+  [[ "$(/usr/sbin/sysctl -n hw.optional.arm64 2>/dev/null || true)" == 1 ]]
+}
+
+cyder_exec_cyder_swift() {
+  local bin="${1:?}"
+  shift
+  if cyder_host_is_apple_silicon && [[ -x /usr/bin/arch ]]; then
+    exec /usr/bin/arch -arm64 "$bin" "$@"
+  fi
+  exec "$bin" "$@"
+}
+
+cyder_spawn_cyder_swift() {
+  local bin="${1:?}"
+  shift
+  if cyder_host_is_apple_silicon && [[ -x /usr/bin/arch ]]; then
+    /usr/bin/arch -arm64 "$bin" "$@"
+  else
+    "$bin" "$@"
+  fi
+}

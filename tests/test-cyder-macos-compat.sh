@@ -10,8 +10,10 @@ catalina_bootstrap="$(cat "$ROOT/scripts/cyder-catalina-bootstrap.command")"
 assert test -x "$ROOT/scripts/cyder-catalina-bootstrap.command"
 assert_contains "$wrapper" 'cyder_macos_at_least 11 0' \
   "wrapper must route no-argument macOS 11+ launches to CyderSwift"
-assert_contains "$wrapper" 'exec "$SELF/CyderSwift" "$exe" "${game_args[@]}"' \
+assert_contains "$wrapper" 'cyder_exec_cyder_swift "$SELF/CyderSwift" "$exe" "${game_args[@]}"' \
   "explicit EXE arguments on macOS 11+ must enter the native lifecycle agent"
+assert_contains "$wrapper" 'cyder_exec_cyder_swift "$SELF/CyderSwift" "$@"' \
+  "no-argument macOS 11+ launches must exec native CyderSwift"
 assert_contains "$wrapper" 'exec "$SCRIPTS/cyder_launcher.sh" --engine-src "$ENGINE_SRC" --launch-exe "$exe"' \
   "Catalina explicit EXE arguments must retain the Bash fallback"
 assert_not_contains "$wrapper" 'CyderLegacyUI.app' \
@@ -34,6 +36,21 @@ assert_contains "$catalina_bootstrap" 'pending_args' \
   "Catalina bootstrap must resume the pending EXE after setup"
 assert_contains "$catalina_bootstrap" '/usr/bin/open "$APP" --args' \
   "Catalina bootstrap must pass the pending EXE back to the Bash wrapper"
+
+compat="$(cat "$ROOT/scripts/cyder-macos-compat.sh")"
+assert_contains "$compat" 'cyder_host_is_apple_silicon' \
+  "Apple Silicon detection must not trust uname -m under Rosetta"
+assert_contains "$compat" 'hw.optional.arm64' \
+  "Apple Silicon detection must use hw.optional.arm64 so it works inside Rosetta"
+assert_contains "$compat" 'cyder_exec_cyder_swift' \
+  "the wrapper must exec CyderSwift through an architecture-forcing helper"
+assert_contains "$compat" 'cyder_spawn_cyder_swift' \
+  "sentinel helpers must spawn CyderSwift through the same architecture helper"
+assert_contains "$compat" '/usr/bin/arch -arm64' \
+  "Apple Silicon must force the arm64 CyderSwift slice"
+if [[ "$(/usr/sbin/sysctl -n hw.optional.arm64 2>/dev/null || true)" == 1 ]]; then
+  assert cyder_host_is_apple_silicon
+fi
 
 assert cyder_macos_at_least 10 15
 assert cyder_macos_at_least 10 0

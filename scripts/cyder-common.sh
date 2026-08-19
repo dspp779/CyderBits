@@ -2723,7 +2723,7 @@ cyder_sentinel_attach() {
     rm -rf "$wait_dir"
     return 1
   }
-  "$swift" --sentinel-connect \
+  cyder_spawn_cyder_swift "$swift" --sentinel-connect \
     --prefix "$prefix" \
     --exe "$exe_name" \
     --fifo "$wait_fifo" \

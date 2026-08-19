@@ -38,6 +38,11 @@ assert_contains "$build_script" '<key>CFBundleTypeIconFile</key>' \
   "Info.plist must declare a document icon for .exe"
 assert_contains "$build_script" '<key>LSUIElement</key>' \
   "Info.plist must declare Cyder as a menu-bar agent without a Dock icon"
+assert_contains "$build_script" '<key>LSArchitecturePriority</key>' \
+  "Info.plist must prefer the native slice so Apple Silicon does not reopen Cyder under Rosetta"
+assert_contains "$build_script" '<string>arm64</string>
+    <string>x86_64</string>' \
+  "LSArchitecturePriority must list arm64 before x86_64"
 assert_contains "$build_script" '<string>gamaniagames</string>' \
   "Info.plist must declare gamaniagames url scheme"
 assert_contains "$build_script" 'cyder_uri_handler.swift' \

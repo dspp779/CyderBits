@@ -102,7 +102,7 @@ assert_contains "$app_source" 'if didRunLauncher {' \
   "a resident Cyder process must accept later Finder EXE requests"
 
 wrapper_source="$(cat "$ROOT/scripts/cyder-macos-wrapper.sh")"
-assert_contains "$wrapper_source" 'exec "$SELF/CyderSwift" "$exe" "${game_args[@]}"' \
+assert_contains "$wrapper_source" 'cyder_exec_cyder_swift "$SELF/CyderSwift" "$exe" "${game_args[@]}"' \
   "macOS 11 explicit EXE launches must enter the native lifecycle agent"
 assert_contains "$wrapper_source" 'Catalina deliberately retains the shell-only fallback' \
   "Catalina must keep the existing Bash-only behavior"
