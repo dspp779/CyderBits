@@ -22,7 +22,7 @@ private let cyderWinetricksComponentGroups: [(String, [CyderWinetricksComponent]
     ]),
 ]
 
-final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate, NSTabViewDelegate, NSTableViewDataSource, NSTableViewDelegate {
+final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate, NSTableViewDataSource, NSTableViewDelegate {
     var onImmediateSave: ((_ registrySetting: String) -> Bool)?
     /// Live Wine `reg add` with draft env; return true only after registry apply succeeds.
     var onApplyWhileRunning: ((_ draftEnvironment: [String: String]) -> Bool)?
@@ -96,7 +96,7 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate,
     }
     private var uriHandlerRows: [CyderURIHandlerRow] = []
     private let uriHandlerTable = NSTableView()
-    private let uriHandlerStatusLabel = NSTextField(labelWithString: "切換到此分頁以掃描 shared bottle。")
+    private let uriHandlerStatusLabel = NSTextField(labelWithString: "開啟偏好設定時會在背景掃描 shared bottle。")
     private let uriHandlerProgress = NSProgressIndicator()
     private let uriHandlerRescanButton = NSButton()
 
@@ -132,7 +132,6 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate,
         let tabs = NSTabView()
         tabs.translatesAutoresizingMaskIntoConstraints = false
         settingsTabView = tabs
-        tabs.delegate = self
         tabs.addTabViewItem(makeGeneralTab())
         tabs.addTabViewItem(makeDisplayTab())
         tabs.addTabViewItem(makeFontsTab())
@@ -475,12 +474,6 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate,
     }
 
     @available(macOS 11.0, *)
-    func tabView(_ tabView: NSTabView, didSelect tabViewItem: NSTabViewItem?) {
-        guard tabViewItem === uriHandlerTabItem else { return }
-        beginURIHandlerScan()
-    }
-
-    @available(macOS 11.0, *)
     @objc private func rescanURIHandlers() {
         beginURIHandlerScan()
     }
@@ -722,6 +715,9 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate,
     func prepareForDisplay() {
         wineIsRunning = hasRunningExes?() ?? false
         reload()
+        if #available(macOS 11.0, *) {
+            beginURIHandlerScan()
+        }
     }
 
     private func refreshRunningChrome(persistPendingWhenIdle: Bool = false) {

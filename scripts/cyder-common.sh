@@ -3421,6 +3421,19 @@ cyder_validate_uri_command() {
   printf '%s' "$exe_win"
 }
 
+cyder_reg_extract_uri_snippet() {
+  local regfile="$1" scheme="$2"
+  local n1 n2 n3
+  n1="[Software\\\\Classes\\\\${scheme}]"
+  n2="[Software\\\\Classes\\\\${scheme}\\\\shell\\\\open\\\\command]"
+  n3="[Software\\\\gamaniaGamesManager]"
+  if command -v rg >/dev/null 2>&1; then
+    rg -F --no-heading -A 40 -e "$n1" -e "$n2" -e "$n3" "$regfile" 2>/dev/null || true
+  else
+    grep -F -A 40 -e "$n1" -e "$n2" -e "$n3" "$regfile" 2>/dev/null || true
+  fi
+}
+
 cyder_reg_read_uri_scheme() {
   local regfile="$1" scheme="$2"
   ROOT_TS=0 ROOT_URL_PROTOCOL=0 COMMAND="" COMMAND_TS=0 INSTALL_PATH="" VERSION=""
@@ -3430,6 +3443,9 @@ cyder_reg_read_uri_scheme() {
   local cmd="${root}\\\\shell\\\\open\\\\command"
   local meta="Software\\\\gamaniaGamesManager"
   local sect="" line ts in_root=0 in_cmd=0 in_meta=0 has_proto=0 root_ts=0 cmd_ts=0
+  local snippet
+  snippet="$(cyder_reg_extract_uri_snippet "$regfile" "$scheme")"
+  [[ -n "$snippet" ]] || return 1
 
   while IFS= read -r line || [[ -n "$line" ]]; do
     if [[ "$line" == \[* ]]; then
@@ -3470,7 +3486,7 @@ cyder_reg_read_uri_scheme() {
       VERSION="$(cyder_reg_unquote_value "$line")"
       continue
     fi
-  done <"$regfile"
+  done <<<"$snippet"
 
   [[ "$has_proto" -eq 1 && -n "$COMMAND" ]] || return 1
   COMMAND_TS=$(( cmd_ts > root_ts ? cmd_ts : root_ts ))
