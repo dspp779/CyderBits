@@ -233,7 +233,7 @@ Finder document event 啟動時，Swift relay 會在呼叫 bash 前監聽 CrossO
 
 命令列直接呼叫 `cyder_launcher.sh` 時仍以前景模式執行，方便腳本等待遊戲結束；Finder document event relay 會設定 `CYDER_WINE_DETACH=1`，由 bash 使用分離模式啟動。
 
-EXE 啟動時 Cyder 不出現在 Dock（`LSUIElement` + accessory）；選單列會立刻出現醒酒瓶，並顯示「正在啟動程式…」。CX26 的 Wine Mac driver 會嘗試從 EXE 資源讀取應用程式圖示；若遊戲沒有可用的 Windows 圖示，Dock 可能顯示 Wine 的預設圖示。
+EXE／URI 啟動時 Cyder 不出現在 Dock（`LSUIElement` + accessory）；選單列會立刻出現醒酒瓶，並顯示「正在啟動程式…」。開啟遊戲庫或偏好設定時會暫時升成 Dock 應用，方便從 Dock 或 Cmd-Tab 切回。CX26 的 Wine Mac driver 會嘗試從 EXE 資源讀取應用程式圖示；若遊戲沒有可用的 Windows 圖示，Dock 可能顯示 Wine 的預設圖示。
 
 若要比較 Wine 的 ShellExecute 啟動路徑，可暫時設定
 `CYDER_WINE_START_MODE=start`；此時會執行 `wine start /wait /unix <exe>`。預設仍是直接執行

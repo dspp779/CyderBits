@@ -4,9 +4,9 @@ import Cocoa
 import Foundation
 
 func activateCyderUI(dockVisible: Bool) {
-    // Cyder is a menu-bar app (LSUIElement). Never promote to Dock/.regular.
-    _ = dockVisible
-    NSApp.setActivationPolicy(.accessory)
+    // Default is LSUIElement + accessory (no Dock). Promote to .regular while
+    // the game library or Preferences is open so Cmd-Tab and the Dock work.
+    NSApp.setActivationPolicy(dockVisible ? .regular : .accessory)
     NSRunningApplication.current.activate(options: [.activateAllWindows, .activateIgnoringOtherApps])
     NSApp.activate(ignoringOtherApps: true)
 }

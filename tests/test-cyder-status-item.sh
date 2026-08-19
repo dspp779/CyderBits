@@ -80,10 +80,10 @@ assert_contains "$app_source" 'presentExternalLaunchStarting()' \
   "URI and Finder EXE launches must show starting UI immediately"
 assert_contains "$app_source" 'showSetup("正在啟動程式…")' \
   "program launches must show a starting progress panel"
+assert_contains "$(cat "$ROOT/scripts/cyder_launch_support.swift")" 'setActivationPolicy(dockVisible ? .regular : .accessory)' \
+  "game library and Preferences must appear in the Dock and Cmd-Tab"
 assert_not_contains "$app_source" 'setActivationPolicy(.regular)' \
-  "native Cyder must never promote itself into the Dock"
-assert_not_contains "$(cat "$ROOT/scripts/cyder_launch_support.swift")" 'setActivationPolicy(dockVisible ? .regular' \
-  "activateCyderUI must not promote Cyder to a Dock app"
+  "app main must not promote to Dock except through activateCyderUI"
 assert_contains "$app_source" 'statusItemController.setUIVisible(true)' \
   "opening preferences or the game library must install the menu-bar item"
 assert_contains "$app_source" 'statusItemController.setUIVisible(false)' \

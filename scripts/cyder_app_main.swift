@@ -305,9 +305,9 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationWillFinishLaunching(_ notification: Notification) {
         // Finder document URLs are delivered through openFiles, not argv, so
-        // launch hidden until the post-launch mode decision. Settings mode is
-        // promoted below; an EXE launch stays out of the Dock unless it needs
-        // to ask the user a question or show an error.
+        // launch hidden until the post-launch mode decision. Game library and
+        // Preferences promote to the Dock via activateCyderUI; EXE/URI launches
+        // stay accessory unless they need a question or error.
         NSApp.setActivationPolicy(.accessory)
         switch instanceCoordinator.start(onRequest: { [weak self] request in
             self?.receiveInstanceRequest(request)
