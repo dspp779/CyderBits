@@ -38,5 +38,11 @@ assert_contains "$app" 'launchArguments: launch.arguments' \
   "forwarded dynamic arguments must survive queueing"
 assert_contains "$app" 'instanceCoordinator.stop()' \
   "the primary must release its owner lock on termination"
+assert_contains "$app" 'applicationShouldHandleReopen' \
+  "clicking Cyder.app while the LSUIElement process is already resident must reopen UI"
+assert_contains "$app" 'presentResidentCyderUI' \
+  "Finder reopen and secondary showUI must share one UI presentation path"
+assert_contains "$app" 'func applicationShouldHandleReopen' \
+  "reopen must be an NSApplicationDelegate method, not a comment"
 
 echo "PASS test-cyder-instance"

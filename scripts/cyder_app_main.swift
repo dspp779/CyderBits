@@ -587,7 +587,29 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             return
         }
         guard request.showUI else { return }
+        presentResidentCyderUI()
+    }
+
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        // LSUIElement + accessory: Finder / Launchpad clicks reuse this process
+        // and send reopen. AppKit's default does nothing when no Cyder window is
+        // visible (the common case after closing the library while a game runs).
+        guard isPrimaryInstance, didFinishLaunch else { return false }
+        CyderDiagnostics.shared.info("reopen requested hasVisibleWindows=\(flag)")
+        presentResidentCyderUI()
+        return false
+    }
+
+    /// Bring the game library or settings forward. Shared by Finder reopen and
+    /// a secondary process that forwarded an empty `showUI` request.
+    private func presentResidentCyderUI() {
         terminateWhenSettingsClose = true
+        statusItemController.setUIVisible(true)
+        activateCyderUI(dockVisible: true)
+        if environmentPreparationInProgress {
+            setupPanel?.show()
+            return
+        }
         openLibraryOnLaunch = shouldOpenGameLibraryOnLaunch()
         if openLibraryOnLaunch {
             showGameLibrary()
