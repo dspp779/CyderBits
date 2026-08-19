@@ -1,6 +1,8 @@
 # OEM source packaging compatibility header
 
-Patch: [`patches/maplestory-oem25-source-distversion.patch`](../../patches/maplestory-oem25-source-distversion.patch)
+> CX25 OEM 產品線與 `--cx 25` 建置已退役。現行路徑是正式 Cyder.app + CX26。本文保留為研究紀錄。
+
+Patch removed from the tree; see git history.
 
 Suggested upstream title: **Do not submit: OEM source-offer packaging compatibility header**
 

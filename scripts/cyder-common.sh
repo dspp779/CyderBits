@@ -906,7 +906,7 @@ cyder_wine_locale_exports() {
   export LANG="$loc" LC_ALL="$loc" LC_CTYPE="$loc"
 }
 
-# CrossOver / MapleStory OEM engines ship a Perl wine frontend that refuses to
+# CrossOver engines ship a Perl wine frontend that refuses to
 # run wineboot until $WINEPREFIX/cxbottle.conf exists. Retail Wine builds have
 # no share/crossover/bottle_data template, so this is a no-op for them.
 cyder_crossover_bottle_data_conf() {
@@ -919,10 +919,9 @@ cyder_crossover_bottle_data_conf() {
   printf '%s\n' "$conf"
 }
 
-# Seed a private-bottle cxbottle.conf before the first wineboot. OEM cxbottle
+# Seed a private-bottle cxbottle.conf before the first wineboot. CrossOver
 # --create is disabled; copying the engine template and injecting WineArch /
-# Template matches the CrossOver baseline. MapleStory adds its own audio and
-# CP950-compatible locale settings below.
+# Template matches the CrossOver baseline.
 cyder_seed_crossover_bottle_conf() {
   local wine_bin="$1"
   local bottle="$2"
@@ -948,23 +947,6 @@ cyder_seed_crossover_bottle_conf() {
 "Template" = "win10_64"
 ' "$dest"
   fi
-  local is_maplestory=0
-  cyder_is_maplestory_oem && is_maplestory=1
-  if (( is_maplestory )) && ! grep -qE '^[[:space:]]*"RAW_AUDIO_PARSE"[[:space:]]*=' "$dest"; then
-    /usr/bin/sed -i '' '/^\[EnvironmentVariables\]$/a\
-"RAW_AUDIO_PARSE" = "1"
-' "$dest"
-  fi
-  if (( is_maplestory )); then
-    local locale_key
-    for locale_key in LANG LC_ALL LC_CTYPE; do
-      if ! grep -qE "^[[:space:]]*\"${locale_key}\"[[:space:]]*=" "$dest"; then
-        /usr/bin/sed -i '' "/^\[EnvironmentVariables\]\$/a\\
-\"${locale_key}\" = \"zh_TW.UTF-8\"
-" "$dest"
-      fi
-    done
-  fi
   echo "Seeded CrossOver bottle metadata: $dest" >&2
 }
 
@@ -973,12 +955,6 @@ cyder_wine_is_perl_script() {
   [[ -f "$path" ]] || return 1
   IFS= read -r first_line <"$path" || true
   [[ "$first_line" == *perl* ]]
-}
-
-cyder_is_maplestory_oem() {
-  [[ "${CYDER_OEM_FLAVOR:-}" == maplestory ||
-     "${CYDER_ENGINE_NAME:-}" == maplestory*oem* ||
-     "${CYDER_BOTTLE_NAME:-}" == maplestory* ]]
 }
 
 cyder_is_maplestory_executable() {
@@ -990,7 +966,7 @@ cyder_is_maplestory_executable() {
 
 cyder_apply_maplestory_wz_cache() {
   local exe="$1"
-  if cyder_is_maplestory_oem || cyder_is_maplestory_executable "$exe"; then
+  if cyder_is_maplestory_executable "$exe"; then
     export CYDER_MAPLESTORY_FILE_CACHE="${CYDER_MAPLESTORY_FILE_CACHE_PREFERENCE:-1}"
   else
     export CYDER_MAPLESTORY_FILE_CACHE=0
@@ -1548,7 +1524,7 @@ cyder_init_bottle() {
   fi
   echo "Creating bottle: $bottle" >&2
   mkdir -p "$bottle"
-  # MapleStory OEM / CrossOver Perl wine requires cxbottle.conf before wineboot.
+  # CrossOver Perl wine requires cxbottle.conf before wineboot.
   cyder_seed_crossover_bottle_conf "$wine_bin" "$bottle" || return $?
   local log_dir="$CYDER_SUPPORT/Logs/operations"
   local log_file="$log_dir/wineboot-$(date '+%Y%m%d-%H%M%S')-$$.log"
@@ -2289,7 +2265,7 @@ cyder_apply_graphics_runtime_preferences() {
   fps="$(cyder_graphics_frame_rate_fps)"
   if [[ -n "$fps" ]] \
      && [[ "$backend" == dxvk ]] \
-     && { [[ "$preference" == dxvk ]] || cyder_is_maplestory_oem; }; then
+     && [[ "$preference" == dxvk ]]; then
     export DXVK_FRAME_RATE="$fps"
   fi
   if [[ "$backend" == dxmt && "$preference" == dxmt ]]; then
@@ -2600,9 +2576,9 @@ cyder_has_running_exes() {
   return 1
 }
 
-# True when the shared bottle is fully ready for the current engine. CrossOver /
-# MapleStory OEM engines also require a readable cxbottle.conf; a half-built
-# bottle without it is treated as not ready so bootstrap/rebuild can replace it.
+# True when the shared bottle is fully ready for the current engine. CrossOver
+# engines also require a readable cxbottle.conf; a half-built bottle without it
+# is treated as not ready so bootstrap/rebuild can replace it.
 cyder_shared_prefix_is_ready() {
   local wine_bin="${1:-}"
   [[ -f "$CYDER_BOOTSTRAP_MARKER" ]] || return 1

@@ -83,11 +83,10 @@ bash scripts/run-bluecg.sh
 
 ## Wine 原始碼
 
-Wine 來自 **CrossOver 開源釋出** — 將 archive 放在 `tools/archives/`（見 [CodeWeavers CrossOver Source](https://www.codeweavers.com/crossover/source)），建置時解壓至 `build/cx25/` 或 `build/cx26/`。
+Wine 來自 **CrossOver 開源釋出** — 將 archive 放在 `tools/archives/`（見 [CodeWeavers CrossOver Source](https://www.codeweavers.com/crossover/source)），建置時解壓至 `build/cx26/`。
 
 ```bash
-bash scripts/build-wine.sh --cx 26          # 預設 CX26
-bash scripts/build-wine.sh --cx 25          # A/B 對照 CX25
+bash scripts/build-wine.sh --cx 26
 bash scripts/sign-wine.sh
 ```
 
@@ -151,7 +150,6 @@ open dist/CyderBits.app
 ├── build/                      # 解壓後原始碼與 llvm-mingw（.gitignore）
 ├── .brew-x86/                  # .gitignore
 ├── install/
-│   ├── wine-cx25-x86_64/       # CX25 engine（.gitignore）
 │   └── wine-cx26-x86_64/       # CX26 engine（.gitignore）
 └── BlueCrossgateNew/           # BlueCG（.gitignore）
 ```

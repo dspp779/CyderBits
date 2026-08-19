@@ -4,8 +4,8 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "$ROOT/tests/assert.sh"
 
-E1="${CYDER_DXVK_ENGINE1:-/Users/jjc/ogom/install/wine-maplestory-oem25-source-x86_64}"
-E2="${CYDER_DXVK_ENGINE2:-/Users/jjc/ogom/install/wine-cx26-x86_64}"
+E1="${CYDER_DXVK_ENGINE1:-$ROOT/install/wine-cx26-x86_64}"
+E2="${CYDER_DXVK_ENGINE2:-$ROOT/install/wine-cx26-x86_64}"
 
 output="$(bash "$ROOT/scripts/build-dxvk.sh" \
   --engine "$E1" \

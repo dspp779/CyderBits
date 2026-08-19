@@ -14,7 +14,7 @@
 | 遊戲相容性總表 | 彙整單機／線上遊戲測試紀錄 | [相容性矩陣](compatibility-matrix.md) |
 | BlueCG／水藍魔力 | A6 same-view backing sync 已通過 Retina+DPI resize 驗收；MIDI underrun 仍列為待釐清雜訊 | [BlueCG](bluecg/README.md) |
 | 皮卡丘打排球 | MSync、ESync 與含空白的 Wine runtime 路徑均列為相容性問題；目前以無同步、無空白實體 runtime 作為 workaround | [皮卡丘排球](pikachu-volleyball/README.md) |
-| 楓之谷（台灣 Beanfun／經典版） | OEM-25 正式版多後端可玩；經典版建議 MSync+DXVK／D3DMetal；離場 QDO livelock 由 Cyder009 bandage 緩解 | [研究入口](maplestory/README.md) · [經典版凍結](../maplestory-classic-wineserver-hang.md) · [GRAP 殘留](maplestory/grap-core64-residual-process-analysis.md) |
+| 楓之谷（台灣 Beanfun／經典版） | 正式 Cyder + CX26 可跑新楓之谷；OEM-25 僅歷史紀錄 | [研究入口](maplestory/README.md) · [經典版凍結](../maplestory-classic-wineserver-hang.md) · [GRAP 殘留](maplestory/grap-core64-residual-process-analysis.md) |
 | Steam | 自動套用 system compositor 與 CEF sandbox 相容參數；Windows 遊戲仍需逐款驗證 | [Steam](steam/README.md) |
 
 ## 建議文件結構

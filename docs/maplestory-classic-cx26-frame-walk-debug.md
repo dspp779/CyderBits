@@ -635,7 +635,7 @@ bash tests/test-build-wine.sh
 它會確認：
 
 - CX26 dry-run 先移除 obsolete Cyder006 patch，再依序包含 upstream 與 Cyder patch；
-- CX25 dry-run 不包含任何一個 frame-walk patch；
+- `tests/test-build-wine.sh` now asserts `--cx 25` is retired;
 - CX26 source、LLVM-MinGW、Rosetta、PE architectures 與 install path 正確；
 - 完整 build 仍包含 `make`、`make install` 與 dylib bundling。
 
@@ -819,6 +819,8 @@ DirectX 元件不會處理 `RtlWalkFrameChain()`。
 
 ### 套用到 CX25
 
+CX25 OEM 產品線與 `--cx 25` 建置已退役。現行路徑是正式 Cyder.app + CX26。本文保留為研究紀錄。
+
 CX25 使用 Wine 10 基線。未做 source／ABI 比對與同等遊戲驗收前，不應跨 major
 version 預設套用。
 
@@ -845,7 +847,7 @@ version 預設套用。
 | `patches/README.md` | Patch 摘要與套用範圍 |
 | `scripts/build-wine.sh` | CX26 自動套用與完整建置 |
 | `scripts/run-maplestory-classic-debug.sh` | 不保存 token 的四參數測試啟動器 |
-| `tests/test-build-wine.sh` | CX26 套用／CX25 排除測試 |
+| `tests/test-build-wine.sh` | asserts `--cx 25` is retired |
 | `tests/test-ntdll-frame-walk-patches.sh` | 乾淨 source round-trip 與 Cyder006 遷移 |
 | `tests/test-ntdll-frame-walk-guard.sh` | x64 PE frame-walk 行為回歸測試 |
 | `tests/fixtures/ntdll-frame-walk-guard.c` | NULL entry 與不可讀 metadata 測試程式 |

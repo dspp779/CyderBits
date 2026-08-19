@@ -1020,7 +1020,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         var needsBootstrap = !FileManager.default.fileExists(atPath: CyderPaths.bootstrapMarker.path)
             || !FileManager.default.fileExists(atPath: sharedSystemReg)
             || !FileManager.default.fileExists(atPath: sharedBaseline)
-        // CrossOver / MapleStory OEM engines need cxbottle.conf; a half-built
+        // CrossOver engines need cxbottle.conf; a half-built
         // bottle without it must go through a full replace, not an in-place patch.
         if !needsBootstrap {
             let engineBottleTemplate = CyderPaths.engine
@@ -1099,29 +1099,6 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             || environmentState(context: context).needsBootstrap
             || !templatesReady && !state.needsEngine
         var bootstrapHealthChecked = false
-        if bootstrapNeeded,
-           let helper = ProcessInfo.processInfo.environment["CYDER_OEM_BOOTSTRAP_HELPER"],
-           !helper.isEmpty {
-            CyderDiagnostics.shared.enter(.bootstrap)
-            showSetup("正在準備 MapleStory 遊戲環境…")
-            let result = runLauncher(
-                context: context,
-                args: [helper, "--prepare-only"],
-                stage: .bootstrap,
-                operation: "oem-prepare",
-                expectsMachineResult: true
-            )
-            if !result.succeeded {
-                return failure(
-                    code: "CYD-BTS-001",
-                    stage: .bootstrap,
-                    summary: "準備遊戲環境時發生問題。",
-                    result: result
-                )
-            }
-            bootstrapHealthChecked = result.machineResult["healthChecked"] == "1"
-            bootstrapNeeded = environmentState(context: context).needsBootstrap
-        }
         if bootstrapNeeded {
             CyderDiagnostics.shared.enter(.bootstrap)
             showSetup("正在準備遊戲環境…")

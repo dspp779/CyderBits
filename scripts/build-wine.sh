@@ -59,7 +59,7 @@ Usage: $(basename "$0") [options]
 Build CrossOver Wine for macOS x86_64 (Rosetta).
 
 Options:
-  --cx 25|26         CrossOver release (default: 26)
+  --cx 26            CrossOver release (default: 26)
   --prepare-only     Extract archives from tools/archives/ and exit
   --with-tests       Build Wine regression-test executables (off for runtime builds)
   --bootstrap-brew   Install project-local x86_64 Homebrew
@@ -93,9 +93,13 @@ EOF
 done
 
 case "$CX_VERSION" in
-  25 | 26) ;;
+  25)
+    echo "CX25 support was retired; this tree only builds CrossOver 26." >&2
+    exit 1
+    ;;
+  26) ;;
   *)
-    echo "Unknown --cx value: $CX_VERSION (expected 25 or 26)" >&2
+    echo "Unknown --cx value: $CX_VERSION (expected 26)" >&2
     exit 1
     ;;
 esac

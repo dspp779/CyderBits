@@ -342,9 +342,6 @@ struct CyderSettingsHarness {
         precondition(CyderGraphicsCapabilities.hasDxmtPayload(engineRoot: payloadTmp))
         precondition(CyderGraphicsCapabilities.hasDxmtPayload(engineRoot: nil))
 
-        setenv("CYDER_OEM_FLAVOR", "maplestory", 1)
-        defer { unsetenv("CYDER_OEM_FLAVOR") }
-        precondition(CyderProduct.isMapleStoryOEM)
         precondition(CyderProduct.defaultGraphicsBackend == .default)
         let oemDefaults = CyderSettings()
         precondition(oemDefaults.graphicsBackend == .default)

@@ -16,7 +16,7 @@
 | `--enable-win64` | 64-bit Wine + WoW64，在 64-bit prefix 跑 32-bit PE |
 | `--enable-archs=i386,x86_64` | 同時建 32/64-bit PE（`syswow64` 等） |
 | `--with-mingw=llvm-mingw` | 使用專案內 llvm-mingw 交叉編譯 PE DLL |
-| `--prefix=...` | 安裝至 `install/wine-cx25-x86_64` 或 `wine-cx26-x86_64` |
+| `--prefix=...` | 安裝至 `install/wine-cx26-x86_64` |
 | `--disable-tests` | runtime build 預設；省下 regression-test 編譯時間，不影響 runtime DLL |
 | `--without-vulkan` | clean source build 的預設；DirectDraw 老遊戲不需 Vulkan |
 | `--with-vulkan` | 可選；搭配 `--vulkan-source homebrew\|crossover`，見 `scripts/build-graphics-stack.sh` |
@@ -196,7 +196,7 @@ macOS 上使用 **`winemac.drv`（Cocoa）**，不走 X11。下列選項在 Mac 
 
 ## 建置決策清單（重新建引擎前）
 
-1. **CX 版本**：`--cx 25` 或 `26`（對應 `crossover-sources-*.tar.gz`）。
+1. **CX 版本**：`--cx 26`（crossover-sources-26.3.0.tar.gz）。CX25 已退役。
 2. **目標遊戲架構**：是否為 PE32 → 確認 `--enable-archs=i386,x86_64`。
 3. **圖形世代**：2D DirectDraw vs 3D Vulkan → `--without-vulkan` 或 `--with-vulkan`。
 4. **Vulkan 來源**（若啟用）：`homebrew`（快速）或 `crossover`（與 CX tarball 版本鎖定）。

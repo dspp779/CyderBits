@@ -112,10 +112,10 @@ D3DMetal 要求 macOS 14+，不能只依編譯或 payload 存在判定成功。
 | 層級 | 狀態 | 證據／限制 |
 |---|---|---|
 | OEM25 baseline | 🟢 已驗證 | OEM 25.0.1.38865、乾淨 win10_64 prefix、台版 V280，曾完成登入並實玩 |
-| OEM 特別版整合 | 🟢 已有腳本 | `scripts/create-cyder-maplestory-oem-app.sh` 與 OEM bootstrap；不把 OTP／帳號資料納入本 repo |
+| OEM 特別版整合 | ⚫ 已退役 | CX25 OEM 產品線與 `--cx 25` 建置已退役。現行路徑是正式 Cyder.app + CX26。本文保留為研究紀錄。 |
 | CX26 第一層 port | 🟡 已編譯／lifecycle smoke | `winemac`、WineD3D texture、`rawaudioparse` patch 可 dry-run／編譯，無 OTP lifecycle 已通 |
 | CX26 D3D11／G 組 | 🟡 實驗引擎 | `ClearView`、`OpenSharedResource`、shared texture、full-clear、dbghelp guard 已有實驗 patch |
-| CX26 完整可玩 | ⚪ 尚未關閉 | 有效 OTP 後的人工畫面、角色／地圖、滑鼠／UI、20 分鐘實玩仍是 gate |
+| CX26 完整可玩 | 🟢 正式 Cyder + CX26 | 現行路徑是正式 Cyder.app + CX26，可跑新楓之谷 |
 
 ### 已知必要契約
 

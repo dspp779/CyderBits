@@ -33,18 +33,10 @@ if [[ "$conf" == *'"RAW_AUDIO_PARSE" = "1"'* ]]; then
   exit 1
 fi
 
-# MapleStory OEM bottles receive the audio parser and CP950-compatible locale.
-OEM_BOTTLE="$TMP/oem-bottle"
-CYDER_OEM_FLAVOR=maplestory cyder_seed_crossover_bottle_conf "$ENGINE/bin/wine" "$OEM_BOTTLE"
-oem_conf="$(cat "$OEM_BOTTLE/cxbottle.conf")"
-assert_contains "$oem_conf" '"RAW_AUDIO_PARSE" = "1"' \
-  "OEM seed should inject RAW_AUDIO_PARSE"
-assert_contains "$oem_conf" '"LANG" = "zh_TW.UTF-8"' \
-  "OEM seed should set LANG"
-assert_contains "$oem_conf" '"LC_ALL" = "zh_TW.UTF-8"' \
-  "OEM seed should set LC_ALL"
-assert_contains "$oem_conf" '"LC_CTYPE" = "zh_TW.UTF-8"' \
-  "OEM seed should set LC_CTYPE"
+if type cyder_is_maplestory_oem >/dev/null 2>&1; then
+  echo "ASSERT failed: cyder_is_maplestory_oem must be removed" >&2
+  exit 1
+fi
 
 # Existing conf is left alone.
 printf 'keep-me\n' >"$BOTTLE/cxbottle.conf"
@@ -218,19 +210,19 @@ JSON
 
 # Engine / bottle name overrides stay under the shared roots.
 (
-  export CYDER_ENGINE_NAME=maplestory-oem25
-  export CYDER_BOTTLE_NAME=maplestory-oem25
+  export CYDER_ENGINE_NAME=custom-engine
+  export CYDER_BOTTLE_NAME=custom-bottle
   export CYDER_SUPPORT="$TMP/cyder-support"
   unset CYDER_PREFIX CYDER_SHARED_PREFIX CYDER_OEM_FLAVOR
   # shellcheck source=../scripts/cyder-common.sh
   source "$ROOT/scripts/cyder-common.sh"
   cyder_init_paths "$ROOT/scripts"
-  assert_eq "$CYDER_ENGINE_NAME" "maplestory-oem25" "engine name override"
+  assert_eq "$CYDER_ENGINE_NAME" "custom-engine" "engine name override"
   assert_eq "$CYDER_PREFIX" \
-    "$TMP/cyder-support/bottles/maplestory-oem25" \
+    "$TMP/cyder-support/bottles/custom-bottle" \
     "prefix path uses CYDER_BOTTLE_NAME"
   assert_eq "$CYDER_SHARED_PREFIX" \
-    "$TMP/cyder-support/bottles/maplestory-oem25" \
+    "$TMP/cyder-support/bottles/custom-bottle" \
     "shared prefix remains a compatibility alias"
 )
 

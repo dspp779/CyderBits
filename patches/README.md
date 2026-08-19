@@ -104,14 +104,16 @@ the tested runtime and artifact checksum.
 
 ## MapleStory OEM / CX26 reference patches (not applied by default)
 
+CX25 OEM 產品線與 `--cx 25` 建置已退役。現行路徑是正式 Cyder.app + CX26。本文保留為研究紀錄。
+
 Brought over from `codex/maplestory-oem-special` for reading and selective A/B.
 **`scripts/build-wine.sh` on this branch does not auto-apply these files.**
 
 | Path | Role |
 |------|------|
 | `maplestory-cx26-*.patch` | Forward-port candidates from OEM CX25 MapleStory work (shared texture, ClearView, window/focus, `.tmp` module name, **no-sched-yield**, …) |
-| `maplestory-oem25-source-distversion.patch` | OEM source packaging marker |
-| `oem25-bisect/` | Reverse-bisect file groups and results (G/W/L/P/S) |
+| `maplestory-oem25-source-distversion.patch` | deleted; see git history / `docs/upstream-prs/maplestory-oem25-distversion.md` |
+| `oem25-bisect/` | Reverse-bisect file groups and results (G/W/L/P/S); historical evidence only, 不再建 OEM／CX25 引擎 |
 
 Sync / wineserver-adjacent items documented in OEM research:
 

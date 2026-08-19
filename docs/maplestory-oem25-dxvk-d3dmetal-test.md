@@ -1,5 +1,7 @@
 # MapleStory OEM25 圖形後端實測記錄
 
+> CX25 OEM 產品線與 `--cx 25` 建置已退役。現行路徑是正式 Cyder.app + CX26。本文保留為研究紀錄。
+
 日期：2026-07-27
 範圍：Cyder OEM25 source engine、WineD3D、DXVK、CrossOver GPTK/D3DMetal，以及 Metal Performance HUD。
 

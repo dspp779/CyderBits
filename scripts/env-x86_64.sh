@@ -20,9 +20,8 @@ export LLVM_MINGW_NAME="llvm-mingw-20260616-ucrt-macos-universal"
 
 case "$CX_VERSION" in
   25)
-    export CYDER_ENGINE_CX_PREFIX="${CYDER_ENGINE_CX_PREFIX:-CX25}"
-    export WINE_SRC="${WINE_SRC:-$BUILD_DIR/cx25/sources/wine}"
-    export WINE_INSTALL="${WINE_INSTALL:-$OGOM/install/wine-cx25-x86_64}"
+    echo "CX25 support was retired; this tree only builds CrossOver 26." >&2
+    exit 1
     ;;
   26)
     export CYDER_ENGINE_CX_PREFIX="${CYDER_ENGINE_CX_PREFIX:-CX26}"
@@ -30,7 +29,7 @@ case "$CX_VERSION" in
     export WINE_INSTALL="${WINE_INSTALL:-$OGOM/install/wine-cx26-x86_64}"
     ;;
   *)
-    echo "Unknown CX_VERSION: $CX_VERSION (expected 25 or 26)" >&2
+    echo "Unknown CX_VERSION: $CX_VERSION (expected 26)" >&2
     exit 1
     ;;
 esac

@@ -59,12 +59,7 @@ func cyderSanitizeFontTarget(_ raw: String?, fallback: String) -> String {
 }
 
 enum CyderProduct {
-    /// MapleStory OEM ships a dedicated App wrapper that exports this flavor.
-    static var isMapleStoryOEM: Bool {
-        ProcessInfo.processInfo.environment["CYDER_OEM_FLAVOR"] == "maplestory"
-    }
-
-    /// Official and OEM builds leave the global `default` value unchanged.
+    /// Official builds leave the global default unchanged.
     /// MapleStory's executable-specific platform policy is resolved only at
     /// launch time, after the actual executable and payload capabilities are
     /// known.

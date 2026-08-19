@@ -8,8 +8,7 @@
 OTP 取得程式已移至獨立專案 [CitrusGate](https://github.com/dspp779/CitrusGate)，不再由本專案維護；這裡只定義遊戲啟動端所消費的資料與
 Wine/OEM runtime 的相容性契約。
 
-**目前調查主線：** CX25 reverse bisect（無 OTP + OTP／進世界）已完成。進世界必要集為
-OEM MoltenVK、dbghelp、kernelbase `.msf`、**整包 G**，且自行編譯引擎請用 `C:\MapleTest`。
+**目前調查主線：** 正式 Cyder.app + CX26。
 CX26 對應契約見
 [OEM CX25 修補總覽 §11.2](oem-cx25-maplestory-patches.md#112-cx26-forward-port-契約) 與
 [MapleStoryPort ↔ CX26](maplestoryport-cx26-port.md)。經典版 DXVK 長跑另見
@@ -111,53 +110,15 @@ MapleStory.exe tw.login.maplestory.beanfun.com 8484 BeanFun <ServiceAccountID> <
 ```
 
 Cyder 不解析任何公開選項；EXE 由 LaunchServices 的 open-file event 送入，`--args` 後
-全部是 MapleStory argv。此介面只負責保持 argv 邊界並轉送參數；楓之谷仍需使用成功
-基線指定的 OEM runtime 與 bottle recipe。
+全部是 MapleStory argv。此介面只負責保持 argv 邊界並轉送參數；楓之谷請使用正式
+Cyder.app + CX26。
 
-本機 OEM 整合測試包可用以下方式建立：
+CX25 OEM 產品線與 `--cx 25` 建置已退役。現行路徑是正式 Cyder.app + CX26。本文保留為研究紀錄。
 
-```sh
-bash scripts/create-cyder-oem-test-app.sh
-```
-
-產生的 `dist/Cyder-test.app` 不內含或重散布 Nexon／CodeWeavers runtime，而是驗證並使用
-已安裝的 `/Applications/MapleStory Launcher.app`、OEM managed bottle 與 signed helper。
-
-### OEM engine fresh-prefix 測試包
-
-2026-07-20 的對照已確認完整 OEM bottle 不是必要條件。以下測試包內附 OEM engine，
-第一次執行時從 engine 自帶的通用 `cxbottle.conf` 建立全新 private prefix，不讀取
-`~/Library/Application Support/MapleStoryNA`：
-
-```sh
-bash scripts/create-cyder-oem-engine-test-app.sh
-```
-
-輸出為 `dist/Cyder-OEM-Engine-Test.app`。engine 使用 `.tar.xz`，目標 Mac 只需系統內建
-`tar`，不依賴 Homebrew `zstd`。此 flavor 固定使用 `zh_TW.UTF-8`，並由
-`cxbottle.conf` 的 `[EnvironmentVariables]` 注入 `RAW_AUDIO_PARSE=1`。
-
-測試版直接啟動使用者選取的原始 `MapleStory.exe`。2026-07-20 以 fresh prefix 重測確認，
-Documents 中的 macOS 路徑由 Wine 轉成 `Z:` 後，可以建立 MapleStory、BlackCipher、NGS、
-Vulkan swapchain 與 NxOverlay；不需要 APFS clone，也不會產生第二份遊戲資料。
-它預設指向成功基線的 `drive_c/MapleTest/MapleStory.exe`。測試 bridge 接受
-`Cyder-test PATH ARG...`；若省略 PATH，則使用上述預設 EXE。這是 OEM helper 的獨立
-測試工具，不是 Cyder.app 的公開 argv 介面。
+研究紀錄見 [OEM engine 差異研究](oem-engine-differences.md)、[OEM CX25 修補總覽](oem-cx25-maplestory-patches.md)。
 
 `ServiceAccountID` 不是顯示名稱，也不是數字 SN。傳入顯示名稱時，遊戲可正常啟動並
 顯示畫面，但伺服器會回覆「未登錄的帳號」。
-
-### 一般名稱的 OEM 分支特別版
-
-目前分支可建立仍名為 `Cyder.app` 的特別版：
-
-```sh
-bash scripts/create-cyder-maplestory-oem-app.sh
-```
-
-它沿用一般版的 `~/.cyder/runtime` 與 `~/Library/Application Support/Cyder`。若偵測到另一
-engine 的既有 shared bottle，會先改名保存再建立 OEM fresh prefix；Wine 尚在使用 prefix
-時不會切換。完整差異與安裝行為見 [OEM engine 差異研究](oem-engine-differences.md)。
 
 ## 版本庫與敏感資料
 
