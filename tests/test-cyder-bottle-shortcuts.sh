@@ -13,6 +13,10 @@ pack="$(cat "$ROOT/scripts/create-cyder-app.sh")"
 
 assert_contains "$scanner" "CyderBottleShortcutScanner" "library should expose a bottle shortcut scanner"
 assert_contains "$library" "importShortcuts" "library store should import discovered shortcuts"
+assert_contains "$library" "title: shortcut.displayName" \
+  "shortcut import must prefer the .lnk display name over the EXE basename"
+assert_contains "$library" 'title?.trimmingCharacters' \
+  "game tiles must fall back to the EXE name when no shortcut title exists"
 assert_contains "$scanner" "LocalBasePath" "scanner should parse Shell Link LocalBasePath"
 assert_contains "$icon" "ensureExtracted" "icon store should extract PE icons without Open Panel"
 assert_not_contains "$icon" "NSWorkspace.shared.icon(forFile:" \

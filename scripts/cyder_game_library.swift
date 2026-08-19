@@ -8,19 +8,24 @@ struct CyderGameRecord: Codable, Equatable, Identifiable {
     let id: String
     var executablePath: String
     var addedAt: Date
+    /// Start Menu / Desktop `.lnk` name when the game was imported from a shortcut.
+    var title: String?
 
     var executableURL: URL {
         URL(fileURLWithPath: executablePath)
     }
 
     var displayName: String {
-        executableURL.deletingPathExtension().lastPathComponent
+        let trimmed = title?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if !trimmed.isEmpty { return trimmed }
+        return executableURL.deletingPathExtension().lastPathComponent
     }
 
-    init(id: String, executablePath: String, addedAt: Date = Date()) {
+    init(id: String, executablePath: String, addedAt: Date = Date(), title: String? = nil) {
         self.id = id
         self.executablePath = executablePath
         self.addedAt = addedAt
+        self.title = title
     }
 }
 
@@ -65,20 +70,29 @@ final class CyderGameLibraryStore {
         load()
     }
 
-    func add(executable: URL) throws -> CyderGameRecord {
+    func add(executable: URL, title: String? = nil) throws -> CyderGameRecord {
         let canonical = try profileStore.canonicalExecutablePath(executable)
         guard canonical.lowercased().hasSuffix(".exe") else {
             throw CyderGameLibraryError.invalidExecutable(canonical)
         }
         let id = try profileStore.profileID(for: URL(fileURLWithPath: canonical))
+        let trimmedTitle = title?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let storedTitle = (trimmedTitle?.isEmpty == false) ? trimmedTitle : nil
         if let index = games.firstIndex(where: { $0.id == id }) {
             // Keep the original add date while refreshing a path that was
             // selected through a symlink or a Finder alias.
             games[index].executablePath = canonical
+            if let storedTitle {
+                games[index].title = storedTitle
+            }
             try save()
             return games[index]
         }
-        let record = CyderGameRecord(id: id, executablePath: canonical)
+        let record = CyderGameRecord(
+            id: id,
+            executablePath: canonical,
+            title: storedTitle
+        )
         games.append(record)
         sortGames()
         try save()
@@ -133,7 +147,7 @@ final class CyderGameLibraryStore {
                 windowsTarget: shortcut.windowsTarget,
                 prefix: prefix
             ) else { continue }
-            let record = try add(executable: exe)
+            let record = try add(executable: exe, title: shortcut.displayName)
             if known.insert(record.id).inserted {
                 added.append(record)
             }
@@ -158,9 +172,7 @@ final class CyderGameLibraryStore {
 
     private func sortGames() {
         games.sort {
-            let lhs = URL(fileURLWithPath: $0.executablePath).lastPathComponent
-            let rhs = URL(fileURLWithPath: $1.executablePath).lastPathComponent
-            let nameOrder = lhs.localizedStandardCompare(rhs)
+            let nameOrder = $0.displayName.localizedStandardCompare($1.displayName)
             if nameOrder != .orderedSame { return nameOrder == .orderedAscending }
             return $0.executablePath.localizedStandardCompare($1.executablePath) == .orderedAscending
         }

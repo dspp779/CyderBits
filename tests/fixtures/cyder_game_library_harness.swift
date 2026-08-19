@@ -15,6 +15,8 @@ enum CyderGameLibraryHarness {
 
         let first = try library.add(executable: firstURL)
         precondition(first.displayName == "測試遊戲")
+        let renamed = try library.add(executable: firstURL, title: "從捷徑來的名字")
+        precondition(renamed.displayName == "從捷徑來的名字")
         _ = try library.add(executable: firstURL)
         precondition(library.games.count == 1)
 
