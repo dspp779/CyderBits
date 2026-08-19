@@ -120,10 +120,75 @@ cyder_install_graphics_payload() {
   mv -f -h "$temp_link" "$current"
 }
 
+# Lexical absolute path (no symlink resolution). Matches Python os.path.abspath
+# enough for engine→graphics links; must keep `current-dxvk` as the final name.
+cyder_graphics_abspath() {
+  local path="$1" cwd part result=""
+  cwd="$(pwd)"
+  case "$path" in
+    /*) ;;
+    *) path="${cwd}/${path}" ;;
+  esac
+  while [[ "$path" != / && "$path" == */ ]]; do
+    path="${path%/}"
+  done
+  while [[ -n "$path" ]]; do
+    case "$path" in
+      /*)
+        path="${path#/}"
+        continue
+        ;;
+    esac
+    part="${path%%/*}"
+    if [[ "$part" == "$path" ]]; then
+      path=""
+    else
+      path="${path#*/}"
+    fi
+    case "$part" in
+      ""|.) continue ;;
+      ..) result="${result%/*}" ;;
+      *) result="${result}/${part}" ;;
+    esac
+  done
+  printf '%s\n' "${result:-/}"
+}
+
+# Lexical relative path; bash 3.2-safe (avoid the macOS CLT interpreter stub).
 cyder_graphics_relpath() {
-  local target="$1" start_dir="$2"
-  python3 -c 'import os, sys; print(os.path.relpath(sys.argv[1], sys.argv[2]))' \
-    "$target" "$start_dir"
+  local target start t_comp s_comp rel=""
+  target="$(cyder_graphics_abspath "$1")"
+  start="$(cyder_graphics_abspath "$2")"
+  if [[ "$target" == "$start" ]]; then
+    printf '.\n'
+    return 0
+  fi
+  while :; do
+    t_comp="${target#/}"
+    t_comp="${t_comp%%/*}"
+    s_comp="${start#/}"
+    s_comp="${s_comp%%/*}"
+    [[ -n "$t_comp" && "$t_comp" == "$s_comp" ]] || break
+    target="${target#/${t_comp}}"
+    start="${start#/${s_comp}}"
+  done
+  while [[ -n "$start" && "$start" != / ]]; do
+    s_comp="${start#/}"
+    s_comp="${s_comp%%/*}"
+    [[ -n "$s_comp" ]] || break
+    start="${start#/${s_comp}}"
+    rel="${rel:+${rel}/}.."
+  done
+  target="${target#/}"
+  if [[ -n "$rel" && -n "$target" ]]; then
+    printf '%s/%s\n' "$rel" "$target"
+  elif [[ -n "$rel" ]]; then
+    printf '%s\n' "$rel"
+  elif [[ -n "$target" ]]; then
+    printf '%s\n' "$target"
+  else
+    printf '.\n'
+  fi
 }
 
 cyder_engine_under_managed_engines() {

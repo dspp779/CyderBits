@@ -153,4 +153,35 @@ case "$rel" in
     ;;
 esac
 
+assert_not_contains "$(cat "$ROOT/scripts/cyder-ensure-graphics.sh")" "python3" \
+  "ensure-graphics relpath must not invoke python3 (CLT stub)"
+
+no_python="$tmp/no-python"
+mkdir -p "$no_python"
+cat >"$no_python/python3" <<'EOF'
+#!/bin/sh
+echo "unexpected python3: $*" >&2
+exit 99
+EOF
+chmod +x "$no_python/python3"
+
+relpath_out="$(
+  PATH="$no_python:/usr/bin:/bin" \
+  bash -c '
+    source "$1/scripts/cyder-ensure-graphics.sh"
+    cyder_graphics_relpath "$2" "$3"
+    cyder_graphics_relpath "$2" "$2"
+    cyder_graphics_relpath "$2" "$4"
+  ' _ "$ROOT" \
+    "$runtime/graphics/current-dxvk" \
+    "$engine/lib" \
+    "$tmp/alt-engines/wine-test/lib"
+)"
+assert_eq "$(printf '%s\n' "$relpath_out" | sed -n '1p')" "../../../graphics/current-dxvk" \
+  "relpath from engine lib to current-dxvk must stay lexical"
+assert_eq "$(printf '%s\n' "$relpath_out" | sed -n '2p')" "." \
+  "relpath of a path to itself must be ."
+assert_contains "$(printf '%s\n' "$relpath_out" | sed -n '3p')" "graphics/current-dxvk" \
+  "relpath across an overridden Engines root must still point at current-dxvk"
+
 echo "PASS test-cyder-ensure-graphics"
