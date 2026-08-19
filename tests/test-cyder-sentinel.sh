@@ -122,6 +122,8 @@ assert_contains "$app" 'hasClaimedWindow(id: launchID)' \
   "timeout and defer must keep the group only if a window was claimed or a process still lives"
 assert_contains "$app" 'claimLiveWindows(id: launchID)' \
   "timeout must synchronously claim existing Wine windows before deciding keep/end"
+assert_contains "$status" 'wineOnscreenWindows(matchingPrefix:' \
+  "LaunchGroup timeout must scan the bottle prefix, not only watched PIDs"
 assert_contains "$status" 'func claimLiveWindows(id: String)' \
   "status item must expose a synchronous window claim for LaunchGroup timeout"
 assert_contains "$app" 'keepLaunchGroupIfLiveOrClaimed(

@@ -151,7 +151,7 @@ final class CyderStatusItemController: NSObject, NSMenuDelegate {
             sessions[id] = updated
         }
         let prefix = session.prefix.path
-        let windows = wineOnscreenWindows(ownedBy: expanded)
+        let windows = wineOnscreenWindows(matchingPrefix: prefix, extraPIDs: expanded)
         for window in windows {
             adoptWindowedProcess(pid: window.pid, prefix: prefix, name: window.ownerName)
         }
@@ -261,6 +261,9 @@ final class CyderStatusItemController: NSObject, NSMenuDelegate {
         session.adoptedPIDs.insert(pid)
         sessions[id] = session
         watchPID(pid)
+        if kill(pid, 0) != 0 {
+            claimLiveWindows(id: id)
+        }
         refresh()
     }
 

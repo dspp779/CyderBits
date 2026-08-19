@@ -115,6 +115,12 @@ assert_contains "$status_source" 'let existing = wineProcessTreeIDs(root: pid)' 
   "first PID watch must snapshot children already forked before kqueue attach"
 assert_contains "$status_source" 'func claimLiveWindows(id: String)' \
   "timeout must claim on-screen Wine windows on the same LaunchGroup"
+assert_contains "$status_source" 'wineOnscreenWindows(matchingPrefix:' \
+  "timeout must claim windows by bottle prefix when the root PID already exited"
+assert_contains "$status_source" 'if kill(pid, 0) != 0 {
+            claimLiveWindows(id: id)
+        }' \
+  "attaching a dead root PID must still claim live windows in that bottle"
 assert_contains "$status_source" 'cancelOrphanedProcessSources' \
   "endLaunch must cancel process sources for PIDs no remaining group watches"
 
