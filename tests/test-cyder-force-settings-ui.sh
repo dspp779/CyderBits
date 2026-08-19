@@ -82,7 +82,10 @@ assert_contains "$ui" "diagnosticsWarning.isHidden = value.wineDiagnostics == .q
 assert_contains "$ui" "let syncMode = NSPopUpButton()" "global settings should use one synchronization selector"
 assert_contains "$ui" 'row("同步機制", syncMode)' "global settings should label the combined synchronization selector"
 assert_contains "$ui" 'row("Windows 語系", wineLocale)' "general settings should expose the Windows locale selector"
-assert_contains "$ui" "跟隨系統會讀取 macOS 語言" "locale selector should explain follow-system vs explicit"
+assert_contains "$ui" 'CyderWineLocale.menuCases.map' "locale menu should expose 系統/中文/日文/英文"
+assert_contains "$(cat "$ROOT/scripts/cyder_settings.swift")" 'case .system: return "系統"' "locale menu should label follow-system as 系統"
+assert_contains "$(cat "$ROOT/scripts/cyder_settings.swift")" 'detectedSystemLabel' "系統 should annotate the detected macOS language"
+assert_contains "$ui" "系統目前偵測為" "locale help should show the currently detected language"
 assert_contains "$ui" "該 bottle 的 wineserver 結束" \
   "locale help must say an already-running wineserver keeps the previous code page"
 assert_contains "$ui" "CyderSyncMode.allCases.map" "sync selector should expose off/MSync/ESync choices"

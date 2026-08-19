@@ -151,11 +151,29 @@ enum CyderWineLocale: String, Codable, CaseIterable {
 
     var title: String {
         switch self {
-        case .system: return "跟隨系統"
-        case .zhTW: return "中（台灣繁體）"
-        case .jaJP: return "日"
-        case .koKR: return "韓"
-        case .enUS: return "英"
+        case .system: return "系統"
+        case .zhTW: return "中文"
+        case .jaJP: return "日文"
+        case .koKR: return "韓文"
+        case .enUS: return "英文"
+        }
+    }
+
+    /// Menu order: 系統、中文、日文、英文. Korean remains decodable from older settings.
+    static var menuCases: [CyderWineLocale] { [.system, .zhTW, .jaJP, .enUS] }
+
+    /// Short label for the language `resolve-wine-locale.sh` would pick from macOS.
+    static func detectedSystemLabel() -> String {
+        let apple = UserDefaults.standard.string(forKey: "AppleLocale") ?? ""
+        switch apple {
+        case "zh-Hant_TW", "zh_TW": return "繁體中文"
+        case "zh-Hant_HK", "zh_HK": return "繁體中文（香港）"
+        case "zh-Hans_CN", "zh_CN", "zh-Hant_CN": return "簡體中文"
+        case "ja_JP", "ja": return "日文"
+        case "ko_KR", "ko": return "韓文"
+        case let value where value.hasPrefix("en_") || value.hasPrefix("en-"): return "英文"
+        case "": return "未知"
+        default: return apple
         }
     }
 
@@ -172,22 +190,15 @@ enum CyderWineLocale: String, Codable, CaseIterable {
     }
 
     var menuIndex: Int {
-        switch self {
-        case .system: return 0
-        case .zhTW: return 1
-        case .jaJP: return 2
-        case .koKR: return 3
-        case .enUS: return 4
-        }
+        Self.menuCases.firstIndex(of: self) ?? 0
     }
 
     init(menuIndex: Int) {
-        switch menuIndex {
-        case 1: self = .zhTW
-        case 2: self = .jaJP
-        case 3: self = .koKR
-        case 4: self = .enUS
-        default: self = .system
+        let cases = Self.menuCases
+        if menuIndex >= 0, menuIndex < cases.count {
+            self = cases[menuIndex]
+        } else {
+            self = .system
         }
     }
 }
@@ -579,6 +590,7 @@ struct CyderSettings: Codable {
 
     static func sanitizedWineLocale(_ raw: String?) -> CyderWineLocale {
         guard let raw, let value = CyderWineLocale(rawValue: raw) else { return .system }
+        if value == .koKR { return .system }
         return value
     }
 
