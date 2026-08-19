@@ -33,6 +33,21 @@ assert_contains "$icon" "cyder-extract-exe-icon.sh" \
 assert_contains "$icon" "45" \
   "icon extraction timeout must be 45 seconds for cold wineserver"
 
+python3 - "$ROOT/scripts/cyder_game_icon.swift" <<'PY'
+from pathlib import Path
+import sys
+src = Path(sys.argv[1]).read_text()
+marker = src.find("CyderPaths.bootstrapMarker")
+read_handle = src.find("FileHandle(forReadingFrom:")
+create = src.find("createFile")
+write = src.find("forWritingTo:")
+assert marker != -1, "bootstrapMarker guard must exist"
+assert read_handle != -1, "source FileHandle open must exist"
+assert create != -1 and write != -1, "staging createFile/forWritingTo must exist"
+assert marker < read_handle, "bootstrapMarker check must run before opening the source FileHandle"
+assert marker < create and marker < write, "bootstrapMarker check must run before staging the EXE"
+PY
+
 parsed="$(
   python3 - <<'PY'
 import struct

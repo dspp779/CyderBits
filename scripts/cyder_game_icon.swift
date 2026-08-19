@@ -67,6 +67,12 @@ final class CyderGameIconStore {
             completion?()
             return
         }
+        let wine = CyderPaths.engine.appendingPathComponent("bin/wine")
+        guard FileManager.default.fileExists(atPath: CyderPaths.bootstrapMarker.path),
+              FileManager.default.fileExists(atPath: wine.path) else {
+            completion?()
+            return
+        }
         let executable: FileHandle
         do {
             executable = try FileHandle(forReadingFrom: game.executableURL)
@@ -174,15 +180,6 @@ final class CyderGameIconStore {
             process.standardError = FileHandle.nullDevice
             var status: Int32 = -1
             do {
-                if !FileManager.default.fileExists(atPath: CyderPaths.bootstrapMarker.path)
-                    || !FileManager.default.fileExists(atPath: wine.path) {
-                    try? FileManager.default.removeItem(at: scratch)
-                    DispatchQueue.main.async {
-                        self.pending.remove(game.id)
-                        completion()
-                    }
-                    return
-                }
                 let finished = DispatchSemaphore(value: 0)
                 process.terminationHandler = { _ in finished.signal() }
                 try process.run()
