@@ -210,7 +210,7 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate,
             row("同步機制", syncMode),
             syncModeDescription,
             row("Windows 語系", wineLocale),
-            note("跟隨系統會讀取 macOS 語言。指定語系會在下次啟動 EXE 時生效。"),
+            note("跟隨系統會讀取 macOS 語言。指定語系會在下次啟動 EXE 時生效；若該 bottle 的 wineserver 仍在跑，代碼頁要等該 bottle 的 wineserver 結束後才會更新。"),
             engineFooterGap,
             engineVersionFooter(),
         ])

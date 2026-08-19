@@ -83,6 +83,8 @@ assert_contains "$ui" "let syncMode = NSPopUpButton()" "global settings should u
 assert_contains "$ui" 'row("同步機制", syncMode)' "global settings should label the combined synchronization selector"
 assert_contains "$ui" 'row("Windows 語系", wineLocale)' "general settings should expose the Windows locale selector"
 assert_contains "$ui" "跟隨系統會讀取 macOS 語言" "locale selector should explain follow-system vs explicit"
+assert_contains "$ui" "該 bottle 的 wineserver 結束" \
+  "locale help must say an already-running wineserver keeps the previous code page"
 assert_contains "$ui" "CyderSyncMode.allCases.map" "sync selector should expose off/MSync/ESync choices"
 assert_contains "$ui" "匯出上次遊戲記錄…" "diagnostics tab should expose last-game export"
 assert_contains "$ui" "清理除錯記錄…" "diagnostics tab should expose debug-log cleanup"
