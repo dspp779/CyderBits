@@ -13,6 +13,7 @@
 
 | 版本 | 文件 | 重點 |
 |------|------|------|
+| 0.12.0 | [繁中](releases/v0.12.0.md) | 正式版：LaunchGroup 選單列、winemenubuilder 遊戲庫圖示、語系選單、捷徑名稱、UI 開啟時顯示 Dock |
 | 0.11.1 | [繁中](releases/v0.11.1.md) | 正式版：gamaniagames://、URI 協定清單、open -n file URL、URI 冷啟動不開偏好設定 |
 | 0.10.1 | [繁中](releases/v0.10.1.md) | 測試版：強制結束液面動畫、MapleStory WZ adaptive cache、release tooling、manifest／遊戲庫測試與文件更新；process monitor 排定 0.11.0 |
 | 0.10.0 | [繁中](releases/v0.10.0.md) | Cyder010、DXVK／DXMT 圖形後端、單一選單列 instance、設定與啟動診斷收斂（已發布） |
