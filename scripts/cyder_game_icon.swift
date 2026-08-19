@@ -11,7 +11,9 @@ final class CyderGameIconStore {
     private let queue = DispatchQueue(label: "local.cyder.game-icons", qos: .utility)
     private var memory: [String: NSImage] = [:]
     private var pending: Set<String> = []
+    private var pendingCompletions: [String: [() -> Void]] = [:]
     private var failed: Set<String> = []
+    private var failedExecutableDate: [String: Date] = [:]
 
     func image(for game: CyderGameRecord) -> NSImage {
         if let logo = logo(for: game) { return logo }
@@ -37,6 +39,7 @@ final class CyderGameIconStore {
     /// protected source path.
     func extractSelectedGame(_ game: CyderGameRecord, completion: @escaping () -> Void) {
         failed.remove(game.id)
+        failedExecutableDate.removeValue(forKey: game.id)
         ensureExtracted(game, force: true, completion: completion)
     }
 
@@ -53,10 +56,21 @@ final class CyderGameIconStore {
             completion?()
             return
         }
-        guard !pending.contains(game.id) else { return }
-        guard force || !failed.contains(game.id) else {
-            completion?()
+        if pending.contains(game.id) {
+            if let completion {
+                pendingCompletions[game.id, default: []].append(completion)
+            }
             return
+        }
+        if !force, failed.contains(game.id) {
+            if let stamped = failedExecutableDate[game.id],
+               let current = executableDate(game.executableURL),
+               stamped == current {
+                completion?()
+                return
+            }
+            failed.remove(game.id)
+            failedExecutableDate.removeValue(forKey: game.id)
         }
         guard let resources = Bundle.main.resourceURL else {
             completion?()
@@ -77,7 +91,7 @@ final class CyderGameIconStore {
         do {
             executable = try FileHandle(forReadingFrom: game.executableURL)
         } catch {
-            failed.insert(game.id)
+            recordFailure(id: game.id, executableURL: game.executableURL)
             CyderDiagnostics.shared.warning("game-icon source-open-failed id=\(game.id)")
             completion?()
             return
@@ -110,12 +124,28 @@ final class CyderGameIconStore {
             .appendingPathComponent("\(game.id).png")
     }
 
+    private func executableDate(_ url: URL) -> Date? {
+        try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate
+    }
+
     private func isFresh(cacheURL: URL, executableURL: URL) -> Bool {
-        guard let iconDate = try? cacheURL.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate,
-              let executableDate = try? executableURL.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate else {
+        guard let iconDate = executableDate(cacheURL),
+              let exeDate = executableDate(executableURL) else {
             return false
         }
-        return iconDate >= executableDate
+        return iconDate >= exeDate
+    }
+
+    private func recordFailure(id: String, executableURL: URL) {
+        failed.insert(id)
+        failedExecutableDate[id] = executableDate(executableURL)
+    }
+
+    private func finishExtract(id: String, extra: () -> Void) {
+        pending.remove(id)
+        extra()
+        let queued = pendingCompletions.removeValue(forKey: id) ?? []
+        queued.forEach { $0() }
     }
 
     private func extract(
@@ -153,10 +183,9 @@ final class CyderGameIconStore {
                 try? executable.close()
                 try? FileManager.default.removeItem(at: scratch)
                 DispatchQueue.main.async {
-                    self.pending.remove(game.id)
-                    self.failed.insert(game.id)
+                    self.recordFailure(id: game.id, executableURL: game.executableURL)
                     CyderDiagnostics.shared.warning("game-icon stage-failed id=\(game.id)")
-                    completion()
+                    self.finishExtract(id: game.id, extra: completion)
                 }
                 return
             }
@@ -194,16 +223,17 @@ final class CyderGameIconStore {
             }
             try? FileManager.default.removeItem(at: scratch)
             DispatchQueue.main.async {
-                self.pending.remove(game.id)
                 let extracted = status == 0 ? NSImage(contentsOf: cacheURL) : nil
                 if let extracted {
+                    self.failed.remove(game.id)
+                    self.failedExecutableDate.removeValue(forKey: game.id)
                     self.memory[game.id] = extracted
                     CyderDiagnostics.shared.info("game-icon extract-success id=\(game.id)")
                 } else {
-                    self.failed.insert(game.id)
+                    self.recordFailure(id: game.id, executableURL: game.executableURL)
                     CyderDiagnostics.shared.warning("game-icon extract-failed id=\(game.id) status=\(status)")
                 }
-                completion()
+                self.finishExtract(id: game.id, extra: completion)
             }
         }
     }

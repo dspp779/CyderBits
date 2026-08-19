@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Extract a PNG from a Windows EXE via a temp .lnk and winemenubuilder -t.
-# Does not parse PE. Does not kill wineserver.
+# Does not parse PE. Does not kill wineserver (reuses the caller's WINEPREFIX).
 set -euo pipefail
 
 usage() {

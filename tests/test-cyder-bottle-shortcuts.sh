@@ -31,7 +31,19 @@ assert_not_contains "$icon" "/usr/bin/python3" \
 assert_contains "$icon" "cyder-extract-exe-icon.sh" \
   "game library must call the bundled winemenubuilder helper"
 assert_contains "$icon" "45" \
-  "icon extraction timeout must be 45 seconds for cold wineserver"
+  "icon extraction timeout must be 45 seconds against the existing shared prefix"
+assert_contains "$icon" "pendingCompletions" \
+  "overlapping extract requests must queue completions instead of dropping them"
+assert_contains "$icon" "failedExecutableDate" \
+  "failed extracts must retry after the EXE mtime changes"
+assert_contains "$icon" "game-icons" \
+  "extracted PNGs must persist under Application Support for reuse"
+assert_contains "$icon" '"WINEPREFIX": CyderPaths.sharedBottle.path' \
+  "icon extraction must reuse the shared bottle, not initialize a second prefix"
+assert_not_contains "$icon" "iconExtractPrefix" \
+  "icon extraction must not create a dedicated Wine prefix"
+assert_not_contains "$icon" "CYDER_ICON_EXTRACT_ISOLATED" \
+  "shared-prefix extracts must not wineserver -k"
 
 python3 - "$ROOT/scripts/cyder_game_icon.swift" <<'PY'
 from pathlib import Path

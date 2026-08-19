@@ -10,7 +10,9 @@ helper_src="$(cat "$HELPER")"
 assert_not_contains "$helper_src" "python3" \
   "icon helper must not invoke python3 (CLT stub)"
 assert_not_contains "$helper_src" "wineserver -k" \
-  "icon helper must not kill wineserver"
+  "icon helper must not kill the shared wineserver"
+assert_not_contains "$helper_src" "wineboot" \
+  "icon helper must not initialize a prefix; shared bootstrap already did"
 assert_contains "$helper_src" "winemenubuilder.exe" \
   "icon helper must use winemenubuilder"
 assert_contains "$helper_src" "winepath" \
@@ -25,7 +27,7 @@ assert_contains "$helper_src" 'winemenubuilder.exe -t "$lnk"' \
 tmp="$(mktemp -d "${TMPDIR:-/tmp}/cyder-extract-icon-test.XXXXXX")"
 trap 'rm -rf "$tmp"' EXIT
 set +e
-missing_out="$("$HELPER" --exe "$tmp/missing.exe" --png "$tmp/out.png" 2>&1)"
+missing_out="$(env -u WINEPREFIX "$HELPER" --exe "$tmp/missing.exe" --png "$tmp/out.png" 2>&1)"
 missing_status=$?
 set -e
 assert_eq "$missing_status" "1" "missing WINEPREFIX and exe must fail closed"
