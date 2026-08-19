@@ -81,6 +81,8 @@ assert_contains "$ui" "等待與凍結追蹤" "Wine diagnostics should expose th
 assert_contains "$ui" "diagnosticsWarning.isHidden = value.wineDiagnostics == .quiet" "diagnostics warning should hide in quiet mode"
 assert_contains "$ui" "let syncMode = NSPopUpButton()" "global settings should use one synchronization selector"
 assert_contains "$ui" 'row("同步機制", syncMode)' "global settings should label the combined synchronization selector"
+assert_contains "$ui" 'row("Windows 語系", wineLocale)' "general settings should expose the Windows locale selector"
+assert_contains "$ui" "跟隨系統會讀取 macOS 語言" "locale selector should explain follow-system vs explicit"
 assert_contains "$ui" "CyderSyncMode.allCases.map" "sync selector should expose off/MSync/ESync choices"
 assert_contains "$ui" "匯出上次遊戲記錄…" "diagnostics tab should expose last-game export"
 assert_contains "$ui" "清理除錯記錄…" "diagnostics tab should expose debug-log cleanup"

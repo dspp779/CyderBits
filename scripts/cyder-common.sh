@@ -675,7 +675,7 @@ cyder_load_saved_settings() {
   # here used to replace Retina=0/DPI=96 with the global Retina=1/DPI=192.
   local keep_msync=0 keep_esync=0 keep_retina=0 keep_dpi=0
   local keep_mingliu=0 keep_songti=0 keep_smoothing=0 keep_power=0 keep_diagnostics=0
-  local keep_maplestory_wz_cache=0
+  local keep_maplestory_wz_cache=0 keep_wine_locale=0
   case "${CYDER_MSYNC-}" in 0|1) keep_msync=1 ;; esac
   case "${CYDER_ESYNC-}" in 0|1) keep_esync=1 ;; esac
   case "${CYDER_RETINA_MODE-}" in 0|1) keep_retina=1 ;; esac
@@ -690,6 +690,11 @@ cyder_load_saved_settings() {
   case "${CYDER_POWER_MODE-}" in normal|background) keep_power=1 ;; esac
   case "${CYDER_WINE_DIAGNOSTICS-}" in quiet|errors|sync|unwind) keep_diagnostics=1 ;; esac
   case "${CYDER_MAPLESTORY_FILE_CACHE_PREFERENCE-}" in 0|1) keep_maplestory_wz_cache=1 ;; esac
+  case "${CYDER_WINE_LOCALE-}" in
+    system|zh_TW.UTF-8|zh_TW|ja_JP.UTF-8|ja_JP|ko_KR.UTF-8|ko_KR|en_US.UTF-8|en_US)
+      keep_wine_locale=1
+      ;;
+  esac
 
   export CYDER_MSYNC="${CYDER_MSYNC:-0}"
   export CYDER_ESYNC="${CYDER_ESYNC:-0}"
@@ -701,6 +706,7 @@ cyder_load_saved_settings() {
   export CYDER_POWER_MODE="${CYDER_POWER_MODE:-normal}"
   export CYDER_WINE_DIAGNOSTICS="${CYDER_WINE_DIAGNOSTICS:-quiet}"
   export CYDER_MAPLESTORY_FILE_CACHE_PREFERENCE="${CYDER_MAPLESTORY_FILE_CACHE_PREFERENCE:-1}"
+  export CYDER_WINE_LOCALE="${CYDER_WINE_LOCALE:-system}"
   [[ -f "$settings" ]] || return 0
   command -v plutil >/dev/null 2>&1 || return 0
 
@@ -751,6 +757,16 @@ cyder_load_saved_settings() {
     case "$value" in
       true|1) export CYDER_MAPLESTORY_FILE_CACHE_PREFERENCE=1 ;;
       false|0) export CYDER_MAPLESTORY_FILE_CACHE_PREFERENCE=0 ;;
+    esac
+  fi
+  if [[ "$keep_wine_locale" -eq 0 ]]; then
+    value="$(plutil -extract wineLocale raw -o - "$settings" 2>/dev/null || true)"
+    case "$value" in
+      zh_TW) export CYDER_WINE_LOCALE=zh_TW.UTF-8 ;;
+      ja_JP) export CYDER_WINE_LOCALE=ja_JP.UTF-8 ;;
+      ko_KR) export CYDER_WINE_LOCALE=ko_KR.UTF-8 ;;
+      en_US) export CYDER_WINE_LOCALE=en_US.UTF-8 ;;
+      *) export CYDER_WINE_LOCALE=system ;;
     esac
   fi
   if [[ -z "${CYDER_GRAPHICS_BACKEND:-}" ]]; then

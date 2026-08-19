@@ -17,7 +17,9 @@ assert_contains "$common" 'mingliu|songti|pingfang' "common should only accept s
 assert_contains "$settings" 'var retinaMode = true' "Retina should default on"
 assert_contains "$settings" 'var dpi = 192' "DPI should default to 192"
 assert_contains "$settings" 'var graphicsHud: CyderGraphicsHud = .off' "graphics HUD should default off"
-assert_contains "$settings" 'schemaVersion = 11' "schema version 11"
+assert_contains "$settings" 'schemaVersion = 12' "schema version 12"
+assert_contains "$settings" 'enum CyderWineLocale' "settings should define the Wine locale preference"
+assert_contains "$settings" 'CYDER_WINE_LOCALE' "global environment should export CYDER_WINE_LOCALE"
 assert_contains "$settings" 'var maplestoryWZCache = true' "MapleStory WZ cache should default on"
 assert_contains "$settings" 'var updatedAt: String?' "settings should persist the last update time"
 assert_contains "$settings" 'var lastModified: [String: String]' "settings should persist per-scope modification times"
@@ -44,6 +46,8 @@ assert_contains "$common" 'CYDER_RETINA_MODE:-1' "shell Retina default should be
 assert_contains "$common" 'CYDER_DPI:-192' "shell DPI default should be 192"
 assert_contains "$common" 'maplestoryWZCache' "shell should read the MapleStory WZ cache preference"
 assert_contains "$common" 'cyder_apply_maplestory_wz_cache' "shell should scope WZ cache to MapleStory launches"
+assert_contains "$common" 'CYDER_WINE_LOCALE' "shell should load the Wine locale preference"
+assert_contains "$common" 'plutil -extract wineLocale' "shell should read wineLocale from settings.json"
 
 assert_contains "$common" 'cyder_apply_graphics_preference' \
   "shell settings loader must route graphicsBackend through shared preference helper"

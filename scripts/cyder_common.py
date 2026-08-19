@@ -97,8 +97,21 @@ def choose_exe() -> Path:
 
 
 def resolve_wine_locale() -> str:
-    """Prefer explicit env, then macOS AppleLocale, then LANG; fallback zh_TW.UTF-8."""
+    """Prefer CYDER_WINE_LOCALE, then LC_ALL, macOS AppleLocale, LANG; fallback zh_TW.UTF-8."""
     fallback = os.environ.get("CYDER_WINE_LOCALE_FALLBACK", "zh_TW.UTF-8")
+    explicit = {
+        "zh_TW.UTF-8": "zh_TW.UTF-8",
+        "zh_TW": "zh_TW.UTF-8",
+        "ja_JP.UTF-8": "ja_JP.UTF-8",
+        "ja_JP": "ja_JP.UTF-8",
+        "ko_KR.UTF-8": "ko_KR.UTF-8",
+        "ko_KR": "ko_KR.UTF-8",
+        "en_US.UTF-8": "en_US.UTF-8",
+        "en_US": "en_US.UTF-8",
+    }
+    preference = os.environ.get("CYDER_WINE_LOCALE", "").strip()
+    if preference in explicit:
+        return explicit[preference]
 
     def valid(val: str) -> bool:
         return bool(val) and val not in ("C", "POSIX", "C.UTF-8")
@@ -150,6 +163,7 @@ def wine_locale_env(env: dict[str, str] | None = None) -> dict[str, str]:
     loc = resolve_wine_locale()
     out["LANG"] = loc
     out["LC_ALL"] = loc
+    out["LC_CTYPE"] = loc
     return out
 
 

@@ -48,6 +48,7 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate,
     private let engineVersion = NSTextField(labelWithString: "")
     private let syncMode = NSPopUpButton()
     private let syncModeDescription = NSTextField(wrappingLabelWithString: "")
+    private let wineLocale = NSPopUpButton()
     private let retina = NSSwitch()
     private let dpi = NSPopUpButton()
     private let fontMingLiu = NSPopUpButton()
@@ -197,6 +198,10 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate,
         let engineFooterGap = NSView()
         engineFooterGap.translatesAutoresizingMaskIntoConstraints = false
         engineFooterGap.heightAnchor.constraint(equalToConstant: 16).isActive = true
+        wineLocale.removeAllItems()
+        wineLocale.addItems(withTitles: CyderWineLocale.allCases.map { $0.title })
+        wineLocale.target = self
+        wineLocale.action = #selector(wineLocaleChanged)
         return tab("一般", rows: [
             gameLibrary,
             note("加入 Windows 遊戲、直接啟動，或管理每個遊戲的獨立 Wine prefix 與設定。"),
@@ -204,6 +209,8 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate,
             note("對目前 Cyder 使用的 Wine 環境執行 wineserver -k，並等待程序結束。"),
             row("同步機制", syncMode),
             syncModeDescription,
+            row("Windows 語系", wineLocale),
+            note("跟隨系統會讀取 macOS 語言。指定語系會在下次啟動 EXE 時生效。"),
             engineFooterGap,
             engineVersionFooter(),
         ])
@@ -680,6 +687,7 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate,
         let value = store.value
         syncMode.selectItem(at: CyderSyncMode(msync: value.msync, esync: value.esync ?? false).rawValue)
         updateSyncModeDescription()
+        wineLocale.selectItem(at: value.wineLocale.menuIndex)
         retina.state = value.retinaMode ? .on : .off
         let dpiValues = [96, 120, 144, 168, 192, 240]
         dpi.selectItem(at: dpiValues.firstIndex(of: value.dpi) ?? 4)
@@ -1013,6 +1021,10 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate,
         }
     }
 
+    @objc private func wineLocaleChanged() {
+        saveImmediately()
+    }
+
     @objc private func syncModeChanged() {
         updateSyncModeDescription()
         saveImmediately(deferredChange: true)
@@ -1044,6 +1056,7 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate,
                 case 3: $0.wineDiagnostics = .unwind
                 default: $0.wineDiagnostics = .quiet
                 }
+                $0.wineLocale = CyderWineLocale(menuIndex: wineLocale.indexOfSelectedItem)
                 $0.maplestoryWZCache = maplestoryWZCache.state == .on
                 for profileID in deletedProfiles {
                     $0.perProfile.removeValue(forKey: profileID)
@@ -1517,6 +1530,7 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate,
         let dpiValues = [96, 120, 144, 168, 192, 240]
         syncMode.selectItem(at: CyderSyncMode(msync: value.msync, esync: value.esync ?? false).rawValue)
         updateSyncModeDescription()
+        wineLocale.selectItem(at: value.wineLocale.menuIndex)
         retina.state = value.retinaMode ? .on : .off
         dpi.selectItem(at: dpiValues.firstIndex(of: value.dpi) ?? 0)
         fontMingLiu.selectItem(at: cyderFontTargetIndex(value.fontMingLiuTarget))

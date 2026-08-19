@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Resolve a Unix locale for Wine: explicit env > macOS AppleLocale > LANG > zh_TW.UTF-8
+# Resolve a Unix locale for Wine: CYDER_WINE_LOCALE > LC_ALL > macOS AppleLocale > LANG > zh_TW.UTF-8
 set -euo pipefail
 
 FALLBACK="${CYDER_WINE_LOCALE_FALLBACK:-zh_TW.UTF-8}"
@@ -7,6 +7,23 @@ FALLBACK="${CYDER_WINE_LOCALE_FALLBACK:-zh_TW.UTF-8}"
 valid_locale() {
   [[ -n "${1:-}" && "$1" != "C" && "$1" != "POSIX" && "$1" != "C.UTF-8" ]]
 }
+
+# Preference / env override. Wine maps these Unix locales to Windows ACP
+# (zh_TW.UTF-8 → 950, ja_JP.UTF-8 → 932, ko_KR.UTF-8 → 949, en_US.UTF-8 → 1252).
+explicit_unix_locale() {
+  case "${1:-}" in
+    zh_TW.UTF-8|zh_TW) printf '%s\n' "zh_TW.UTF-8" ;;
+    ja_JP.UTF-8|ja_JP) printf '%s\n' "ja_JP.UTF-8" ;;
+    ko_KR.UTF-8|ko_KR) printf '%s\n' "ko_KR.UTF-8" ;;
+    en_US.UTF-8|en_US) printf '%s\n' "en_US.UTF-8" ;;
+    *) return 1 ;;
+  esac
+}
+
+if loc="$(explicit_unix_locale "${CYDER_WINE_LOCALE:-}")"; then
+  printf '%s\n' "$loc"
+  exit 0
+fi
 
 if valid_locale "${LC_ALL:-}"; then
   printf '%s\n' "$LC_ALL"

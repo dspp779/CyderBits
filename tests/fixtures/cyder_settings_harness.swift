@@ -6,14 +6,16 @@ struct CyderSettingsHarness {
         let path = URL(fileURLWithPath: CommandLine.arguments[1])
         let store = CyderSettingsStore(url: path)
         let profileID = "profile-0123456789abcdef01234567"
-        precondition(store.value.schemaVersion == 11)
+        precondition(store.value.schemaVersion == 12)
         precondition(store.value.graphicsBackend == .default)
         precondition(store.value.dxvkFrameRate == .sixty)
         precondition(store.value.graphicsHud == .off)
         precondition(store.value.dxvkHudFrametimes)
         precondition(store.value.wineDiagnostics == .quiet)
         precondition(store.value.maplestoryWZCache)
+        precondition(store.value.wineLocale == .system)
         precondition(store.environment["CYDER_WINE_DIAGNOSTICS"] == "quiet")
+        precondition(store.environment["CYDER_WINE_LOCALE"] == "system")
         precondition(store.environment["CYDER_DPI"] == "480")
         let profileEnvironment = store.environment(profileID: profileID, legacyBasename: "game.exe")
         precondition(profileEnvironment["PROFILE_VALUE"] == "yes")
@@ -63,14 +65,18 @@ struct CyderSettingsHarness {
         let environment = profile["environment"] as! [String: Any]
         precondition(environment["NOT VALID"] == nil)
         let reloaded = CyderSettingsStore(url: path)
-        precondition(reloaded.value.schemaVersion == 11)
+        precondition(reloaded.value.schemaVersion == 12)
         precondition(!reloaded.value.maplestoryWZCache)
         precondition(reloaded.value.revision == 1)
 
         try store.update { settings in
             settings.wineDiagnostics = .errors
+            settings.wineLocale = .zhTW
         }
         precondition(store.environment["CYDER_WINE_DIAGNOSTICS"] == "errors")
+        precondition(store.environment["CYDER_WINE_LOCALE"] == "zh_TW.UTF-8")
+        precondition(CyderSettings.sanitizedWineLocale("ja_JP") == .jaJP)
+        precondition(CyderSettings.sanitizedWineLocale("bogus") == .system)
         precondition(CyderWineDiagnostics.errors.wineDebug == "-all,err+all,+timestamp,+pid,+tid")
         precondition(CyderWineDiagnostics.sync.wineDebug == "-all,err+all,+timestamp,+pid,+tid,+sync")
         precondition(CyderWineDiagnostics.unwind.wineDebug == "-all,+timestamp,+pid,+tid,+seh,+unwind")

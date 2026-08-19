@@ -140,6 +140,58 @@ enum CyderWineDiagnostics: String, Codable, CaseIterable {
     }
 }
 
+/// Global Wine Unix locale. Wine maps this to the Windows ANSI code page
+/// (for example `zh_TW.UTF-8` → ACP 950) at process start.
+enum CyderWineLocale: String, Codable, CaseIterable {
+    case system
+    case zhTW = "zh_TW"
+    case jaJP = "ja_JP"
+    case koKR = "ko_KR"
+    case enUS = "en_US"
+
+    var title: String {
+        switch self {
+        case .system: return "跟隨系統"
+        case .zhTW: return "中（台灣繁體）"
+        case .jaJP: return "日"
+        case .koKR: return "韓"
+        case .enUS: return "英"
+        }
+    }
+
+    /// Unix locale exported as `CYDER_WINE_LOCALE`. `system` leaves detection to
+    /// `resolve-wine-locale.sh`.
+    var unixLocale: String? {
+        switch self {
+        case .system: return nil
+        case .zhTW: return "zh_TW.UTF-8"
+        case .jaJP: return "ja_JP.UTF-8"
+        case .koKR: return "ko_KR.UTF-8"
+        case .enUS: return "en_US.UTF-8"
+        }
+    }
+
+    var menuIndex: Int {
+        switch self {
+        case .system: return 0
+        case .zhTW: return 1
+        case .jaJP: return 2
+        case .koKR: return 3
+        case .enUS: return 4
+        }
+    }
+
+    init(menuIndex: Int) {
+        switch menuIndex {
+        case 1: self = .zhTW
+        case 2: self = .jaJP
+        case 3: self = .koKR
+        case 4: self = .enUS
+        default: self = .system
+        }
+    }
+}
+
 enum CyderSyncMode: Int, CaseIterable {
     case off
     case msync
@@ -350,13 +402,14 @@ struct CyderExecutableSettings: Codable {
 }
 
 struct CyderSettings: Codable {
-    // Schema 11 adds the MapleStory WZ cache preference. Schema 10 removes the experimental dxvk2 graphics backend. Schema 9 added
+    // Schema 12 adds the global Wine locale preference. Schema 11 adds the MapleStory WZ cache preference.
+    // Schema 10 removes the experimental dxvk2 graphics backend. Schema 9 added
     // that backend; old settings are migrated to the default backend on decode.
     // Schema 8 replaces fontPreset with fontMingLiuTarget/fontSongtiTarget.
     // Schema 7 adds wineDiagnostics. Schema 6 adds dxvkHudFrametimes. Schema 5 adds graphicsHud.
     // Schema 4 adds graphics backend and DXVK frame rate. Schema 3 adds profile-keyed overrides. Keep perExecutable as a
     // legacy basename fallback; never infer a profile from a basename.
-    var schemaVersion = 11
+    var schemaVersion = 12
     var revision = 0
     /// Wall-clock time of the most recent effective settings change. Kept in
     /// settings.json so the state and its provenance travel together.
@@ -376,6 +429,8 @@ struct CyderSettings: Codable {
     var graphicsHud: CyderGraphicsHud = .off
     var dxvkHudFrametimes = true
     var wineDiagnostics: CyderWineDiagnostics = .quiet
+    /// Unix locale for Wine process start. Default follows macOS `AppleLocale`.
+    var wineLocale: CyderWineLocale = .system
     /// Enable MapleStory-only read-ahead for read-only WZ/MS files.
     var maplestoryWZCache = true
     var perExecutable: [String: CyderExecutableSettings] = [:]
@@ -387,6 +442,7 @@ struct CyderSettings: Codable {
         case schemaVersion, revision, updatedAt, lastModified, msync, esync, retinaMode, dpi
         case fontMingLiuTarget, fontSongtiTarget, fontSmoothing
         case graphicsBackend, dxvkFrameRate, graphicsHud, dxvkHudFrametimes, wineDiagnostics
+        case wineLocale
         case maplestoryWZCache
         case perExecutable, perProfile
         case fontPreset
@@ -412,10 +468,10 @@ struct CyderSettings: Codable {
     init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
         let version = try values.decodeIfPresent(Int.self, forKey: .schemaVersion) ?? 1
-        guard version <= 11 else { throw DecodingError.dataCorruptedError(
+        guard version <= 12 else { throw DecodingError.dataCorruptedError(
             forKey: .schemaVersion, in: values, debugDescription: "unsupported settings schema \(version)"
         ) }
-        schemaVersion = 11
+        schemaVersion = 12
         revision = try values.decodeIfPresent(Int.self, forKey: .revision) ?? 0
         updatedAt = try values.decodeIfPresent(String.self, forKey: .updatedAt)
         lastModified = try values.decodeIfPresent([String: String].self, forKey: .lastModified) ?? [:]
@@ -446,6 +502,9 @@ struct CyderSettings: Codable {
         dxvkHudFrametimes = try values.decodeIfPresent(Bool.self, forKey: .dxvkHudFrametimes) ?? true
         wineDiagnostics = Self.sanitizedWineDiagnostics(
             try values.decodeIfPresent(String.self, forKey: .wineDiagnostics)
+        )
+        wineLocale = Self.sanitizedWineLocale(
+            try values.decodeIfPresent(String.self, forKey: .wineLocale)
         )
         maplestoryWZCache = try values.decodeIfPresent(Bool.self, forKey: .maplestoryWZCache) ?? true
         perExecutable = try values.decodeIfPresent([String: CyderExecutableSettings].self, forKey: .perExecutable) ?? [:]
@@ -487,6 +546,7 @@ struct CyderSettings: Codable {
         try container.encode(graphicsHud, forKey: .graphicsHud)
         try container.encode(dxvkHudFrametimes, forKey: .dxvkHudFrametimes)
         try container.encode(wineDiagnostics, forKey: .wineDiagnostics)
+        try container.encode(wineLocale, forKey: .wineLocale)
         try container.encode(maplestoryWZCache, forKey: .maplestoryWZCache)
         try container.encode(perExecutable, forKey: .perExecutable)
         try container.encode(perProfile, forKey: .perProfile)
@@ -514,6 +574,11 @@ struct CyderSettings: Codable {
 
     static func sanitizedWineDiagnostics(_ raw: String?) -> CyderWineDiagnostics {
         guard let raw, let value = CyderWineDiagnostics(rawValue: raw) else { return .quiet }
+        return value
+    }
+
+    static func sanitizedWineLocale(_ raw: String?) -> CyderWineLocale {
+        guard let raw, let value = CyderWineLocale(rawValue: raw) else { return .system }
         return value
     }
 
@@ -727,6 +792,7 @@ struct CyderSettings: Codable {
         mark("graphicsHud", before.graphicsHud.rawValue != after.graphicsHud.rawValue)
         mark("dxvkHudFrametimes", before.dxvkHudFrametimes != after.dxvkHudFrametimes)
         mark("wineDiagnostics", before.wineDiagnostics.rawValue != after.wineDiagnostics.rawValue)
+        mark("wineLocale", before.wineLocale.rawValue != after.wineLocale.rawValue)
         mark("maplestoryWZCache", before.maplestoryWZCache != after.maplestoryWZCache)
 
         let profileIDs = Set(before.perProfile.keys).union(after.perProfile.keys)
@@ -771,7 +837,7 @@ final class CyderSettingsStore {
         do {
             let data = try Data(contentsOf: url)
             let decoded = try JSONDecoder().decode(CyderSettings.self, from: data)
-            guard decoded.schemaVersion <= 11 else {
+            guard decoded.schemaVersion <= 12 else {
                 CyderDiagnostics.shared.warning("unsupported settings schema=\(decoded.schemaVersion); using defaults")
                 value = .defaults
                 return
@@ -787,7 +853,7 @@ final class CyderSettingsStore {
         CyderDiagnostics.shared.enter(.settingsSave)
         var next = value
         work(&next)
-        next.schemaVersion = 11
+        next.schemaVersion = 12
         next.perProfile = next.perProfile.reduce(into: [:]) { result, item in
             guard CyderSettings.isValidProfileID(item.key) else { return }
             result[item.key] = CyderSettings.sanitized(item.value)
@@ -825,6 +891,7 @@ final class CyderSettingsStore {
             "CYDER_FONT_SMOOTHING": value.fontSmoothing,
             "CYDER_POWER_MODE": "normal",
             "CYDER_WINE_DIAGNOSTICS": value.wineDiagnostics.rawValue,
+            "CYDER_WINE_LOCALE": value.wineLocale.unixLocale ?? "system",
         ]
     }
 
