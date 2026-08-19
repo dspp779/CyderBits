@@ -37,7 +37,9 @@ assert_contains "$common" 'exec 3<>' \
   "the wait fifo write end must open read-write so attach cannot deadlock on helper dyld"
 assert_contains "$common" '--pid-file "$CYDER_SENTINEL_WATCH_FILE" 3>&-' \
   "the helper argv must close fd 3 so it cannot inherit the fifo write end"
-assert_contains "$common" 'cyder_exec_game >>"$log_file" 2>&1 3>&-' \
+assert_contains "$common" 'cyder_exec_game_with_launch_log "$log_file" &' \
+  "the detached supervisor must log through the launch-log helper"
+assert_contains "$common" 'cyder_exec_game >"$fifo" 2>&1 3>&-' \
   "Wine must not inherit the fifo write end"
 assert_contains "$sentinel" 'closeInheritedHelperFileDescriptors' \
   "the sentinel helper must drop inherited fds so it cannot hold its own fifo write end"

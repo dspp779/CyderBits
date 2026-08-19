@@ -541,4 +541,73 @@ PATH="$TMP/fake-bin:$PATH" \
 assert_contains "$(cat "$TMP/run-support/Logs/last-launch.log")" "$custom_prefix" "custom profile launch should log its prefix"
 assert test ! -e "$custom_prefix/.cyder-runtime/sessions"/*
 
+# Quiet capture keeps a live tail cap; non-quiet diagnostics keep the full stream.
+mkdir -p "$TMP/cap-bin"
+cat >"$TMP/cap-bin/arch" <<'SH'
+#!/usr/bin/env bash
+[[ "${1:-}" == "-x86_64" ]] && shift
+exec "$@"
+SH
+cat >"$TMP/cap-bin/wine" <<'SH'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >"${CYDER_TEST_ARGS:-/dev/null}"
+printf 'WINE-HEAD\n'
+perl -e 'print "x" x 51200; print "\n"'
+printf 'WINE-TAIL\n'
+SH
+chmod +x "$TMP/cap-bin/arch" "$TMP/cap-bin/wine"
+
+bounded_log="$TMP/bounded-unit.log"
+: >"$bounded_log"
+printf 'KEEP-HEAD\n' >"$bounded_log"
+{
+  perl -e 'print "y" x 20000; print "\n"'
+  printf 'KEEP-TAIL\n'
+} | CYDER_WINE_LAUNCH_LOG_MAX_BYTES=4096 bash -c \
+  'source "$1/scripts/cyder-common.sh"; cyder_bounded_wine_log "$2"' \
+  _ "$ROOT" "$bounded_log"
+bounded_size="$(wc -c <"$bounded_log" | tr -d ' ')"
+if [[ "$bounded_size" -gt 4096 ]]; then
+  echo "ASSERT failed: quiet Wine log helper should cap at CYDER_WINE_LAUNCH_LOG_MAX_BYTES (got $bounded_size)" >&2
+  exit 1
+fi
+assert_contains "$(cat "$bounded_log")" "truncated" "capped quiet Wine log should record truncation"
+assert_contains "$(cat "$bounded_log")" "KEEP-TAIL" "capped quiet Wine log should keep the newest output"
+assert_not_contains "$(cat "$bounded_log")" "KEEP-HEAD" "capped quiet Wine log should drop the oldest output"
+
+CYDER_SUPPORT="$TMP/quiet-cap-support" \
+CYDER_SCRIPTS="$ROOT/scripts" \
+CYDER_TEST_ARGS="$TMP/quiet-cap-args" \
+CYDER_CAPTURE_WINE_LOG=1 \
+CYDER_WINE_LAUNCH_LOG_MAX_BYTES=4096 \
+PATH="$TMP/cap-bin:$PATH" \
+  bash -c 'source "$1/scripts/cyder-common.sh"; cyder_init_paths "$1"; cyder_run_wine_exe "$2/wine" "$3"' \
+    _ "$ROOT" "$TMP/cap-bin" "$TMP/foreground-test.exe"
+quiet_cap_log="$TMP/quiet-cap-support/Logs/sessions/last-wine-launch.log"
+quiet_cap_size="$(wc -c <"$quiet_cap_log" | tr -d ' ')"
+if [[ "$quiet_cap_size" -gt 4096 ]]; then
+  echo "ASSERT failed: quiet captured launch log should stay within the live cap (got $quiet_cap_size)" >&2
+  exit 1
+fi
+assert_contains "$(cat "$quiet_cap_log")" "truncated" "quiet launch log should note live truncation"
+assert_contains "$(cat "$quiet_cap_log")" "WINE-TAIL" "quiet launch log should retain the newest Wine output"
+assert_not_contains "$(cat "$quiet_cap_log")" "WINE-HEAD" "quiet launch log should drop the oldest Wine output"
+
+CYDER_SUPPORT="$TMP/errors-full-support" \
+CYDER_SCRIPTS="$ROOT/scripts" \
+CYDER_TEST_ARGS="$TMP/errors-full-args" \
+CYDER_WINE_DIAGNOSTICS=errors \
+CYDER_WINE_LAUNCH_LOG_MAX_BYTES=4096 \
+PATH="$TMP/cap-bin:$PATH" \
+  bash -c 'source "$1/scripts/cyder-common.sh"; cyder_init_paths "$1"; cyder_run_wine_exe "$2/wine" "$3"' \
+    _ "$ROOT" "$TMP/cap-bin" "$TMP/foreground-test.exe"
+errors_full_log="$TMP/errors-full-support/Logs/sessions/last-wine-launch.log"
+errors_full_size="$(wc -c <"$errors_full_log" | tr -d ' ')"
+if [[ "$errors_full_size" -le 4096 ]]; then
+  echo "ASSERT failed: errors diagnostics should keep the full Wine stream (got $errors_full_size)" >&2
+  exit 1
+fi
+assert_contains "$(cat "$errors_full_log")" "WINE-HEAD" "errors diagnostics should keep the start of Wine output"
+assert_contains "$(cat "$errors_full_log")" "WINE-TAIL" "errors diagnostics should keep the end of Wine output"
+
 echo "PASS test-cyder-launcher"

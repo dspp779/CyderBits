@@ -2719,6 +2719,81 @@ cyder_sentinel_close_write() {
   exec 3>&- 2>/dev/null || true
 }
 
+# Quiet Wine launch logs keep a live tail cap on one inode so a long session
+# cannot fill the disk. Non-quiet diagnostics skip this helper.
+cyder_bounded_wine_log() {
+  local log_file="$1"
+  local max_bytes="${CYDER_WINE_LAUNCH_LOG_MAX_BYTES:-16777216}"
+  [[ "$max_bytes" =~ ^[1-9][0-9]*$ ]] || max_bytes=16777216
+  /usr/bin/perl -e '
+    use strict;
+    use warnings;
+    use Fcntl qw(O_RDWR O_CREAT SEEK_SET SEEK_END);
+    use IO::Handle;
+
+    my $file = $ARGV[0];
+    my $max = int($ARGV[1]);
+    $max = 1 if $max < 1;
+    my $marker = "[Cyder] last-wine-launch.log truncated; showing newest output\n";
+    my $payload_max = $max - length($marker);
+    $payload_max = $max if $payload_max < 1;
+    my $flush_every = $payload_max > 1024 * 1024 ? 1024 * 1024 : int($payload_max / 4) || 1;
+
+    sysopen(my $fh, $file, O_RDWR | O_CREAT, 0644) or die "open $file: $!";
+    binmode $fh;
+    binmode STDIN;
+    $fh->autoflush(1);
+    seek $fh, 0, SEEK_END or die $!;
+    my $size = tell $fh;
+    my $ring = "";
+    my $using_ring = 0;
+    my $since_flush = 0;
+    my $write_capped = sub {
+      truncate $fh, 0 or die $!;
+      seek $fh, 0, SEEK_SET or die $!;
+      print $fh $marker;
+      print $fh $ring;
+    };
+
+    if ($size >= $max) {
+      my $start = $size > $payload_max ? $size - $payload_max : 0;
+      seek $fh, $start, SEEK_SET or die $!;
+      read $fh, $ring, $payload_max;
+      $using_ring = 1;
+      $write_capped->();
+    }
+
+    while (1) {
+      my $n = read STDIN, my $buf, 65536;
+      last unless $n;
+      if (!$using_ring) {
+        if ($size + $n <= $max) {
+          print $fh $buf;
+          $size += $n;
+          next;
+        }
+        seek $fh, 0, SEEK_SET or die $!;
+        my $existing = "";
+        read $fh, $existing, $size if $size > 0;
+        $ring = $existing . $buf;
+        $ring = substr($ring, -$payload_max) if length($ring) > $payload_max;
+        $using_ring = 1;
+        $write_capped->();
+        $since_flush = 0;
+        next;
+      }
+      $ring .= $buf;
+      $ring = substr($ring, -$payload_max) if length($ring) > $payload_max;
+      $since_flush += $n;
+      if ($since_flush >= $flush_every) {
+        $write_capped->();
+        $since_flush = 0;
+      }
+    }
+    $write_capped->() if $using_ring;
+  ' -- "$log_file" "$max_bytes"
+}
+
 cyder_run_wine_exe() {
   local wine_bin="$1"
   local exe="$2"
@@ -2846,6 +2921,30 @@ cyder_run_wine_exe() {
       cyder_exec_wine "$wine_bin" "$exe"
     fi
   }
+  cyder_exec_game_with_launch_log() {
+    local launch_log="$1"
+    local status=0 dir fifo log_pid
+    if [[ "$launch_log" == /dev/null ]]; then
+      cyder_exec_game >/dev/null 2>&1 3>&-
+      return $?
+    fi
+    if [[ "$wine_diagnostics" != quiet ]]; then
+      cyder_exec_game >>"$launch_log" 2>&1 3>&-
+      return $?
+    fi
+    dir="$(mktemp -d "${TMPDIR:-/tmp}/cyder-winelog.XXXXXX")" || return 1
+    fifo="$dir/log"
+    if ! mkfifo "$fifo"; then
+      rm -rf "$dir"
+      return 1
+    fi
+    cyder_bounded_wine_log "$launch_log" <"$fifo" 3>&- &
+    log_pid=$!
+    cyder_exec_game >"$fifo" 2>&1 3>&- || status=$?
+    wait "$log_pid" || true
+    rm -rf "$dir"
+    return "$status"
+  }
   {
     local taskpolicy_bin=""
     taskpolicy_bin="$(cyder_find_taskpolicy || true)"
@@ -2945,7 +3044,7 @@ cyder_run_wine_exe() {
       detached_session_id="${session_id:-}"
       (
         cyder_sentinel_attach "$prefix" "$exe" || true
-        cyder_exec_game >>"$log_file" 2>&1 3>&- &
+        cyder_exec_game_with_launch_log "$log_file" &
         wine_pid=$!
         cyder_sentinel_publish_pid "$wine_pid"
         cyder_sentinel_close_write
@@ -3027,7 +3126,7 @@ cyder_run_wine_exe() {
     else
       # CLI launches keep Wine in the foreground so the caller owns the game
       # lifetime. Finder's native entry point opts into the detached branch.
-      cyder_exec_game >>"$log_file" 2>&1
+      cyder_exec_game_with_launch_log "$log_file"
     fi
   )
 }

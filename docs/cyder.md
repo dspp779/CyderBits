@@ -274,7 +274,7 @@ Cyder 每次啟動都會建立小型 session 記錄，保存目前階段、shell
       ...                   # wineboot、環境套用等其它操作記錄
     sessions/
       <session>.log         # Cyder App session
-      last-wine-launch.log  # 最近一次遊戲執行診斷（固定覆寫）
+      last-wine-launch.log  # 最近一次遊戲執行診斷（安靜模式即時保留最後 16 MiB；除錯模式完整保留）
     session-state.json      # 目前／上次 session 是否正常完成
     last-error.json         # 最近一次結構化錯誤
     last-launch.log         # 指向 sessions/last-wine-launch.log 的連結
@@ -284,7 +284,7 @@ Cyder 每次啟動都會建立小型 session 記錄，保存目前階段、shell
 
 除使用者主動取消外，非預期失敗會顯示 `CYD-*` 錯誤代碼、失敗階段、exit status 或 signal，並提供「複製診斷資訊」及「開啟相關記錄」。偏好設定 →「除錯」只匯出上次遊戲的 Wine launch log；其他初始化或啟動錯誤可直接複製錯誤對話框中的診斷資訊。清理除錯記錄會在關閉遊戲後移除 launch/debug log，以及 `operations`、`sessions` 內的舊紀錄。若 native process 來不及顯示對話框便 crash，Cyder 會在下次啟動時偵測未完成的 session 並提示查看上次記錄。
 
-設定套用會追加到單一 rolling settings-apply.log；遊戲執行只保留最新的 last-wine-launch.log。
+設定套用會追加到單一 rolling settings-apply.log；遊戲執行只保留最新的 last-wine-launch.log。安靜模式會在寫入過程中把該檔限制在最後 16 MiB；偏好設定「除錯」開啟 Wine 診斷時則完整保留。
 
 ## 相關文件
 
