@@ -25,8 +25,13 @@ final class CyderGameIconStore {
     /// this does not fall back to a placeholder, so title bars can omit the
     /// image when the game has no logo yet.
     func logo(for game: CyderGameRecord) -> NSImage? {
-        if let cached = memory[game.id] { return cached }
         let cacheURL = iconURL(for: game)
+        if let cached = memory[game.id] {
+            if isFresh(cacheURL: cacheURL, executableURL: game.executableURL) {
+                return cached
+            }
+            memory.removeValue(forKey: game.id)
+        }
         guard isFresh(cacheURL: cacheURL, executableURL: game.executableURL),
               let image = NSImage(contentsOf: cacheURL) else { return nil }
         memory[game.id] = image
@@ -201,6 +206,11 @@ final class CyderGameIconStore {
                 "--wine", wine.path,
                 "--scratch", scratch.path,
             ]
+            // Cost of reusing bottles/shared: the first extract per EXE attaches
+            // to that wineserver (a running game on shared can hitch). Timeout
+            // only SIGTERM's this bash helper — never terminate wineserver.
+            // Independent profile tiles also extract against shared. After
+            // game-icons/<id>.png is written, later library opens do not start Wine.
             process.environment = ProcessInfo.processInfo.environment.merging([
                 "WINEPREFIX": CyderPaths.sharedBottle.path,
                 "WINESERVER": CyderPaths.engine.appendingPathComponent("bin/wineserver").path,

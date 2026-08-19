@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 # Extract a PNG from a Windows EXE via a temp .lnk and winemenubuilder -t.
-# Does not parse PE. Does not kill wineserver (reuses the caller's WINEPREFIX).
+# Does not parse PE. Reuses the caller's WINEPREFIX (Cyder: bottles/shared) so
+# we do not initialize a second prefix. Cost: first extract can hitch a game
+# already on that server; this script must not terminate wineserver (that would
+# kill the game). Timeout is owned by the Swift caller (SIGTERM this script only).
 set -euo pipefail
 
 usage() {

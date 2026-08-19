@@ -22,7 +22,10 @@ assert_contains "$ui" "refreshLibrary" "refresh should have a dedicated action"
 assert_contains "$ui" "gearshape" "game library should expose a preferences gear"
 assert_contains "$ui" "onOpenPreferences" "game library should request preferences"
 assert_contains "$ui" "addCyderTitlebarButtons" "title bar should host multiple trailing buttons"
-assert_contains "$ui" "importBottleShortcuts" "opening the library should import bottle shortcuts"
+assert_contains "$ui" "func retryMissingIcons(" \
+  "an already-open library must retry icon extract after Wine bootstrap"
+assert_contains "$app" "retryMissingIcons(" \
+  "environment setup must ask the library to retry icons when bootstrap finishes"
 assert_contains "$app" "onOpenPreferences" "app should wire library preferences to settings"
 assert_contains "$pack" "cyder_bottle_shortcuts.swift" \
   "app bundle must compile the shortcut scanner source"
@@ -63,6 +66,12 @@ assert read_handle != -1, "source FileHandle open must exist"
 assert create != -1 and write != -1, "staging createFile/forWritingTo must exist"
 assert marker < read_handle, "bootstrapMarker check must run before opening the source FileHandle"
 assert marker < create and marker < write, "bootstrapMarker check must run before staging the EXE"
+logo = src.find("func logo(for")
+mem = src.find("if let cached = memory[game.id]", logo)
+assert mem != -1, "logo() must consult the in-memory cache"
+block = src[mem:mem + 280]
+assert "isFresh" in block, "memory hit must still honor EXE vs PNG mtime"
+assert "return cached" in block, "fresh memory logos must still return"
 PY
 
 parsed="$(

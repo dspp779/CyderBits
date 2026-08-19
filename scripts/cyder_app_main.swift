@@ -1192,6 +1192,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
                         return
                     }
                 }
+                self.gameLibraryController.retryMissingIcons()
                 if self.openLibraryOnLaunch {
                     self.showGameLibrary()
                 } else {

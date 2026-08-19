@@ -1174,6 +1174,13 @@ final class CyderGameLibraryWindowController: NSWindowController, NSWindowDelega
         ensureGameIcons()
     }
 
+    /// Re-run extract after Wine bootstrap so tiles that opened during first-run
+    /// setup are not stuck on placeholders until the user hits refresh.
+    func retryMissingIcons() {
+        guard window?.isVisible == true else { return }
+        ensureGameIcons()
+    }
+
     private func importBottleShortcuts() {
         do {
             _ = try libraryStore.importShortcuts()
