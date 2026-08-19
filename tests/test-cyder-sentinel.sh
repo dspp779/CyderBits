@@ -54,8 +54,10 @@ assert_not_contains "$app" 'sentinel.onLaunch = { [weak self] launch in
   "helper hello must not create a second LaunchGroup"
 assert_not_contains "$status" 'lifecycleState(at:' \
   "menu-bar liveness must not poll lifecycle sidecar files"
-assert_contains "$app" 'sentinel.onLaunch' \
-  "the app delegate must install sentinel launch callbacks"
+assert_contains "$app" 'instanceCoordinator.sentinel.onLaunchEnded' \
+  "the app delegate must install the helper disconnect callback"
+assert_not_contains "$app" 'sentinel.onLaunch =' \
+  "helper hello must not be wired; LaunchGroup is created at relay start"
 assert_not_contains "$sentinel" 'usleep(400_000)' \
   "the sentinel helper must not poll Wine windows on an interval"
 assert_not_contains "$sentinel" 'func currentHolders' \
@@ -118,6 +120,10 @@ assert_contains "$app" 'hasLiveWatchedPIDs(id: launchID)' \
   "timeout and defer must not keep the LaunchGroup unless watched PIDs are still live"
 assert_contains "$app" 'hasClaimedWindow(id: launchID)' \
   "timeout and defer must keep the group only if a window was claimed or a process still lives"
+assert_contains "$app" 'claimLiveWindows(id: launchID)' \
+  "timeout must synchronously claim existing Wine windows before deciding keep/end"
+assert_contains "$status" 'func claimLiveWindows(id: String)' \
+  "status item must expose a synchronous window claim for LaunchGroup timeout"
 assert_contains "$app" 'keepLaunchGroupIfLiveOrClaimed(
                 id: launchID,
                 launchActivated: &launchActivated,

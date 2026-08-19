@@ -132,6 +132,31 @@ final class CyderStatusItemController: NSObject, NSMenuDelegate {
         return session.hasForeground || !session.foregroundPIDs.isEmpty
     }
 
+    /// Snapshot the current Wine tree and adopt any on-screen windows before a
+    /// timeout decides whether to keep the LaunchGroup.
+    func claimLiveWindows(id: String) {
+        precondition(Thread.isMainThread)
+        guard let session = sessions[id] else { return }
+        var pids = session.adoptedPIDs
+        if session.pid > 0 { pids.insert(session.pid) }
+        var expanded = pids
+        for pid in pids {
+            expanded.formUnion(wineProcessTreeIDs(root: pid))
+        }
+        for pid in expanded {
+            watchPID(pid)
+        }
+        if var updated = sessions[id] {
+            updated.adoptedPIDs.formUnion(expanded)
+            sessions[id] = updated
+        }
+        let prefix = session.prefix.path
+        let windows = wineOnscreenWindows(ownedBy: expanded)
+        for window in windows {
+            adoptWindowedProcess(pid: window.pid, prefix: prefix, name: window.ownerName)
+        }
+    }
+
     func cancelMonitoring(pid: Int32, notifyWhenEmpty: Bool = true) {
         guard let key = sessions.first(where: { $0.value.pid == pid })?.key,
               sessions.removeValue(forKey: key) != nil else { return }
@@ -330,6 +355,13 @@ final class CyderStatusItemController: NSObject, NSMenuDelegate {
         }
         processSources[pid] = source
         source.resume()
+        let existing = wineProcessTreeIDs(root: pid)
+        for child in existing where child != pid {
+            watchPIDOnQueue(child)
+        }
+        DispatchQueue.main.async { [weak self] in
+            self?.handleProcessSpawn(root: pid, children: existing)
+        }
     }
 
     private func handleProcessSpawn(root: Int32, children: Set<Int32>) {

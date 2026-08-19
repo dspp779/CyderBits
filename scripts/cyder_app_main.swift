@@ -1553,6 +1553,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         guard !launchActivated else { return }
         var keepGroup = false
         onMainThread {
+            statusItemController.claimLiveWindows(id: launchID)
             keepGroup = statusItemController.hasLiveWatchedPIDs(id: launchID)
                 || statusItemController.hasClaimedWindow(id: launchID)
             if keepGroup {

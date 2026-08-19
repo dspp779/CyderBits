@@ -111,6 +111,10 @@ assert_contains "$app_source" 'attachRootPID(id: launchID' \
   "library and Finder launches must attach the pid file to the LaunchGroup created for that relay"
 assert_contains "$status_source" 'func attachRootPID(id: String, pid: Int32)' \
   "status item must expose id-keyed root PID attach"
+assert_contains "$status_source" 'let existing = wineProcessTreeIDs(root: pid)' \
+  "first PID watch must snapshot children already forked before kqueue attach"
+assert_contains "$status_source" 'func claimLiveWindows(id: String)' \
+  "timeout must claim on-screen Wine windows on the same LaunchGroup"
 assert_contains "$status_source" 'cancelOrphanedProcessSources' \
   "endLaunch must cancel process sources for PIDs no remaining group watches"
 
