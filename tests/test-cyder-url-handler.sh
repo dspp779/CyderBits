@@ -17,6 +17,8 @@ assert_contains "$COMMON" 'cyder_reg_read_uri_scheme' "common must parse wine re
 assert_contains "$URI_SWIFT" 'CyderURIHandlerManager' "swift uri handler manager must exist"
 assert_contains "$URI_SWIFT" 'urlForApplication(toOpen:' \
   "swift must query the default URL handler via NSWorkspace"
+assert_contains "$URI_SWIFT" 'URL(string: "\(Self.scheme)://")' \
+  "default-handler probe must use a hierarchical URL, not scheme-only gamaniagames:"
 assert_not_contains "$URI_SWIFT" 'LSCopyDefaultHandlerForURLScheme' \
   "swift must not use deprecated LSCopyDefaultHandlerForURLScheme"
 assert_contains "$URI_SWIFT" 'absoluteString' "design requires preserving uri absoluteString"

@@ -161,7 +161,7 @@ final class CyderURIHandlerManager {
     }
 
     func currentDefaultHandlerBundleID() -> String? {
-        guard let probe = URL(string: "\(Self.scheme):"),
+        guard let probe = URL(string: "\(Self.scheme)://"),
               let appURL = NSWorkspace.shared.urlForApplication(toOpen: probe) else {
             return nil
         }
