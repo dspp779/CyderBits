@@ -335,7 +335,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         }
         let uriStrings = CyderURIHandlerManager.shared.filterHandledURLs(urls)
         CyderDiagnostics.shared.info(
-            "open-urls received=\(urls.count) gamaniagames=\(uriStrings.count) file-exe=\(fileExecutables.count)"
+            "open-urls received=\(urls.count) gamaniagames=\(uriStrings.count) file-doc=\(fileExecutables.count)"
         )
         if !fileExecutables.isEmpty {
             deliverExecutableFiles(fileExecutables)
@@ -1203,13 +1203,13 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func runPhasedLaunch(context: CyderLaunchContext) -> CyderLaunchOutcome {
-        var exePaths = normalizeExePaths(pendingFiles)
-        if exePaths.isEmpty {
+        var docPaths = normalizeExePaths(pendingFiles)
+        if docPaths.isEmpty {
             hideSetup()
             guard let chosen = chooseExeOnMainThread() else {
                 return .cancelled
             }
-            exePaths = [chosen]
+            docPaths = [chosen]
         }
 
         // Opening an EXE is a launch-only path. It must never create or repair
@@ -1230,18 +1230,31 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             // open Cyder.app so ensure-graphics can install the payloads.
             showAlert(
                 "圖形元件尚未準備完成",
-                "仍會嘗試啟動遊戲。若需要 DXVK/DXMT，請先單獨開啟 Cyder.app 準備圖形元件。"
+                "仍會嘗試啟動。若需要 DXVK/DXMT，請先單獨開啟 Cyder.app 準備圖形元件。"
             )
-            CyderDiagnostics.shared.info("graphics payloads missing; Finder EXE continuing with fallback")
+            CyderDiagnostics.shared.info("graphics payloads missing; Finder document launch continuing with fallback")
         }
-        let exeURL = URL(fileURLWithPath: exePaths[0])
+
+        let documentPath = docPaths[0]
+        if isMsiPath(documentPath) {
+            return runWineThroughLauncher(
+                context: context,
+                exe: documentPath,
+                prefix: CyderPaths.sharedBottle,
+                launchArguments: pendingLaunchArguments,
+                launchTarget: .msi
+            )
+        }
+
+        let exeURL = URL(fileURLWithPath: documentPath)
         switch prefixForExecutable(exeURL) {
         case .success(let prefix):
             return runWineThroughLauncher(
                 context: context,
                 exe: exeURL.path,
                 prefix: prefix,
-                launchArguments: pendingLaunchArguments
+                launchArguments: pendingLaunchArguments,
+                launchTarget: .exe
             )
         case .failure(let failure):
             return .failure(failure)
@@ -1340,7 +1353,8 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         exe: String,
         prefix: URL,
         launchArguments: [String]? = nil,
-        launchEnvironment: [String: String] = [:]
+        launchEnvironment: [String: String] = [:],
+        launchTarget: CyderWineLaunchTarget = .exe
     ) -> CyderLaunchOutcome {
         let activationWaiter = WineActivationWaiter(prefix: prefix.path)
         onMainThread { wineActivationWaiter = activationWaiter }
@@ -1404,7 +1418,13 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
                 }
             }
         }
-        var args = [context.launcher, "--engine-src", context.engineSrc, "--launch-exe", exe]
+        var args = [context.launcher, "--engine-src", context.engineSrc]
+        switch launchTarget {
+        case .exe:
+            args.append(contentsOf: ["--launch-exe", exe])
+        case .msi:
+            args.append(contentsOf: ["--launch-msi", exe])
+        }
         if let launchArguments, !launchArguments.isEmpty {
             args.append("--")
             args.append(contentsOf: launchArguments)
@@ -1424,18 +1444,29 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             // below and does not depend on Wine log text.
             "CYDER_CAPTURE_WINE_LOG": "1",
         ]) { _, internalValue in internalValue }
+        let operation = launchTarget == .msi ? "msi-launch" : "wine-launch"
         let result = runLauncher(
             context: context,
             args: args,
             stage: .wineSpawn,
-            operation: "wine-launch",
+            operation: operation,
             extraEnvironment: wineLaunchEnvironment
         )
         guard result.succeeded else {
+            if launchTarget == .msi && result.status == 75 {
+                return .failure(CyderFailure(
+                    code: "CYD-MSI-001",
+                    stage: .wineSpawn,
+                    summary: "請先關閉所有 Wine 程序，再安裝 MSI。",
+                    technicalDetails: result.outputTail,
+                    logURL: result.logURL,
+                    exitCode: result.status
+                ))
+            }
             return .failure(failure(
                 code: "CYD-WIN-001",
                 stage: .wineSpawn,
-                summary: "Bash 無法啟動 Wine。",
+                summary: launchTarget == .msi ? "Bash 無法啟動 MSI 安裝程式。" : "Bash 無法啟動 Wine。",
                 result: result
             ))
         }

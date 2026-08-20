@@ -479,9 +479,19 @@ func normalizeExePaths(_ paths: [String]) -> [String] {
         }
         if path.isEmpty { continue }
         path = (path as NSString).standardizingPath
-        if path.lowercased().hasSuffix(".exe"), seen.insert(path).inserted {
+        let ext = (path as NSString).pathExtension.lowercased()
+        if ext == "exe" || ext == "msi", seen.insert(path).inserted {
             out.append(path)
         }
     }
     return out
+}
+
+func isMsiPath(_ path: String) -> Bool {
+    (path as NSString).pathExtension.lowercased() == "msi"
+}
+
+enum CyderWineLaunchTarget {
+    case exe
+    case msi
 }

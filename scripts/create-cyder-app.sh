@@ -431,6 +431,24 @@ cat > "$CONTENTS/Info.plist" <<PLIST
         <string>com.microsoft.windows-executable</string>
       </array>
     </dict>
+    <dict>
+      <key>CFBundleTypeName</key>
+      <string>Windows Installer Package</string>
+      <key>CFBundleTypeRole</key>
+      <string>Viewer</string>
+      <key>LSHandlerRank</key>
+      <string>Alternate</string>
+      <key>CFBundleTypeIconFile</key>
+      <string>AppIcon</string>
+      <key>CFBundleTypeExtensions</key>
+      <array>
+        <string>msi</string>
+      </array>
+      <key>LSItemContentTypes</key>
+      <array>
+        <string>com.microsoft.windows-installer</string>
+      </array>
+    </dict>
   </array>
   <key>CFBundleURLTypes</key>
   <array>
@@ -463,6 +481,25 @@ cat > "$CONTENTS/Info.plist" <<PLIST
         <key>public.filename-extension</key>
         <array>
           <string>exe</string>
+        </array>
+      </dict>
+    </dict>
+    <dict>
+      <key>UTTypeIdentifier</key>
+      <string>com.microsoft.windows-installer</string>
+      <key>UTTypeDescription</key>
+      <string>Windows Installer Package</string>
+      <key>UTTypeConformsTo</key>
+      <array>
+        <string>public.data</string>
+      </array>
+      <key>UTTypeIconFile</key>
+      <string>AppIcon</string>
+      <key>UTTypeTagSpecification</key>
+      <dict>
+        <key>public.filename-extension</key>
+        <array>
+          <string>msi</string>
         </array>
       </dict>
     </dict>

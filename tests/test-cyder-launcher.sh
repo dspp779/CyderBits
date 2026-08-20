@@ -49,6 +49,21 @@ set -e
 assert_eq "$not_ready_status" "2" "launch-exe must not create a missing environment"
 assert_contains "$not_ready_out" "open Cyder.app" "launch-exe should direct the user to manual setup"
 
+touch "$TMP/sample.msi"
+set +e
+msi_launch_out="$(bash "$ROOT/scripts/cyder_launcher.sh" --launch-msi /nonexistent/missing.msi 2>&1)"
+msi_launch_status=$?
+set -e
+assert_eq "$msi_launch_status" 1 "launch-msi with missing file should fail"
+assert_contains "$msi_launch_out" "Missing or invalid .msi" "launch-msi should reach launch handler"
+
+set +e
+msi_not_ready_out="$(CYDER_SUPPORT="$TMP/not-ready-support" bash "$ROOT/scripts/cyder_launcher.sh" --launch-msi "$TMP/sample.msi" 2>&1)"
+msi_not_ready_status=$?
+set -e
+assert_eq "$msi_not_ready_status" "2" "launch-msi must not create a missing environment"
+assert_contains "$msi_not_ready_out" "open Cyder.app" "launch-msi should direct the user to manual setup"
+
 # Cyder.app settings opens upgrade the runtime graphics payload explicitly.
 # The launch-only path above must not implicitly use this operation.
 set +e

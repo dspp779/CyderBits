@@ -15,8 +15,12 @@ assert_contains "$source_text" "libraryLaunchInProgress" \
   "the single Wine activation waiter must reject overlapping library startups"
 assert_contains "$source_text" "Association launch: EXE will arrive separately in openFiles" \
   "association launches should treat application argv exclusively as game arguments"
-assert_contains "$source_text" 'file-exe=' \
-  "open-url diagnostics must report file URL exe delivery"
+assert_contains "$source_text" 'file-doc=' \
+  "open-url diagnostics must report file URL document delivery"
+assert_contains "$source_text" '--launch-msi' \
+  "Finder MSI requests must relay to the Bash MSI launcher"
+assert_contains "$source_text" 'CYD-MSI-001' \
+  "running-prefix MSI failures must use a dedicated actionable error"
 assert_contains "$source_text" 'isFileURL' \
   "open-url events must accept file URLs for .exe launches"
 assert_contains "$source_text" "documentLaunchRequested = true" \
@@ -68,6 +72,8 @@ assert_contains "$source_text" 'FileManager.default.createDirectory(at: games' \
 assert_contains "$source_text" 'args: [context.launcher' \
   "native operations must invoke the bundled Bash launcher"
 support_text="$(cat "$ROOT/scripts/cyder_launch_support.swift")"
+assert_contains "$support_text" 'ext == "exe" || ext == "msi"' \
+  "openFiles delivery must accept Windows .msi documents"
 assert_contains "$support_text" 'func wineRegularAppsLaunched' \
   "launch support must recognize reparented Wine Dock apps"
 assert_contains "$source_text" 'presentExternalLaunchStarting()' \
@@ -103,8 +109,8 @@ assert_not_contains "$run_phased_text" '"--ensure-graphics-only"' \
   "Finder EXE launches must not upgrade graphics payloads"
 assert_not_contains "$run_phased_text" 'return .graphicsNotReady' \
   "Finder EXE launches must not hard-block when graphics payloads are missing"
-assert_contains "$run_phased_text" 'graphics payloads missing; Finder EXE continuing with fallback' \
-  "Finder EXE launches must fall back when graphics payloads are missing"
+assert_contains "$run_phased_text" 'graphics payloads missing; Finder document launch continuing with fallback' \
+  "Finder document launches must fall back when graphics payloads are missing"
 assert_contains "$source_text" "圖形元件尚未準備完成" \
   "Finder EXE launches must hint the user to open Cyder.app for graphics prep"
 assert_contains "$source_text" 'CYD-GFX-001' \

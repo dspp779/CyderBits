@@ -82,14 +82,14 @@ for raw in "$@"; do
   fi
   path="${raw#file://}"
   lower="$(printf '%s' "$path" | tr '[:upper:]' '[:lower:]')"
-  if [[ "$lower" == *.exe && -z "$exe" ]]; then
+  if [[ -z "$exe" && ( "$lower" == *.exe || "$lower" == *.msi ) ]]; then
     exe="$path"
   elif [[ -n "$exe" ]]; then
     game_args+=("$raw")
   fi
 done
 
-# On macOS 11+, explicit EXE launches also pass through the native lifecycle
+# On macOS 11+, explicit EXE/MSI launches also pass through the native lifecycle
 # agent so the menu-bar status remains available until the bottle is idle.
 # Catalina deliberately retains the shell-only fallback.
 if [[ -n "$exe" ]]; then
@@ -100,6 +100,13 @@ if [[ -n "$exe" ]]; then
   if ! cyder_macos_at_least 11 0 && ! cyder_catalina_environment_ready; then
     cyder_start_catalina_bootstrap "$exe" "${game_args[@]}"
     exit $?
+  fi
+  lower_exe="$(printf '%s' "$exe" | tr '[:upper:]' '[:lower:]')"
+  if [[ "$lower_exe" == *.msi ]]; then
+    if ((${#game_args[@]} > 0)); then
+      exec "$SCRIPTS/cyder_launcher.sh" --engine-src "$ENGINE_SRC" --launch-msi "$exe" -- "${game_args[@]}"
+    fi
+    exec "$SCRIPTS/cyder_launcher.sh" --engine-src "$ENGINE_SRC" --launch-msi "$exe"
   fi
   if ((${#game_args[@]} > 0)); then
     exec "$SCRIPTS/cyder_launcher.sh" --engine-src "$ENGINE_SRC" --launch-exe "$exe" -- "${game_args[@]}"

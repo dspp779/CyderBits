@@ -75,6 +75,8 @@ Options:
   --templates-ready  Check that the shared prefix is bootstrapped for the current engine
   --launch-exe PATH [-- ARG ...]
                       Launch .exe; arguments after -- replace saved game arguments for this launch
+  --launch-msi PATH [-- ARG ...]
+                      Install .msi into the shared prefix via msiexec /i
   --profile-resolve PATH  Resolve PATH to its per-game bottle and exit
   --profile-create PATH [pristine|golden]  Provision a fresh per-game bottle and exit
   --profile-remove PATH  Remove a per-game bottle/profile and exit
@@ -102,6 +104,7 @@ APPLY_SETTINGS_ONLY=0
 INSTALL_WINETRICKS=0
 WINETRICKS_VERBS=()
 LAUNCH_ONLY=0
+LAUNCH_MSI_ONLY=0
 PROFILE_ACTION=""
 PROFILE_EXE=""
 PROFILE_TEMPLATE="golden"
@@ -112,8 +115,11 @@ SESSION_ARGS=()
 TEMPLATES_READY=0
 ENGINE_SRC="$CYDER_ENGINE_SRC"
 EXE_ARGS=()
+MSI_ARGS=()
 FORWARDED_GAME_ARGUMENTS=()
+FORWARDED_MSI_ARGUMENTS=()
 FORWARDED_GAME_ARGUMENTS_SET=0
+FORWARDED_MSI_ARGUMENTS_SET=0
 POSITIONAL_EXE=0
 SCAN_URI_HANDLERS=0
 SCAN_URI_PREFIX=""
@@ -227,6 +233,15 @@ while [[ $# -gt 0 ]]; do
       EXE_ARGS+=("$2")
       shift 2
       ;;
+    --launch-msi)
+      [[ $# -ge 2 ]] || {
+        echo "--launch-msi requires PATH" >&2
+        exit 1
+      }
+      LAUNCH_MSI_ONLY=1
+      MSI_ARGS+=("$2")
+      shift 2
+      ;;
     --profile-resolve)
       [[ $# -ge 2 ]] || { echo "--profile-resolve requires PATH" >&2; exit 1; }
       [[ -z "$PROFILE_ACTION" ]] || { echo "profile action specified more than once" >&2; exit 1; }
@@ -278,7 +293,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --)
       shift
-      if [[ "$LAUNCH_ONLY" -eq 1 ]]; then
+      if [[ "$LAUNCH_MSI_ONLY" -eq 1 ]]; then
+        FORWARDED_MSI_ARGUMENTS=("$@")
+        FORWARDED_MSI_ARGUMENTS_SET=1
+      elif [[ "$LAUNCH_ONLY" -eq 1 ]]; then
         FORWARDED_GAME_ARGUMENTS=("$@")
         FORWARDED_GAME_ARGUMENTS_SET=1
       else
@@ -311,6 +329,7 @@ primary_actions=0
 [[ "$APPLY_SETTINGS_ONLY" -eq 1 ]] && primary_actions=$((primary_actions + 1))
 [[ "$INSTALL_WINETRICKS" -eq 1 ]] && primary_actions=$((primary_actions + 1))
 [[ "$LAUNCH_ONLY" -eq 1 ]] && primary_actions=$((primary_actions + 1))
+[[ "$LAUNCH_MSI_ONLY" -eq 1 ]] && primary_actions=$((primary_actions + 1))
 [[ "$STOP_ALL" -eq 1 ]] && primary_actions=$((primary_actions + 1))
 [[ "$HAS_RUNNING_EXES" -eq 1 ]] && primary_actions=$((primary_actions + 1))
 [[ "$LIST_SESSIONS" -eq 1 ]] && primary_actions=$((primary_actions + 1))
@@ -684,6 +703,41 @@ if [[ "$LAUNCH_ONLY" -eq 1 ]]; then
     cyder_run_wine_exe "$wine" "$exe" "$prefix" "${CYDER_GAME_ARGUMENTS[@]}"
   else
     cyder_run_wine_exe "$wine" "$exe" "$prefix"
+  fi
+  exit 0
+fi
+
+if [[ "$LAUNCH_MSI_ONLY" -eq 1 ]]; then
+  cyder_set_stage msi-validation
+  msi="$(cyder_resolve_msi_from_args "${MSI_ARGS[@]}")" || {
+    echo "Missing or invalid .msi for --launch-msi" >&2
+    exit 1
+  }
+  if ! cyder_engine_is_ready_for_launch; then
+    echo "Cyder environment is not ready; open Cyder.app to finish setup." >&2
+    exit 2
+  fi
+  engine="$CYDER_ENGINES/$CYDER_ENGINE_NAME"
+  wine="$engine/bin/wine"
+  prefix="$CYDER_SHARED_PREFIX"
+  if cyder_has_running_prefix "$prefix"; then
+    echo "Cannot install MSI while the shared prefix is running: $prefix" >&2
+    echo "Close all Cyder games and try again." >&2
+    exit 75
+  fi
+  cyder_prepare_graphics_prefix "$wine" "$engine" "$prefix" || {
+    echo "Unable to prepare graphics payload for prefix: $prefix" >&2
+    exit 1
+  }
+  cyder_set_stage settings-apply
+  cyder_prepare_installer_launch_settings "$wine" "$engine" "$prefix" || {
+    settings_status=$?
+    exit "$settings_status"
+  }
+  if [[ "$FORWARDED_MSI_ARGUMENTS_SET" -eq 1 ]]; then
+    CYDER_LAUNCH_TARGET_KIND=msi cyder_run_wine_exe "$wine" "$msi" "$prefix" "${FORWARDED_MSI_ARGUMENTS[@]}"
+  else
+    CYDER_LAUNCH_TARGET_KIND=msi cyder_run_wine_exe "$wine" "$msi" "$prefix"
   fi
   exit 0
 fi

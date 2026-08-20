@@ -1152,6 +1152,19 @@ cyder_resolve_exe_from_args() {
   return 1
 }
 
+cyder_resolve_msi_from_args() {
+  local a p ext
+  for a in "$@"; do
+    p="$(cyder_abs_path "$a")"
+    ext="$(echo "${p##*.}" | tr '[:upper:]' '[:lower:]')"
+    if [[ "$ext" == "msi" && -f "$p" ]]; then
+      echo "$p"
+      return 0
+    fi
+  done
+  return 1
+}
+
 cyder_wine_bin_for_dry_run() {
   local engine_src="$1"
   local installed="$CYDER_ENGINES/$CYDER_ENGINE_NAME/bin/wine"
@@ -2471,6 +2484,16 @@ cyder_prepare_game_launch_settings() {
   fi
 }
 
+# MSI installers always target the shared prefix and must not load per-game
+# profile settings.  Global display/font registry still applies when idle.
+cyder_prepare_installer_launch_settings() {
+  local wine_bin="$1"
+  local engine_root="$2"
+  local prefix="$3"
+  cyder_load_saved_settings
+  cyder_apply_user_settings "$wine_bin" "$engine_root" "$prefix" || return $?
+}
+
 cyder_apply_user_settings() {
   local wine_bin="$1"
   local engine_root="$2"
@@ -2819,25 +2842,38 @@ cyder_run_wine_exe() {
   else
     shift 2
   fi
-  # cyder_init_paths may run before a new bottle exists. Re-select and pin the
-  # database immediately before launch, when the final prefix is available.
-  cyder_configure_compatdb "$prefix"
+  local target_kind="${CYDER_LAUNCH_TARGET_KIND:-exe}"
   local -a game_args=("$@")
   CYDER_STEAM_ARGUMENTS=()
-  if (( ${#game_args[@]} > 0 )); then
-    cyder_apply_steam_compatibility_arguments "$exe" "${game_args[@]}"
+  if [[ "$target_kind" == "msi" ]]; then
+    # MSI installs never participate in Steam argv rewriting or CompatDB.
+    :
   else
-    cyder_apply_steam_compatibility_arguments "$exe"
-  fi
-  game_args=()
-  if (( ${#CYDER_STEAM_ARGUMENTS[@]} > 0 )); then
-    game_args=("${CYDER_STEAM_ARGUMENTS[@]}")
+    # cyder_init_paths may run before a new bottle exists. Re-select and pin the
+    # database immediately before launch, when the final prefix is available.
+    cyder_configure_compatdb "$prefix"
+    if (( ${#game_args[@]} > 0 )); then
+      cyder_apply_steam_compatibility_arguments "$exe" "${game_args[@]}"
+    else
+      cyder_apply_steam_compatibility_arguments "$exe"
+    fi
+    game_args=()
+    if (( ${#CYDER_STEAM_ARGUMENTS[@]} > 0 )); then
+      game_args=("${CYDER_STEAM_ARGUMENTS[@]}")
+    fi
   fi
   # Login credentials often arrive through argv. Execute the original array,
   # but never copy argument values into persistent logs.
   local game_args_text="(no game arguments)"
+  if [[ "$target_kind" == "msi" ]]; then
+    game_args_text="(no msiexec arguments)"
+  fi
   if (( ${#game_args[@]} > 0 )); then
-    game_args_text="<${#game_args[@]} game arguments redacted>"
+    if [[ "$target_kind" == "msi" ]]; then
+      game_args_text="<${#game_args[@]} msiexec arguments redacted>"
+    else
+      game_args_text="<${#game_args[@]} game arguments redacted>"
+    fi
   fi
   if declare -F cyder_apply_moltenvk_os_floor >/dev/null 2>&1; then
     cyder_apply_moltenvk_os_floor
@@ -2925,7 +2961,13 @@ cyder_run_wine_exe() {
     fi
   fi
   cyder_exec_game() {
-    if [[ "$start_mode" == "start" ]]; then
+    if [[ "$target_kind" == "msi" ]]; then
+      if (( ${#game_args[@]} > 0 )); then
+        cyder_exec_wine "$wine_bin" msiexec /i "$exe" "${game_args[@]}"
+      else
+        cyder_exec_wine "$wine_bin" msiexec /i "$exe"
+      fi
+    elif [[ "$start_mode" == "start" ]]; then
       if (( ${#game_args[@]} > 0 )); then
         cyder_exec_wine "$wine_bin" start /wait /unix "$exe" "${game_args[@]}"
       else
@@ -2965,7 +3007,13 @@ cyder_run_wine_exe() {
     local taskpolicy_bin=""
     taskpolicy_bin="$(cyder_find_taskpolicy || true)"
     local cmd_line=""
-    if [[ "$start_mode" == "start" ]]; then
+    if [[ "$target_kind" == "msi" ]]; then
+      if [[ "${CYDER_POWER_MODE:-normal}" == background && -n "$taskpolicy_bin" ]]; then
+        cmd_line="$taskpolicy_bin -c background /usr/bin/arch -x86_64 $wine_bin msiexec /i $exe $game_args_text"
+      else
+        cmd_line="/usr/bin/arch -x86_64 $wine_bin msiexec /i $exe $game_args_text"
+      fi
+    elif [[ "$start_mode" == "start" ]]; then
       if [[ "${CYDER_POWER_MODE:-normal}" == background && -n "$taskpolicy_bin" ]]; then
         cmd_line="$taskpolicy_bin -c background /usr/bin/arch -x86_64 $wine_bin start /wait /unix $exe $game_args_text"
       else
@@ -2981,7 +3029,11 @@ cyder_run_wine_exe() {
     # CrossOver-style preamble so Logs/last-launch.log shows the exact command
     # and sync flags before Wine stdout/stderr.
     echo "***** $(date '+%Y-%m-%dT%H:%M:%SZ')"
-    echo "Running command: \"$exe\""
+    if [[ "$target_kind" == "msi" ]]; then
+      echo "Running MSI installer: \"$exe\""
+    else
+      echo "Running command: \"$exe\""
+    fi
     echo "Launch kind: ${CYDER_LAUNCH_KIND:-cli}"
     echo "Runtime: $engine_root"
     echo "Prefix: $canonical_prefix"
