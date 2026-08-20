@@ -299,13 +299,34 @@ if [[ "$context_block" == *"開啟遊戲"* || "$context_block" == *"NSMenuItem.s
 fi
 assert_contains "$context_block" "選項" "game context menu should expose Options"
 assert_contains "$context_block" "顯示於 Finder" "game context menu should expose Reveal in Finder"
-assert_contains "$app" "shouldOpenGameLibraryOnLaunch" "app should choose the library as the main entry when games exist"
+assert_not_contains "$app" "shouldOpenGameLibraryOnLaunch" \
+  "direct Cyder.app opens must not auto-choose the game library"
+assert_contains "$app" "presentResidentCyderUI" "Finder/Dock reopen must restore Cyder UI"
+resident_ui="$(awk '
+  /private func presentResidentCyderUI\(\)/ { found = 1 }
+  found { print }
+  found && /^    func applicationWillTerminate/ { exit }
+' "$ROOT/scripts/cyder_app_main.swift")"
+assert_contains "$resident_ui" "showSettings()" \
+  "reopen must open Preferences instead of the game library"
+assert_not_contains "$resident_ui" "showGameLibrary()" \
+  "reopen must not auto-open the game library"
+finalize_mode="$(awk '
+  /private func finalizePostLaunchModeDecision\(\)/ { found = 1 }
+  found { print }
+  found && /^    private func scheduleSecondaryForward/ { exit }
+' "$ROOT/scripts/cyder_app_main.swift")"
+assert_not_contains "$finalize_mode" "shouldOpenGameLibraryOnLaunch" \
+  "cold app-only launches must not auto-open the game library from library contents"
+assert_contains "$finalize_mode" "prepareEnvironmentAndShowSettings" \
+  "cold app-only launches still prepare the environment then show Preferences"
 assert_contains "$app" "gameLibraryController.window?.isVisible != true" "preferences should not terminate while the library remains open"
 assert_contains "$app" "launchGameFromLibrary" "the library should launch through the monitored Bash relay"
 assert_contains "$app" "libraryLaunchInProgress" "the library should serialize the activation-monitoring window"
 assert_not_contains "$app" "createsNewApplicationInstance = true" "library launches should retain UI error reporting"
 assert_contains "$app" "gameLibraryController.window?.isVisible == true" "Finder opens should preserve an already visible library"
-assert_contains "$app" "if !documentLaunchRequested {" "detached game launches should not show the parent application's active-session warning"
+assert_contains "$app" "if !self.documentLaunchRequested {" \
+  "detached game launches should not show the parent application's active-session warning"
 assert_contains "$common" 'cyder_load_game_settings' "Bash should consume the game library's one-shot launch settings"
 assert_contains "$app" "開啟相關記錄" "failure dialog should use the specific related-log label"
 assert_contains "$app" "exportLastGameLog" "app should handle last-game log export"

@@ -612,7 +612,8 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             return
         }
         terminateWhenSettingsClose = true
-        openLibraryOnLaunch = openLibraryOnLaunch || shouldOpenGameLibraryOnLaunch()
+        // Direct Cyder.app opens always land on Preferences. The game library
+        // remains available from the menu / Dock menu.
         activateCyderUI(dockVisible: true)
         prepareEnvironmentAndShowSettings()
     }
@@ -681,8 +682,8 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         return false
     }
 
-    /// Bring the game library or settings forward. Shared by Finder reopen and
-    /// a secondary process that forwarded an empty `showUI` request.
+    /// Bring Preferences forward. Shared by Finder reopen and a secondary
+    /// process that forwarded an empty `showUI` request.
     private func presentResidentCyderUI() {
         terminateWhenSettingsClose = true
         statusItemController.setUIVisible(true)
@@ -691,12 +692,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             setupPanel?.show()
             return
         }
-        openLibraryOnLaunch = shouldOpenGameLibraryOnLaunch()
-        if openLibraryOnLaunch {
-            showGameLibrary()
-        } else {
-            showSettings()
-        }
+        showSettings()
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -837,13 +833,6 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             settingsController.window?.orderOut(nil)
         }
         openingGameLibrary = false
-    }
-
-    private func shouldOpenGameLibraryOnLaunch() -> Bool {
-        let library = CyderGameLibraryStore.shared
-        library.reload()
-        if !library.games.isEmpty { return true }
-        return !CyderProfileStore(root: CyderPaths.support).listRecords().isEmpty
     }
 
     private func launchGameFromLibrary(
@@ -1267,6 +1256,8 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
                     }
                 }
                 self.gameLibraryController.retryMissingIcons()
+                // Prefer Preferences for direct app opens. CYDER_OPEN_GAME_LIBRARY=1
+                // remains a test/dev override.
                 if self.openLibraryOnLaunch {
                     self.showGameLibrary()
                 } else {

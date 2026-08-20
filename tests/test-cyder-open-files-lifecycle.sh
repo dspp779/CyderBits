@@ -31,6 +31,8 @@ assert_contains "$source_text" "currentAppleEvent" \
   "cold-start mode selection must inspect the launch Apple Event"
 assert_contains "$source_text" "if launchIntent == .appOnly" \
   "open-application launches must enter UI without waiting"
+assert_not_contains "$source_text" "shouldOpenGameLibraryOnLaunch" \
+  "direct Cyder.app opens must always prefer Preferences over the game library"
 assert_contains "$source_text" "DispatchQueue.main.async { [weak self] in" \
   "document launches should use one main-queue turn instead of a fixed delay"
 assert_not_contains "$source_text" "asyncAfter(deadline: .now() + 0.2)" \
