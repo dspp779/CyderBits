@@ -29,10 +29,12 @@ exit 0
 SH
 cat >"$TMP/scripts/install-wine-mono.sh" <<'SH'
 #!/usr/bin/env bash
+[[ "${1:-}" == "--download-only" ]] && exit 0
 : >"$WINEPREFIX/.cyder-mono-10.4.1"
 SH
 cat >"$TMP/scripts/install-wine-gecko.sh" <<'SH'
 #!/usr/bin/env bash
+[[ "${1:-}" == "--download-only" ]] && exit 0
 : >"$WINEPREFIX/.cyder-gecko-2.47.4"
 SH
 cat >"$TMP/scripts/cyder-apply-golden-settings.sh" <<'SH'

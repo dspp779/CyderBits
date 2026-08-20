@@ -16,6 +16,7 @@ SH
 cat >"$TMP/engine/bin/wine" <<'SH'
 #!/usr/bin/env bash
 set -u
+printf 'wine:%s\n' "$*" >>"$CYDER_WINESERVER_LOG"
 if [[ "${1:-}" == wineboot ]]; then
   case "${WINEBOOT_FAKE_MODE:-success}" in
     success)
@@ -25,7 +26,14 @@ if [[ "${1:-}" == wineboot ]]; then
       : >"$WINEPREFIX/drive_c/windows/system32/kernel32.dll"
       ;;
     delayed)
-      mkdir -p "$WINEPREFIX/drive_c/windows/system32"
+      # Simulate wineboot returning before on-disk artifacts finish while
+      # wineserver is still in its short idle window.
+      mkdir -p "$WINEPREFIX/drive_c/windows"
+      (
+        sleep 0.3
+        mkdir -p "$WINEPREFIX/drive_c/windows/system32"
+        : >"$WINEPREFIX/drive_c/windows/system32/kernel32.dll"
+      ) &
       ;;
     missing)
       mkdir -p "$WINEPREFIX/drive_c"
@@ -44,18 +52,14 @@ fi
 SH
 cat >"$TMP/engine/bin/wineserver" <<'SH'
 #!/usr/bin/env bash
-printf '%s\n' "$*" >>"$CYDER_WINESERVER_LOG"
-if [[ "${WINEBOOT_FAKE_MODE:-}" == delayed && "${1:-}" == -w ]]; then
-  : >"$WINEPREFIX/system.reg"
-  : >"$WINEPREFIX/user.reg"
-  : >"$WINEPREFIX/drive_c/windows/system32/kernel32.dll"
-fi
+printf 'wineserver:%s\n' "$*" >>"$CYDER_WINESERVER_LOG"
 SH
 chmod +x "$TMP/bin/arch" "$TMP/engine/bin/wine" "$TMP/engine/bin/wineserver"
 export PATH="$TMP/bin:$PATH"
 export CYDER_SUPPORT="$TMP/support"
 export CYDER_SHARED_PREFIX="$TMP/prefix"
 export CYDER_WINEBOOT_TIMEOUT=1
+export CYDER_WINESERVER_WAIT_TIMEOUT=1
 export CYDER_WINESERVER_LOG="$TMP/wineserver.log"
 source "$ROOT/scripts/cyder-common.sh"
 cyder_wine_locale_exports() { :; }
@@ -89,9 +93,30 @@ run_case() {
   fi
 }
 
+: >"$CYDER_WINESERVER_LOG"
 run_case success 0 success ""
+assert_contains "$(cat "$TMP/success.stderr")" "success_wait=artifact-ready" \
+  "success path should wait for bottle artifacts without stopping wineserver"
+assert_not_contains "$(cat "$TMP/success.stderr")" "wineserver_persist=" \
+  "success path should not force wineserver -p; keep alive by chaining MSI"
+if grep -E -q '^wineserver:-p' "$CYDER_WINESERVER_LOG"; then
+  echo "ASSERT failed: success path must not invoke wineserver -p" >&2
+  exit 1
+fi
+if grep -qx -- 'wineserver:-k' "$CYDER_WINESERVER_LOG"; then
+  echo "ASSERT failed: success path must keep wineserver alive (no -k)" >&2
+  exit 1
+fi
+
+: >"$CYDER_WINESERVER_LOG"
 run_case delayed 0 success ""
-assert_contains "$(cat "$TMP/delayed.stderr")" "success_wait=wineserver -w" "delayed registry flush should wait for wineserver"
+assert_contains "$(cat "$TMP/delayed.stderr")" "success_wait=artifact-ready" \
+  "delayed artifact flush should poll on-disk files while wineserver stays alive"
+if grep -qx -- 'wineserver:-k' "$CYDER_WINESERVER_LOG"; then
+  echo "ASSERT failed: delayed success path must keep wineserver alive (no -k)" >&2
+  exit 1
+fi
+
 if [[ -e "$CYDER_SUPPORT/Logs/operations/wineboot-20000101-000000-1.log" ]]; then
   echo "ASSERT failed: wineboot operation logs older than 30 days should rotate" >&2
   exit 1

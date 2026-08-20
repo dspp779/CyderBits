@@ -1169,6 +1169,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             || environmentState(context: context).needsBootstrap
         var bootstrapHealthChecked = false
         if bootstrapNeeded {
+            prefetchBootstrapMSI(context: context)
             CyderDiagnostics.shared.enter(.bootstrap)
             showSetup("正在準備遊戲環境…")
             let result = runLauncher(
@@ -1378,6 +1379,27 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
     private func graphicsPayloadsPresent() -> Bool {
         let capabilities = CyderGraphicsCapabilities.current(engineRoot: CyderPaths.engine)
         return capabilities.hasDxvk || capabilities.hasDxmt
+    }
+
+    private func prefetchBootstrapMSI(context: CyderLaunchContext) {
+        let prefetchScript = URL(fileURLWithPath: context.launcher)
+            .deletingLastPathComponent()
+            .appendingPathComponent("cyder-prefetch-bootstrap-msi.sh")
+        guard FileManager.default.isReadableFile(atPath: prefetchScript.path) else {
+            return
+        }
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/bash")
+        process.arguments = [prefetchScript.path]
+        process.environment = context.environment
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+        do {
+            try process.run()
+            CyderDiagnostics.shared.info("bootstrap MSI prefetch started")
+        } catch {
+            CyderDiagnostics.shared.info("bootstrap MSI prefetch skipped: \(error.localizedDescription)")
+        }
     }
 
     private func graphicsPayloadNeedsInstall(context: CyderLaunchContext) -> Bool {
@@ -2028,6 +2050,36 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    private func formattedSetupProgress(_ raw: String) -> String {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return trimmed }
+        var label = ""
+        var elapsedMs = 0
+        var sawStructured = false
+        for line in trimmed.split(whereSeparator: \.isNewline) {
+            let piece = String(line)
+            if piece.hasPrefix("label=") {
+                label = String(piece.dropFirst("label=".count))
+                sawStructured = true
+            } else if piece.hasPrefix("elapsed_ms="),
+                      let parsed = Int(piece.dropFirst("elapsed_ms=".count)) {
+                elapsedMs = parsed
+                sawStructured = true
+            } else if piece.hasPrefix("stage=") {
+                sawStructured = true
+            }
+        }
+        guard sawStructured else { return trimmed }
+        if elapsedMs > 0 {
+            let seconds = Double(elapsedMs) / 1000.0
+            let shown = seconds >= 10
+                ? String(format: "%.0f", seconds)
+                : String(format: "%.1f", seconds)
+            return "\(label)（\(shown)s）"
+        }
+        return label
+    }
+
     private func hideSetup() {
         onMainThread {
             setupPanel?.close()
@@ -2284,7 +2336,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
                     return
                 }
                 lastProgress = text
-                self.showSetup(text)
+                self.showSetup(self.formattedSetupProgress(text))
             }
             progressTimer = timer
             timer.resume()

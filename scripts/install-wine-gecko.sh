@@ -2,8 +2,29 @@
 # Install the pinned Wine Gecko runtime into one WINEPREFIX.
 set -Eeuo pipefail
 
-WINE_INSTALL="${WINE_INSTALL:?WINE_INSTALL not set}"
-WINEPREFIX="${WINEPREFIX:?WINEPREFIX not set}"
+DOWNLOAD_ONLY=0
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --download-only)
+      DOWNLOAD_ONLY=1
+      shift
+      ;;
+    -h | --help)
+      cat <<'EOF'
+Usage: install-wine-gecko.sh [--download-only]
+
+Downloads and verifies the pinned Wine Gecko MSIs. Without --download-only,
+installs them into WINEPREFIX via msiexec.
+EOF
+      exit 0
+      ;;
+    *)
+      echo "Unknown option: $1" >&2
+      exit 2
+      ;;
+  esac
+done
+
 GECKO_VER="${WINE_GECKO_VERSION:-2.47.4}"
 DOWNLOADS="${CYDER_DOWNLOADS:-$HOME/Library/Application Support/Cyder/downloads}"
 
@@ -47,6 +68,16 @@ download_and_verify() {
 mkdir -p "$DOWNLOADS"
 x86_msi="$(download_and_verify x86 "$X86_SHA256")"
 x64_msi="$(download_and_verify x86_64 "$X64_SHA256")"
+
+if [[ "$DOWNLOAD_ONLY" -eq 1 ]]; then
+  echo "Wine Gecko ${GECKO_VER} downloads ready:"
+  echo "  $x86_msi"
+  echo "  $x64_msi"
+  exit 0
+fi
+
+WINE_INSTALL="${WINE_INSTALL:?WINE_INSTALL not set}"
+WINEPREFIX="${WINEPREFIX:?WINEPREFIX not set}"
 
 export WINEPREFIX
 for installer in "$x86_msi" "$x64_msi"; do

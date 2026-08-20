@@ -104,6 +104,8 @@ assert_contains "$source_text" "CYDER_PROGRESS_FILE" \
   "bootstrap should expose a progress file for staged setup messages"
 assert_contains "$source_text" 'args.contains("--bootstrap-only")' \
   "long setup operations should enable progress polling"
+assert_contains "$source_text" "formattedSetupProgress" \
+  "Swift must parse structured stage/label/elapsed progress for the setup panel"
 assert_contains "$source_text" 'graphicsPayloadNeedsInstall(context: context)' \
   "settings-mode must decide graphics install from Swift-side version checks"
 assert_contains "$source_text" 'if graphicsNeedsInstall {' \
@@ -116,6 +118,10 @@ assert_contains "$source_text" '.cyder-engine-signed' \
   "missing ad-hoc sign marker must still count as needsEngine"
 assert_not_contains "$source_text" 'operation: "templates-ready"' \
   "settings-mode must not run the removed templates-ready probe"
+assert_contains "$source_text" 'prefetchBootstrapMSI(context: context)' \
+  "settings-mode should start MSI prefetch before bootstrap"
+assert_contains "$source_text" 'cyder-prefetch-bootstrap-msi.sh' \
+  "MSI prefetch should call the bundled prefetch helper script"
 assert_contains "$source_text" 'if !bootstrapHealthChecked && bootstrapNeeded' \
   "subsequent settings opens must not probe wine cmd when the prefix is already ready"
 run_phased_text="$(awk '

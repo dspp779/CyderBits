@@ -379,10 +379,12 @@ SH
 chmod +x "$TMP/runtime/Engines/wine-x86_64/bin/wine"
 cat >"$TMP/profile-scripts/install-wine-mono.sh" <<'SH'
 #!/usr/bin/env bash
+[[ "${1:-}" == "--download-only" ]] && exit 0
 : >"$WINEPREFIX/.cyder-mono-10.4.1"
 SH
 cat >"$TMP/profile-scripts/install-wine-gecko.sh" <<'SH'
 #!/usr/bin/env bash
+[[ "${1:-}" == "--download-only" ]] && exit 0
 : >"$WINEPREFIX/.cyder-gecko-2.47.4"
 SH
 cat >"$TMP/profile-scripts/cyder-apply-golden-settings.sh" <<'SH'

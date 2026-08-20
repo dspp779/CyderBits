@@ -1218,18 +1218,104 @@ elif [[ -f "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/cyder-macos-compat.sh"
   source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/cyder-macos-compat.sh"
 fi
 
-# UI-facing progress line for long bootstrap/provision work. Written atomically
-# so the modern Swift UI can update its stage text while the launcher runs.
+# UI-facing progress for long bootstrap/provision work. Written atomically so
+# the Swift UI can update while the launcher runs.
+# Usage: cyder_report_progress "label" [stage] [elapsed_ms]
+# Writes a structured progress file when CYDER_PROGRESS_FILE is set:
+#   stage=<id>
+#   label=<message>
+#   elapsed_ms=<n>
+# stderr still prints the human label for CLI visibility. Plain single-arg
+# callers remain supported (stage=general).
 cyder_report_progress() {
   local message="$1"
+  local stage="${2:-general}"
+  local elapsed_ms="${3:-0}"
   echo "$message" >&2
   [[ -n "${CYDER_PROGRESS_FILE:-}" ]] || return 0
   local dir tmp
   dir="$(dirname "$CYDER_PROGRESS_FILE")"
   mkdir -p "$dir"
   tmp="$CYDER_PROGRESS_FILE.tmp.$$"
-  printf '%s\n' "$message" >"$tmp"
+  {
+    printf 'stage=%s\n' "$stage"
+    printf 'label=%s\n' "$message"
+    printf 'elapsed_ms=%s\n' "$elapsed_ms"
+  } >"$tmp"
   mv -f "$tmp" "$CYDER_PROGRESS_FILE"
+}
+
+cyder_now_ms() {
+  if [[ -n "${EPOCHREALTIME:-}" ]]; then
+    awk -v t="$EPOCHREALTIME" 'BEGIN { printf "%d\n", t * 1000 }'
+  else
+    python3 -c 'import time; print(int(time.time() * 1000))'
+  fi
+}
+
+cyder_bootstrap_timing_file() {
+  if [[ -n "${CYDER_BOOTSTRAP_TIMING_FILE:-}" ]]; then
+    printf '%s\n' "$CYDER_BOOTSTRAP_TIMING_FILE"
+    return 0
+  fi
+  if [[ -n "${CYDER_SUPPORT:-}" ]]; then
+    printf '%s\n' "$CYDER_SUPPORT/Logs/bootstrap-timing.jsonl"
+    return 0
+  fi
+  return 1
+}
+
+cyder_bootstrap_substage_record() {
+  local stage="$1" elapsed_ms="$2" status="$3"
+  if [[ -n "${CYDER_DIAGNOSTIC_SESSION_ID:-}" || "${CYDER_DIAGNOSTIC_VERBOSE:-0}" == 1 ]]; then
+    printf 'diagnostic event=bootstrap-substage session=%s stage=%s phase=end elapsed_ms=%s status=%s\n' \
+      "${CYDER_DIAGNOSTIC_SESSION_ID:-cli}" "$stage" "$elapsed_ms" "$status" >&2
+  fi
+  local timing_file
+  timing_file="$(cyder_bootstrap_timing_file 2>/dev/null)" || return 0
+  local dir
+  dir="$(dirname "$timing_file")"
+  mkdir -p "$dir"
+  printf '{"stage":"%s","elapsed_ms":%s,"status":%s,"session":"%s"}\n' \
+    "$stage" "$elapsed_ms" "$status" "${CYDER_DIAGNOSTIC_SESSION_ID:-}" >>"$timing_file"
+}
+
+cyder_bootstrap_substage_begin() {
+  local stage="$1"
+  CYDER_BOOTSTRAP_STAGE_STACK+=("$stage")
+  CYDER_BOOTSTRAP_T0_STACK+=("$(cyder_now_ms)")
+  cyder_diagnostic_stage "$stage"
+  if [[ -n "${CYDER_DIAGNOSTIC_SESSION_ID:-}" || "${CYDER_DIAGNOSTIC_VERBOSE:-0}" == 1 ]]; then
+    printf 'diagnostic event=bootstrap-substage session=%s stage=%s phase=begin\n' \
+      "${CYDER_DIAGNOSTIC_SESSION_ID:-cli}" "$stage" >&2
+  fi
+}
+
+cyder_bootstrap_substage_end() {
+  local stage="$1" substage_status="${2:-0}"
+  local stack_len="${#CYDER_BOOTSTRAP_STAGE_STACK[@]}"
+  (( stack_len > 0 )) || return 0
+  local top_idx=$((stack_len - 1))
+  local active="${CYDER_BOOTSTRAP_STAGE_STACK[$top_idx]}"
+  if [[ "$active" != "$stage" ]]; then
+    echo "bootstrap substage end mismatch: expected $active got $stage" >&2
+  fi
+  local t0="${CYDER_BOOTSTRAP_T0_STACK[$top_idx]}"
+  local now elapsed_ms=0
+  now="$(cyder_now_ms)"
+  if [[ "$now" =~ ^[0-9]+$ && "$t0" =~ ^[0-9]+$ ]]; then
+    elapsed_ms=$((now - t0))
+  fi
+  if (( stack_len == 1 )); then
+    CYDER_BOOTSTRAP_STAGE_STACK=()
+    CYDER_BOOTSTRAP_T0_STACK=()
+  else
+    unset "CYDER_BOOTSTRAP_STAGE_STACK[$top_idx]"
+    unset "CYDER_BOOTSTRAP_T0_STACK[$top_idx]"
+    CYDER_BOOTSTRAP_STAGE_STACK=("${CYDER_BOOTSTRAP_STAGE_STACK[@]}")
+    CYDER_BOOTSTRAP_T0_STACK=("${CYDER_BOOTSTRAP_T0_STACK[@]}")
+  fi
+  cyder_bootstrap_substage_record "$stage" "$elapsed_ms" "$substage_status"
 }
 
 # Lightweight post-provision check: confirm the bottle looks complete without
@@ -1594,7 +1680,8 @@ cyder_init_bottle() {
     echo
   } >>"$log_file"
   ln -sfn "operations/$(basename "$log_file")" "$CYDER_SUPPORT/Logs/last-wineboot.log"
-  local status=0 timed_out=0
+  local status=0 timed_out=0 wineboot_t0_ms
+  wineboot_t0_ms="$(cyder_now_ms)"
   local timeout="${CYDER_WINEBOOT_TIMEOUT:-120}"
   [[ "$timeout" =~ ^[0-9]+$ ]] || timeout=120
   (( timeout > 0 )) || timeout=1
@@ -1647,58 +1734,37 @@ cyder_init_bottle() {
       CYDER_OPERATION_ERROR_CODE=CYD-WINEBOOT-EXIT
     fi
   fi
-  # `wineboot` may return before wineserver has flushed system.reg/user.reg.
-  # Checking artifacts at that point produces a false CYD-WINEBOOT-ARTIFACT
-  # on real CrossOver engines. Give the flush its own bounded wait, then
-  # inspect the completed prefix.
-  if (( status == 0 )) && [[ -x "$wineserver" ]]; then
-    local wineserver_wait_timeout="${CYDER_WINESERVER_WAIT_TIMEOUT:-30}"
-    [[ "$wineserver_wait_timeout" =~ ^[0-9]+$ ]] || wineserver_wait_timeout=30
-    (( wineserver_wait_timeout > 0 )) || wineserver_wait_timeout=1
-    local wineserver_deadline=$((SECONDS + wineserver_wait_timeout))
-    echo "success_wait=wineserver -w" >>"$log_file"
-    (
-      cyder_wine_locale_exports
-      export WINEPREFIX="$bottle" WINESERVER="$wineserver"
-      cyder_run arch -x86_64 "$wineserver" -w >>"$log_file" 2>&1
-    ) &
-    local wineserver_wait_pid=$!
-    while kill -0 "$wineserver_wait_pid" 2>/dev/null; do
-      if (( SECONDS >= wineserver_deadline )); then
-        timed_out=1
-        kill -TERM "$wineserver_wait_pid" 2>/dev/null || true
-        sleep 1
-        kill -KILL "$wineserver_wait_pid" 2>/dev/null || true
+  # wineboot returns while wineserver is still in its short idle window (~3s).
+  # Do not wait for wineserver exit or force -p; the next MSI install must
+  # attach within that window. Poll only on-disk wineboot artifacts
+  # (drive_c + kernel32). system.reg/user.reg may flush later at -k.
+  if (( status == 0 )); then
+    local artifact_wait_timeout="${CYDER_WINESERVER_WAIT_TIMEOUT:-30}"
+    [[ "$artifact_wait_timeout" =~ ^[0-9]+$ ]] || artifact_wait_timeout=30
+    (( artifact_wait_timeout > 0 )) || artifact_wait_timeout=1
+    local artifact_deadline=$((SECONDS + artifact_wait_timeout))
+    local missing=()
+    echo "success_wait=artifact-ready" >>"$log_file"
+    cyder_bootstrap_substage_begin wineboot-artifact-wait
+    while true; do
+      missing=()
+      [[ -d "$bottle/drive_c" ]] || missing+=(drive_c)
+      [[ -f "$bottle/drive_c/windows/system32/kernel32.dll" || \
+         -f "$bottle/drive_c/windows/syswow64/kernel32.dll" ]] || missing+=(kernel32.dll)
+      if (( ${#missing[@]} == 0 )); then
+        cyder_bootstrap_substage_end wineboot-artifact-wait 0
         break
       fi
-      sleep 1
-    done
-    if (( timed_out )); then
-      wait "$wineserver_wait_pid" 2>/dev/null || true
-      status=124
-      CYDER_OPERATION_ERROR_KIND=timeout
-      CYDER_OPERATION_ERROR_CODE=CYD-WINEBOOT-TIMEOUT
-    else
-      wait "$wineserver_wait_pid" || status=$?
-      if (( status != 0 )); then
-        CYDER_OPERATION_ERROR_KIND=exit
-        CYDER_OPERATION_ERROR_CODE=CYD-WINEBOOT-EXIT
+      if (( SECONDS >= artifact_deadline )); then
+        status=125
+        CYDER_OPERATION_ERROR_KIND=artifact-missing
+        CYDER_OPERATION_ERROR_CODE=CYD-WINEBOOT-ARTIFACT
+        echo "missing_artifacts=${missing[*]}" >>"$log_file"
+        cyder_bootstrap_substage_end wineboot-artifact-wait "$status"
+        break
       fi
-    fi
-  fi
-  if (( status == 0 )); then
-    local missing=()
-    [[ -f "$bottle/system.reg" ]] || missing+=(system.reg)
-    [[ -f "$bottle/user.reg" ]] || missing+=(user.reg)
-    [[ -d "$bottle/drive_c" ]] || missing+=(drive_c)
-    [[ -f "$bottle/drive_c/windows/system32/kernel32.dll" || \
-       -f "$bottle/drive_c/windows/syswow64/kernel32.dll" ]] || missing+=(kernel32.dll)
-    if (( ${#missing[@]} > 0 )); then
-      status=125
-      CYDER_OPERATION_ERROR_KIND=artifact-missing
-      CYDER_OPERATION_ERROR_CODE=CYD-WINEBOOT-ARTIFACT
-      echo "missing_artifacts=${missing[*]}" >>"$log_file"
-    fi
+      sleep 0.1
+    done
   fi
   # Any failed wineboot can leave a partially initialized wineserver behind,
   # not only a timeout. Always clean it before returning an error so the next
@@ -1709,6 +1775,13 @@ cyder_init_bottle() {
     echo "failure_cleanup=wineserver -w" >>"$log_file"
     WINEPREFIX="$bottle" arch -x86_64 "$wineserver" -w >>"$log_file" 2>&1 || true
   fi
+  local wineboot_duration_ms=0 wineboot_finished_ms
+  wineboot_finished_ms="$(cyder_now_ms)"
+  if [[ "$wineboot_finished_ms" =~ ^[0-9]+$ && "$wineboot_t0_ms" =~ ^[0-9]+$ ]]; then
+    wineboot_duration_ms=$((wineboot_finished_ms - wineboot_t0_ms))
+  fi
+  echo "finished=$(date -u '+%Y-%m-%dT%H:%M:%SZ')" >>"$log_file"
+  echo "duration_ms=$wineboot_duration_ms" >>"$log_file"
   echo "exit_status=$status" >>"$log_file"
   echo "result=${CYDER_OPERATION_ERROR_KIND:-success}" >>"$log_file"
   echo "error_code=${CYDER_OPERATION_ERROR_CODE:-}" >>"$log_file"
@@ -1721,11 +1794,8 @@ cyder_init_bottle() {
   rm -f "$dos/c:" "$dos/z:"
   ln -sf ../drive_c "$dos/c:"
   ln -sf / "$dos/z:"
-  (
-    cyder_wine_locale_exports
-    export WINEPREFIX="$bottle" WINESERVER="$wineserver"
-    arch -x86_64 "$wineserver" -k 2>/dev/null || true
-  )
+  # Keep wineserver alive for immediate Mono/Gecko msiexec. Baseline verify
+  # stops it later (flushing .reg).
 }
 
 cyder_health_check_prefix() {
@@ -1876,59 +1946,128 @@ cyder_template_engine_version() {
 # bottles use this directly; template publish/clone is deferred until 1.0.0.
 cyder_provision_prefix_baseline() {
   local wine_bin="$1" engine_root="$2" prefix="$3"
+  local component_status=0
+  local mono_ver="${WINE_MONO_VERSION:-10.4.1}"
+  local gecko_ver="${WINE_GECKO_VERSION:-2.47.4}"
   CYDER_BOOTSTRAP_HEALTH_CHECKED=0
+  CYDER_BOOTSTRAP_STAGE_STACK=()
+  CYDER_BOOTSTRAP_T0_STACK=()
 
-  cyder_report_progress "正在建立 Windows 環境…"
-  cyder_diagnostic_stage wineboot
-  cyder_init_bottle "$wine_bin" "$prefix" || return $?
+  # Prefetch MSIs before wineboot so the post-wineboot hot path can chain
+  # msiexec onto the still-live wineserver (~3s idle window) without checksum
+  # or download work in between.
+  [[ -f "$CYDER_SCRIPTS/install-wine-mono.sh" ]] || {
+    echo "Baseline component installer is missing: install-wine-mono.sh" >&2
+    return 1
+  }
+  [[ -f "$CYDER_SCRIPTS/install-wine-gecko.sh" ]] || {
+    echo "Baseline component installer is missing: install-wine-gecko.sh" >&2
+    return 1
+  }
+  cyder_report_progress "正在準備元件下載…" "mono-download"
+  cyder_bootstrap_substage_begin mono-download
+  (
+    export WINEPREFIX="$prefix" WINE_INSTALL="$engine_root" CYDER_DOWNLOADS="$CYDER_DOWNLOADS"
+    bash "$CYDER_SCRIPTS/install-wine-mono.sh" --download-only
+  ) || component_status=$?
+  cyder_bootstrap_substage_end mono-download "$component_status"
+  (( component_status == 0 )) || return "$component_status"
 
-  cyder_report_progress "正在安裝 .NET（Wine Mono）…"
-  cyder_diagnostic_stage mono-setup
-  local component
-  for component in install-wine-mono.sh install-wine-gecko.sh; do
-    [[ -f "$CYDER_SCRIPTS/$component" ]] || {
-      echo "Baseline component installer is missing: $component" >&2
-      return 1
-    }
-    if [[ "$component" == install-wine-gecko.sh ]]; then
-      cyder_report_progress "正在安裝瀏覽器元件（Gecko）…"
-      cyder_diagnostic_stage gecko-setup
-    fi
+  cyder_bootstrap_substage_begin gecko-download
+  (
+    export WINEPREFIX="$prefix" WINE_INSTALL="$engine_root" CYDER_DOWNLOADS="$CYDER_DOWNLOADS"
+    bash "$CYDER_SCRIPTS/install-wine-gecko.sh" --download-only
+  ) || component_status=$?
+  cyder_bootstrap_substage_end gecko-download "$component_status"
+  (( component_status == 0 )) || return "$component_status"
+
+  cyder_report_progress "正在建立 Windows 環境…" "wineboot"
+  cyder_bootstrap_substage_begin wineboot
+  cyder_init_bottle "$wine_bin" "$prefix" || {
+    component_status=$?
+    cyder_bootstrap_substage_end wineboot "$component_status"
+    return "$component_status"
+  }
+  cyder_bootstrap_substage_end wineboot 0
+
+  if [[ -f "$prefix/.cyder-mono-$mono_ver" ]]; then
+    cyder_report_progress "Wine Mono 已就緒，略過安裝…" "mono-install"
+    cyder_bootstrap_substage_begin mono-install
+    cyder_bootstrap_substage_end mono-install 0
+  else
+    cyder_report_progress "正在安裝 .NET（Wine Mono）…" "mono-install"
+    cyder_bootstrap_substage_begin mono-install
     (
       export WINEPREFIX="$prefix" WINE_INSTALL="$engine_root" CYDER_DOWNLOADS="$CYDER_DOWNLOADS"
-      bash "$CYDER_SCRIPTS/$component"
-    ) || return $?
-  done
+      bash "$CYDER_SCRIPTS/install-wine-mono.sh"
+    ) || component_status=$?
+    cyder_bootstrap_substage_end mono-install "$component_status"
+    (( component_status == 0 )) || return "$component_status"
+  fi
+
+  if [[ -f "$prefix/.cyder-gecko-$gecko_ver" ]]; then
+    cyder_report_progress "Wine Gecko 已就緒，略過安裝…" "gecko-install"
+    cyder_bootstrap_substage_begin gecko-install
+    cyder_bootstrap_substage_end gecko-install 0
+  else
+    cyder_report_progress "正在安裝瀏覽器元件（Gecko）…" "gecko-install"
+    cyder_bootstrap_substage_begin gecko-install
+    (
+      export WINEPREFIX="$prefix" WINE_INSTALL="$engine_root" CYDER_DOWNLOADS="$CYDER_DOWNLOADS"
+      bash "$CYDER_SCRIPTS/install-wine-gecko.sh"
+    ) || component_status=$?
+    cyder_bootstrap_substage_end gecko-install "$component_status"
+    (( component_status == 0 )) || return "$component_status"
+  fi
 
   if [[ -f "$CYDER_SCRIPTS/install-libarchive-tar.sh" ]]; then
-    cyder_report_progress "正在安裝 tar 解壓工具…"
-    cyder_diagnostic_stage tar-setup
-    (
-      export WINEPREFIX="$prefix" WINE_INSTALL="$engine_root"
-      export OGOM="${CYDER_OGOM:-${OGOM:-}}"
-      export CYDER_LIBARCHIVE_SRC="${CYDER_LIBARCHIVE_SRC:-$(cyder_resolve_libarchive_src)}"
-      bash "$CYDER_SCRIPTS/install-libarchive-tar.sh" --prefix "$prefix"
-    ) || return $?
+    if [[ -f "$prefix/drive_c/windows/syswow64/tar.exe" ]]; then
+      cyder_report_progress "tar 解壓工具已就緒，略過安裝…" "tar-setup"
+      cyder_bootstrap_substage_begin tar-setup
+      cyder_bootstrap_substage_end tar-setup 0
+    else
+      cyder_report_progress "正在安裝 tar 解壓工具…" "tar-setup"
+      cyder_bootstrap_substage_begin tar-setup
+      (
+        export WINEPREFIX="$prefix" WINE_INSTALL="$engine_root"
+        export OGOM="${CYDER_OGOM:-${OGOM:-}}"
+        export CYDER_LIBARCHIVE_SRC="${CYDER_LIBARCHIVE_SRC:-$(cyder_resolve_libarchive_src)}"
+        bash "$CYDER_SCRIPTS/install-libarchive-tar.sh" --prefix "$prefix"
+      ) || component_status=$?
+      cyder_bootstrap_substage_end tar-setup "$component_status"
+      (( component_status == 0 )) || return "$component_status"
+    fi
   fi
 
   if [[ -f "$CYDER_SCRIPTS/cyder-apply-golden-settings.sh" ]]; then
-    cyder_report_progress "正在套用預設設定…"
-    cyder_diagnostic_stage golden-setup
-    (
-      export WINEPREFIX="$prefix" WINE_INSTALL="$engine_root"
-      bash "$CYDER_SCRIPTS/cyder-apply-golden-settings.sh"
-    ) || return $?
+    if [[ -f "$prefix/.cyder-golden-baseline-v2" ]]; then
+      cyder_report_progress "預設設定已就緒，略過套用…" "golden-setup"
+      cyder_bootstrap_substage_begin golden-setup
+      cyder_bootstrap_substage_end golden-setup 0
+    else
+      cyder_report_progress "正在套用預設設定…" "golden-setup"
+      cyder_bootstrap_substage_begin golden-setup
+      (
+        export WINEPREFIX="$prefix" WINE_INSTALL="$engine_root"
+        bash "$CYDER_SCRIPTS/cyder-apply-golden-settings.sh"
+      ) || component_status=$?
+      cyder_bootstrap_substage_end golden-setup "$component_status"
+      (( component_status == 0 )) || return "$component_status"
+    fi
   fi
 
-  cyder_report_progress "正在確認環境…"
-  cyder_stop_prefix_wineserver "$wine_bin" "$prefix" || return $?
+  cyder_report_progress "正在確認環境…" "verify"
+  cyder_bootstrap_substage_begin verify
+  cyder_stop_prefix_wineserver "$wine_bin" "$prefix" || component_status=$?
   # Skip a full wine cmd probe here: wineboot + component installs already
   # exercised the prefix. Artifact checks are enough; Cyder.app will not run a
   # second probe when healthChecked=1 is returned from bootstrap.
   if ! cyder_verify_prefix_baseline_artifacts "$prefix"; then
     echo "Baseline provision artifact check failed: $prefix" >&2
-    return 1
+    component_status=1
   fi
+  cyder_bootstrap_substage_end verify "$component_status"
+  (( component_status == 0 )) || return "$component_status"
   CYDER_BOOTSTRAP_HEALTH_CHECKED=1
 }
 
@@ -2699,7 +2838,8 @@ cyder_bootstrap_shared_prefix() {
   local wine_bin="$1"
   local engine_root="$2"
   CYDER_BOOTSTRAP_HEALTH_CHECKED=0
-  cyder_prepare_graphics_prefix "$wine_bin" "$engine_root" "$CYDER_SHARED_PREFIX" || return $?
+  # Graphics/winemetal belong after the prefix exists (Phase C). Do not prepare
+  # graphics against a missing or incomplete bottle here.
   if cyder_shared_prefix_is_ready "$wine_bin"; then
     return 0
   fi
@@ -2739,9 +2879,9 @@ cyder_bootstrap_shared_prefix() {
     printf 'revision=%s\n' "${CYDER_TEMPLATE_REVISION:-1}" >"$CYDER_BOOTSTRAP_MARKER"
   fi
 
-  # A first-run prefix did not exist when prepare_graphics_prefix ran, so its
-  # DXMT PE gate could not install winemetal.dll. Run ensure once more after
-  # provisioning to populate the newly-created prefix.
+  # Phase C: install DXMT winemetal PE into the newly provisioned prefix.
+  # Runtime payload unpack remains Swift/settings responsibility.
+  cyder_report_progress "正在準備圖形元件…" "graphics-ensure"
   if declare -F cyder_graphics_source_dir >/dev/null 2>&1 &&
      cyder_graphics_source_dir >/dev/null 2>&1; then
     cyder_ensure_graphics "$CYDER_SHARED_PREFIX" || return $?

@@ -47,7 +47,8 @@
 | `release-cyder.sh` | 測試／正式通道：建置、簽署、（正式）公證與 `Cyder.app.zip`；見 `docs/release-pipeline.zh-TW.md` |
 | `cyder-ensure-graphics.sh` | 將 app `Resources/graphics/` payload 依 version／SHA-256 安裝到 runtime，更新 `current-dxvk`／`current-dxmt`、建立 engine `lib` 相對 symlink，並以目前 DXMT payload 覆蓋 prefix 的 64/32 位元 `winemetal.dll` |
 | `cyder-migrate-graphics-prefix.sh` | 偵測舊 Cyder 拷入的 DXVK／DXMT DLL，還原 Wine 內建 `d3d*`／`dxgi`、清理舊 payload marker；保留 `winemetal.dll`，由 ensure-graphics 以目前 DXMT 版本覆蓋；不修改 DllOverrides registry |
-| `cyder-measure-startup.sh` | 量測 Cyder 啟動各階段 wall time（後續開啟、EXE/URI 前置檢查；`--first-prefix` 在隔離 support 做首次 prefix bootstrap） |
+| `cyder-measure-startup.sh` | 量測 Cyder 啟動各階段 wall time（後續開啟、EXE/URI 前置檢查；`--first-prefix` 在隔離 support 做首次 prefix bootstrap，並匯總 `bootstrap-timing.jsonl` 子階段） |
+| `cyder-prefetch-bootstrap-msi.sh` | 預先下載 pinned Wine Mono/Gecko MSI（`--download-only`），可在 bootstrap 前與 engine 解包並行 |
 | `cyder-winetricks.sh` | 以 Cyder engine 的 unattended CLI 安裝固定版 Winetricks 元件；目標為 SharedPrefix，供 Cyder 原生元件選擇器呼叫 |
 | `cyder_app_main.swift` | 編譯為 `Cyder.app/Contents/MacOS/Cyder`（Universal）；無 `.exe` 時顯示設定頁，有 `.exe` 時直接啟動 Wine，收到 same-prefix 的 `ActivatingAppPID` Foreground 通知後 activate 並退出 |
 | `create-cyder-pid-test-app.sh` | 建立 `dist/CyderPIDTest.app` Universal 測試工具 |
@@ -106,6 +107,8 @@ run-bluecg.sh
 | `tests/test-cyder-running-prefix.sh` | wineserver `$TMPDIR` socket 與 live session 視為 prefix in use |
 | `tests/test-cyder-diagnostics.sh` | session 階段 `previous_ms` / `elapsed_ms` 與錯誤紀錄 |
 | `tests/test-cyder-measure-startup.sh` | 啟動階段量測腳本契約 |
+| `tests/test-cyder-bootstrap-timing.sh` | bootstrap 子階段 timing 與 wineboot duration 契約 |
+| `tests/test-cyder-prefetch-bootstrap-msi.sh` | Mono/Gecko `--download-only` 與 prefetch 腳本契約 |
 | `tests/test-release-cyder.sh` | `release-cyder.sh` 通道契約與 test dry-run |
 | `tests/test-cyder-game-launch-settings.sh` | stable EXE ID → per-game settings → fast registry/apply launch bridge |
 | `tests/test-cyderbits-app.sh` | CyderBits.app 是否內含 `cyder_common.py`、模組可載入 |

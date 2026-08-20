@@ -117,6 +117,8 @@ if [[ "$RUN_FIRST_PREFIX" -eq 1 ]]; then
   FIRST_SUPPORT="$OUT/first-support"
   mkdir -p "$FIRST_SUPPORT"
   export CYDER_SUPPORT="$FIRST_SUPPORT"
+  time_cmd "first-prefetch-msi" \
+    bash "$ROOT/scripts/cyder-prefetch-bootstrap-msi.sh"
   time_cmd "first-ensure-engine" \
     bash "$LAUNCHER" --engine-src "$ENGINE_SRC" --ensure-engine-only
   time_cmd "first-ensure-graphics" \
@@ -145,6 +147,27 @@ def group(prefix):
         "last_status": rows[-1]["status"] if rows else None,
     }
 
+bootstrap_substage = {}
+timing_path = out / "first-support" / "Logs" / "bootstrap-timing.jsonl"
+if timing_path.exists():
+    by_stage = {}
+    for line in timing_path.read_text().splitlines():
+        if not line.strip():
+            continue
+        row = json.loads(line)
+        stage = row.get("stage")
+        elapsed = row.get("elapsed_ms")
+        if stage is None or elapsed is None:
+            continue
+        by_stage.setdefault(stage, []).append(elapsed)
+    bootstrap_substage = {
+        stage: {
+            "samples_ms": values,
+            "mean_ms": round(mean(values), 1),
+        }
+        for stage, values in sorted(by_stage.items())
+    }
+
 summary = {
     "app": app,
     "rounds": rounds,
@@ -157,13 +180,17 @@ summary = {
         "exe-marker-stat": group("exe-marker-stat"),
         "uri-scan-live": group("uri-scan-live"),
         "uri-scan-fixture": group("uri-scan-fixture"),
+        "first-prefetch-msi": group("first-prefetch-msi"),
         "first-ensure-engine": group("first-ensure-engine"),
         "first-ensure-graphics": group("first-ensure-graphics"),
         "first-bootstrap": group("first-bootstrap"),
     },
+    "bootstrap_substage": bootstrap_substage,
     "records": records,
 }
 (out / "results.json").write_text(json.dumps(summary, indent=2, ensure_ascii=False) + "\n")
 print(json.dumps(summary["groups"], indent=2))
+if bootstrap_substage:
+    print(json.dumps({"bootstrap_substage": bootstrap_substage}, indent=2))
 print(f"wrote {out / 'results.json'}")
 PY
