@@ -88,7 +88,6 @@ Options:
   --session-acquire PREFIX OWNER_PID MSYNC ESYNC POWER Reserve a bottle session
   --session-update PREFIX SESSION_FILE NEW_PID Update a reserved session PID
   --session-release PREFIX SESSION_FILE Release a reserved session
-  --templates-ready  Check that the shared prefix is bootstrapped for the current engine
   --launch-exe PATH [-- ARG ...]
                       Launch .exe; arguments after -- replace saved game arguments for this launch
   --launch-msi PATH [-- ARG ...]
@@ -128,7 +127,6 @@ APPLY_SETTINGS_PREFIX=""
 APPLY_SETTINGS_PREFIX_SET=0
 SESSION_ACTION=""
 SESSION_ARGS=()
-TEMPLATES_READY=0
 ENGINE_SRC="$CYDER_ENGINE_SRC"
 EXE_ARGS=()
 MSI_ARGS=()
@@ -235,10 +233,6 @@ while [[ $# -gt 0 ]]; do
       [[ $# -ge "$needed" ]] || { echo "--session-$SESSION_ACTION has missing arguments" >&2; exit 1; }
       SESSION_ARGS=("${@:2:$((needed - 1))}")
       shift "$needed"
-      ;;
-    --templates-ready)
-      TEMPLATES_READY=1
-      shift
       ;;
     --launch-exe)
       [[ $# -ge 2 ]] || {
@@ -351,7 +345,6 @@ primary_actions=0
 [[ "$LIST_SESSIONS" -eq 1 ]] && primary_actions=$((primary_actions + 1))
 [[ "$TASKMGR_PREFIX_SET" -eq 1 ]] && primary_actions=$((primary_actions + 1))
 [[ "$STOP_PREFIX_SET" -eq 1 ]] && primary_actions=$((primary_actions + 1))
-[[ "$TEMPLATES_READY" -eq 1 ]] && primary_actions=$((primary_actions + 1))
 [[ "$BOOTSTRAP_ONLY" -eq 1 ]] && primary_actions=$((primary_actions + 1))
 [[ "$HEALTH_CHECK" -eq 1 ]] && primary_actions=$((primary_actions + 1))
 [[ "$REBUILD_PREFIX" -eq 1 ]] && primary_actions=$((primary_actions + 1))
@@ -398,20 +391,6 @@ if [[ -n "$PROFILE_ACTION" ]]; then
     cyder_create_profile_prefix "$profile_wine" "$profile_engine" "$PROFILE_EXE" "$PROFILE_TEMPLATE"
   fi
   exit $?
-fi
-
-if [[ "$TEMPLATES_READY" -eq 1 ]]; then
-  CYDER_DIAGNOSTIC_EXPECTED_EXIT=1
-  engine="$CYDER_ENGINES/$CYDER_ENGINE_NAME/bin/wine"
-  if [[ ! -x "$engine" ]]; then
-    exit 1
-  fi
-  # Compatibility flag: historically meant pristine/golden manifests. Until
-  # 1.0.0 template bottles return, ready means shared is bootstrapped.
-  [[ -f "$CYDER_BOOTSTRAP_MARKER" \
-     && -f "$CYDER_SHARED_PREFIX/system.reg" \
-     && -f "$CYDER_SHARED_PREFIX/.cyder-golden-baseline-v2" ]] || exit 1
-  exit 0
 fi
 
 cyder_validate_bottle_prefix() {

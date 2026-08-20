@@ -65,8 +65,8 @@ set -e
 assert_eq "$msi_not_ready_status" "2" "launch-msi must not create a missing environment"
 assert_contains "$msi_not_ready_out" "open Cyder.app" "launch-msi should direct the user to manual setup"
 
-# Cyder.app settings opens upgrade the runtime graphics payload explicitly.
-# The launch-only path above must not implicitly use this operation.
+# Cyder.app settings opens can still upgrade the runtime graphics payload
+# explicitly. The launch-only path above must not implicitly use this operation.
 set +e
 graphics_out="$(
   env -u CYDER_RESOURCES -u CYDER_APP \
@@ -433,15 +433,9 @@ mkdir -p "$profile_support/bottles/shared/drive_c/windows/system32"
 : >"$profile_support/bottles/shared/.cyder-bootstrap-v1"
 : >"$profile_support/bottles/shared/system.reg"
 : >"$profile_support/bottles/shared/.cyder-golden-baseline-v2"
-CYDER_SUPPORT="$profile_support" PATH="$TMP/bin:$PATH" \
-  bash "$ROOT/scripts/cyder_launcher.sh" --templates-ready
-set +e
-rm -f "$profile_support/bottles/shared/.cyder-bootstrap-v1"
-CYDER_SUPPORT="$profile_support" PATH="$TMP/bin:$PATH" \
-  bash "$ROOT/scripts/cyder_launcher.sh" --templates-ready >/dev/null 2>&1
-templates_missing_status=$?
-set -e
-assert_eq "$templates_missing_status" "1" "missing shared bootstrap should be a negative readiness result"
+launcher_text="$(<"$ROOT/scripts/cyder_launcher.sh")"
+assert_not_contains "$launcher_text" "--templates-ready" \
+  "launcher should no longer expose the removed templates-ready probe"
 
 # Native bridge session API validates bottle scope and supports reservation
 # lifecycle through the same session registry used by Wine launches.

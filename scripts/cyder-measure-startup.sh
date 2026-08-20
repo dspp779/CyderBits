@@ -88,8 +88,6 @@ for i in $(seq 1 "$ROUNDS"); do
     bash "$LAUNCHER" --engine-src "$ENGINE_SRC" --ensure-engine-only
   time_cmd "subsequent-ensure-graphics-$i" \
     bash "$LAUNCHER" --ensure-graphics-only
-  time_cmd "subsequent-templates-ready-$i" \
-    bash "$LAUNCHER" --engine-src "$ENGINE_SRC" --templates-ready
   time_cmd "subsequent-health-check-$i" \
     bash "$LAUNCHER" --engine-src "$ENGINE_SRC" --health-check || true
 done
@@ -154,7 +152,6 @@ summary = {
     "groups": {
         "ensure-engine": group("subsequent-ensure-engine"),
         "ensure-graphics": group("subsequent-ensure-graphics"),
-        "templates-ready": group("subsequent-templates-ready"),
         "health-check": group("subsequent-health-check"),
         "exe-engine-ready": group("exe-engine-ready"),
         "exe-marker-stat": group("exe-marker-stat"),

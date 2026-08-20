@@ -7,6 +7,7 @@ script="$(cat "$ROOT/scripts/cyder-measure-startup.sh")"
 assert_contains "$script" "--first-prefix" "measure script must isolate first-prefix bootstrap"
 assert_contains "$script" "--ensure-engine-only" "measure script must time ensure-engine"
 assert_contains "$script" "--scan-uri-handlers" "measure script must time URI precheck"
+assert_not_contains "$script" "--templates-ready" "measure script must stop timing the removed templates-ready probe"
 assert_not_contains "$script" "--rebuild-prefix" "measure script must not rebuild the live bottle"
 
 diag="$(cat "$ROOT/scripts/cyder_diagnostics.swift")"
