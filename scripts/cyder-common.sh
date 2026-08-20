@@ -2159,6 +2159,13 @@ cyder_dxmt_launch_allowed() {
     && cyder_engine_has_dxmt_payload "$engine_root"
 }
 
+cyder_d3dmetal_launch_allowed() {
+  local engine_root="$1"
+  declare -F cyder_macos_at_least >/dev/null 2>&1 \
+    && cyder_macos_at_least 14 0 \
+    && cyder_preferred_gptk_root >/dev/null 2>&1
+}
+
 cyder_maplestory_auto_graphics_backend() {
   local exe="$1" engine_root="$2"
   cyder_is_maplestory_graphics_executable "$exe" || return 1
@@ -2187,10 +2194,22 @@ cyder_apply_graphics_preference() {
       export CYDER_GRAPHICS_AUTO_POLICY=1
       unset CYDER_GRAPHICS_BACKEND CX_GRAPHICS_BACKEND
       ;;
-    wined3d|d3dmetal)
-      export CYDER_GRAPHICS_PREFERENCE="$preference"
+    wined3d)
+      export CYDER_GRAPHICS_PREFERENCE=wined3d
       export CYDER_GRAPHICS_AUTO_POLICY=0
-      export CYDER_GRAPHICS_BACKEND="$preference" CX_GRAPHICS_BACKEND="$preference"
+      export CYDER_GRAPHICS_BACKEND=wined3d CX_GRAPHICS_BACKEND=wined3d
+      ;;
+    d3dmetal)
+      if cyder_d3dmetal_launch_allowed "$engine_root"; then
+        export CYDER_GRAPHICS_PREFERENCE=d3dmetal
+        export CYDER_GRAPHICS_AUTO_POLICY=0
+        export CYDER_GRAPHICS_BACKEND=d3dmetal CX_GRAPHICS_BACKEND=d3dmetal
+      else
+        echo "D3DMetal is unavailable (requires macOS 14+ and GPTK); using default graphics backend." >&2
+        export CYDER_GRAPHICS_PREFERENCE=default
+        export CYDER_GRAPHICS_AUTO_POLICY=0
+        unset CYDER_GRAPHICS_BACKEND CX_GRAPHICS_BACKEND
+      fi
       ;;
     dxvk)
       if cyder_engine_has_dxvk_payload "$engine_root"; then

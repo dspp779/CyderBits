@@ -53,6 +53,12 @@ assert_not_contains "$ui" 'DXVK 2' \
   "prefs should hide the deferred DXVK 2 backend"
 assert_not_contains "$ui" '"自動"' "graphics menus must not offer auto"
 assert_contains "$ui" "canSelectDxmt" "DXMT should gate on OS + payload"
+assert_contains "$ui" "canSelectDxvk" "DXVK should gate on payload availability"
+assert_contains "$ui" "updateDxvkMenuItemAvailability" "DXVK menu should expose availability tooltip"
+assert_contains "$ui" "supportsD3DMetalOS" \
+  "GPTK install controls should be gated on macOS 14+"
+assert_contains "$ui" "showGptkControls = supportsD3DMetalOS" \
+  "GPTK install UI must stay hidden below macOS 14"
 assert_contains "$ui" "CyderGraphicsCapabilities.current(engineRoot: CyderPaths.engine)" \
   "prefs DXMT gating should probe the installed engine"
 assert_contains "$library_ui" "CyderGraphicsCapabilities.current(engineRoot: CyderPaths.engine)" \
@@ -150,10 +156,12 @@ assert_contains "$common" 'DXVK_HUD=${DXVK_HUD:-<unset>}' \
 assert_contains "$(cat "$ROOT/scripts/cyder_gptk.swift")" 'CYDER_ALLOW_TEST_HOOKS' "GPTK test override must require an allow flag"
 assert_contains "$(cat "$ROOT/scripts/pack-engine-artifact.sh")" 'apple_gptk' "engine pack must exclude/assert no apple_gptk"
 assert_contains "$(cat "$ROOT/scripts/cyder_settings.swift")" 'defaultGraphicsBackend' "OEM/default graphics backend should be product-aware"
-assert_contains "$(cat "$ROOT/scripts/cyder_settings.swift")" 'osMajorVersion >= 15' \
-  "effectiveLaunchBackend must fail closed on DXMT below macOS 15"
-assert_contains "$(cat "$ROOT/scripts/cyder_settings.swift")" 'return (hasDxmt && osMajorVersion >= 15) ? .dxmt : nil' \
-  "effectiveLaunchBackend must refuse DXMT without payload or OS support"
+assert_contains "$(cat "$ROOT/scripts/cyder_settings.swift")" 'isSelectableGraphicsBackend' \
+  "graphics backend availability should be centralized"
+assert_contains "$(cat "$ROOT/scripts/cyder_settings.swift")" 'sanitizeGraphicsPreferences' \
+  "stored graphics preferences should reconcile against current capabilities"
+assert_contains "$(cat "$ROOT/scripts/cyder_settings.swift")" 'reconcileGraphicsPreferences' \
+  "settings store should expose post-ensure graphics reconciliation"
 assert_contains "$ui" 'saveImmediately(registrySetting: "dpi", deferredChange: true)' \
   "DPI changes should invoke only the DPI sed path"
 assert_contains "$ui" 'saveImmediately(registrySetting: "display", deferredChange: true)' \
@@ -214,6 +222,8 @@ assert_contains "$library_ui" 'return ["跟隨全域", "預設", "D3DMetal", "DX
 assert_not_contains "$library_ui" 'DXVK 2' \
   "game options should hide the deferred DXVK 2 backend"
 assert_not_contains "$library_ui" '"自動"' "game graphics menus must not offer auto"
+assert_contains "$library_ui" "canSelectDxvk" "game library DXVK should gate on payload availability"
+assert_contains "$library_ui" "updateDxvkMenuItemAvailability" "game library should expose DXVK availability tooltip"
 assert_contains "$library_ui" "private var graphicsBackendOverride: CyderGraphicsBackend?" "follow-global backend should use an optional profile override"
 assert_not_contains "$library_ui" "private var dxvkFrameRateOverride" "game options should not expose a frame-rate override"
 assert_not_contains "$library_ui" "限制幀率" "game options should not expose DXVK frame-rate choices"

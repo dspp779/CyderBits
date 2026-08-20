@@ -1121,6 +1121,10 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate,
         supportsDxmtOS && CyderGraphicsCapabilities.current(engineRoot: CyderPaths.engine).hasDxmt
     }
 
+    private var canSelectDxvk: Bool {
+        CyderGraphicsCapabilities.current(engineRoot: CyderPaths.engine).hasDxvk
+    }
+
     private var graphicsBackendTitles: [String] {
         return ["預設", "D3DMetal", "DXMT", "DXVK", "WineD3D"]
     }
@@ -1144,7 +1148,17 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate,
         if !supportsDxmtOS {
             item.toolTip = "需要 macOS 15+"
         } else if !CyderGraphicsCapabilities.current(engineRoot: CyderPaths.engine).hasDxmt {
-            item.toolTip = "需要引擎內建 DXMT"
+            item.toolTip = "需要已安裝的 DXMT 圖形元件"
+        } else {
+            item.toolTip = nil
+        }
+    }
+
+    private func updateDxvkMenuItemAvailability() {
+        guard let item = graphicsBackend.item(at: 3) else { return }
+        item.isEnabled = canSelectDxvk
+        if !canSelectDxvk {
+            item.toolTip = "需要已安裝的 DXVK 圖形元件"
         } else {
             item.toolTip = nil
         }
@@ -1154,7 +1168,7 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate,
         switch graphicsBackend.indexOfSelectedItem {
         case 1: return canSelectD3DMetal ? .d3dmetal : .default
         case 2: return canSelectDxmt ? .dxmt : .default
-        case 3: return .dxvk
+        case 3: return canSelectDxvk ? .dxvk : .default
         case 4: return .wined3d
         default: return .default
         }
@@ -1165,7 +1179,7 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate,
         case .default: return 0
         case .d3dmetal: return canSelectD3DMetal ? 1 : 0
         case .dxmt: return canSelectDxmt ? 2 : 0
-        case .dxvk: return 3
+        case .dxvk: return canSelectDxvk ? 3 : 0
         case .wined3d: return 4
         }
     }
@@ -1207,12 +1221,14 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate,
     private func refreshGraphicsControls() {
         updateD3DMetalMenuItemAvailability()
         updateDxmtMenuItemAvailability()
+        updateDxvkMenuItemAvailability()
         CyderGptk.syncEngineLink()
         let backend = graphicsBackendValue
         let showFrameRate = backend.usesFrameLimiter
         let showDxvkFrametimes = backend.usesDxvkTranslation
         let enableDxvkFrametimes = graphicsHudValue == .dxvk
-        let showGptkControls = backend != .dxvk && backend != .wined3d && backend != .dxmt
+        let showGptkControls = supportsD3DMetalOS
+            && backend != .dxvk && backend != .wined3d && backend != .dxmt
         dxvkFrameRate.isHidden = !showFrameRate
         (dxvkFrameRate.superview as? NSStackView)?.isHidden = !showFrameRate
         dxvkHudFrametimes.isHidden = !showDxvkFrametimes

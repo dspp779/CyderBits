@@ -1167,6 +1167,9 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
                     return
                 }
                 self.hideSetup()
+                if !self.documentLaunchRequested {
+                    try? CyderSettingsStore.shared.reconcileGraphicsPreferences()
+                }
                 if let preparationFailure {
                     if preparationFailure.code == "CYD-GFX-001" {
                         // Graphics payload install must not block settings / Cyder residency.

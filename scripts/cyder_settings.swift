@@ -656,15 +656,105 @@ struct CyderSettings: Codable {
         )
     }
 
+    /// Whether the UI may offer this backend on the current machine.
+    static func isSelectableGraphicsBackend(
+        _ backend: CyderGraphicsBackend,
+        capabilities: CyderGraphicsCapabilities,
+        osMajorVersion: Int = ProcessInfo.processInfo.operatingSystemVersion.majorVersion
+    ) -> Bool {
+        switch backend {
+        case .default, .wined3d:
+            return true
+        case .dxvk:
+            return capabilities.hasDxvk
+        case .dxmt:
+            return osMajorVersion >= 15 && capabilities.hasDxmt
+        case .d3dmetal:
+            return osMajorVersion >= 14 && capabilities.hasD3DMetal
+        }
+    }
+
+    /// Coerce a stored preference to `default` when OS or payload requirements are not met.
+    static func coercedGraphicsBackend(
+        _ backend: CyderGraphicsBackend,
+        capabilities: CyderGraphicsCapabilities,
+        osMajorVersion: Int = ProcessInfo.processInfo.operatingSystemVersion.majorVersion
+    ) -> CyderGraphicsBackend {
+        isSelectableGraphicsBackend(backend, capabilities: capabilities, osMajorVersion: osMajorVersion)
+            ? backend
+            : .default
+    }
+
+    /// Coerce an optional per-game override to `nil` (follow global) when unavailable.
+    static func coercedOptionalGraphicsBackend(
+        _ backend: CyderGraphicsBackend?,
+        capabilities: CyderGraphicsCapabilities,
+        osMajorVersion: Int = ProcessInfo.processInfo.operatingSystemVersion.majorVersion
+    ) -> CyderGraphicsBackend? {
+        guard let backend else { return nil }
+        return isSelectableGraphicsBackend(backend, capabilities: capabilities, osMajorVersion: osMajorVersion)
+            ? backend
+            : nil
+    }
+
+    /// Rewrite global and per-game graphics preferences to match current capabilities.
+    @discardableResult
+    static func sanitizeGraphicsPreferences(
+        _ settings: inout CyderSettings,
+        capabilities: CyderGraphicsCapabilities,
+        osMajorVersion: Int = ProcessInfo.processInfo.operatingSystemVersion.majorVersion
+    ) -> Bool {
+        var changed = false
+        let coercedGlobal = coercedGraphicsBackend(
+            settings.graphicsBackend,
+            capabilities: capabilities,
+            osMajorVersion: osMajorVersion
+        )
+        if coercedGlobal != settings.graphicsBackend {
+            settings.graphicsBackend = coercedGlobal
+            changed = true
+        }
+        if settings.graphicsHud == .dxvk, !settings.graphicsBackend.usesDxvkTranslation {
+            settings.graphicsHud = .off
+            changed = true
+        }
+        settings.perProfile = settings.perProfile.mapValues { profile in
+            var next = profile
+            let coerced = coercedOptionalGraphicsBackend(
+                profile.graphicsBackend,
+                capabilities: capabilities,
+                osMajorVersion: osMajorVersion
+            )
+            if coerced != profile.graphicsBackend {
+                next.graphicsBackend = coerced
+                changed = true
+            }
+            return next
+        }
+        settings.perExecutable = settings.perExecutable.mapValues { rule in
+            var next = rule
+            let coerced = coercedOptionalGraphicsBackend(
+                rule.graphicsBackend,
+                capabilities: capabilities,
+                osMajorVersion: osMajorVersion
+            )
+            if coerced != rule.graphicsBackend {
+                next.graphicsBackend = coerced
+                changed = true
+            }
+            return next
+        }
+        return changed
+    }
+
     /// Concrete backend to inject into Wine, or `nil` to leave CompatDB alone.
     /// `default` remains CompatDB-driven except for the two MapleStory
     /// executables, whose platform policy is resolved when the executable name
     /// is available.
     ///
-    /// DXMT additionally fails closed on `hasDxmt` + `osMajorVersion`: a stale
-    /// or hand-edited `dxmt` preference must never launch DXMT on an engine
-    /// missing the payload or on macOS < 15, even though the UI already
-    /// disables that menu item.
+    /// Explicit backend choices fail closed when the OS or payload requirements
+    /// are not met, so stale settings.json values cannot force an unavailable
+    /// backend at launch time.
     static func effectiveLaunchBackend(
         preference: CyderGraphicsBackend,
         hasD3DMetal: Bool,
@@ -673,6 +763,11 @@ struct CyderSettings: Codable {
         osMajorVersion: Int = ProcessInfo.processInfo.operatingSystemVersion.majorVersion,
         executableBasename: String? = nil
     ) -> CyderGraphicsBackend? {
+        let capabilities = CyderGraphicsCapabilities(
+            hasD3DMetal: hasD3DMetal,
+            hasDxvk: hasDxvk,
+            hasDxmt: hasDxmt
+        )
         switch preference {
         case .default:
             if isMapleStoryGraphicsExecutable(executableBasename) {
@@ -684,10 +779,20 @@ struct CyderSettings: Codable {
                 }
             }
             return nil
+        case .wined3d:
+            return .wined3d
+        case .dxvk:
+            return isSelectableGraphicsBackend(.dxvk, capabilities: capabilities, osMajorVersion: osMajorVersion)
+                ? .dxvk
+                : nil
         case .dxmt:
-            return (hasDxmt && osMajorVersion >= 15) ? .dxmt : nil
-        case .wined3d, .dxvk, .d3dmetal:
-            return preference
+            return isSelectableGraphicsBackend(.dxmt, capabilities: capabilities, osMajorVersion: osMajorVersion)
+                ? .dxmt
+                : nil
+        case .d3dmetal:
+            return isSelectableGraphicsBackend(.d3dmetal, capabilities: capabilities, osMajorVersion: osMajorVersion)
+                ? .d3dmetal
+                : nil
         }
     }
 
@@ -891,6 +996,20 @@ final class CyderSettingsStore {
     }
 
     func reset() throws { try update { $0 = .defaults } }
+
+    /// Reconcile stored graphics preferences after environment prep on app open.
+    /// The UI only offers selectable backends when saving; this pass fixes stale
+    /// settings.json from OS upgrades, incomplete ensure, or manual edits.
+    func reconcileGraphicsPreferences() throws {
+        let capabilities = CyderGraphicsCapabilities.current(engineRoot: CyderPaths.engine)
+        var next = value
+        guard CyderSettings.sanitizeGraphicsPreferences(&next, capabilities: capabilities) else {
+            return
+        }
+        try update { settings in
+            settings = next
+        }
+    }
 
     var environment: [String: String] {
         [

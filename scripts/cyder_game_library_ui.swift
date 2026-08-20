@@ -1068,6 +1068,10 @@ private final class CyderGameSettingsWindowController: NSWindowController, NSWin
         supportsDxmtOS && CyderGraphicsCapabilities.current(engineRoot: CyderPaths.engine).hasDxmt
     }
 
+    private var canSelectDxvk: Bool {
+        CyderGraphicsCapabilities.current(engineRoot: CyderPaths.engine).hasDxvk
+    }
+
     private var graphicsBackendTitles: [String] {
         return ["跟隨全域", "預設", "D3DMetal", "DXMT", "DXVK", "WineD3D"]
     }
@@ -1091,7 +1095,17 @@ private final class CyderGameSettingsWindowController: NSWindowController, NSWin
         if !supportsDxmtOS {
             item.toolTip = "需要 macOS 15+"
         } else if !CyderGraphicsCapabilities.current(engineRoot: CyderPaths.engine).hasDxmt {
-            item.toolTip = "需要引擎內建 DXMT"
+            item.toolTip = "需要已安裝的 DXMT 圖形元件"
+        } else {
+            item.toolTip = nil
+        }
+    }
+
+    private func updateDxvkMenuItemAvailability() {
+        guard let item = graphicsBackend.item(at: 4) else { return }
+        item.isEnabled = canSelectDxvk
+        if !canSelectDxvk {
+            item.toolTip = "需要已安裝的 DXVK 圖形元件"
         } else {
             item.toolTip = nil
         }
@@ -1102,7 +1116,7 @@ private final class CyderGameSettingsWindowController: NSWindowController, NSWin
         case 1: return .default
         case 2: return canSelectD3DMetal ? .d3dmetal : nil
         case 3: return canSelectDxmt ? .dxmt : nil
-        case 4: return .dxvk
+        case 4: return canSelectDxvk ? .dxvk : nil
         case 5: return .wined3d
         default: return nil
         }
@@ -1114,7 +1128,7 @@ private final class CyderGameSettingsWindowController: NSWindowController, NSWin
         case .default: return 1
         case .d3dmetal: return canSelectD3DMetal ? 2 : 0
         case .dxmt: return canSelectDxmt ? 3 : 0
-        case .dxvk: return 4
+        case .dxvk: return canSelectDxvk ? 4 : 0
         case .wined3d: return 5
         }
     }
@@ -1122,6 +1136,7 @@ private final class CyderGameSettingsWindowController: NSWindowController, NSWin
     private func refreshGraphicsControls() {
         updateD3DMetalMenuItemAvailability()
         updateDxmtMenuItemAvailability()
+        updateDxvkMenuItemAvailability()
     }
 
     private func cyderFontTargetIndex(_ target: String) -> Int {

@@ -317,7 +317,30 @@ struct CyderSettingsHarness {
         precondition(
             CyderSettings.effectiveLaunchBackend(
                 preference: .d3dmetal, hasD3DMetal: false, hasDxvk: false, hasDxmt: false
-            ) == .d3dmetal
+            ) == nil
+        )
+        precondition(
+            CyderSettings.effectiveLaunchBackend(
+                preference: .dxvk, hasD3DMetal: false, hasDxvk: false, hasDxmt: false
+            ) == nil
+        )
+        precondition(
+            CyderSettings.coercedGraphicsBackend(
+                .dxmt,
+                capabilities: CyderGraphicsCapabilities(
+                    hasD3DMetal: false, hasDxvk: true, hasDxmt: true
+                ),
+                osMajorVersion: 12
+            ) == .default
+        )
+        precondition(
+            CyderSettings.coercedOptionalGraphicsBackend(
+                .dxmt,
+                capabilities: CyderGraphicsCapabilities(
+                    hasD3DMetal: false, hasDxvk: true, hasDxmt: true
+                ),
+                osMajorVersion: 12
+            ) == nil
         )
         precondition(CyderSettings.sanitizedGraphicsBackend("auto") == .default)
         precondition(CyderSettings.sanitizedGraphicsBackend(nil) == .default)
