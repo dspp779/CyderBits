@@ -15,6 +15,12 @@ swiftc -Onone \
   "$ROOT/scripts/cyder_diagnostics.swift" \
   "$ROOT/tests/fixtures/cyder_diagnostics_harness.swift"
 
+CYDER_SUPPORT="$TMP/timing-support" "$TMP/diagnostics-harness" timing
+timing_log="$(ls "$TMP/timing-support/Logs/sessions/"*.log | head -n 1)"
+assert_contains "$(cat "$timing_log")" "previous_ms=" "stage transitions should record previous_ms"
+assert_contains "$(cat "$timing_log")" "elapsed_ms=12" "operation timing should record elapsed_ms"
+assert_contains "$(cat "$timing_log")" "session_ms=" "session finish should record session_ms"
+
 CYDER_SUPPORT="$TMP/support" "$TMP/diagnostics-harness" leave-running
 state="$(cat "$TMP/support/Logs/session-state.json")"
 assert_contains "$state" '"state" : "running"' "unfinished session should remain marked running"

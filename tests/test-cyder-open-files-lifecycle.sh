@@ -25,10 +25,16 @@ assert_contains "$source_text" 'isFileURL' \
   "open-url events must accept file URLs for .exe launches"
 assert_contains "$source_text" "documentLaunchRequested = true" \
   "open-file requests must switch the app out of settings mode"
-assert_contains "$source_text" "asyncAfter(deadline: .now() + 0.2)" \
-  "settings-mode startup must allow the open-file event to arrive"
-assert_contains "$source_text" "if self.documentLaunchRequested" \
-  "a late open-file request must suppress the settings completion"
+assert_contains "$source_text" "private enum CyderLaunchIntent" \
+  "startup must track an explicit launch intent"
+assert_contains "$source_text" "currentAppleEvent" \
+  "cold-start mode selection must inspect the launch Apple Event"
+assert_contains "$source_text" "if launchIntent == .appOnly" \
+  "open-application launches must enter UI without waiting"
+assert_contains "$source_text" "DispatchQueue.main.async { [weak self] in" \
+  "document launches should use one main-queue turn instead of a fixed delay"
+assert_not_contains "$source_text" "asyncAfter(deadline: .now() + 0.2)" \
+  "startup mode selection must not depend on a fixed 0.2s defer"
 assert_contains "$source_text" "runWineThroughLauncher" \
   "Finder document events must relay Wine launches to Bash"
 assert_contains "$source_text" '"CYDER_WINE_DETACH": "1"' \
@@ -100,6 +106,14 @@ assert_contains "$source_text" 'args.contains("--bootstrap-only")' \
   "long setup operations should enable progress polling"
 assert_contains "$source_text" '"--ensure-graphics-only"' \
   "settings-mode preparation must install graphics payloads"
+assert_contains "$source_text" 'if state.needsEngine {' \
+  "settings-mode must spawn ensure-engine only when the sidecar is not current"
+assert_not_contains "$source_text" 'state.needsEngine || enginePresent' \
+  "a current engine tree must not force ensure-engine-only"
+assert_contains "$source_text" '.cyder-engine-signed' \
+  "missing ad-hoc sign marker must still count as needsEngine"
+assert_contains "$source_text" 'if !bootstrapHealthChecked && bootstrapNeeded' \
+  "subsequent settings opens must not probe wine cmd when the prefix is already ready"
 run_phased_text="$(awk '
   /private func runPhasedLaunch/ { found = 1 }
   found { print }

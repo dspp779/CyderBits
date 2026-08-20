@@ -6,7 +6,8 @@ build
 install/
 install
 Cyder-last-game.log
-tests/tmp/
+# Agent/local scratch
+.rpfx.*/
 logs/
 dist/
 debug/

@@ -1,4 +1,5 @@
 // Cyder.app entry — phased setup UI, then launch Windows EXE directly with Wine.
+import Carbon.HIToolbox
 import Cocoa
 import Darwin
 import Foundation
@@ -20,6 +21,14 @@ private enum CyderPrefixResolution {
 private enum CyderFailureAction: Equatable {
     case close
     case rebuild
+}
+
+private enum CyderLaunchIntent: Equatable {
+    case undetermined
+    case appOnly
+    case documentLaunchExpected
+    case urlLaunchExpected
+    case cliLaunch
 }
 
 final class CyderAppDelegate: NSObject, NSApplicationDelegate {
@@ -50,6 +59,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
     private var isPrimaryInstance = true
     private var secondaryForwardScheduled = false
     private var secondaryRequestSent = false
+    private var launchIntent: CyderLaunchIntent = .undetermined
     private var deferredInstanceRequests: [CyderInstanceRequest] = []
     private lazy var instanceCoordinator: CyderInstanceCoordinator = {
         let coordinator = CyderInstanceCoordinator()
@@ -334,6 +344,11 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             normalizeExePaths([$0.path])
         }
         let uriStrings = CyderURIHandlerManager.shared.filterHandledURLs(urls)
+        if !uriStrings.isEmpty {
+            launchIntent = .urlLaunchExpected
+        } else if !fileExecutables.isEmpty && launchIntent != .cliLaunch {
+            launchIntent = .documentLaunchExpected
+        }
         CyderDiagnostics.shared.info(
             "open-urls received=\(urls.count) gamaniagames=\(uriStrings.count) file-doc=\(fileExecutables.count)"
         )
@@ -354,6 +369,9 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
 
     func application(_ application: NSApplication, openFiles filenames: [String]) {
         let executableFiles = normalizeExePaths(filenames)
+        if !executableFiles.isEmpty && launchIntent != .cliLaunch {
+            launchIntent = .documentLaunchExpected
+        }
         CyderDiagnostics.shared.info(
             "open-files received=\(filenames.count) executable=\(executableFiles.count) bundle=\(Bundle.main.bundlePath)"
         )
@@ -401,6 +419,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         if !isPrimaryInstance {
             captureInvocationArguments()
+            determineInitialLaunchIntent()
             scheduleSecondaryForward()
             return
         }
@@ -471,11 +490,12 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         }
         pendingFiles = normalizeExePaths(pendingFiles)
         if !pendingFiles.isEmpty { documentLaunchRequested = true }
+        determineInitialLaunchIntent()
         // A test launch creates a second Cyder process while the library app
         // remains alive. Its session-state file is therefore expected to be
         // "running", not evidence of a crash. Only settings-mode launches
         // should surface a previous-session warning.
-        if !documentLaunchRequested {
+        if launchIntent == .appOnly && !documentLaunchRequested {
             showPreviousCrashIfNeeded()
         }
         CyderDiagnostics.shared.enter(
@@ -483,25 +503,16 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             detail: launchModeDetail()
         )
         CyderDiagnostics.shared.info(
-            "launch-context args=\(CommandLine.arguments.count - 1) pending=\(pendingFiles.count) bundle=\(Bundle.main.bundlePath)"
+            "launch-context args=\(CommandLine.arguments.count - 1) pending=\(pendingFiles.count) intent=\(String(describing: launchIntent)) bundle=\(Bundle.main.bundlePath)"
         )
-        // LaunchServices can deliver application(_:openFiles:) just after
-        // applicationDidFinishLaunching. Defer the settings-mode decision one
-        // short turn so a document or URI launch cannot start a competing
-        // health check or expose the settings window behind Wine.
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
-            guard let self else { return }
-            if self.documentLaunchRequested || !self.pendingFiles.isEmpty {
-                // URI launches are already queued; scheduleRun() is EXE-only
-                // and would otherwise prompt for a file when pendingFiles is empty.
-                if !self.pendingFiles.isEmpty {
-                    self.scheduleRun()
-                }
-            } else {
-                self.terminateWhenSettingsClose = true
-                self.openLibraryOnLaunch = self.openLibraryOnLaunch || self.shouldOpenGameLibraryOnLaunch()
-                activateCyderUI(dockVisible: true)
-                self.prepareEnvironmentAndShowSettings()
+        if launchIntent == .appOnly {
+            finalizePostLaunchModeDecision()
+        } else {
+            // launch Apple Event already says this is a document / URL launch.
+            // One main-queue turn lets AppKit finish delivering openFiles/open
+            // callbacks if they were queued just behind didFinishLaunching.
+            DispatchQueue.main.async { [weak self] in
+                self?.finalizePostLaunchModeDecision()
             }
         }
         if !deferredInstanceRequests.isEmpty {
@@ -525,6 +536,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             // Also accept direct invocation: `Cyder game.exe ARG...`.
             pendingFiles.append(executable)
             documentLaunchRequested = true
+            launchIntent = .cliLaunch
             applicationArguments.removeFirst()
             // Empty means "no dynamic argv", not "wipe saved/test arguments".
             pendingLaunchArguments = applicationArguments.isEmpty
@@ -536,13 +548,81 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    private func detectLaunchIntentFromAppleEvent() -> CyderLaunchIntent {
+        guard let event = NSAppleEventManager.shared().currentAppleEvent else {
+            return .undetermined
+        }
+        let eventClass = event.eventClass
+        let eventID = event.eventID
+        if eventClass == kInternetEventClass && eventID == AEEventID(kAEGetURL) {
+            return .urlLaunchExpected
+        }
+        if eventClass == kCoreEventClass {
+            switch eventID {
+            case AEEventID(kAEOpenApplication), AEEventID(kAEReopenApplication):
+                return .appOnly
+            case AEEventID(kAEOpenDocuments):
+                return .documentLaunchExpected
+            default:
+                break
+            }
+        }
+        return .undetermined
+    }
+
+    private func refreshLaunchIntentFromState() {
+        if !pendingURLs.isEmpty || queuedLaunches.contains(where: \.isURI) {
+            launchIntent = .urlLaunchExpected
+            return
+        }
+        if !pendingFiles.isEmpty || documentLaunchRequested {
+            if launchIntent != .cliLaunch {
+                launchIntent = .documentLaunchExpected
+            }
+            return
+        }
+        if pendingLaunchArguments != nil && launchIntent == .undetermined {
+            launchIntent = .documentLaunchExpected
+        }
+    }
+
+    private func determineInitialLaunchIntent() {
+        let appleEventIntent = detectLaunchIntentFromAppleEvent()
+        launchIntent = appleEventIntent
+        if !pendingFiles.isEmpty {
+            launchIntent = .cliLaunch
+        } else if launchIntent == .undetermined, pendingLaunchArguments != nil {
+            // `open ... --args` and direct invocation carry payload in argv
+            // before AppKit has a document event to deliver.
+            launchIntent = .documentLaunchExpected
+        } else if launchIntent == .undetermined && pendingURLs.isEmpty {
+            launchIntent = .appOnly
+        }
+        refreshLaunchIntentFromState()
+    }
+
+    private func finalizePostLaunchModeDecision() {
+        refreshLaunchIntentFromState()
+        if documentLaunchRequested || !pendingFiles.isEmpty {
+            // URI launches are already queued; scheduleRun() is EXE-only
+            // and would otherwise prompt for a file when pendingFiles is empty.
+            if !pendingFiles.isEmpty {
+                scheduleRun()
+            }
+            return
+        }
+        terminateWhenSettingsClose = true
+        openLibraryOnLaunch = openLibraryOnLaunch || shouldOpenGameLibraryOnLaunch()
+        activateCyderUI(dockVisible: true)
+        prepareEnvironmentAndShowSettings()
+    }
+
     private func scheduleSecondaryForward() {
         guard !isPrimaryInstance, !secondaryForwardScheduled else { return }
         secondaryForwardScheduled = true
-        // LaunchServices can deliver openFiles shortly after didFinishLaunching.
-        // Keep the secondary alive for one short turn so its argv and document
-        // event are forwarded as a single request.
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak self] in
+        // Keep the secondary alive for one main-queue turn so argv and any
+        // queued openFiles/open-URL callbacks are forwarded as a single request.
+        DispatchQueue.main.async { [weak self] in
             self?.forwardSecondaryInstance()
         }
     }
@@ -550,10 +630,11 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
     private func forwardSecondaryInstance() {
         guard !secondaryRequestSent else { return }
         secondaryRequestSent = true
+        refreshLaunchIntentFromState()
         let files = normalizeExePaths(pendingFiles)
         let urls = pendingURLs
         let arguments = pendingLaunchArguments
-        let showUI = files.isEmpty && arguments == nil && urls.isEmpty
+        let showUI = launchIntent == .appOnly && files.isEmpty && arguments == nil && urls.isEmpty
         instanceCoordinator.forward(files: files, arguments: arguments, urls: urls, showUI: showUI)
         NSApp.terminate(nil)
     }
@@ -1037,17 +1118,13 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
 
     private func ensureEnvironment(context: CyderLaunchContext) -> CyderFailure? {
         let state = environmentState(context: context)
-        let engineWine = CyderPaths.engine.appendingPathComponent("bin/wine")
-        let enginePresent = FileManager.default.isExecutableFile(atPath: engineWine.path)
 
-        // Always run ensure-engine-only when an engine tree exists (or needs
-        // install). The shell also compares the artifact fingerprint so an
-        // updated same-label test engine is refreshed before launch.
-        if state.needsEngine || enginePresent {
+        // Sidecar version + artifact SHA (and the signed marker) already decide
+        // needsEngine. Spawning bash --ensure-engine-only on a current tree is
+        // the dominant cost of opening Preferences.
+        if state.needsEngine {
             CyderDiagnostics.shared.enter(.engineExtraction)
-            if state.needsEngine {
-                showSetup("正在準備遊戲執行元件…")
-            }
+            showSetup("正在準備遊戲執行元件…")
             let result = runLauncher(
                 context: context,
                 args: [context.launcher, "--engine-src", context.engineSrc, "--ensure-engine-only"],
@@ -1094,7 +1171,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             )
             templatesReady = probe.succeeded
         }
-        var bootstrapNeeded = state.needsEngine
+        let bootstrapNeeded = state.needsEngine
             || state.needsBootstrap
             || environmentState(context: context).needsBootstrap
             || !templatesReady && !state.needsEngine
@@ -1119,10 +1196,11 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             }
             bootstrapHealthChecked = result.machineResult["healthChecked"] == "1"
         }
-        // A marker only proves that bootstrap completed once. Probe the
-        // current prefix on normal app launches, but reuse the machine-readable
-        // result when this same bootstrap operation already completed a probe.
-        if !bootstrapHealthChecked {
+        // Subsequent Preferences opens already proved markers + sidecar. Skip
+        // wine cmd /c exit 0 unless this launch still needs bootstrap/repair.
+        // In-use prefixes must not start a second wineserver (see
+        // cyder_has_running_prefix).
+        if !bootstrapHealthChecked && bootstrapNeeded {
             CyderDiagnostics.shared.enter(.engineValidation)
             showSetup("正在檢查遊戲環境…")
             let health = runLauncher(
@@ -1151,8 +1229,8 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         }
         let context = CyderLaunchContext(resourcePath: resourcePath)
         let state = environmentState(context: context)
-        // Already-initialized installs still probe engine fingerprint + health;
-        // avoid implying a full bootstrap when markers are already present.
+        // Already-initialized installs skip engine extract and wine cmd probe;
+        // still refresh graphics payloads and confirm markers.
         if state.needsEngine || state.needsBootstrap {
             showSetup("正在準備遊戲環境…")
         } else {
@@ -1218,16 +1296,26 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         // Opening an EXE is a launch-only path. It must never create or repair
         // a prefix invisibly; the user can open Cyder.app to see setup progress
         // and recovery errors.
+        let precheckStarted = CFAbsoluteTimeGetCurrent()
+        CyderDiagnostics.shared.enter(.exeValidation, detail: "finder-precheck")
         let state = environmentState(context: context)
+        let wineReady = FileManager.default.isExecutableFile(
+            atPath: CyderPaths.engine.appendingPathComponent("bin/wine").path
+        )
+        let graphicsPresent = graphicsPayloadsPresent()
+        CyderDiagnostics.shared.noteElapsed(
+            operation: "exe-precheck",
+            milliseconds: (CFAbsoluteTimeGetCurrent() - precheckStarted) * 1000,
+            extra: "needsEngine=\(state.needsEngine) needsBootstrap=\(state.needsBootstrap) wineReady=\(wineReady) graphics=\(graphicsPresent)"
+        )
         guard !state.needsEngine, !state.needsBootstrap else {
             return .environmentNotReady
         }
 
-        let wine = CyderPaths.engine.appendingPathComponent("bin/wine")
-        guard FileManager.default.isExecutableFile(atPath: wine.path) else {
+        guard wineReady else {
             return .environmentNotReady
         }
-        if !graphicsPayloadsPresent() {
+        if !graphicsPresent {
             // Do not hard-block Finder EXE launches when DXVK/DXMT payloads are
             // absent. Fall back to the available Wine stack and hint the user to
             // open Cyder.app so ensure-graphics can install the payloads.
@@ -1462,8 +1550,8 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
                     stage: .wineSpawn,
                     summary: "請先關閉所有 Wine 程序，再安裝 MSI。",
                     technicalDetails: result.outputTail,
-                    logURL: result.logURL,
-                    exitCode: result.status
+                    exitCode: result.status,
+                    logURL: result.logURL
                 ))
             }
             return .failure(failure(
@@ -1856,6 +1944,13 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         if !engineVersionsEqual(installed, bundled) {
             return true
         }
+        let engineRoot = engineWine
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let signedMarker = engineRoot.appendingPathComponent(".cyder-engine-signed")
+        if !FileManager.default.fileExists(atPath: signedMarker.path) {
+            return true
+        }
         let resources = URL(fileURLWithPath: context.engineVersionFile).deletingLastPathComponent()
         let bundledFingerprintFile = resources.appendingPathComponent("engine-artifact-sha256.txt")
         guard let bundledFingerprint = try? String(contentsOf: bundledFingerprintFile, encoding: .utf8)
@@ -2176,8 +2271,10 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         }
 
         do {
+            let started = CFAbsoluteTimeGetCurrent()
             try process.run()
             process.waitUntilExit()
+            let elapsedMs = (CFAbsoluteTimeGetCurrent() - started) * 1000
             progressTimer?.cancel()
             progressTimer = nil
             try? handle.close()
@@ -2194,8 +2291,10 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
                 }
             }
             try? FileManager.default.removeItem(at: resultURL)
-            CyderDiagnostics.shared.info(
-                "operation=\(operation) status=\(process.terminationStatus) reason=\(process.terminationReason.rawValue) log=\(operationLog.path)"
+            CyderDiagnostics.shared.noteElapsed(
+                operation: operation,
+                milliseconds: elapsedMs,
+                extra: "status=\(process.terminationStatus) reason=\(process.terminationReason.rawValue) log=\(operationLog.path)"
             )
             return CyderProcessResult(
                 status: process.terminationStatus,
@@ -2319,7 +2418,14 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         guard let resourcePath = Bundle.main.resourcePath else { return }
         let context = CyderLaunchContext(resourcePath: resourcePath)
         let prefix = CyderPaths.sharedBottle
-        switch CyderURIHandlerManager.shared.validateLaunch(prefix: prefix, launcher: context.launcher) {
+        CyderDiagnostics.shared.enter(.exeValidation, detail: "uri-precheck")
+        let precheckStarted = CFAbsoluteTimeGetCurrent()
+        let validation = CyderURIHandlerManager.shared.validateLaunch(prefix: prefix, launcher: context.launcher)
+        CyderDiagnostics.shared.noteElapsed(
+            operation: "uri-precheck",
+            milliseconds: (CFAbsoluteTimeGetCurrent() - precheckStarted) * 1000
+        )
+        switch validation {
         case .failure(let error):
             hideSetup()
             showAlert("無法開啟 gamaniagames://", error.localizedDescription)

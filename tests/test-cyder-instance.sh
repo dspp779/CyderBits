@@ -30,6 +30,12 @@ assert_contains "$app" 'isPrimaryInstance' \
   "the native app must distinguish primary and secondary processes"
 assert_contains "$app" 'scheduleSecondaryForward' \
   "secondary launches must wait for openFiles before forwarding"
+assert_contains "$app" 'determineInitialLaunchIntent()' \
+  "secondary launches must classify their Apple Event / argv intent before forwarding"
+assert_contains "$app" 'let showUI = launchIntent == .appOnly' \
+  "secondary forward should only request UI for open-application launches"
+assert_not_contains "$app" 'asyncAfter(deadline: .now() + 0.35)' \
+  "secondary forward must not depend on a fixed 0.35s delay"
 assert_contains "$app" 'receiveInstanceRequest' \
   "the primary must consume forwarded launch requests"
 assert_contains "$app" 'queuedLaunches' \

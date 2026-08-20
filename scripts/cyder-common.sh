@@ -2612,17 +2612,45 @@ cyder_open_prefix_taskmgr() {
   ) </dev/null >>"$CYDER_SUPPORT/Logs/taskmgr.log" 2>&1 &
 }
 
+# Wine stores the per-prefix server socket under $TMPDIR (macOS LaunchServices
+# uses /var/folders/.../T) with /tmp as fallback. Check both, and treat a live
+# Cyder session pid as in-use even if the socket path differs.
+cyder_prefix_has_live_session_pids() {
+  local prefix="$1" dir file pid
+  dir="$(cyder_session_dir "$prefix")"
+  [[ -d "$dir" ]] || return 1
+  for file in "$dir"/*.session; do
+    [[ -f "$file" && ! -L "$file" ]] || continue
+    pid="$(sed -n 's/^pid=//p' "$file" | head -1)"
+    if [[ "$pid" =~ ^[1-9][0-9]*$ ]] && kill -0 "$pid" 2>/dev/null; then
+      return 0
+    fi
+  done
+  return 1
+}
+
 cyder_has_running_prefix() {
   local prefix="$1"
   [[ -d "$prefix" ]] || return 1
-  local device inode socket_dir
-  device="$(stat -f '%d' "$prefix" 2>/dev/null)" || return 1
-  inode="$(stat -f '%i' "$prefix" 2>/dev/null)" || return 1
+  local resolved device inode socket_dir tmp_root uid
+  resolved="$(cd "$prefix" && pwd -P)" || resolved="$prefix"
+  device="$(stat -f '%d' "$resolved" 2>/dev/null)" || return 1
+  inode="$(stat -f '%i' "$resolved" 2>/dev/null)" || return 1
   printf -v device '%x' "$device"
   printf -v inode '%x' "$inode"
-  socket_dir="/tmp/.wine-$(id -u)/server-$device-$inode"
-  # Wine removes the socket when the prefix wineserver exits; the lock file may remain.
-  [[ -S "$socket_dir/socket" ]]
+  uid="$(id -u)"
+  for tmp_root in /tmp ${TMPDIR:+"$TMPDIR"}; do
+    [[ -n "$tmp_root" ]] || continue
+    socket_dir="${tmp_root%/}/.wine-${uid}/server-${device}-${inode}"
+    # Wine removes the socket when the prefix wineserver exits; the lock file may remain.
+    [[ -S "$socket_dir/socket" ]] && return 0
+  done
+  cyder_prefix_has_live_session_pids "$resolved" && return 0
+  if [[ "$resolved" != "$prefix" ]]; then
+    cyder_prefix_has_live_session_pids "$prefix"
+    return $?
+  fi
+  return 1
 }
 
 cyder_has_running_exes() {

@@ -17,12 +17,28 @@ CYDER_DIAGNOSTIC_STAGE="${CYDER_DIAGNOSTIC_STAGE:-launcher-start}"
 CYDER_DIAGNOSTIC_LAST_ERROR=""
 CYDER_DIAGNOSTIC_EXPECTED_EXIT="0"
 
+cyder_now_ms() {
+  if [[ -n "${EPOCHREALTIME:-}" ]]; then
+    awk -v t="$EPOCHREALTIME" 'BEGIN { printf "%d\n", t * 1000 }'
+  else
+    python3 -c 'import time; print(int(time.time() * 1000))'
+  fi
+}
+
 cyder_set_stage() {
+  local now elapsed_ms=0
+  now="$(cyder_now_ms)"
+  if [[ -z "${CYDER_LAUNCHER_T0_MS:-}" ]]; then
+    CYDER_LAUNCHER_T0_MS="$now"
+  fi
+  if [[ "$now" =~ ^[0-9]+$ && "$CYDER_LAUNCHER_T0_MS" =~ ^[0-9]+$ ]]; then
+    elapsed_ms=$((now - CYDER_LAUNCHER_T0_MS))
+  fi
   CYDER_DIAGNOSTIC_STAGE="$1"
   export CYDER_DIAGNOSTIC_STAGE
   if [[ -n "${CYDER_DIAGNOSTIC_SESSION_ID:-}" || "${CYDER_DIAGNOSTIC_VERBOSE:-0}" == 1 ]]; then
-    printf 'diagnostic event=stage session=%s stage=%s\n' \
-      "${CYDER_DIAGNOSTIC_SESSION_ID:-cli}" "$CYDER_DIAGNOSTIC_STAGE" >&2
+    printf 'diagnostic event=stage session=%s stage=%s elapsed_ms=%s\n' \
+      "${CYDER_DIAGNOSTIC_SESSION_ID:-cli}" "$CYDER_DIAGNOSTIC_STAGE" "$elapsed_ms" >&2
   fi
 }
 

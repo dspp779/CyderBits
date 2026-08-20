@@ -101,10 +101,12 @@ final class CyderDiagnostics {
     let sessionLogURL: URL
     private let stateURL: URL
     private let lastErrorURL: URL
-    private let startedAt = CyderDiagnostics.timestampFormatter.string(from: Date())
+    private let startedAtDate = Date()
+    private let startedAt: String
     private let lock = NSLock()
     private var logHandle: FileHandle?
     private var stage: CyderStage = .appStart
+    private var stageEnteredAt = Date()
     private var didFinish = false
     private var operationSequence = 0
     private(set) var previousUnexpectedSession: CyderPreviousSession?
@@ -128,6 +130,7 @@ final class CyderDiagnostics {
         let operationsURL = logsURL.appendingPathComponent("operations", isDirectory: true)
         stateURL = logsURL.appendingPathComponent("session-state.json")
         lastErrorURL = logsURL.appendingPathComponent("last-error.json")
+        startedAt = Self.timestampFormatter.string(from: startedAtDate)
 
         let timestamp = Self.timestampFormatter.string(from: Date())
             .replacingOccurrences(of: ":", with: "-")
@@ -143,7 +146,10 @@ final class CyderDiagnostics {
             redirectStandardStreams()
             rotateLogs(in: sessionsURL, keeping: 10)
             writeState(state: "running", outcome: nil)
-            log("INFO", "session started appVersion=\(appVersion) os=\(ProcessInfo.processInfo.operatingSystemVersionString) arch=\(Self.machineArchitecture())")
+            log(
+                "INFO",
+                "session started appVersion=\(appVersion) os=\(ProcessInfo.processInfo.operatingSystemVersionString) arch=\(Self.machineArchitecture())"
+            )
         } catch {
             fputs("Cyder diagnostics initialization failed: \(error)\n", stderr)
         }
@@ -158,11 +164,31 @@ final class CyderDiagnostics {
     }
 
     func enter(_ newStage: CyderStage, detail: String? = nil) {
+        let now = Date()
         lock.lock()
+        let previous = stage
+        let previousMs = now.timeIntervalSince(stageEnteredAt) * 1000
+        let sessionMs = now.timeIntervalSince(startedAtDate) * 1000
         stage = newStage
+        stageEnteredAt = now
         lock.unlock()
-        log("INFO", "stage=\(newStage.rawValue)\(detail.map { " detail=\($0)" } ?? "")")
+        var message = "stage=\(newStage.rawValue)"
+        if let detail {
+            message += " detail=\(detail)"
+        }
+        message += String(
+            format: " previous=%@ previous_ms=%.0f session_ms=%.0f",
+            previous.rawValue,
+            previousMs,
+            sessionMs
+        )
+        log("INFO", message)
         writeState(state: "running", outcome: nil)
+    }
+
+    func noteElapsed(operation: String, milliseconds: Double, extra: String = "") {
+        let suffix = extra.isEmpty ? "" : " \(extra)"
+        log("INFO", String(format: "operation=%@ elapsed_ms=%.0f%@", operation, milliseconds, suffix))
     }
 
     func info(_ message: String) {
@@ -201,8 +227,9 @@ final class CyderDiagnostics {
         }
         didFinish = true
         stage = .completed
+        let sessionMs = Date().timeIntervalSince(startedAtDate) * 1000
         lock.unlock()
-        log("INFO", "session finished outcome=\(outcome)")
+        log("INFO", String(format: "session finished outcome=%@ session_ms=%.0f", outcome, sessionMs))
         writeState(state: "completed", outcome: outcome)
     }
 

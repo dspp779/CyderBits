@@ -9,6 +9,18 @@ struct CyderDiagnosticsHarness {
         case "leave-running":
             diagnostics.enter(.wineSpawn, detail: "fault-injection")
             exit(0)
+        case "timing":
+            diagnostics.enter(.engineValidation, detail: "timing")
+            Thread.sleep(forTimeInterval: 0.05)
+            diagnostics.enter(.wineSpawn, detail: "timing")
+            diagnostics.noteElapsed(operation: "timing-probe", milliseconds: 12, extra: "status=0")
+            diagnostics.finish(outcome: "timing")
+            let log = try! String(contentsOf: diagnostics.sessionLogURL, encoding: .utf8)
+            guard log.contains("previous_ms="),
+                  log.contains("session_ms="),
+                  log.contains("elapsed_ms=12") else {
+                exit(18)
+            }
         case "recover":
             guard diagnostics.previousUnexpectedSession?.stage == CyderStage.wineSpawn.rawValue else {
                 exit(11)

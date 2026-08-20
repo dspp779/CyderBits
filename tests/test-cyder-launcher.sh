@@ -39,6 +39,7 @@ diagnostic_status=$?
 set -e
 assert_eq "$diagnostic_status" 1 "diagnostic launch should preserve the original exit status"
 assert_contains "$diagnostic_out" "stage=exe-validation" "diagnostic output should identify the failing stage"
+assert_contains "$diagnostic_out" "elapsed_ms=" "diagnostic stage events should include elapsed_ms"
 assert_contains "$diagnostic_out" "event=exit" "explicit nonzero exits should be recorded"
 
 touch "$TMP/not-ready.exe"
