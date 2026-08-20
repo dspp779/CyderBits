@@ -1166,6 +1166,7 @@ final class CyderGameLibraryWindowController: NSWindowController, NSWindowDelega
     private var selectedGameID: String?
     private var independentIDs: Set<String> = []
     private var gameSettingsController: CyderGameSettingsWindowController?
+    private var macLauncherInstallInProgress = false
     private let toolbarPreferencesButton = NSButton()
     private let toolbarRefreshButton = NSButton()
     private let toolbarAddButton = NSButton()
@@ -1363,6 +1364,12 @@ final class CyderGameLibraryWindowController: NSWindowController, NSWindowDelega
     private func contextMenu(for game: CyderGameRecord) -> NSMenu {
         selectGame(game)
         let menu = NSMenu()
+        let macAppTitle = CyderMacLauncherInstaller.isInstalled(for: game)
+            ? "更新 macOS 應用程式"
+            : "加入 macOS 應用程式"
+        let macApp = menu.addItem(withTitle: macAppTitle, action: #selector(installMacAppForSelectedGame), keyEquivalent: "")
+        macApp.target = self
+        macApp.isEnabled = !macLauncherInstallInProgress
         let options = menu.addItem(withTitle: "選項", action: #selector(openSettingsForSelectedGame), keyEquivalent: "")
         options.target = self
         let reveal = menu.addItem(withTitle: "顯示於 Finder", action: #selector(revealSelectedGameInFinder), keyEquivalent: "")
@@ -1477,6 +1484,43 @@ final class CyderGameLibraryWindowController: NSWindowController, NSWindowDelega
             return
         }
         NSWorkspace.shared.activateFileViewerSelecting([url])
+    }
+
+    @objc private func installMacAppForSelectedGame() {
+        guard let game = selectedGame, !macLauncherInstallInProgress else { return }
+        guard FileManager.default.fileExists(atPath: game.executablePath) else {
+            showAlert(title: "找不到遊戲", message: "這個 EXE 已不在原本的位置。")
+            return
+        }
+        macLauncherInstallInProgress = true
+        let updating = CyderMacLauncherInstaller.isInstalled(for: game)
+        CyderMacLauncherInstaller.install(game: game) { [weak self] result in
+            guard let self else { return }
+            self.macLauncherInstallInProgress = false
+            switch result {
+            case .success(let appURL):
+                do {
+                    try self.libraryStore.setMacAppPath(appURL.path, forGameID: game.id)
+                    self.games = self.libraryStore.games
+                } catch {
+                    CyderDiagnostics.shared.warning(
+                        "mac-launcher save-failed id=\(game.id) error=\(error.localizedDescription)"
+                    )
+                }
+                let alert = NSAlert()
+                alert.messageText = updating ? "已更新 macOS 應用程式" : "已加入 macOS 應用程式"
+                alert.informativeText =
+                    "可在 Launchpad 或「\(CyderMacLauncherInstaller.outputDirectory().path)」找到 \(game.displayName)。"
+                alert.alertStyle = .informational
+                alert.addButton(withTitle: "在 Finder 中顯示")
+                alert.addButton(withTitle: "知道了")
+                if alert.runModal() == .alertFirstButtonReturn {
+                    NSWorkspace.shared.activateFileViewerSelecting([appURL])
+                }
+            case .failure(let error):
+                self.showAlert(title: "無法建立 macOS 應用程式", message: error.localizedDescription)
+            }
+        }
     }
 
     private var selectedGame: CyderGameRecord? {

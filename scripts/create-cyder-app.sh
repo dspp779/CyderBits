@@ -228,7 +228,9 @@ fi
 
 cp "$SCRIPT_DIR/cyder-profile.sh" "$RES/ogom-scripts/"
 cp "$SCRIPT_DIR/cyder-extract-exe-icon.sh" "$RES/ogom-scripts/"
+cp "$SCRIPT_DIR/cyder-create-mac-launcher.sh" "$RES/ogom-scripts/"
 chmod +x "$RES/ogom-scripts/cyder-extract-exe-icon.sh"
+chmod +x "$RES/ogom-scripts/cyder-create-mac-launcher.sh"
 chmod +x "$RES/ogom-scripts/cyder_launcher.sh"
 chmod +x "$RES/ogom-scripts/cyder-ensure-graphics.sh"
 chmod +x "$RES/ogom-scripts/cyder-migrate-graphics-prefix.sh"
@@ -294,6 +296,7 @@ SWIFT_SOURCES=(
   "$SCRIPT_DIR/cyder_game_library.swift"
   "$SCRIPT_DIR/cyder_bottle_shortcuts.swift"
   "$SCRIPT_DIR/cyder_game_icon.swift"
+  "$SCRIPT_DIR/cyder_mac_launcher.swift"
   "$SCRIPT_DIR/cyder_game_library_ui.swift"
   "$SCRIPT_DIR/cyder_app_main.swift"
 )

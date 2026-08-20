@@ -63,5 +63,8 @@ enum CyderPaths {
     /// Temporary copies of EXEs during icon extraction. Not a Wine prefix.
     static let iconExtractRoot: URL = support
         .appendingPathComponent("icon-extract", isDirectory: true)
+    /// Default folder for thin game launchers (CrossOver-style subdirectory).
+    static let macLaunchersRoot: URL = home
+        .appendingPathComponent("Applications/Cyder", isDirectory: true)
     static let bootstrapMarker = sharedBottle.appendingPathComponent(".cyder-bootstrap-v1")
 }

@@ -57,6 +57,10 @@ assert_contains "$build_script" 'cp "$SCRIPT_DIR/cyder-extract-exe-icon.sh" "$RE
   "Cyder.app must bundle the winemenubuilder icon helper"
 assert_contains "$build_script" 'chmod +x "$RES/ogom-scripts/cyder-extract-exe-icon.sh"' \
   "icon helper must be executable in the app bundle"
+assert_contains "$build_script" 'cp "$SCRIPT_DIR/cyder-create-mac-launcher.sh" "$RES/ogom-scripts/"' \
+  "Cyder.app must bundle the mac launcher helper"
+assert_contains "$build_script" 'cyder_mac_launcher.swift' \
+  "CyderSwift build must compile the mac launcher module"
 assert_not_contains "$build_script" 'cyder_create_game_app.py' \
   "Cyder.app must not ship the CyderBits Python packager"
 assert_not_contains "$build_script" 'cyder_common.py' \

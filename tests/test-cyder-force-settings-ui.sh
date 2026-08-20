@@ -194,6 +194,7 @@ assert_contains "$library_ui" "rule.retinaMode = true" "high-resolution on shoul
 assert_contains "$library_ui" "rule.dpi = 192" "high-resolution on should force 192 DPI"
 assert_not_contains "$library_ui" "private let dpi = NSPopUpButton()" "game options should not expose a DPI control"
 assert_contains "$library_ui" 'withTitle: "選項"' "game library context menu should open Options"
+assert_contains "$library_ui" "加入 macOS 應用程式" "game library should offer macOS Applications shortcut"
 assert_not_contains "$library_ui" 'withTitle: "移除"' "game library must not offer remove (shortcuts re-import)"
 assert_contains "$library_ui" "顯示於 Finder" "game library should reveal the EXE in Finder"
 assert_contains "$library_ui" "revealSelectedGameInFinder" "Finder reveal should have a dedicated action"

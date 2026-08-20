@@ -10,6 +10,8 @@ struct CyderGameRecord: Codable, Equatable, Identifiable {
     var addedAt: Date
     /// Start Menu / Desktop `.lnk` name when the game was imported from a shortcut.
     var title: String?
+    /// Thin macOS `.app` wrapper under ~/Applications/Cyder, if created.
+    var macAppPath: String?
 
     var executableURL: URL {
         URL(fileURLWithPath: executablePath)
@@ -21,11 +23,12 @@ struct CyderGameRecord: Codable, Equatable, Identifiable {
         return executableURL.deletingPathExtension().lastPathComponent
     }
 
-    init(id: String, executablePath: String, addedAt: Date = Date(), title: String? = nil) {
+    init(id: String, executablePath: String, addedAt: Date = Date(), title: String? = nil, macAppPath: String? = nil) {
         self.id = id
         self.executablePath = executablePath
         self.addedAt = addedAt
         self.title = title
+        self.macAppPath = macAppPath
     }
 }
 
@@ -121,6 +124,12 @@ final class CyderGameLibraryStore {
 
     func reload() {
         load()
+    }
+
+    func setMacAppPath(_ path: String?, forGameID id: String) throws {
+        guard let index = games.firstIndex(where: { $0.id == id }) else { return }
+        games[index].macAppPath = path
+        try save()
     }
 
     /// Drop library entries whose EXE path no longer exists on disk.
