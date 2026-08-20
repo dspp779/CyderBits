@@ -49,7 +49,7 @@ flowchart TB
 
   subgraph user["使用者本機"]
     BUNDLE --> OPEN{"開啟方式"}
-    OPEN -->|"開 Cyder.app"| ENS["ensure-engine-only<br/>再 ensure-graphics-only"]
+    OPEN -->|"開 Cyder.app"| ENS["ensure-engine-only<br/>版本不同才 ensure-graphics-only"]
     OPEN -->|"Finder 開 .exe"| SKIP["跳過 graphics 升級<br/>只用現有 current-*"]
     ENS --> ENG["~/.cyder/runtime/Engines/wine-x86_64/"]
     ENS --> GFX["~/.cyder/runtime/graphics/<br/>current-dxvk / dxmt"]
@@ -187,14 +187,15 @@ sequenceDiagram
 | 步驟 | 腳本／入口 | 條件 |
 |------|------------|------|
 | 1. 裝／升級 engine | `cyder_ensure_shared_engine` | version 不同，或同版但 SHA 不同 |
-| 2. 裝／升級 graphics | `cyder_ensure_graphics` | sidecar version ≠ 已解壓 marker；每次也校正 DXMT `winemetal.dll` |
-| 3. 接線 | `lib/dxvk`、`lib/dxmt` → `current-*` | 每次 ensure-graphics |
+| 2. 裝／升級 graphics | `cyder_ensure_graphics` | Swift 先比對 bundled version 與 runtime `current-*` marker；只有版本不同才呼叫 shell |
+| 3. 接線 | `lib/dxvk`、`lib/dxmt` → `current-*` | 只有在執行 ensure-graphics 時更新 |
 | 4. DXMT PE gate | `cyder_ensure_dxmt_winemetal_prefix` | 將同版 64/32 位元 `winemetal.dll` 覆蓋 shared 或 per-game prefix；不複製 `winemetal.so` |
 | 5. 遷移舊 bottle | `cyder_migrate_graphics_prefix` | 偵測舊 Cyder 拷入的 DXVK／DXMT PE；prefix 使用中則延後，且不刪 `winemetal.dll` |
 | 6. Bootstrap bottle | `cyder_bootstrap_shared_prefix` | 開 Cyder 且 marker 未齊；**不再**把 DXVK 拷進 system32 |
 
 `cyder_prepare_graphics_prefix` 在有 graphics 貨源時會先跑 ensure，再開 Cyder
-的 `--ensure-graphics-only` 會再跑一次（第二次應是 no-op）。`--launch-exe`
+時若 bundled version 與 runtime marker 相同，Swift 端會直接跳過
+`--ensure-graphics-only`。`--launch-exe`
 在選定 shared 或 per-game prefix 後也會執行同一個 preparation，確保舊 profile
 不會因缺少 `winemetal.dll` 而直接失敗。若是首次建立 prefix，bootstrap 完成後會
 再跑一次 ensure，補上建立前不存在、因此無法先安裝的 `winemetal.dll`。

@@ -1141,40 +1141,32 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             }
         }
 
-        CyderDiagnostics.shared.enter(.engineExtraction)
-        showSetup("正在準備圖形元件…")
-        let graphics = runLauncher(
-            context: context,
-            args: [context.launcher, "--ensure-graphics-only"],
-            stage: .engineExtraction,
-            operation: "graphics-install"
-        )
-        if !graphics.succeeded {
-            return failure(
-                code: "CYD-GFX-001",
+        let graphicsNeedsInstall = graphicsPayloadNeedsInstall(context: context)
+        if graphicsNeedsInstall {
+            CyderDiagnostics.shared.enter(.engineExtraction)
+            showSetup("正在準備圖形元件…")
+            let graphics = runLauncher(
+                context: context,
+                args: [context.launcher, "--ensure-graphics-only"],
                 stage: .engineExtraction,
-                summary: "準備圖形元件時發生問題。",
-                result: graphics
+                operation: "graphics-install"
             )
+            if !graphics.succeeded {
+                return failure(
+                    code: "CYD-GFX-001",
+                    stage: .engineExtraction,
+                    summary: "準備圖形元件時發生問題。",
+                    result: graphics
+                )
+            }
         }
 
         // Engine installation can create/replace the engine tree. Recompute
         // the marker decision after that operation so first-run setup cannot
         // be deferred to the next Cyder launch.
-        var templatesReady = false
-        if !state.needsEngine && !state.needsBootstrap {
-            let probe = runLauncher(
-                context: context,
-                args: [context.launcher, "--engine-src", context.engineSrc, "--templates-ready"],
-                stage: .bootstrap,
-                operation: "templates-ready"
-            )
-            templatesReady = probe.succeeded
-        }
         let bootstrapNeeded = state.needsEngine
             || state.needsBootstrap
             || environmentState(context: context).needsBootstrap
-            || !templatesReady && !state.needsEngine
         var bootstrapHealthChecked = false
         if bootstrapNeeded {
             CyderDiagnostics.shared.enter(.bootstrap)
@@ -1386,6 +1378,30 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
     private func graphicsPayloadsPresent() -> Bool {
         let capabilities = CyderGraphicsCapabilities.current(engineRoot: CyderPaths.engine)
         return capabilities.hasDxvk || capabilities.hasDxmt
+    }
+
+    private func graphicsPayloadNeedsInstall(context: CyderLaunchContext) -> Bool {
+        graphicsVersionNeedsInstall(name: "dxvk", context: context)
+            || graphicsVersionNeedsInstall(name: "dxmt", context: context)
+    }
+
+    private func graphicsVersionNeedsInstall(name: String, context: CyderLaunchContext) -> Bool {
+        guard let bundled = bundledGraphicsVersion(name: name, context: context) else {
+            return false
+        }
+        return installedGraphicsVersion(name: name) != bundled
+    }
+
+    private func bundledGraphicsVersion(name: String, context: CyderLaunchContext) -> String? {
+        let resources = URL(fileURLWithPath: context.engineVersionFile).deletingLastPathComponent()
+        let versionFile = resources.appendingPathComponent("graphics/\(name)-version.txt")
+        return trimmedFileContents(versionFile)
+    }
+
+    private func installedGraphicsVersion(name: String) -> String? {
+        let versionFile = CyderPaths.runtimeRoot
+            .appendingPathComponent("graphics/current-\(name)/.cyder-graphics-version")
+        return trimmedFileContents(versionFile)
     }
 
     private func installWinetricks(_ verbs: [String]) {
@@ -1925,8 +1941,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         guard FileManager.default.fileExists(atPath: context.engineVersionFile) else {
             return false
         }
-        guard let bundled = try? String(contentsOfFile: context.engineVersionFile, encoding: .utf8)
-            .trimmingCharacters(in: .whitespacesAndNewlines),
+        guard let bundled = trimmedFileContents(URL(fileURLWithPath: context.engineVersionFile)),
             !bundled.isEmpty
         else {
             return false
@@ -1935,8 +1950,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             .deletingLastPathComponent()
             .deletingLastPathComponent()
             .appendingPathComponent("version")
-        guard let installed = try? String(contentsOfFile: installedFile.path, encoding: .utf8)
-            .trimmingCharacters(in: .whitespacesAndNewlines),
+        guard let installed = trimmedFileContents(installedFile),
             !installed.isEmpty
         else {
             return true
@@ -1953,17 +1967,23 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         }
         let resources = URL(fileURLWithPath: context.engineVersionFile).deletingLastPathComponent()
         let bundledFingerprintFile = resources.appendingPathComponent("engine-artifact-sha256.txt")
-        guard let bundledFingerprint = try? String(contentsOf: bundledFingerprintFile, encoding: .utf8)
-            .trimmingCharacters(in: .whitespacesAndNewlines),
+        guard let bundledFingerprint = trimmedFileContents(bundledFingerprintFile),
             !bundledFingerprint.isEmpty
         else {
             return false
         }
         let installedFingerprintFile = installedFile.deletingLastPathComponent()
             .appendingPathComponent(".cyder-engine-artifact-sha256")
-        let installedFingerprint = try? String(contentsOf: installedFingerprintFile, encoding: .utf8)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let installedFingerprint = trimmedFileContents(installedFingerprintFile)
         return installedFingerprint != bundledFingerprint
+    }
+
+    private func trimmedFileContents(_ url: URL) -> String? {
+        guard let raw = try? String(contentsOf: url, encoding: .utf8) else {
+            return nil
+        }
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
     }
 
     /// Packaging metadata historically used either a display label

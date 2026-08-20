@@ -104,14 +104,18 @@ assert_contains "$source_text" "CYDER_PROGRESS_FILE" \
   "bootstrap should expose a progress file for staged setup messages"
 assert_contains "$source_text" 'args.contains("--bootstrap-only")' \
   "long setup operations should enable progress polling"
-assert_contains "$source_text" '"--ensure-graphics-only"' \
-  "settings-mode preparation must install graphics payloads"
+assert_contains "$source_text" 'graphicsPayloadNeedsInstall(context: context)' \
+  "settings-mode must decide graphics install from Swift-side version checks"
+assert_contains "$source_text" 'if graphicsNeedsInstall {' \
+  "settings-mode should only spawn ensure-graphics when versions differ"
 assert_contains "$source_text" 'if state.needsEngine {' \
   "settings-mode must spawn ensure-engine only when the sidecar is not current"
 assert_not_contains "$source_text" 'state.needsEngine || enginePresent' \
   "a current engine tree must not force ensure-engine-only"
 assert_contains "$source_text" '.cyder-engine-signed' \
   "missing ad-hoc sign marker must still count as needsEngine"
+assert_not_contains "$source_text" 'operation: "templates-ready"' \
+  "settings-mode must not run the removed templates-ready probe"
 assert_contains "$source_text" 'if !bootstrapHealthChecked && bootstrapNeeded' \
   "subsequent settings opens must not probe wine cmd when the prefix is already ready"
 run_phased_text="$(awk '
