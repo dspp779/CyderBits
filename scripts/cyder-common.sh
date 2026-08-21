@@ -252,9 +252,23 @@ cyder_engine_version_from_tarball() {
 
 cyder_bundled_engine_version_from_src() {
   local engine_src="$1"
+  local from_tar="" from_sidecar=""
   engine_src="$(cyder_abs_path "$engine_src")"
+  if [[ -n "${CYDER_OGOM:-}" ]]; then
+    from_sidecar="$(cyder_bundled_engine_version "$CYDER_OGOM" 2>/dev/null || true)"
+  fi
   if cyder_engine_is_tarball "$engine_src"; then
-    if cyder_engine_version_from_tarball "$engine_src"; then
+    from_tar="$(cyder_engine_version_from_tarball "$engine_src" 2>/dev/null || true)"
+    # Prefer Resources/engine-version.txt (dotted human label) over the
+    # archive-internal version file, which may still store the filesystem slug.
+    if [[ -n "$from_sidecar" ]]; then
+      if [[ -z "$from_tar" ]] || cyder_engine_versions_equal "$from_tar" "$from_sidecar"; then
+        printf '%s\n' "$from_sidecar"
+        return 0
+      fi
+    fi
+    if [[ -n "$from_tar" ]]; then
+      printf '%s\n' "$from_tar"
       return 0
     fi
     cyder_engine_version_from_archive "$engine_src"
@@ -269,8 +283,8 @@ cyder_bundled_engine_version_from_src() {
       return 0
     fi
   fi
-  if [[ -n "${CYDER_OGOM:-}" ]]; then
-    cyder_bundled_engine_version "$CYDER_OGOM"
+  if [[ -n "$from_sidecar" ]]; then
+    printf '%s\n' "$from_sidecar"
     return 0
   fi
   return 1

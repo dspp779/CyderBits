@@ -1146,6 +1146,12 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
     private func ensureEnvironment(context: CyderLaunchContext) -> CyderFailure? {
         let state = environmentState(context: context)
 
+        // Even when ensure-engine is skipped, rewrite a legacy slug-form version
+        // marker so Preferences shows the dotted sidecar label.
+        if !state.needsEngine {
+            _ = CyderPaths.healInstalledEngineVersionLabelIfNeeded()
+        }
+
         // Sidecar version + artifact SHA (and the signed marker) already decide
         // needsEngine. Spawning bash --ensure-engine-only on a current tree is
         // the dominant cost of opening Preferences.
@@ -2022,7 +2028,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         else {
             return true
         }
-        if !engineVersionsEqual(installed, bundled) {
+        if !cyderEngineVersionsEqual(installed, bundled) {
             return true
         }
         let engineRoot = engineWine
@@ -2051,50 +2057,6 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         }
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? nil : trimmed
-    }
-
-    /// Packaging metadata historically used either a display label
-    /// (`wine crossover 26.2.0 (wine 11.0)`), its filesystem-safe slug
-    /// (`crossover-26.2.0-wine-11.0`), or Cyder011-style labels with dots
-    /// vs hyphens (`CX26.3.0-W11-Cyder011` vs `CX26-3-0-W11-Cyder011`).
-    /// Keep this in sync with `cyder_engine_versions_equal` in cyder-common.sh.
-    private func engineVersionsEqual(_ lhs: String, _ rhs: String) -> Bool {
-        if lhs == rhs { return true }
-        let leftSlug = engineVersionSlug(lhs)
-        let rightSlug = engineVersionSlug(rhs)
-        return leftSlug == rhs || lhs == rightSlug || leftSlug == rightSlug
-    }
-
-    private func engineVersionSlug(_ raw: String) -> String {
-        let value = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        let prefix = "wine crossover "
-        if value.hasPrefix(prefix),
-           let wineMarker = value.range(of: " (wine ", options: .backwards),
-           value.hasSuffix(")") {
-            let crossover = value[value.index(value.startIndex, offsetBy: prefix.count)..<wineMarker.lowerBound]
-            let wineStart = wineMarker.upperBound
-            let wineEnd = value.index(before: value.endIndex)
-            let wine = value[wineStart..<wineEnd]
-            return collapseEngineVersionSlug("crossover-\(crossover)-wine-\(wine)")
-        }
-        let lower = value.lowercased()
-        if lower.hasPrefix("wine sikarugir ") {
-            let tail = String(value.dropFirst("wine sikarugir ".count))
-            return collapseEngineVersionSlug("sikarugir-\(tail)")
-        }
-        return collapseEngineVersionSlug(value)
-    }
-
-    /// Match bash `tr ' .()/' '-' | tr -s '-'`.
-    private func collapseEngineVersionSlug(_ raw: String) -> String {
-        let translated = raw.map { ch -> Character in
-            " .()/".contains(ch) ? "-" : ch
-        }
-        var slug = String(translated)
-        while slug.contains("--") {
-            slug = slug.replacingOccurrences(of: "--", with: "-")
-        }
-        return slug.trimmingCharacters(in: CharacterSet(charactersIn: "-"))
     }
 
     private func onMainThread(_ work: () -> Void) {

@@ -42,6 +42,37 @@ assert_eq "$(cyder_read_engine_version_file "$STAGE_CANON")" \
 common_src="$(cat "$ROOT/scripts/cyder-common.sh")"
 assert_contains "$common_src" 'Heal legacy installs that stored the filesystem slug' \
   "ensure must rewrite slug-form version files to the canonical sidecar label"
+assert_contains "$common_src" 'Prefer Resources/engine-version.txt' \
+  "bundled version lookup must prefer the app sidecar over archive-internal slugs"
+
+# Prefer sidecar dotted label when the tarball still embeds the filesystem slug.
+RES="$TMP/resources"
+mkdir -p "$RES"
+printf '%s\n' 'CX26.3.0-W11-Cyder011' >"$RES/engine-version.txt"
+STAGE_TAR="$TMP/tar-src/wine-x86_64"
+mkdir -p "$STAGE_TAR"
+printf '%s\n' 'CX26-3-0-W11-Cyder011' >"$STAGE_TAR/version"
+TARBALL_ZST="$TMP/engine-CX26-3-0-W11-Cyder011.tar.zst"
+(
+  cd "$TMP/tar-src"
+  if command -v zstd >/dev/null 2>&1; then
+    tar -cf - wine-x86_64 | zstd -q -o "$TARBALL_ZST"
+  else
+    # Fall back to xz naming path for hosts without zstd.
+    TARBALL_ZST="$TMP/engine-CX26-3-0-W11-Cyder011.tar.xz"
+    tar -cf - wine-x86_64 | xz -c >"$TARBALL_ZST"
+  fi
+)
+from_src="$(CYDER_OGOM="$RES" cyder_bundled_engine_version_from_src "$TARBALL_ZST")"
+assert_eq "$from_src" "CX26.3.0-W11-Cyder011" \
+  "bundled version from archive must prefer Resources/engine-version.txt"
+
+paths_src="$(cat "$ROOT/scripts/cyder_paths.swift")"
+assert_contains "$paths_src" 'healInstalledEngineVersionLabelIfNeeded' \
+  "Preferences must heal slug-form installed version labels"
+settings_ui="$(cat "$ROOT/scripts/cyder_settings_ui.swift")"
+assert_contains "$settings_ui" 'healInstalledEngineVersionLabelIfNeeded' \
+  "engine version label refresh must heal before display"
 
 STAGE="$TMP/stage/wine-x86_64"
 mkdir -p "$STAGE/bin"
