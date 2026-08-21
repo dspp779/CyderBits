@@ -1373,6 +1373,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
                 return .failure(failure)
             }
         }
+    }
 
     private func prefixForExecutable(_ executable: URL) -> CyderPrefixResolution {
         let profileStore = CyderProfileStore(root: CyderPaths.support)
