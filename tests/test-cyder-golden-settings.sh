@@ -35,8 +35,8 @@ assert_contains "$log" '"msvcp140"="native,builtin"' \
   "Golden should prefer native VC++ msvcp140"
 assert_contains "$log" 'FontSmoothingType"=dword:00000002' \
   "Golden should use RGB ClearType globally"
-assert_contains "$log" '"RetinaMode"="y"' "Golden should enable Retina explicitly"
-assert_contains "$log" 'LogPixels"=dword:000000c0' "Golden should use 192 DPI"
+assert_contains "$log" '"RetinaMode"="n"' "Golden should disable Retina explicitly"
+assert_contains "$log" 'LogPixels"=dword:00000060' "Golden should use 96 DPI"
 if [[ "$log" == *'AppDefaults\BlueLauncher.exe\Control Panel\Desktop'* ]]; then
   echo "ASSERT failed: Golden should not write ineffective BlueLauncher smoothing values" >&2
   exit 1

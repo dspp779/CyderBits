@@ -688,7 +688,7 @@ cyder_load_saved_settings() {
   local settings="$CYDER_SUPPORT/settings.json"
   # Process-level values are authoritative. Native Cyder uses them for the
   # currently selected game's overrides; reloading the global settings file
-  # here used to replace Retina=0/DPI=96 with the global Retina=1/DPI=192.
+  # here used to replace Retina=0/DPI=96 with the global Retina preference.
   local keep_msync=0 keep_esync=0 keep_retina=0 keep_dpi=0
   local keep_mingliu=0 keep_songti=0 keep_smoothing=0 keep_power=0 keep_diagnostics=0
   local keep_maplestory_wz_cache=0 keep_wine_locale=0

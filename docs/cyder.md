@@ -163,7 +163,7 @@ Cyder 目前使用一個預設 Wine bottle，所有 `.exe` 共用同一套 Windo
 1. 從 app 內 `engine-<version>.tar.zst` 解壓引擎至 `Engines/`（若尚未安裝或版本不同）
 2. 對 `bottles/shared` 執行 wineboot：空 bottle 用 `-i`，既有 bottle 用 `-u`（engine 升級時保留 shared，只清 `.cyder-bootstrap-v1` 以觸發再 provision；需要乾淨環境時用偏好設定「重建 Windows 遊戲環境」）
 3. 安裝 **syswow64/tar.exe**（含 libarchive DLL）。Wine Mono／Gecko 不在初始化安裝；當程式第一次載入 `mscoree`（.NET）或 `mshtml`（內嵌網頁）時，Wine 會跳出元件安裝提示。
-4. 寫入 **Mac 高解析度** registry（RetinaMode + LogPixels=192）與其他 Golden baseline 設定
+4. 寫入 **Mac 顯示 baseline** registry（預設 RetinaMode 關閉、LogPixels=96）與其他 Golden baseline 設定
 5. 套用進階設定，並為遊戲畫面主程式 `bluecg.exe` 寫入專屬的 `ddraw=n,b` DLL override
 6. 寫入 `.cyder-bootstrap-v1`；之後啟動跳過上述步驟
 
@@ -184,8 +184,8 @@ Cyder 目前使用一個預設 Wine bottle，所有 `.exe` 共用同一套 Windo
 Cyder 的 `設定…`（`⌘,`）、Dock 右鍵或執行檔選擇器的「進階設定…」可調整：
 
 - 同步機制：關閉（預設）、MSync 或 ESync（三者互斥）
-- Retina Mode（預設開啟）
-- DPI（預設 192 / 200%；非整數縮放可能讓部分老遊戲出現鋸齒或模糊）
+- Retina Mode（預設關閉；相容性較佳，需要時再開）
+- DPI（預設 96／100%；非整數縮放可能讓部分老遊戲出現鋸齒或模糊）
 - 字體平滑（預設 ClearType RGB，可選關閉或灰階；與 Retina Mode 獨立）
 - Windows 字體方案：宋體 Songti TC（預設）或細明體 MingLiU
 - 每遊戲能源模式：標準不套用 `taskpolicy`；省電使用 `taskpolicy -c background`。省電模式會降低 CPU 使用率，但可能造成畫面卡頓。Apple 晶片通常會優先使用節能核心；BlueCG 測試中 Wine CPU 能耗約為標準模式的 1/10，可能大幅延長續航。M1 Pro／Max 僅有 2 個節能核心，可能極度卡頓，不建議使用。
@@ -194,7 +194,7 @@ Cyder 的 `設定…`（`⌘,`）、Dock 右鍵或執行檔選擇器的「進階
 
 設定儲存在 `~/Library/Application Support/Cyder/settings.json`。全域顯示與字體設定會在控制項變更時，以原生 `sed` 直接更新未執行中的 Wine prefix；遊戲庫的個別設定則在遊戲設定頁按「套用」後保存，並在之後開啟該 EXE 時載入。
 
-新建立的 prefix 會先以 Retina Mode／192 DPI 作為 bootstrap baseline，但每次啟動仍會先套用 `settings.json` 的全域顯示設定；因此即使遊戲沒有個別 profile，偏好設定關閉高解析度也會在第一次啟動時生效。
+新建立的 prefix 會先以 Retina Mode 關閉／96 DPI 作為 bootstrap baseline，之後每次啟動仍會先套用 `settings.json` 的全域顯示設定；因此即使遊戲沒有個別 profile，偏好設定開啟高解析度也會在第一次啟動時生效。偏好設定與遊戲庫開啟時可用 `⌘W` 關閉目前視窗、`⌘Q` 結束 Cyder（若仍有 Wine session，結束流程與選單「結束 Cyder」相同）。
 
 遊戲庫以 EXE 的 canonical path 計算穩定 ID，個別選項存放於 `perProfile`；這不代表一定建立獨立 bottle。遊戲設定頁直接開放同步機制（關閉／MSync／ESync）、Retina、DPI、字體、能源模式、環境變數與命令列參數。環境變數寫 `KEY=value`，可以空白或換行分隔多組（換行視同空白），值含空白請用引號。命令列參數直接接在 EXE 後，以空白分隔，亦可換行書寫（換行視同空白）；含空白的單一參數可用引號保留。提供「測試」以套用目前草稿後開啟遊戲，或按「套用」保存供之後從遊戲庫、Finder／直接 EXE 開啟時使用。每個 EXE 的能源模式使用 `powerMode=standard|energySaving`；啟動契約環境變數為 `CYDER_POWER_MODE=normal|background`。
 
@@ -262,7 +262,7 @@ BlueCG（魔力寶貝）可透過 Cyder 直接開 `BlueLauncher.exe`；遊戲目
 | 現象 | 建議 |
 |------|------|
 | 中文輸入變 `??` | 確認系統語言為繁中；Cyder 會讀 `AppleLocale` |
-| 畫面糊 / 視窗太小 | bootstrap 已啟用高解析度；可對 `bottles/shared` 執行 `bash scripts/enable-mac-retina-hires.sh` |
+| 畫面糊 / 視窗太小 | 可在偏好設定開啟高解析度（Retina）；或對 `bottles/shared` 執行 `bash scripts/enable-mac-retina-hires.sh --on` |
 | 大 zip 解壓失敗 / 找不到 tar | 確認 `bottles/shared/drive_c/windows/syswow64/tar.exe` 存在；刪除 `.cyder-bootstrap-v1` 後重開 Cyder 觸發 reinstall，或執行 `--bootstrap-only` |
 | 找不到 Wine | 重新開啟 Cyder.app 以安裝共用引擎到 `Engines/` |
 | Wine Mono／.NET 安裝提示 | 初始化不預裝 Mono。需要 .NET（`mscoree`）的程式會跳出 Wine 元件安裝對話框，可依提示下載安裝；或對 `bottles/shared` 手動執行 `bash scripts/install-wine-mono.sh`。完整 .NET Framework／Desktop Runtime 請用官方 Windows installer 經 Cyder 開啟 |

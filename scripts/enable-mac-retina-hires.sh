@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Mac high-resolution mode for a Wine prefix (CrossOver-like).
-# Cyder product default is ON (RetinaMode=y + LogPixels=192 via golden/settings).
+# Cyder product default is OFF (RetinaMode=n + LogPixels=96 via golden/settings).
 # This helper defaults OFF without args; use --on for RetinaMode=y + LogPixels=192.
 set -euo pipefail
 

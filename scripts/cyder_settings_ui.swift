@@ -1443,8 +1443,8 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate,
             msync: rule.msync ?? defaults.msync ?? false,
             esync: rule.esync ?? defaults.esync ?? false
         ).rawValue)
-        executableRetina.state = (rule.retinaMode ?? defaults.retinaMode ?? true) ? .on : .off
-        executableDpi.selectItem(at: dpiValues.firstIndex(of: rule.dpi ?? defaults.dpi ?? 192) ?? 0)
+        executableRetina.state = (rule.retinaMode ?? defaults.retinaMode ?? false) ? .on : .off
+        executableDpi.selectItem(at: dpiValues.firstIndex(of: rule.dpi ?? defaults.dpi ?? 96) ?? 0)
         executablePowerMode.selectItem(at: rule.powerMode == "energySaving" ? 1 : 0)
         executableFontMingLiu.selectItem(at: cyderFontTargetIndex(
             rule.fontMingLiuTarget ?? defaults.fontMingLiuTarget ?? cyderDefaultMingLiuFontTarget()

@@ -102,7 +102,7 @@ assert_contains "$(cat "$TMP/wineserver.log")" "$TMP/support/bottles/shared|-k" 
 
 # A global Retina-off/DPI-96 setting must apply even when the EXE has no
 # per-profile entry. This is the first-launch path for a newly provisioned
-# prefix, whose golden baseline starts in Retina-on/DPI-192 mode.
+# prefix (golden baseline also defaults to Retina-off/DPI-96).
 cat >"$TMP/support/settings.json" <<'JSON'
 {
   "schemaVersion": 9,

@@ -12,8 +12,8 @@ USER_REG="$WINEPREFIX/user.reg"
 SETTING="${CYDER_FAST_SETTING:-all}"
 [[ -f "$USER_REG" ]] || { echo "user.reg is missing: $USER_REG" >&2; exit 1; }
 
-retina="${CYDER_RETINA_MODE:-1}"
-dpi="${CYDER_DPI:-192}"
+retina="${CYDER_RETINA_MODE:-0}"
+dpi="${CYDER_DPI:-96}"
 smoothing="${CYDER_FONT_SMOOTHING:-cleartype-rgb}"
 
 mingliu_target="${CYDER_FONT_MINGLIU_TARGET:-}"
@@ -28,8 +28,8 @@ fi
 cyder_font_target_is_valid "$mingliu_target" || mingliu_target="$(cyder_detect_default_mingliu_target)"
 cyder_font_target_is_valid "$songti_target" || songti_target=songti
 
-[[ "$retina" == 0 || "$retina" == 1 ]] || retina=1
-[[ "$dpi" =~ ^[0-9]+$ ]] && (( dpi >= 72 && dpi <= 480 )) || dpi=192
+[[ "$retina" == 0 || "$retina" == 1 ]] || retina=0
+[[ "$dpi" =~ ^[0-9]+$ ]] && (( dpi >= 72 && dpi <= 480 )) || dpi=96
 case "$smoothing" in off|grayscale|cleartype-rgb|cleartype-bgr) ;; *) smoothing=cleartype-rgb ;; esac
 
 REPL_SET_NAMES=()

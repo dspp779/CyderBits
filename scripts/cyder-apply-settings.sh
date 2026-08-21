@@ -20,12 +20,12 @@ WINEPREFIX="${WINEPREFIX:-}"
 
 WINE=(arch -x86_64 "$WINE_INSTALL/bin/wine")
 STATE_FILE="${CYDER_SETTINGS_STATE_FILE:-$WINEPREFIX/.cyder-settings-applied.tsv}"
-retina="${CYDER_RETINA_MODE:-1}"
-dpi="${CYDER_DPI:-192}"
+retina="${CYDER_RETINA_MODE:-0}"
+dpi="${CYDER_DPI:-96}"
 smoothing="${CYDER_FONT_SMOOTHING:-cleartype-rgb}"
 
-[[ "$retina" == 0 || "$retina" == 1 ]] || retina=1
-[[ "$dpi" =~ ^[0-9]+$ ]] && (( dpi >= 72 && dpi <= 480 )) || dpi=192
+[[ "$retina" == 0 || "$retina" == 1 ]] || retina=0
+[[ "$dpi" =~ ^[0-9]+$ ]] && (( dpi >= 72 && dpi <= 480 )) || dpi=96
 case "$smoothing" in off|grayscale|cleartype-rgb|cleartype-bgr) ;; *) smoothing=cleartype-rgb ;; esac
 
 mingliu_target="${CYDER_FONT_MINGLIU_TARGET:-}"

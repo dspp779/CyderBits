@@ -430,8 +430,8 @@ struct CyderSettings: Codable {
     var lastModified: [String: String] = [:]
     var msync = false
     var esync: Bool? = false
-    var retinaMode = true
-    var dpi = 192
+    var retinaMode = false
+    var dpi = 96
     var fontMingLiuTarget = cyderDefaultMingLiuFontTarget()
     var fontSongtiTarget = "songti"
     var fontSmoothing = "cleartype-rgb"
@@ -488,8 +488,8 @@ struct CyderSettings: Codable {
         lastModified = try values.decodeIfPresent([String: String].self, forKey: .lastModified) ?? [:]
         msync = try values.decodeIfPresent(Bool.self, forKey: .msync) ?? false
         esync = try values.decodeIfPresent(Bool?.self, forKey: .esync) ?? false
-        retinaMode = try values.decodeIfPresent(Bool.self, forKey: .retinaMode) ?? true
-        dpi = try values.decodeIfPresent(Int.self, forKey: .dpi) ?? 192
+        retinaMode = try values.decodeIfPresent(Bool.self, forKey: .retinaMode) ?? false
+        dpi = try values.decodeIfPresent(Int.self, forKey: .dpi) ?? 96
         let legacyPreset = try values.decodeIfPresent(String.self, forKey: .fontPreset)
         let migrated = Self.migrateFontTargets(preset: legacyPreset)
         fontMingLiuTarget = cyderSanitizeFontTarget(

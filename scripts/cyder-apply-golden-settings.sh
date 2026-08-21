@@ -22,10 +22,10 @@ cat >"$regfile" <<'EOF'
 REGEDIT4
 
 [HKEY_CURRENT_USER\Software\Wine\Mac Driver]
-"RetinaMode"="y"
+"RetinaMode"="n"
 
 [HKEY_CURRENT_USER\Control Panel\Desktop]
-"LogPixels"=dword:000000c0
+"LogPixels"=dword:00000060
 "FontSmoothing"="2"
 "FontSmoothingType"=dword:00000002
 "FontSmoothingGamma"=dword:00000578
@@ -131,8 +131,8 @@ echo "regedit /s $regfile" >&2
 
 printf '%s\n' \
   'schema=3' \
-  'retina=1' \
-  'dpi=192' \
+  'retina=0' \
+  'dpi=96' \
   'fontMingLiu=songti' \
   'fontSongti=songti' \
   'smoothing=cleartype-rgb' \
