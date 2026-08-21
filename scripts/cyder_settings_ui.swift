@@ -368,7 +368,7 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate,
             rebuild,
             note("重新建立執行 Windows 遊戲所需的環境。遊戲檔案不會刪除，但已安裝的 Windows 元件與自訂設定需要重新套用。"),
             winetricks,
-            note("以原生選擇器安裝 WMP、Quartz、Devenum、VB6 等元件到 shared prefix。.NET 由 Wine Mono 涵蓋；VC++ 與 .NET Desktop Runtime 請用官方 installer。請先關閉所有遊戲。"),
+            note("以原生選擇器安裝 WMP、Quartz、Devenum、VB6 等元件到 shared prefix。.NET／Wine Mono 不預裝：需要時 Wine 會提示安裝，或手動執行 install-wine-mono.sh。VC++ 與 .NET Desktop Runtime 請用官方 installer。請先關閉所有遊戲。"),
             row("MapleStory WZ 快取", maplestoryWZCache),
             note("預設開啟，只對 MapleStory 的唯讀 WZ 小讀取啟用 read-ahead。若遇到資源載入異常，可關閉後重新啟動遊戲。"),
         ])

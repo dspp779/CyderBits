@@ -34,7 +34,7 @@ assert_not_contains "$ui" 'CyderWinetricksComponent(title: "Visual C++' \
 assert_not_contains "$ui" 'CyderWinetricksComponent(title: ".NET Desktop Runtime' \
   ".NET Desktop Runtime should be installed from official installers"
 assert_not_contains "$ui" 'CyderWinetricksComponent(title: ".NET Framework' \
-  ".NET Framework is covered by bootstrap Wine Mono; omit from built-in picker"
+  ".NET Framework omitted from picker; Mono is on-demand, not preinstalled"
 assert_contains "$ui" 'CyderWinetricksComponent(title: "Visual Basic 6 Runtime"' \
   "VB6 runtime should remain available through Winetricks"
 assert_contains "$ui" "onImmediateSave" "controls should expose immediate save"
