@@ -161,7 +161,7 @@ Cyder 目前使用一個預設 Wine bottle，所有 `.exe` 共用同一套 Windo
 首次啟動（或 marker 不存在）時，`cyder_launcher.sh` 會依序：
 
 1. 從 app 內 `engine-<version>.tar.zst` 解壓引擎至 `Engines/`（若尚未安裝或版本不同）
-2. 對 `bottles/shared` 執行 `wineboot -u` 建立／重建 bottle（engine 升級時會先清空 shared，並刪除舊的 `templates/`）
+2. 對 `bottles/shared` 執行 wineboot：空 bottle 用 `-i`，既有 bottle 用 `-u`（engine 升級時保留 shared，只清 `.cyder-bootstrap-v1` 以觸發再 provision；需要乾淨環境時用偏好設定「重建 Windows 遊戲環境」）
 3. 安裝 **wine-mono**、**wine-gecko**、**syswow64/tar.exe**（含 libarchive DLL）
 4. 寫入 **Mac 高解析度** registry（RetinaMode + LogPixels=192）與其他 Golden baseline 設定
 5. 套用進階設定，並為遊戲畫面主程式 `bluecg.exe` 寫入專屬的 `ddraw=n,b` DLL override

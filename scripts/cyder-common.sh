@@ -290,8 +290,22 @@ cyder_detect_engine_version_label() {
 
 cyder_reset_shared_prefix() {
   [[ -e "$CYDER_SHARED_PREFIX" ]] || return 0
-  echo "Resetting shared bottle (engine version changed): $CYDER_SHARED_PREFIX" >&2
+  echo "Resetting shared bottle: $CYDER_SHARED_PREFIX" >&2
   cyder_remove_path "$CYDER_SHARED_PREFIX"
+}
+
+# Engine upgrades keep the shared bottle; clear the bootstrap marker so the next
+# open re-runs provision (wineboot -u + baseline). Users can still wipe via
+# Preferences → 重建 Windows 遊戲環境.
+cyder_invalidate_shared_bootstrap_for_engine_upgrade() {
+  if [[ -f "${CYDER_SHARED_PREFIX:-}/.cyder-bootstrap-v1" ]]; then
+    echo "Engine upgrade: keeping shared bottle; clearing bootstrap marker for wineboot -u: $CYDER_SHARED_PREFIX" >&2
+    rm -f "$CYDER_SHARED_PREFIX/.cyder-bootstrap-v1"
+  fi
+  if [[ -n "${CYDER_SUPPORT:-}" && -e "$CYDER_SUPPORT/templates" ]]; then
+    echo "Removing stale template bottles: $CYDER_SUPPORT/templates" >&2
+    cyder_remove_path "$CYDER_SUPPORT/templates"
+  fi
 }
 
 cyder_engine_archive_basename() {
@@ -1629,24 +1643,14 @@ cyder_ensure_shared_engine() {
       echo "Refreshing shared engine artifact ($bundled_version) -> $dest" >&2
     else
       echo "Upgrading shared engine ($installed_version -> $bundled_version) -> $dest" >&2
-      cyder_reset_shared_prefix
-      # Stale pristine/golden templates belong to the previous engine; drop them
-      # until the 1.0.0 template mechanism returns.
-      if [[ -e "$CYDER_SUPPORT/templates" ]]; then
-        echo "Removing stale template bottles: $CYDER_SUPPORT/templates" >&2
-        cyder_remove_path "$CYDER_SUPPORT/templates"
-      fi
+      cyder_invalidate_shared_bootstrap_for_engine_upgrade
     fi
   else
     echo "Installing shared engine -> $dest" >&2
     if [[ -n "$bundled_version" && -e "$CYDER_SHARED_PREFIX" ]]; then
       if [[ -z "$CYDER_MIGRATED_ENGINE_VERSION" ]] ||
          ! cyder_engine_versions_equal "$CYDER_MIGRATED_ENGINE_VERSION" "$bundled_version"; then
-        cyder_reset_shared_prefix
-        if [[ -e "$CYDER_SUPPORT/templates" ]]; then
-          echo "Removing stale template bottles: $CYDER_SUPPORT/templates" >&2
-          cyder_remove_path "$CYDER_SUPPORT/templates"
-        fi
+        cyder_invalidate_shared_bootstrap_for_engine_upgrade
       fi
     fi
   fi
@@ -1681,18 +1685,21 @@ cyder_init_bottle() {
   CYDER_OPERATION_ERROR_CODE=""
   export CYDER_OPERATION_ERROR_KIND CYDER_OPERATION_ERROR_CODE
   local wineserver="${wine_bin%/wine}/wineserver"
+  # Empty prefix: wineboot -i (faster cold init). Existing prefix: -u (engine upgrade).
+  local wineboot_flag="-i"
+  local wineboot_reason="create"
   if [[ -f "$bottle/system.reg" ]]; then
-    # A prior failed OEM wineboot / older Cyder build can leave a usable
-    # system.reg without cxbottle.conf. Seed (or keep) metadata in place so
-    # "rebuild" / relaunch does not require manually deleting the bottle.
+    # Prefer Preferences → 重建 Windows if the prefix is too broken to salvage.
     cyder_seed_crossover_bottle_conf "$wine_bin" "$bottle" || return $?
-    echo "Bottle exists: $bottle" >&2
-    return 0
+    echo "Updating bottle: $bottle" >&2
+    wineboot_flag="-u"
+    wineboot_reason="update"
+  else
+    echo "Creating bottle: $bottle" >&2
+    mkdir -p "$bottle"
+    # CrossOver Perl wine requires cxbottle.conf before wineboot.
+    cyder_seed_crossover_bottle_conf "$wine_bin" "$bottle" || return $?
   fi
-  echo "Creating bottle: $bottle" >&2
-  mkdir -p "$bottle"
-  # CrossOver Perl wine requires cxbottle.conf before wineboot.
-  cyder_seed_crossover_bottle_conf "$wine_bin" "$bottle" || return $?
   local log_dir="$CYDER_SUPPORT/Logs/operations"
   local log_file="$log_dir/wineboot-$(date '+%Y%m%d-%H%M%S')-$$.log"
   mkdir -p "$log_dir"
@@ -1723,6 +1730,8 @@ cyder_init_bottle() {
   [[ -n "$cpu_arch" ]] || cpu_arch=unknown
   {
     echo "operation=wineboot"
+    echo "wineboot_flag=$wineboot_flag"
+    echo "wineboot_reason=$wineboot_reason"
     echo "wine=$wine_bin"
     echo "prefix=$bottle"
     echo "engine_version=$engine_version"
@@ -1757,7 +1766,7 @@ cyder_init_bottle() {
     # cached Mono/Gecko installers and modify "pristine" during wineboot.
     # Golden installs the pinned, checksummed versions explicitly afterwards.
     export WINEDLLOVERRIDES="${WINEDLLOVERRIDES:-mscoree,mshtml=}"
-    cyder_run arch -x86_64 "$wine_bin" wineboot -u >>"$log_file" 2>&1
+    cyder_run arch -x86_64 "$wine_bin" wineboot "$wineboot_flag" >>"$log_file" 2>&1
   ) &
   local wineboot_pid=$!
   local deadline=$((SECONDS + timeout))

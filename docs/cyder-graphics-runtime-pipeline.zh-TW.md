@@ -200,7 +200,7 @@ sequenceDiagram
 不會因缺少 `winemetal.dll` 而直接失敗。若是首次建立 prefix，bootstrap 完成後會
 再跑一次 ensure，補上建立前不存在、因此無法先安裝的 `winemetal.dll`。
 
-Engine 大版本升級會 `cyder_reset_shared_prefix`；圖形 payload 換版**不會**重做 bottle。
+Engine 大版本升級會保留 shared bottle、清掉 `.cyder-bootstrap-v1` 後再跑 `wineboot -u`；圖形 payload 換版**不會**重做 bottle。需要乾淨 prefix 時用偏好設定「重建 Windows 遊戲環境」。
 
 Health check 只驗證 Wine engine、prefix registry／kernel32 與最小 `cmd` probe，
 不把可選的 DXVK／DXMT 缺失當成 Windows 環境損壞。圖形後端是否可用由

@@ -108,6 +108,7 @@ run-bluecg.sh
 | `tests/test-cyder-diagnostics.sh` | session 階段 `previous_ms` / `elapsed_ms` 與錯誤紀錄 |
 | `tests/test-cyder-measure-startup.sh` | 啟動階段量測腳本契約 |
 | `tests/test-cyder-bootstrap-timing.sh` | bootstrap 子階段 timing 與 wineboot duration 契約 |
+| `tests/test-cyder-wineboot-flag.sh` | 空 prefix／既有 prefix／重建的 `wineboot -i`／`-u` 選擇與 engine 升級保留 bottle 契約 |
 | `tests/test-cyder-prefetch-bootstrap-msi.sh` | Mono/Gecko `--download-only` 與 prefetch 腳本契約 |
 | `tests/test-release-cyder.sh` | `release-cyder.sh` 通道契約與 test dry-run |
 | `tests/test-cyder-game-launch-settings.sh` | stable EXE ID → per-game settings → fast registry/apply launch bridge |

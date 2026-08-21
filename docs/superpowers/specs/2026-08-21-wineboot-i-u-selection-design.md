@@ -1,7 +1,7 @@
 # Design: wineboot `-i` / `-u` selection by prefix lifecycle
 
 **Date:** 2026-08-21  
-**Status:** draft — awaiting approval before implementation plan  
+**Status:** approved — 2026-08-21  
 **Related:** `scripts/cyder-common.sh` (`cyder_init_bottle`, `cyder_rebuild_shared_prefix`, engine upgrade invalidate), bench `debug/wineboot-init-bench-multi-20260821-160430/`
 
 ## Problem
