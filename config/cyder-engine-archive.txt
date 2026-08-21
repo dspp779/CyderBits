@@ -1,1 +1,1 @@
-dist/artifacts/engine-releases/engine-crossover-26.3.0-wine-11.0.tar.zst
+dist/artifacts/engine-releases/engine-CX26-3-0-W11-Cyder011.tar.zst

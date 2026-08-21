@@ -1,1 +1,1 @@
-wine crossover 26.3.0 (wine 11.0)
+CX26.3.0-W11-Cyder011

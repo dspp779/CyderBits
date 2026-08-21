@@ -66,13 +66,25 @@ set -euo pipefail
 SELF="$(cd "$(dirname "$0")" && pwd)"
 RES="$(cd "$SELF/../Resources" && pwd)"
 
-ENGINE_VER="$(tr -d '[:space:]' < "$RES/engine-version.txt" 2>/dev/null || true)"
-if [[ -n "$ENGINE_VER" && -f "$RES/engine-${ENGINE_VER}.tar.zst" ]]; then
-  ENGINE_SRC="$RES/engine-${ENGINE_VER}.tar.zst"
-elif [[ -n "$ENGINE_VER" && -f "$RES/engine-wine-x86_64-${ENGINE_VER}.tar.xz" ]]; then
-  ENGINE_SRC="$RES/engine-wine-x86_64-${ENGINE_VER}.tar.xz"
+ENGINE_ARCHIVE="$(tr -d '[:space:]' < "$RES/engine-archive.txt" 2>/dev/null || true)"
+if [[ -n "$ENGINE_ARCHIVE" && -f "$RES/$ENGINE_ARCHIVE" ]]; then
+  ENGINE_SRC="$RES/$ENGINE_ARCHIVE"
 else
-  ENGINE_SRC="$RES/engine-payload"
+  ENGINE_VER="$(sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' "$RES/engine-version.txt" 2>/dev/null | head -n 1 || true)"
+  ENGINE_VER_SLUG="$(printf '%s' "$ENGINE_VER" | tr ' .()/' '-' | tr -s '-')"
+  ENGINE_VER_SLUG="${ENGINE_VER_SLUG#-}"
+  ENGINE_VER_SLUG="${ENGINE_VER_SLUG%-}"
+  if [[ -n "$ENGINE_VER" && -f "$RES/engine-${ENGINE_VER}.tar.zst" ]]; then
+    ENGINE_SRC="$RES/engine-${ENGINE_VER}.tar.zst"
+  elif [[ -n "$ENGINE_VER_SLUG" && -f "$RES/engine-${ENGINE_VER_SLUG}.tar.zst" ]]; then
+    ENGINE_SRC="$RES/engine-${ENGINE_VER_SLUG}.tar.zst"
+  elif [[ -n "$ENGINE_VER" && -f "$RES/engine-wine-x86_64-${ENGINE_VER}.tar.xz" ]]; then
+    ENGINE_SRC="$RES/engine-wine-x86_64-${ENGINE_VER}.tar.xz"
+  elif [[ -n "$ENGINE_VER_SLUG" && -f "$RES/engine-wine-x86_64-${ENGINE_VER_SLUG}.tar.xz" ]]; then
+    ENGINE_SRC="$RES/engine-wine-x86_64-${ENGINE_VER_SLUG}.tar.xz"
+  else
+    ENGINE_SRC="$RES/engine-payload"
+  fi
 fi
 
 export CYDER_ENGINE_SRC="$ENGINE_SRC"

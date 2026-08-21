@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
-  "engineId": "cx26.3-w11-crossover-zstd",
-  "versionLabel": "wine crossover 26.3.0 (wine 11.0)",
+  "engineId": "cx26.3-w11-cyder011",
+  "versionLabel": "CX26.3.0-W11-Cyder011",
   "base": {
     "crossover": "26.3.0",
     "wine": "11.0"
@@ -46,8 +46,8 @@
   "components": [
     "runtime/cxcompatdb/cxcompatdb.c"
   ],
-  "notes": "Cyder uses an open cxcompatdb.so loaded by the original CrossOver ntdll hook. It owns current-process CompatDB arguments, DLL overrides, graphics backend validation and runtime prepend; Cyder no longer patches ntdll for CompatDB. The MapleStory stack is D3DMetal-neutral; MoltenVK feature-level validation applies only to the optional DXVK path. Graphics payloads are shipped separately. The release stack includes only the MapleStory adaptive read-ahead cache for read-only WZ files and its 512-slot capacity tuning; ring, summary, timeline, cache-stats, section-map, mmap and prewarm patches remain development diagnostics and are not shipped in the release engine. The graphics build is pinned to upstream MoltenVK 1.4.0 with the Cyder CrossOver capability patch plus timeline-wait and present autoreleasepool patches. Packed as zstd -22 --ultra (same ntdll as Cyder011).",
+  "notes": "Cyder uses an open cxcompatdb.so loaded by the original CrossOver ntdll hook. It owns current-process CompatDB arguments, DLL overrides, graphics backend validation and runtime prepend; Cyder no longer patches ntdll for CompatDB. The MapleStory stack is D3DMetal-neutral; MoltenVK feature-level validation applies only to the optional DXVK path. Graphics payloads are shipped separately. The release stack includes only the MapleStory adaptive read-ahead cache for read-only WZ files and its 512-slot capacity tuning; ring, summary, timeline, cache-stats, section-map, mmap and prewarm patches remain development diagnostics and are not shipped in the release engine. The graphics build is pinned to upstream MoltenVK 1.4.0 with the Cyder CrossOver capability patch plus timeline-wait and present autoreleasepool patches. Redistributed as zstd -22 --ultra.",
   "ntdllSHA256": "a361cf85184066b07d50f3bc2095ce61650b48ded781a6468bf16f1334ac81fc",
-  "artifact": "engine-crossover-26.3.0-wine-11.0.tar.zst",
-  "artifactSHA256": "1cdbd72b25dadbc83657168dd06b1d0eab12076d8d3889db6e227ff4a3f98c82"
+  "artifact": "engine-CX26-3-0-W11-Cyder011.tar.zst",
+  "artifactSHA256": "50ad28e80485f369a26b1eaf0cdfb6f599a782177b8cccf50044ff0b7aca9e6e"
 }

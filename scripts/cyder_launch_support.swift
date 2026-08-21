@@ -456,13 +456,25 @@ func resolveEngineSrc(resourcePath: String) -> String {
     if let ver = try? String(contentsOfFile: versionFile, encoding: .utf8) {
         let trimmed = ver.trimmingCharacters(in: .whitespacesAndNewlines)
         if !trimmed.isEmpty {
-            let zst = resourcePath + "/engine-\(trimmed).tar.zst"
-            if FileManager.default.fileExists(atPath: zst) {
-                return zst
-            }
-            let xz = resourcePath + "/engine-wine-x86_64-\(trimmed).tar.xz"
-            if FileManager.default.fileExists(atPath: xz) {
-                return xz
+            let slug = trimmed
+                .replacingOccurrences(of: " ", with: "-")
+                .replacingOccurrences(of: ".", with: "-")
+                .replacingOccurrences(of: "(", with: "-")
+                .replacingOccurrences(of: ")", with: "-")
+                .replacingOccurrences(of: "/", with: "-")
+            let collapsed = slug
+                .split(separator: "-", omittingEmptySubsequences: true)
+                .joined(separator: "-")
+            for name in [
+                "engine-\(trimmed).tar.zst",
+                "engine-\(collapsed).tar.zst",
+                "engine-wine-x86_64-\(trimmed).tar.xz",
+                "engine-wine-x86_64-\(collapsed).tar.xz",
+            ] {
+                let path = resourcePath + "/" + name
+                if FileManager.default.fileExists(atPath: path) {
+                    return path
+                }
             }
         }
     }
