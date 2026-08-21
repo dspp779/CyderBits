@@ -71,7 +71,7 @@ Usage: $(basename "$0") [options] [game.exe ...]
 Options:
   --engine-src PATH   Wine engine source (default: install/wine-cx26-x86_64 or app payload)
   --dry-run           Print paths without installing engine or launching
-  --bootstrap-only    Bootstrap shared prefix (mono, tar, hi-res) and exit
+  --bootstrap-only    Bootstrap shared prefix (wineboot, tar, hi-res) and exit
   --health-check      Validate the Wine engine and run a minimal prefix probe
   --rebuild-prefix    Rebuild the shared Windows game environment safely
   --ensure-engine-only  Install shared engine from payload/tarball and exit

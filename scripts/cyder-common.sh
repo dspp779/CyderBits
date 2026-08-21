@@ -1796,9 +1796,9 @@ cyder_init_bottle() {
     fi
   fi
   # wineboot returns while wineserver is still in its short idle window (~3s).
-  # Do not wait for wineserver exit or force -p; the next MSI install must
-  # attach within that window. Poll only on-disk wineboot artifacts
-  # (drive_c + kernel32). system.reg/user.reg may flush later at -k.
+  # Do not wait for wineserver exit or force -p; poll only on-disk wineboot
+  # artifacts (drive_c + kernel32). system.reg/user.reg may flush later when
+  # baseline verify stops the server.
   if (( status == 0 )); then
     local artifact_wait_timeout="${CYDER_WINESERVER_WAIT_TIMEOUT:-30}"
     [[ "$artifact_wait_timeout" =~ ^[0-9]+$ ]] || artifact_wait_timeout=30
@@ -1855,8 +1855,9 @@ cyder_init_bottle() {
   rm -f "$dos/c:" "$dos/z:"
   ln -sf ../drive_c "$dos/c:"
   ln -sf / "$dos/z:"
-  # Keep wineserver alive for immediate Mono/Gecko msiexec. Baseline verify
-  # stops it later (flushing .reg).
+  # Leave wineserver running after wineboot so later baseline steps (tar /
+  # golden registry) can reuse it; cyder_verify_prefix_baseline_artifacts
+  # stops it and flushes .reg.
 }
 
 cyder_health_check_prefix() {
@@ -2193,9 +2194,7 @@ cyder_prepare_golden_template() {
   cyder_profile_init_layout "$CYDER_SUPPORT"
   local golden="$CYDER_SUPPORT/templates/golden"
   if cyder_profile_template_ready golden "$CYDER_SUPPORT" "$revision" "$engine_version" \
-      && [[ -f "$golden/.cyder-mono-10.4.1" \
-         && -f "$golden/.cyder-gecko-2.47.4" \
-         && -f "$golden/.cyder-golden-baseline-v2" ]]; then
+      && [[ -f "$golden/.cyder-golden-baseline-v2" ]]; then
     return 0
   fi
 
