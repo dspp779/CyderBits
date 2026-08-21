@@ -41,31 +41,31 @@ assert_contains "$provision_text" "mono-download" \
   "provision must time Mono download separately from install"
 assert_contains "$provision_text" "gecko-download" \
   "provision must time Gecko download separately from install"
-# Downloads must finish before wineboot so MSI install can chain onto the
-# still-live wineserver without waiting for idle exit or wineserver -p.
-download_before_wineboot="$(
-  awk '
-    /mono-download|gecko-download/ { if (!saw_wineboot) print }
-    /cyder_bootstrap_substage_begin wineboot/ { saw_wineboot = 1 }
-  ' <<<"$provision_text"
-)"
-assert_contains "$download_before_wineboot" "mono-download" \
-  "Mono download must run before wineboot to keep MSI install hot-path short"
-assert_contains "$download_before_wineboot" "gecko-download" \
-  "Gecko download must run before wineboot to keep MSI install hot-path short"
+assert_contains "$provision_text" "mono_dl_pid" \
+  "Mono download must run in the background alongside wineboot"
+assert_contains "$provision_text" "gecko_dl_pid" \
+  "Gecko download must run in the background alongside wineboot"
+# Downloads start before wineboot; wineboot must not wait for both to finish.
+assert_contains "$provision_text" "cyder_init_bottle" \
+  "provision must still wineboot the prefix"
+# Ready-order install after wineboot (mutex scheduler).
 assert_contains "$provision_text" "mono-install" \
   "provision must still install Mono after wineboot"
-wineboot_to_mono="$(
+assert_contains "$provision_text" "gecko-install" \
+  "provision must still install Gecko after wineboot"
+assert_contains "$provision_text" "Bootstrap scheduler stalled" \
+  "scheduler must fail closed if Mono/Gecko never become ready"
+# msiexec hot path: install scripts without a fresh blocking --download-only
+# between wineboot success and the install invocations.
+wineboot_to_install="$(
   awk '
-    /cyder_bootstrap_substage_begin wineboot/ { found = 1 }
+    /cyder_bootstrap_substage_end wineboot/ { found = 1 }
     found { print }
-    /cyder_bootstrap_substage_begin mono-install/ { exit }
+    /cyder_bootstrap_substage_begin mono-install|cyder_bootstrap_substage_begin gecko-install/ { exit }
   ' <<<"$provision_text"
 )"
-assert_not_contains "$wineboot_to_mono" "mono-download" \
-  "no download/checksum work may sit between wineboot and Mono install"
-assert_not_contains "$wineboot_to_mono" "gecko-download" \
-  "no Gecko download may sit between wineboot and Mono install"
+assert_not_contains "$wineboot_to_install" '--download-only' \
+  "no blocking --download-only may sit on the wineboot→install hot path"
 
 # P3: structured progress
 assert_contains "$common_text" 'cyder_report_progress' \
