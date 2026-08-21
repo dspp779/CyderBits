@@ -1,8 +1,8 @@
 # Bootstrap：download ∥ wineboot + install 就緒管線
 
 日期：2026-08-21  
-狀態：設計已核准（方案 B：install 依就緒順序）  
-範圍：`cyder_provision_prefix_baseline` 內 Mono/Gecko 下載與 wineboot／msiexec 的排程。
+狀態：**superseded**（2026-08-21）— bootstrap 已不再預裝／排程 Mono／Gecko（`a19c783`）。手動 `install-wine-*.sh` 與 `cyder-prefetch-bootstrap-msi.sh` 仍可供進階使用。現行政策見 `docs/cyder.md`。  
+範圍（歷史）：`cyder_provision_prefix_baseline` 內 Mono/Gecko 下載與 wineboot／msiexec 的排程。
 
 相關：
 - `docs/superpowers/specs/2026-08-20-bootstrap-wineserver-keepalive-design.md`（P2：install 前 MSI 就緒、無 `-p`）

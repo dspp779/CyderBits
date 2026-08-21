@@ -1,5 +1,7 @@
 # Bootstrap wineserver keep-alive Implementation Plan
 
+> **Status: superseded (2026-08-21)** — Mono/Gecko preinstall removed from bootstrap (`a19c783`). Artifact-ready wait remains; MSI warm-path goal does not.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Keep wineserver alive after successful wineboot so Mono/Gecko reuse the warm session.

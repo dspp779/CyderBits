@@ -1,7 +1,7 @@
 # Bootstrap P3/P4/P5：progress、idempotent skip、graphics 解耦
 
 日期：2026-08-20  
-狀態：設計已核准（方案 A）  
+狀態：設計已核准（方案 A）；**Mono／Gecko skip 條款已過時**（2026-08-21 起 bootstrap 不預裝這兩者，見 `docs/cyder.md`）。P3 progress、tar／golden skip、P5 graphics 解耦仍適用。  
 範圍：首次／重跑 `cyder_provision_prefix_baseline` 與 shared bootstrap 的 progress UX、可重入 skip、graphics/winemetal 責任邊界。
 
 相關：`docs/superpowers/specs/2026-08-20-bootstrap-wineserver-keepalive-design.md`（P2）

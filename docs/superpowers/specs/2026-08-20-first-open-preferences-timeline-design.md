@@ -1,8 +1,8 @@
 # 初次開啟 → 偏好設定：dry-run timeline
 
 日期：2026-08-20  
-狀態：設計已核准（混合方案）  
-範圍：量測「第一次開 Cyder 到可開偏好設定」的 wall-clock，產出可顯示 overlap 的 timeline。
+狀態：**部分 superseded**（2026-08-21）— App 已不再 fire-and-forget MSI prefetch；量測腳本改為串行 ensure-engine → ensure-graphics → bootstrap-only。Mono/Gecko 不在 bootstrap 內。  
+範圍：量測「第一次開 Cyder 到可開偏好設定」的 wall-clock，產出 timeline。
 
 相關：
 - `scripts/cyder-measure-startup.sh`（現有串行量測，不模擬 prefetch∥bootstrap）

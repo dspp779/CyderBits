@@ -1,8 +1,8 @@
 # Bootstrap wineserver keep-alive（P2）
 
 日期：2026-08-20  
-狀態：設計已核准（write-and-go）  
-範圍：首次 `cyder_provision_prefix_baseline` 內 wineboot → Mono → Gecko 的 wineserver 生命週期。
+狀態：**superseded**（2026-08-21）— bootstrap 已不再預裝 Wine Mono／Gecko（`a19c783`）。artifact-ready 成功條件與失敗路徑 `-k`/`-w` 清理仍有效；「為 msiexec 暖機 keep-alive」的產品目標已取消。現行政策見 `docs/cyder.md`。  
+範圍（歷史）：首次 `cyder_provision_prefix_baseline` 內 wineboot → Mono → Gecko 的 wineserver 生命週期。
 
 ## 目標
 

@@ -1,5 +1,7 @@
 # First-open → Preferences Timeline Implementation Plan
 
+> **Status: partially superseded (2026-08-21)** — product no longer prefetches Mono/Gecko MSI during first-open; measure script is serial ensure-engine → ensure-graphics → bootstrap-only. Keep isolated `CYDER_SUPPORT` + spans/timeline outputs.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Add a Phase A dry-run script that mirrors `ensureEnvironment` (including prefetch∥bootstrap overlap), emit `spans.jsonl` / `results.json` / Mermaid `timeline.md`, and run one isolated measurement.

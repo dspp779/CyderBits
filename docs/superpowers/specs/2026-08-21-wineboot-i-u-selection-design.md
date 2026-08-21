@@ -25,7 +25,7 @@ Despite run-to-run noise (~±2 s), `-i` was faster in every round (~1.5× median
 
 ## Non-goals
 
-- Changing Mono/Gecko install order or parallel download pipeline.
+- Re-introducing Mono/Gecko preinstall into bootstrap (left to Wine on-demand dialogs / manual scripts).
 - Auto-healing corrupt prefixes beyond “user hits 重建”.
 - Per-game profile template revival (still deferred to 1.0.0).
 - Forcing `wineboot -u` on every app launch when `.cyder-bootstrap-v1` is already present.
@@ -70,7 +70,7 @@ cyder_provision_prefix_baseline
        → wineboot -i
        → wait artifacts (drive_c + kernel32)
        → dosdevices c:/z:
-  → mono/gecko/… (unchanged)
+  → tar / golden registry / …（Wine Mono／Gecko 不預裝；需要時由 Wine 提示或手動腳本）
   → write .cyder-bootstrap-v1
 ```
 
@@ -87,7 +87,7 @@ Later open / bootstrap:
   → cyder_provision_prefix_baseline (marker missing)
   → cyder_init_bottle
        system.reg present → wineboot -u
-  → mono/gecko skip if version markers match; else reinstall
+  → tar / golden registry / …（不預裝 Mono／Gecko）
   → rewrite .cyder-bootstrap-v1
 ```
 

@@ -1,5 +1,7 @@
 # Bootstrap Download∥Wineboot Pipeline Implementation Plan
 
+> **Status: superseded (2026-08-21)** — Mono/Gecko download/install scheduler removed from bootstrap (`a19c783`). Do not re-implement against this plan without a new approved design.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Parallelize mono/gecko MSI download with wineboot, then install whichever component is ready first under a single-install mutex (scheme B).
