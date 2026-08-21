@@ -72,6 +72,8 @@ pack_payload() {
     if [[ "$name" == dxvk ]]; then
       python3 "$SCRIPT_DIR/stamp-wine-builtin-pe.py" "$staged"
     fi
+    # zstd refuses -o when the destination already exists and stdin is the input.
+    rm -f "$archive"
     (
       cd "$STAGING"
       tar -cf - "$name" | "$ZSTD_BIN" -22 --ultra -T0 -o "$archive"
