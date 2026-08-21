@@ -231,7 +231,7 @@ Finder 或 CLI 可直接用 Cyder 開啟 `.msi`：經 `msiexec /i` 安裝到 sha
 
 遊戲庫磁貼右鍵可選「加入 macOS 應用程式」（已存在則為「更新」）：在 `~/Applications/Cyder/` 建立精簡 `.app`，啟動時轉交 `Cyder.app` 開啟對應 EXE。捷徑不含 Wine；若遊戲沒有可用圖示則沿用 Cyder 圖示。CLI：`bash scripts/cyder-create-mac-launcher.sh --exe … --cyder-app … --output …`。
 
-捷徑會**固定寫入當下的 EXE 絕對路徑**。若之後「重建 Windows 遊戲環境」、刪除 bottle 內安裝，或搬移 `Cyder.app`，舊捷徑會失效；新版捷徑會跳出提示並可開啟 Cyder，請在遊戲庫重新安裝遊戲後再「更新 macOS 應用程式」。
+捷徑會**固定寫入當下的 EXE 絕對路徑**。若之後「重建 Windows 遊戲環境」、刪除 bottle 內安裝，或搬移 `Cyder.app`，舊捷徑會失效；捷徑會跳出提示（含 `open` 失敗），請在遊戲庫重新安裝遊戲後再「更新 macOS 應用程式」。
 
 直接由 Finder 打開 `.exe` 時，Cyder **不會**安裝、升級或重建環境。若 engine 不存在、版本不同或預設 bottle 尚未完成 bootstrap，只顯示提示，要求使用者先單獨開啟 `Cyder.app` 完成設定與環境建置。
 

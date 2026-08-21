@@ -4,9 +4,9 @@
 
 # CyderBits
 
-**在 Mac 上跑經典 Windows 遊戲 — Cyder 0.12.0 以 DirectDraw 與 GDI 為驗證基準，並提供可選圖形 backend。**
+**在 Mac 上跑經典 Windows 遊戲 — Cyder 0.13.0 以 DirectDraw 與 GDI 為驗證基準，並提供可選圖形 backend。**
 
-驗證路徑仍是傳統 2D Win32 圖形：**DirectDraw → Wine wined3d/OpenGL** 與 GDI。Cyder 0.12.0 使用 `CX26.3.0-W11-Cyder011` engine；DXVK／DXMT 以獨立 graphics payload 提供，D3DMetal 透過 GPTK 提供。實際遊戲相容性仍需依遊戲、macOS 版本與 backend 個別驗證。
+驗證路徑仍是傳統 2D Win32 圖形：**DirectDraw → Wine wined3d/OpenGL** 與 GDI。Cyder 0.13.0 使用 `CX26.3.0-W11-Cyder011` engine；DXVK／DXMT 以獨立 graphics payload 提供，D3DMetal 透過 GPTK 提供。實際遊戲相容性仍需依遊戲、macOS 版本與 backend 個別驗證。
 
 本 repo（CyderBits）目前主要是**應用層**：Cyder 啟動器、遊戲庫、設定、CompatDB 與打包器。實際執行 Windows `.exe` 的 Wine 核心在獨立專案 [cyder-wine-engine](https://github.com/dspp779/cyder-wine-engine)。
 
@@ -171,6 +171,7 @@ bash tests/test-verify-bluecg.sh
 
 - [Cyder 0.7.0 發布說明](docs/releases/v0.7.0.md) — CrossOver bottle 隔離、cabextract、新圖示、MapleStory OEM flavor
 - [Cyder 0.6.0 發布說明](docs/releases/v0.6.0.md) — CX26.3 engine、macOS 10.15 runtime、Winetricks、動態 argv
+- [Cyder 0.13.0 發布說明](docs/releases/v0.13.0.md) — 首次開機加速、不預裝 Mono/Gecko、偏好設定預設入口、.msi／mac 捷徑、Retina 預設關
 - [Cyder 0.12.0 發布說明](docs/releases/v0.12.0.md) — LaunchGroup 選單列、winemenubuilder 遊戲庫圖示、語系選單、捷徑名稱、UI 開啟時顯示 Dock
 - [Cyder 0.11.1 發布說明](docs/releases/v0.11.1.md) — gamaniagames://、open -n file URL、URI 冷啟動不開偏好設定
 - [Cyder 0.10.1 測試版說明](docs/releases/v0.10.1.md) — 強制結束液面動畫、MapleStory WZ adaptive cache、release tooling、測試與文件更新

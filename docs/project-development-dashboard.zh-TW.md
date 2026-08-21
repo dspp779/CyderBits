@@ -1,7 +1,7 @@
 # Cyder 專案開發狀態 Dashboard
 
-> 最後整理：2026-08-17
-> 基準：Cyder `0.10.1` test channel 工作版本
+> 最後整理：2026-08-21
+> 基準：Cyder `0.13.0` 發布準備（engine 仍 `CX26.3.0-W11-Cyder011`）
 > 讀法：本頁是跨文件的狀態總覽；實作行為以程式碼與測試為準，研究結論以各主題文件為準。
 
 ## 一句話結論
@@ -9,11 +9,9 @@
 本 repo（CyderBits / ogom）目前主要是應用層；實際執行 `.exe` 的 Wine 核心在
 [cyder-wine-engine](https://github.com/dspp779/cyder-wine-engine)。
 
-Cyder／CyderBits 的核心啟動器、遊戲庫、每遊戲設定、圖形 backend、診斷記錄與單一選單列
-instance 已經形成可測試的產品骨架；目前離「可以放心宣告 0.10.1」最近的工作，不是再加
-功能，而是完成 DXMT／Steam／反作弊遊戲的實機回歸，以及把目前保守的
-prefix-level 程序等待，升級成能辨識每個遊戲與 helper 的 LaunchGroup monitor；後者排定於 0.11.0，
-不列入 0.10.1 release gate。
+**0.13.0** 已定稿應用層變更（首次開機加速、不預裝 Mono/Gecko、偏好設定預設入口、
+.msi／mac 捷徑、Retina 預設關、無聲失敗提示）。引擎 label 與 0.12.0 相同。剩餘風險仍是
+DXMT／Steam／反作弊等實機回歸，以及 MapleStory 相關 engine 議題（多半在 sibling repo）。
 
 最需要持續追蹤的兩個技術風險是：
 
@@ -38,7 +36,7 @@ prefix-level 程序等待，升級成能辨識每個遊戲與 helper 的 LaunchG
 
 | 工作線 | 目前狀態 | 重要性 | 目前判斷 |
 |---|---|---:|---|
-| Cyder 0.10.1 release | 🟡 test channel，待實機回歸 | P0 | `CX26.3.0-W11-Cyder011` 已 pin；MapleStory WZ adaptive cache 預設開啟且可於進階關閉；DXMT、Steam／反作弊仍要逐款驗證；DXVK 2 已列入待開發 |
+| Cyder 0.13.0 release | 🟡 文件／版本已就緒，待正式公證 | P0 | App `0.13.0`；engine 仍 `CX26.3.0-W11-Cyder011`；見 [v0.13.0](releases/v0.13.0.md) |
 | 啟動器／遊戲庫／設定 | 🟢 核心已落地 | P1 | 已有 per-profile、圖形 backend、環境變數、argv、診斷與執行中套用流程 |
 | 執行中的程序管理 | 🟡 部分完成 | P1／0.11.0 | 單一 primary icon、session sidecar、背景等待已存在；真正的 per-game process monitor 延後至 0.11.0 |
 | 台版 MapleStory OEM | 🟡 OEM baseline 可玩；CX26 port 待完整畫面驗收 | P0 | OEM25 已實玩；CX26 第一層／G 組 patch 可建置，仍缺有效 OTP 的地圖級驗收 |
@@ -51,13 +49,12 @@ prefix-level 程序等待，升級成能辨識每個遊戲與 helper 的 LaunchG
 
 ### 現況
 
-- 目標版本為 **Cyder 0.10.1**，目前以 test channel 驗證。
-- Engine pin 為 `CX26.3.0-W11-Cyder011`。
+- 目標版本為 **Cyder 0.13.0**（應用層發佈；engine 與 0.12.0 同為 `CX26.3.0-W11-Cyder011`）。
+- 發布說明：[0.13.0](releases/v0.13.0.md)。測試／正式通道流程見 [release-pipeline](release-pipeline.zh-TW.md)。
 - MapleStory WZ adaptive cache 只處理唯讀 `.wz` 小讀取；正式 engine 不含 ring／summary／timeline／mmap／prewarm 診斷 patch，Cyder 預設開啟並可在進階設定關閉。
 - DXMT／D3DMetal runtime 已接上 ensure、capability gate、設定與 launch path；MapleStory.exe／Maplestory_Classic.exe 在 default 下於 macOS 15+ 自動選 DXMT，舊版選 DXVK。
 - 設定套用、單一選單列 instance、session 狀態與診斷 log 已有實作。
-- 目前 release note 明確保留的缺口是：DXMT、Steam 與反作弊程序的實際啟動、
-  離場、長跑與背景程序清理。
+- 目前仍建議保留的實機缺口：DXMT、Steam 與反作弊程序的實際啟動、離場、長跑與背景程序清理。
 
 ### 為什麼重要
 
@@ -67,12 +64,11 @@ D3DMetal 要求 macOS 14+，不能只依編譯或 payload 存在判定成功。
 
 ### 下一個完成條件（P0）
 
-- 以 `Cyder011` test artifact 實測 BlueCG、Steam、台版 MapleStory、MapleStory Classic，
-  覆蓋啟動、畫面、輸入、長跑、正常退出與異常退出。
-- 對 DXMT、D3DMetal 各保留一輪可追溯的 engine／macOS／遊戲／設定紀錄。
-- 在 release checklist 中把「視窗建立」與「畫面真的不是黑屏」分開驗收；後者需要人工看畫面。
+- 跑 `bash scripts/release-cyder.sh --channel release --version 0.13.0`，確認 staple／`spctl`。
+- 以 `Cyder011` 正式 artifact 抽測 BlueCG（或既有基準遊戲）啟動與退出。
+- 對 DXMT、D3DMetal 各保留一輪可追溯的 engine／macOS／遊戲／設定紀錄（可延後於 0.13.x）。
 
-參考：[0.10.1 test release note](releases/v0.10.1.md)、[0.10.0 release note](releases/v0.10.0.md)、[圖形 backend 文件](cyder-graphics-backends.zh-TW.md)。
+參考：[0.13.0 release note](releases/v0.13.0.md)、[0.12.0 release note](releases/v0.12.0.md)、[圖形 backend 文件](cyder-graphics-backends.zh-TW.md)。
 
 ## 2. 執行中的程序管理
 

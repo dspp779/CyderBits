@@ -36,8 +36,8 @@ assert_contains "$script" 'requires a stable semantic version' \
   "release channel must reject dev and rc version strings"
 assert_contains "$(cat "$ROOT/scripts/create-cyder-app.sh")" 'cyder-app-version.txt' \
   "App build must read its version from the shared version file"
-assert_eq "$(tr -d '[:space:]' <"$ROOT/config/cyder-app-version.txt")" "0.12.0" \
-  "current 0.12.0 must be the shared App version"
+assert_eq "$(tr -d '[:space:]' <"$ROOT/config/cyder-app-version.txt")" "0.13.0" \
+  "current 0.13.0 must be the shared App version"
 
 # Dry-run test channel should not require Developer ID or network.
 # Inherit a release-looking SIGN_IDENTITY to ensure test still forces ad-hoc.
@@ -50,7 +50,7 @@ assert_contains "$out" 'SIGN_IDENTITY=-' "test dry-run should force ad-hoc ident
 
 release_out="$(
   SIGN_IDENTITY='Developer ID Application: Example' \
-    bash "$ROOT/scripts/release-cyder.sh" --channel release --version 0.12.0 --dry-run --out-dir /tmp/cyder-release-dry 2>&1
+    bash "$ROOT/scripts/release-cyder.sh" --channel release --version 0.13.0 --dry-run --out-dir /tmp/cyder-release-dry 2>&1
 )"
 assert_contains "$release_out" 'create-cyder-app.sh' \
   "release dry-run should print the App build command"
