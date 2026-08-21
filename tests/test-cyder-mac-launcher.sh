@@ -16,6 +16,12 @@ assert test -x "$HELPER"
 helper_src="$(cat "$HELPER")"
 assert_contains "$helper_src" 'open -n -a' \
   "mac launcher must hand off to Cyder via open -n -a"
+assert_contains "$helper_src" '找不到遊戲檔案' \
+  "mac launcher must alert when the embedded EXE path is missing"
+assert_contains "$helper_src" '找不到 Cyder' \
+  "mac launcher must alert when Cyder.app was moved or deleted"
+assert_contains "$helper_src" 'osascript' \
+  "missing-target failures must show a visible alert (wrapper is LSUIElement)"
 assert_contains "$helper_src" 'LSUIElement' \
   "mac launcher wrapper must stay out of the Dock"
 assert_contains "$helper_src" 'AppIcon.icns' \
@@ -75,6 +81,14 @@ launcher_body="$(cat "$tmp/My Game.app/Contents/MacOS/CyderGame")"
 assert_contains "$launcher_body" "open -n -a" "launcher script must call open -n -a"
 assert_contains "$launcher_body" "$fake_exe" "launcher script must embed the EXE path"
 assert_contains "$launcher_body" "$fake_cyder" "launcher script must embed the Cyder.app path"
+assert_contains "$launcher_body" "找不到遊戲檔案" "launcher must include missing-EXE alert copy"
+# Missing EXE must surface an alert path instead of silent open failure.
+rm -f "$fake_exe"
+set +e
+"$tmp/My Game.app/Contents/MacOS/CyderGame" >/dev/null 2>&1
+missing_status=$?
+set -e
+assert_eq "$missing_status" "1" "missing EXE must exit non-zero after alerting"
 icon_path="$tmp/My Game.app/Contents/Resources/AppIcon.icns"
 [[ -f "$icon_path" ]] || {
   echo "ASSERT failed: launcher must include an icon (Cyder fallback when no --icon-png)" >&2

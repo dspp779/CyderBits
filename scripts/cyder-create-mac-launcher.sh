@@ -71,7 +71,36 @@ BUNDLE_ID_PLIST="$(plist_escape "$BUNDLE_ID")"
 cat >"$MACOS/CyderGame" <<EOF
 #!/bin/bash
 set -euo pipefail
-exec /usr/bin/open -n -a '$CYDER_ESCAPED' '$EXE_ESCAPED'
+CYDER_APP='$CYDER_ESCAPED'
+EXE='$EXE_ESCAPED'
+
+cyder_launcher_alert() {
+  local title="\$1" message="\$2"
+  /usr/bin/osascript -e "display alert \\"\${title}\\" message \\"\${message}\\" as warning" >/dev/null 2>&1 || true
+}
+
+if [[ ! -d "\$CYDER_APP" ]]; then
+  cyder_launcher_alert "找不到 Cyder" \\
+    "這個捷徑綁定的 Cyder.app 已不存在或已搬移：
+\$CYDER_APP
+
+請開啟目前的 Cyder，在遊戲庫對該遊戲選擇「更新 macOS 應用程式」。"
+  exit 1
+fi
+
+if [[ ! -f "\$EXE" ]]; then
+  cyder_launcher_alert "找不到遊戲檔案" \\
+    "這個捷徑指向的 EXE 已不存在（常見原因：重建了 Windows 遊戲環境，或遊戲已解除安裝）。
+
+\$EXE
+
+請在 Cyder 遊戲庫重新安裝／加入遊戲後，再選擇「更新 macOS 應用程式」。"
+  # Open Cyder so the user can recover from Preferences / the library.
+  /usr/bin/open -n -a "\$CYDER_APP" >/dev/null 2>&1 || true
+  exit 1
+fi
+
+exec /usr/bin/open -n -a "\$CYDER_APP" "\$EXE"
 EOF
 chmod +x "$MACOS/CyderGame"
 
