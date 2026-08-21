@@ -209,7 +209,7 @@ WINE=~/.cyder/runtime/Engines/wine-x86_64/bin/wine
 
 Winetricks 會直接修改 shared prefix，因此安裝前必須先關閉所有遊戲；元件與 DLL override 可能影響所有使用 SharedPrefix 的遊戲。Cyder.app 會隨附固定版本的 Winetricks script 與 LGPL license，下載檔案則放在 `~/Library/Application Support/Cyder/downloads/winetricks/`。Cyder 會以 `--unattended` CLI 模式執行，使用者不需要操作 Winetricks TUI，也不需要另外安裝 `zenity` 或 `kdialog`。
 
-目前原生選擇器提供 .NET Framework，以及 `wmp9`、`quartz`、`devenum`、`vb6run` 等需要 Wine 專用處理的常見元件。Visual C++ Redistributable 與 .NET Desktop Runtime 6–9 不列入內建選擇器；請從 Microsoft 下載符合遊戲架構與版本的官方 Windows installer，再直接用 Cyder 開啟，讓它安裝到目前 prefix。底層 verb 仍保留給進階診斷，但不屬於一般支援流程。Steam 也不再列在內建選擇器中，請由使用者自行安裝。若需要其他 Winetricks verb，仍可在開發環境直接呼叫 `cyder-winetricks.sh install VERB`，但這是進階手動操作。
+目前原生選擇器提供 `wmp9`、`quartz`、`devenum`、`vb6run` 等需要 Wine 專用處理的常見元件。.NET Framework 不列入內建選擇器（bootstrap 已安裝 Wine Mono）；Visual C++ Redistributable 與 .NET Desktop Runtime 6–9 亦不列入——請從 Microsoft 下載符合遊戲架構與版本的官方 Windows installer，再直接用 Cyder 開啟，讓它安裝到目前 prefix。底層 verb（含 `dotnet*`）仍保留給進階診斷，但不屬於一般支援流程。Steam 也不再列在內建選擇器中，請由使用者自行安裝。若需要其他 Winetricks verb，仍可在開發環境直接呼叫 `cyder-winetricks.sh install VERB`，但這是進階手動操作。
 
 這是 SharedPrefix 的進階手動工具，不會自動替每個遊戲建立隔離 bottle；需要隔離元件時，應使用遊戲 Profile／CyderBits。
 
