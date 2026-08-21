@@ -209,7 +209,7 @@ WINE=~/.cyder/runtime/Engines/wine-x86_64/bin/wine
 
 Winetricks 會直接修改 shared prefix，因此安裝前必須先關閉所有遊戲；元件與 DLL override 可能影響所有使用 SharedPrefix 的遊戲。Cyder.app 會隨附固定版本的 Winetricks script 與 LGPL license，下載檔案則放在 `~/Library/Application Support/Cyder/downloads/winetricks/`。Cyder 會以 `--unattended` CLI 模式執行，使用者不需要操作 Winetricks TUI，也不需要另外安裝 `zenity` 或 `kdialog`。
 
-目前原生選擇器提供 `wmp9`、`quartz`、`devenum`、`vb6run` 等需要 Wine 專用處理的常見元件。.NET Framework 不列入內建選擇器（bootstrap 已安裝 Wine Mono）；Visual C++ Redistributable 與 .NET Desktop Runtime 6–9 亦不列入——請從 Microsoft 下載符合遊戲架構與版本的官方 Windows installer，再直接用 Cyder 開啟，讓它安裝到目前 prefix。底層 verb（含 `dotnet*`）仍保留給進階診斷，但不屬於一般支援流程。Steam 也不再列在內建選擇器中，請由使用者自行安裝。若需要其他 Winetricks verb，仍可在開發環境直接呼叫 `cyder-winetricks.sh install VERB`，但這是進階手動操作。
+目前原生選擇器提供 `wmp9`、`quartz`、`devenum`、`vb6run` 等需要 Wine 專用處理的常見元件。.NET Framework／Wine Mono **不**列入內建選擇器，也不在 bootstrap 預裝：程式第一次載入 `mscoree` 時，Wine 會跳出元件安裝提示；亦可對 shared prefix 手動執行 `bash scripts/install-wine-mono.sh`（app 內附同名腳本於 `Contents/Resources/ogom-scripts/`）。Visual C++ Redistributable 與 .NET Desktop Runtime 6–9 亦不列入——請從 Microsoft 下載符合遊戲架構與版本的官方 Windows installer，再直接用 Cyder 開啟（`.exe` 或 `.msi`），讓它安裝到目前 prefix。底層 verb（含 `dotnet*`）仍保留給進階診斷，但不屬於一般支援流程。Steam 也不再列在內建選擇器中，請由使用者自行安裝。若需要其他 Winetricks verb，仍可在開發環境直接呼叫 `cyder-winetricks.sh install VERB`，但這是進階手動操作。
 
 這是 SharedPrefix 的進階手動工具，不會自動替每個遊戲建立隔離 bottle；需要隔離元件時，應使用遊戲 Profile／CyderBits。
 
@@ -219,9 +219,17 @@ Wine 的 macOS RetinaMode、DPI 與字體 registry 是整個 Wine session／bott
 
 個別遊戲可能需要不同的同步設定；例如皮卡丘打排球目前應關閉 MSync／ESync，並使用無空白的 Wine runtime。請參考 [依遊戲問題文件](games/pikachu-volleyball/README.md)。
 
-單獨開啟 `Cyder.app` 時會直接顯示偏好設定。沒有執行中的 Wine session 時，控制項一經變更就立即寫入 `settings.json`；未執行中的 prefix 會同步呼叫並等待原生 `sed` 修改 `user.reg`，不啟動 Wine 或 Rosetta。若有執行中的 Wine session，只有同步機制、Retina／DPI 與字體欄位會暫存為草稿；下方狀態列會醒目提示並顯示「套用設定」，其他欄位仍會立即保存。
+單獨開啟 `Cyder.app`（或從 Dock／Cmd-Tab 重開且無文件／URI）時會直接顯示偏好設定；遊戲庫改由選單或 Dock 選單開啟。沒有執行中的 Wine session 時，控制項一經變更就立即寫入 `settings.json`；未執行中的 prefix 會同步呼叫並等待原生 `sed` 修改 `user.reg`，不啟動 Wine 或 Rosetta。若有執行中的 Wine session，只有同步機制、Retina／DPI 與字體欄位會暫存為草稿；下方狀態列會醒目提示並顯示「套用設定」，其他欄位仍會立即保存。
 
 執行中的 Wine session 會讓「套用設定」按鈕只處理已修改的同步、顯示與字體草稿；它不會自動關閉遊戲。按下後仍須等所有 Wine 程序結束，再重新啟動 prefix，這些 session-level 設定才會完整生效。強制關閉可能造成尚未儲存的遊戲進度遺失，因此請使用一般頁的「關閉所有 Wine 程序」前先確認遊戲狀態。
+
+### Windows Installer（`.msi`）
+
+Finder 或 CLI 可直接用 Cyder 開啟 `.msi`：經 `msiexec /i` 安裝到 shared prefix。若該 prefix 已有執行中的 Wine session，安裝會被拒絕（避免與遊戲搶同一 wineserver）；請先關閉遊戲再開 installer。
+
+### macOS 應用程式捷徑
+
+遊戲庫磁貼右鍵可選「加入 macOS 應用程式」（已存在則為「更新」）：在 `~/Applications/Cyder/` 建立精簡 `.app`，啟動時轉交 `Cyder.app` 開啟對應 EXE。捷徑不含 Wine；若遊戲沒有可用圖示則沿用 Cyder 圖示。CLI：`bash scripts/cyder-create-mac-launcher.sh --exe … --cyder-app … --output …`。
 
 直接由 Finder 打開 `.exe` 時，Cyder **不會**安裝、升級或重建環境。若 engine 不存在、版本不同或預設 bottle 尚未完成 bootstrap，只顯示提示，要求使用者先單獨開啟 `Cyder.app` 完成設定與環境建置。
 
@@ -257,7 +265,8 @@ BlueCG（魔力寶貝）可透過 Cyder 直接開 `BlueLauncher.exe`；遊戲目
 | 畫面糊 / 視窗太小 | bootstrap 已啟用高解析度；可對 `bottles/shared` 執行 `bash scripts/enable-mac-retina-hires.sh` |
 | 大 zip 解壓失敗 / 找不到 tar | 確認 `bottles/shared/drive_c/windows/syswow64/tar.exe` 存在；刪除 `.cyder-bootstrap-v1` 後重開 Cyder 觸發 reinstall，或執行 `--bootstrap-only` |
 | 找不到 Wine | 重新開啟 Cyder.app 以安裝共用引擎到 `Engines/` |
-| Gecko 安裝提示 | 未預裝時，需要內嵌網頁的程式會觸發 Wine 安裝提示。若不需要，可對 `bottles/shared` 執行 `bash scripts/configure-mshtml.sh --disable` |
+| Wine Mono／.NET 安裝提示 | 初始化不預裝 Mono。需要 .NET（`mscoree`）的程式會跳出 Wine 元件安裝對話框，可依提示下載安裝；或對 `bottles/shared` 手動執行 `bash scripts/install-wine-mono.sh`。完整 .NET Framework／Desktop Runtime 請用官方 Windows installer 經 Cyder 開啟 |
+| Gecko 安裝提示 | 未預裝時，需要內嵌網頁（`mshtml`）的程式會觸發 Wine 安裝提示。可依提示安裝，或手動 `bash scripts/install-wine-gecko.sh`。若不需要內嵌網頁，可對 `bottles/shared` 執行 `bash scripts/configure-mshtml.sh --disable` |
 | 多遊戲衝突 / registry 混亂 | 改用 [CyderBits](cyderbits.md) 為該遊戲建立獨立 bottle 的 game `.app` |
 | Dock 圖示 | Cyder 啟動 Wine 程序後即結束；Dock 上顯示的是 Wine / 遊戲視窗 |
 
