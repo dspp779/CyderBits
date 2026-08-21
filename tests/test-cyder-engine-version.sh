@@ -22,9 +22,26 @@ if cyder_engine_versions_equal "$label" "crossover-26.2.0-wine-12.0"; then
   exit 1
 fi
 
-sik_label="wine sikarugir 10.0 (revision 6)"
-sik_slug="$(cyder_engine_version_slug_from_label "$sik_label")"
-assert_contains "$sik_slug" "sikarugir-10" "sikarugir slug should preserve vendor and wine version"
+cyder_engine_versions_equal "CX26.3.0-W11-Cyder011" "CX26-3-0-W11-Cyder011" || {
+  echo "ASSERT failed: dotted Cyder011 label must equal hyphenated install slug" >&2
+  exit 1
+}
+assert_eq "$(cyder_engine_version_slug_from_label 'CX26.3.0-W11-Cyder011')" \
+  "CX26-3-0-W11-Cyder011" \
+  "Cyder011 slug must replace dots with hyphens"
+# Canonical install marker is the dotted label; slug is only for archive names.
+STAGE_CANON="$TMP/canon/wine-x86_64"
+mkdir -p "$STAGE_CANON/bin"
+printf '%s\n' '#!/bin/sh' >"$STAGE_CANON/bin/wine"
+chmod +x "$STAGE_CANON/bin/wine"
+printf '%s\n' 'CX26-3-0-W11-Cyder011' >"$STAGE_CANON/version"
+cyder_write_engine_version_file "$STAGE_CANON" "CX26.3.0-W11-Cyder011"
+assert_eq "$(cyder_read_engine_version_file "$STAGE_CANON")" \
+  "CX26.3.0-W11-Cyder011" \
+  "version file must store the dotted sidecar label, not the archive slug"
+common_src="$(cat "$ROOT/scripts/cyder-common.sh")"
+assert_contains "$common_src" 'Heal legacy installs that stored the filesystem slug' \
+  "ensure must rewrite slug-form version files to the canonical sidecar label"
 
 STAGE="$TMP/stage/wine-x86_64"
 mkdir -p "$STAGE/bin"

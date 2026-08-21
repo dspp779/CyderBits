@@ -1166,12 +1166,11 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             }
         }
 
-        // Engine installation can create/replace the engine tree. Recompute
-        // the marker decision after that operation so first-run setup cannot
-        // be deferred to the next Cyder launch.
-        let bootstrapNeeded = state.needsEngine
-            || state.needsBootstrap
-            || environmentState(context: context).needsBootstrap
+        // Engine installation can create/replace the engine tree and invalidate
+        // the bootstrap marker. Recompute from on-disk markers after ensure so a
+        // false-positive needsEngine (label/slug mismatch) cannot force
+        // bootstrap + wine health-check on every Preferences open.
+        let bootstrapNeeded = environmentState(context: context).needsBootstrap
         var bootstrapHealthChecked = false
         if bootstrapNeeded {
             CyderDiagnostics.shared.enter(.bootstrap)
@@ -1994,11 +1993,15 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     /// Packaging metadata historically used either a display label
-    /// (`wine crossover 26.2.0 (wine 11.0)`) or its filesystem-safe slug
-    /// (`crossover-26.2.0-wine-11.0`). Both identify the same engine.
+    /// (`wine crossover 26.2.0 (wine 11.0)`), its filesystem-safe slug
+    /// (`crossover-26.2.0-wine-11.0`), or Cyder011-style labels with dots
+    /// vs hyphens (`CX26.3.0-W11-Cyder011` vs `CX26-3-0-W11-Cyder011`).
+    /// Keep this in sync with `cyder_engine_versions_equal` in cyder-common.sh.
     private func engineVersionsEqual(_ lhs: String, _ rhs: String) -> Bool {
         if lhs == rhs { return true }
-        return engineVersionSlug(lhs) == engineVersionSlug(rhs)
+        let leftSlug = engineVersionSlug(lhs)
+        let rightSlug = engineVersionSlug(rhs)
+        return leftSlug == rhs || lhs == rightSlug || leftSlug == rightSlug
     }
 
     private func engineVersionSlug(_ raw: String) -> String {
@@ -2011,10 +2014,26 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             let wineStart = wineMarker.upperBound
             let wineEnd = value.index(before: value.endIndex)
             let wine = value[wineStart..<wineEnd]
-            return "crossover-\(crossover)-wine-\(wine)"
-                .replacingOccurrences(of: " ", with: "-")
+            return collapseEngineVersionSlug("crossover-\(crossover)-wine-\(wine)")
         }
-        return value
+        let lower = value.lowercased()
+        if lower.hasPrefix("wine sikarugir ") {
+            let tail = String(value.dropFirst("wine sikarugir ".count))
+            return collapseEngineVersionSlug("sikarugir-\(tail)")
+        }
+        return collapseEngineVersionSlug(value)
+    }
+
+    /// Match bash `tr ' .()/' '-' | tr -s '-'`.
+    private func collapseEngineVersionSlug(_ raw: String) -> String {
+        let translated = raw.map { ch -> Character in
+            " .()/".contains(ch) ? "-" : ch
+        }
+        var slug = String(translated)
+        while slug.contains("--") {
+            slug = slug.replacingOccurrences(of: "--", with: "-")
+        }
+        return slug.trimmingCharacters(in: CharacterSet(charactersIn: "-"))
     }
 
     private func onMainThread(_ work: () -> Void) {

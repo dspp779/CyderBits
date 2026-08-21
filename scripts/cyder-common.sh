@@ -214,6 +214,9 @@ cyder_read_engine_version_file() {
 }
 
 cyder_write_engine_version_file() {
+  # Canonical on-disk form is the human label from engine-version.txt /
+  # versionLabel (e.g. CX26.3.0-W11-Cyder011). Archive filenames may use the
+  # filesystem slug (CX26-3-0-W11-Cyder011); never store the slug in version.
   local engine_root="$1"
   local ver="$2"
   ver="$(cyder_engine_version_label_trim "$ver")"
@@ -1633,6 +1636,11 @@ cyder_ensure_shared_engine() {
        { [[ "$same_version" -eq 1 ]] &&
          { [[ -z "$bundled_sha" ]] || [[ "$installed_sha" == "$bundled_sha" ]]; }; }; then
       echo "Shared engine present: $dest" >&2
+      # Heal legacy installs that stored the filesystem slug in version while
+      # the app sidecar keeps the dotted human label.
+      if [[ -n "$bundled_version" && "$installed_version" != "$bundled_version" ]]; then
+        cyder_write_engine_version_file "$dest" "$bundled_version"
+      fi
       if [[ ! -f "$dest/.cyder-engine-signed" ]]; then
         cyder_sign_installed_engine "$dest" || exit 1
       fi

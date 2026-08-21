@@ -116,6 +116,10 @@ assert_contains "$source_text" 'if state.needsEngine {' \
   "settings-mode must spawn ensure-engine only when the sidecar is not current"
 assert_not_contains "$source_text" 'state.needsEngine || enginePresent' \
   "a current engine tree must not force ensure-engine-only"
+assert_contains "$source_text" 'let bootstrapNeeded = environmentState(context: context).needsBootstrap' \
+  "after ensure, bootstrap must follow on-disk markers only (not a stale needsEngine)"
+assert_contains "$source_text" 'collapseEngineVersionSlug' \
+  "Swift must slug Cyder011 labels like bash so dotted vs hyphenated versions compare equal"
 assert_contains "$source_text" '.cyder-engine-signed' \
   "missing ad-hoc sign marker must still count as needsEngine"
 assert_not_contains "$source_text" 'prefetchBootstrapMSI(context: context)' \
