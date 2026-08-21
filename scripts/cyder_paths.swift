@@ -102,33 +102,6 @@ enum CyderPaths {
         return nil
     }
 
-    /// Bundled sidecar label from the running Cyder.app (`Resources/engine-version.txt`).
-    static var bundledEngineVersion: String? {
-        guard let resourcePath = Bundle.main.resourcePath else { return nil }
-        let url = URL(fileURLWithPath: resourcePath).appendingPathComponent("engine-version.txt")
-        guard let raw = try? String(contentsOf: url, encoding: .utf8) else { return nil }
-        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.isEmpty ? nil : trimmed
-    }
-
-    /// Display label for Preferences. When the on-disk marker is a filesystem
-    /// slug that identifies the same engine as the app sidecar, rewrite the
-    /// marker to the dotted human label and return that.
-    @discardableResult
-    static func healInstalledEngineVersionLabelIfNeeded() -> String? {
-        guard let installed = installedEngineVersion else { return nil }
-        guard let bundled = bundledEngineVersion else { return installed }
-        if installed == bundled { return installed }
-        guard cyderEngineVersionsEqual(installed, bundled) else { return installed }
-        let versionURL = engine.appendingPathComponent("version")
-        do {
-            try (bundled + "\n").write(to: versionURL, atomically: true, encoding: .utf8)
-            return bundled
-        } catch {
-            return installed
-        }
-    }
-
     /// Prefer an absolute `CYDER_PREFIX`, then its compatibility alias;
     /// `bottles/$CYDER_BOTTLE_NAME` (default `shared`).
     static let sharedBottle: URL = {

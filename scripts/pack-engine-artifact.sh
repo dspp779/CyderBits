@@ -148,6 +148,8 @@ if [[ -e "$ENGINE_TREE/lib64/apple_gptk" ]] ||
   exit 1
 fi
 cyder_write_engine_version_file "$ENGINE_TREE" "$ENGINE_VERSION_LABEL"
+# Pack the human label into wine-x86_64/version (e.g. CX26.3.0-…). Filename
+# slug is only for the archive basename; install extracts this file as-is.
 
 bash "$SCRIPT_DIR/strip-wine-install.sh" "$ENGINE_TREE"
 # Preserve MoltenVK already in the install tree (VULKAN_SOURCE=existing only

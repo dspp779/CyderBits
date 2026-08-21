@@ -666,8 +666,7 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate,
     }
 
     private func refreshEngineVersionLabel() {
-        engineVersion.stringValue =
-            CyderPaths.healInstalledEngineVersionLabelIfNeeded() ?? "尚未安裝"
+        engineVersion.stringValue = CyderPaths.installedEngineVersion ?? "尚未安裝"
     }
 
     private func reload() {

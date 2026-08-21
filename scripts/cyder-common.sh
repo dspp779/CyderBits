@@ -186,11 +186,10 @@ cyder_engine_version_slug_from_label() {
   printf '%s\n' "$slug"
 }
 
-# Engine archives built by older/special packaging flows may store the
-# filesystem-safe slug in wine-x86_64/version while the app sidecar keeps the
-# human-readable label.  Treat those representations as the same version so a
-# successful extraction cannot leave document launches permanently reporting
-# that the environment is not ready.
+# Engine archives historically may have stored a filesystem-safe slug in
+# wine-x86_64/version while the app sidecar kept the human-readable label.
+# Treat those representations as the same version for upgrade detection only;
+# new packs must embed the dotted label, and install must not rewrite it.
 cyder_engine_versions_equal() {
   local left right left_slug right_slug
   left="$(cyder_engine_version_label_trim "${1:-}")"
@@ -214,9 +213,10 @@ cyder_read_engine_version_file() {
 }
 
 cyder_write_engine_version_file() {
-  # Canonical on-disk form is the human label from engine-version.txt /
-  # versionLabel (e.g. CX26.3.0-W11-Cyder011). Archive filenames may use the
-  # filesystem slug (CX26-3-0-W11-Cyder011); never store the slug in version.
+  # Canonical on-disk form is the human label (e.g. CX26.3.0-W11-Cyder011).
+  # pack-engine-artifact writes this into the staged tree before archiving;
+  # archive filenames may use the filesystem slug. Install must not rewrite a
+  # packaged version file after extract.
   local engine_root="$1"
   local ver="$2"
   ver="$(cyder_engine_version_label_trim "$ver")"
@@ -252,23 +252,11 @@ cyder_engine_version_from_tarball() {
 
 cyder_bundled_engine_version_from_src() {
   local engine_src="$1"
-  local from_tar="" from_sidecar=""
   engine_src="$(cyder_abs_path "$engine_src")"
-  if [[ -n "${CYDER_OGOM:-}" ]]; then
-    from_sidecar="$(cyder_bundled_engine_version "$CYDER_OGOM" 2>/dev/null || true)"
-  fi
   if cyder_engine_is_tarball "$engine_src"; then
-    from_tar="$(cyder_engine_version_from_tarball "$engine_src" 2>/dev/null || true)"
-    # Prefer Resources/engine-version.txt (dotted human label) over the
-    # archive-internal version file, which may still store the filesystem slug.
-    if [[ -n "$from_sidecar" ]]; then
-      if [[ -z "$from_tar" ]] || cyder_engine_versions_equal "$from_tar" "$from_sidecar"; then
-        printf '%s\n' "$from_sidecar"
-        return 0
-      fi
-    fi
-    if [[ -n "$from_tar" ]]; then
-      printf '%s\n' "$from_tar"
+    # Trust the label packaged inside the archive (pack writes ENGINE_VERSION_LABEL,
+    # not the filename slug). Do not prefer or rewrite from app sidecars here.
+    if cyder_engine_version_from_tarball "$engine_src"; then
       return 0
     fi
     cyder_engine_version_from_archive "$engine_src"
@@ -283,8 +271,8 @@ cyder_bundled_engine_version_from_src() {
       return 0
     fi
   fi
-  if [[ -n "$from_sidecar" ]]; then
-    printf '%s\n' "$from_sidecar"
+  if [[ -n "${CYDER_OGOM:-}" ]]; then
+    cyder_bundled_engine_version "$CYDER_OGOM"
     return 0
   fi
   return 1
@@ -1689,11 +1677,6 @@ cyder_ensure_shared_engine() {
        { [[ "$same_version" -eq 1 ]] &&
          { [[ -z "$bundled_sha" ]] || [[ "$installed_sha" == "$bundled_sha" ]]; }; }; then
       echo "Shared engine present: $dest" >&2
-      # Heal legacy installs that stored the filesystem slug in version while
-      # the app sidecar keeps the dotted human label.
-      if [[ -n "$bundled_version" && "$installed_version" != "$bundled_version" ]]; then
-        cyder_write_engine_version_file "$dest" "$bundled_version"
-      fi
       if [[ ! -f "$dest/.cyder-engine-signed" ]]; then
         cyder_sign_installed_engine "$dest" || exit 1
       fi
@@ -1725,13 +1708,17 @@ cyder_ensure_shared_engine() {
     echo "Missing engine source: $engine_src" >&2
     exit 1
   fi
-  if [[ -z "$bundled_version" && -x "$dest/bin/wine" ]]; then
-    bundled_version="$(cyder_format_engine_version_from_wine "$dest/bin/wine" 2>/dev/null || true)"
+  # Trust wine-x86_64/version from the packed tree. Only fill a missing marker
+  # (directory installs / broken archives); never overwrite a packaged label.
+  if ! cyder_read_engine_version_file "$dest" >/dev/null 2>&1; then
+    if [[ -z "$bundled_version" && -x "$dest/bin/wine" ]]; then
+      bundled_version="$(cyder_format_engine_version_from_wine "$dest/bin/wine" 2>/dev/null || true)"
+    fi
+    if [[ -n "$bundled_version" ]]; then
+      cyder_write_engine_version_file "$dest" "$bundled_version"
+    fi
   fi
-  if [[ -n "$bundled_version" ]]; then
-    cyder_write_engine_version_file "$dest" "$bundled_version"
-    rm -f "$dest/.cyder-engine-version"
-  fi
+  rm -f "$dest/.cyder-engine-version"
   cyder_sign_installed_engine "$dest" || exit 1
   if [[ -n "$bundled_sha" ]]; then
     printf '%s\n' "$bundled_sha" >"$dest/.cyder-engine-artifact-sha256"

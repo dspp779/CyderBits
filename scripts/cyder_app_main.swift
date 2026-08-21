@@ -1146,12 +1146,6 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
     private func ensureEnvironment(context: CyderLaunchContext) -> CyderFailure? {
         let state = environmentState(context: context)
 
-        // Even when ensure-engine is skipped, rewrite a legacy slug-form version
-        // marker so Preferences shows the dotted sidecar label.
-        if !state.needsEngine {
-            _ = CyderPaths.healInstalledEngineVersionLabelIfNeeded()
-        }
-
         // Sidecar version + artifact SHA (and the signed marker) already decide
         // needsEngine. Spawning bash --ensure-engine-only on a current tree is
         // the dominant cost of opening Preferences.
