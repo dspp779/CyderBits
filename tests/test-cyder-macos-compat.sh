@@ -14,16 +14,22 @@ assert_contains "$wrapper" 'cyder_exec_cyder_swift "$SELF/CyderSwift" "$exe" "${
   "explicit EXE arguments on macOS 11+ must enter the native lifecycle agent"
 assert_contains "$wrapper" 'cyder_exec_cyder_swift "$SELF/CyderSwift" "$@"' \
   "no-argument macOS 11+ launches must exec native CyderSwift"
-assert_contains "$wrapper" 'exec "$SCRIPTS/cyder_launcher.sh" --engine-src "$ENGINE_SRC" --launch-exe "$exe"' \
+assert_contains "$wrapper" 'cyder_exec_launcher_with_alert' \
+  "Catalina / shell launch failures must surface a visible alert"
+assert_contains "$wrapper" '--launch-exe "$exe"' \
   "Catalina explicit EXE arguments must retain the Bash fallback"
-assert_contains "$wrapper" 'exec "$SCRIPTS/cyder_launcher.sh" --engine-src "$ENGINE_SRC" --launch-msi "$exe"' \
+assert_contains "$wrapper" '--launch-msi "$exe"' \
   "explicit MSI arguments must route through the Bash MSI launcher"
 assert_not_contains "$wrapper" 'CyderLegacyUI.app' \
   "wrapper must not retain the removed Catalina applet"
 assert_contains "$wrapper" 'cyder_catalina_environment_ready' \
   "Catalina must check readiness before selecting or launching an EXE"
-assert_contains "$wrapper" '/usr/bin/open -a Terminal "$bootstrap"' \
+assert_contains "$wrapper" '無法啟動遊戲' \
+  "shell launch failure alerts must use user-visible copy"
+assert_contains "$wrapper" 'open -a Terminal "$bootstrap"' \
   "Catalina first run must open the visible Terminal bootstrap"
+assert_contains "$wrapper" '無法開啟終端機' \
+  "failed Terminal open must alert instead of exiting silently"
 assert_contains "$catalina_bootstrap" '--bootstrap-only' \
   "Catalina Terminal bootstrap must use the supported launcher action"
 assert_contains "$catalina_bootstrap" 'CYDER_PROGRESS_FILE' \
@@ -32,6 +38,8 @@ assert_contains "$catalina_bootstrap" 'catalina-bootstrap.lock' \
   "Catalina Terminal bootstrap must reject concurrent initialization"
 assert_contains "$catalina_bootstrap" '/usr/bin/open "$APP"' \
   "successful Catalina bootstrap must reopen Cyder"
+assert_contains "$catalina_bootstrap" '無法重新開啟 Cyder' \
+  "failed reopen after Catalina bootstrap must alert"
 assert_contains "$wrapper" 'catalina-pending-launch' \
   "Catalina must preserve the original first-run EXE request"
 assert_contains "$catalina_bootstrap" 'pending_args' \

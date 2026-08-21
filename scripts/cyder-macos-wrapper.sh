@@ -71,7 +71,26 @@ cyder_start_catalina_bootstrap() {
   else
     rm -f "$pending"
   fi
-  /usr/bin/open -a Terminal "$bootstrap"
+  if ! /usr/bin/open -a Terminal "$bootstrap"; then
+    /usr/bin/osascript -e "display alert \"無法開啟終端機\" message \"Cyder 無法開啟 Terminal 進行首次初始化。
+
+請手動開啟終端機並執行：
+$bootstrap\" as warning" 2>/dev/null || true
+    return 1
+  fi
+}
+
+# Catalina / non-Mach-O CyderSwift: launch via Bash and surface failures visually.
+# Finder launches of Cyder.app are LSUIElement, so stderr-only exits look like a no-op.
+cyder_exec_launcher_with_alert() {
+  set +e
+  "$SCRIPTS/cyder_launcher.sh" "$@"
+  local status=$?
+  set -e
+  if [[ "$status" -ne 0 ]]; then
+    /usr/bin/osascript -e 'display alert "無法啟動遊戲" message "Cyder 無法啟動這個 Windows 程式。請重新開啟 Cyder.app，或查看 ~/Library/Application Support/Cyder/Logs/。" as warning' 2>/dev/null || true
+  fi
+  exit "$status"
 }
 
 exe=""
@@ -111,14 +130,14 @@ if [[ -n "$exe" ]]; then
   lower_exe="$(printf '%s' "$exe" | tr '[:upper:]' '[:lower:]')"
   if [[ "$lower_exe" == *.msi ]]; then
     if ((${#game_args[@]} > 0)); then
-      exec "$SCRIPTS/cyder_launcher.sh" --engine-src "$ENGINE_SRC" --launch-msi "$exe" -- "${game_args[@]}"
+      cyder_exec_launcher_with_alert --engine-src "$ENGINE_SRC" --launch-msi "$exe" -- "${game_args[@]}"
     fi
-    exec "$SCRIPTS/cyder_launcher.sh" --engine-src "$ENGINE_SRC" --launch-msi "$exe"
+    cyder_exec_launcher_with_alert --engine-src "$ENGINE_SRC" --launch-msi "$exe"
   fi
   if ((${#game_args[@]} > 0)); then
-    exec "$SCRIPTS/cyder_launcher.sh" --engine-src "$ENGINE_SRC" --launch-exe "$exe" -- "${game_args[@]}"
+    cyder_exec_launcher_with_alert --engine-src "$ENGINE_SRC" --launch-exe "$exe" -- "${game_args[@]}"
   fi
-  exec "$SCRIPTS/cyder_launcher.sh" --engine-src "$ENGINE_SRC" --launch-exe "$exe"
+  cyder_exec_launcher_with_alert --engine-src "$ENGINE_SRC" --launch-exe "$exe"
 fi
 
 # With no explicit EXE, Big Sur and newer open the preferences / game library.
@@ -138,4 +157,4 @@ if [[ -z "$exe" ]]; then
   fi
   exe="$(cyder_choose_exe)"
 fi
-exec "$SCRIPTS/cyder_launcher.sh" --engine-src "$ENGINE_SRC" --launch-exe "$exe"
+cyder_exec_launcher_with_alert --engine-src "$ENGINE_SRC" --launch-exe "$exe"

@@ -136,9 +136,19 @@ if [[ "$status" -eq 0 ]]; then
     pending_exe_lower="$(printf '%s' "${pending_args[0]}" | tr '[:upper:]' '[:lower:]')"
   fi
   if [[ "$pending_exe_lower" == *.exe && -f "${pending_args[0]:-}" ]]; then
-    /usr/bin/open "$APP" --args "${pending_args[@]}" >/dev/null 2>&1 || true
+    if ! /usr/bin/open "$APP" --args "${pending_args[@]}" >/dev/null 2>&1; then
+      /usr/bin/osascript -e "display alert \"無法重新開啟 Cyder\" message \"初始化已完成，但無法自動開啟 Cyder.app。
+
+請手動開啟：
+$APP\" as warning" 2>/dev/null || true
+    fi
   else
-    /usr/bin/open "$APP" >/dev/null 2>&1 || true
+    if ! /usr/bin/open "$APP" >/dev/null 2>&1; then
+      /usr/bin/osascript -e "display alert \"無法重新開啟 Cyder\" message \"初始化已完成，但無法自動開啟 Cyder.app。
+
+請手動開啟：
+$APP\" as warning" 2>/dev/null || true
+    fi
   fi
   exit 0
 fi
