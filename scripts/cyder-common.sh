@@ -319,7 +319,7 @@ cyder_engine_archive_path_xz() {
 cyder_engine_archive_path_for_format() {
   local ver="$1"
   local dir="${2:-$(cyder_engine_artifacts_dir)}"
-  local format="${3:-xz}"
+  local format="${3:-zst}"
   case "$format" in
     zst | zstd) cyder_engine_archive_path "$ver" "$dir" ;;
     xz) cyder_engine_archive_path_xz "$ver" "$dir" ;;

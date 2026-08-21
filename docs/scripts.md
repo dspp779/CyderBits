@@ -41,7 +41,7 @@
 | 腳本 | 用途 |
 |------|------|
 | `pack-graphics-payloads.sh` | 從 engine 的 `lib/dxvk`／`lib/dxmt` 製作獨立 zstd archive、version 與 SHA-256 sidecar 到 `dist/artifacts/graphics/`；DXVK staging DLL 會先加 Wine builtin signature |
-| `pack-engine-artifact.sh` | strip + bundle + sign + 預設 xz 最高壓縮比 → `engine-wine-x86_64-CX26-<winever>.tar.xz`；先 pack graphics，再排除 `lib/dxvk`／`lib/dxmt`；`--zstd` / `CYDER_ENGINE_FORMAT=zstd` 產出 `engine-CX26-<winever>.tar.zst` |
+| `pack-engine-artifact.sh` | strip + bundle + sign + 預設 zstd `-22 --ultra` → `engine-CX26-<winever>.tar.zst`；先 pack graphics，再排除 `lib/dxvk`／`lib/dxmt`；`--xz` / `CYDER_ENGINE_FORMAT=xz` 產出 `engine-wine-x86_64-CX26-<winever>.tar.xz`；可用 `CYDER_ENGINE_ZSTD_LEVEL`／`CYDER_ENGINE_ZSTD_FLAGS` 調整等級 |
 | `cyder-copy-engine-artifact.sh` | 複製預建 engine artifact 進 app `Resources/` |
 | `create-cyder-app.sh` | `dist/Cyder.app`（`.exe` 啟動器 + engine artifact + graphics payload + bootstrap） |
 | `release-cyder.sh` | 測試／正式通道：建置、簽署、（正式）公證與 `Cyder.app.zip`；見 `docs/release-pipeline.zh-TW.md` |

@@ -9,7 +9,16 @@ source "$SCRIPT_DIR/env-x86_64.sh"
 
 FORCE=0
 DRY_RUN=0
-FORMAT="${CYDER_ENGINE_FORMAT:-xz}"
+FORMAT="${CYDER_ENGINE_FORMAT:-zst}"
+# Default -22 --ultra: ~7% larger than xz -9e on CX26 engine, ~3× faster extract.
+# Override with CYDER_ENGINE_ZSTD_LEVEL (e.g. 19) or CYDER_ENGINE_ZSTD_FLAGS.
+if [[ -n "${CYDER_ENGINE_ZSTD_FLAGS:-}" ]]; then
+  ZSTD_FLAGS="$CYDER_ENGINE_ZSTD_FLAGS"
+elif [[ -n "${CYDER_ENGINE_ZSTD_LEVEL:-}" ]]; then
+  ZSTD_FLAGS="-${CYDER_ENGINE_ZSTD_LEVEL}"
+else
+  ZSTD_FLAGS="-22 --ultra"
+fi
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -39,13 +48,14 @@ while [[ $# -gt 0 ]]; do
       ;;
     -h | --help)
       cat <<EOF
-Usage: $(basename "$0") [--force] [--dry-run] [--zstd] [--format zstd|xz]
+Usage: $(basename "$0") [--force] [--dry-run] [--xz] [--format zstd|xz]
 
 Build a compressed engine artifact from install/wine-cx26-x86_64 (or WINE_INSTALL).
-  xz:   dist/artifacts/engine-wine-x86_64-<CX26-winever>.tar.xz (default, xz -9e)
-  zstd: dist/artifacts/engine-<CX26-winever>.tar.zst (--zstd)
+  zstd: dist/artifacts/engine-<CX26-winever>.tar.zst (default, zstd -22 --ultra)
+  xz:   dist/artifacts/engine-wine-x86_64-<CX26-winever>.tar.xz (xz -9e)
 Set CYDER_ENGINE_VERSION to override the detected version label.
-Set CYDER_ENGINE_FORMAT=zstd or pass --zstd to build with zstd -22 --ultra.
+Set CYDER_ENGINE_FORMAT=xz or pass --xz for xz.
+Set CYDER_ENGINE_ZSTD_LEVEL / CYDER_ENGINE_ZSTD_FLAGS to tune zstd compression.
 EOF
       exit 0
       ;;
@@ -156,10 +166,12 @@ fi
 
 case "$FORMAT" in
   zst)
-    echo "==> Compressing with zstd (-22 --ultra)"
+    # shellcheck disable=SC2086
+    echo "==> Compressing with zstd ($ZSTD_FLAGS -T0)"
     (
       cd "$STAGING"
-      tar -cf - wine-x86_64 | "$ZSTD_BIN" -22 --ultra -T0 -o "$ARCHIVE"
+      # shellcheck disable=SC2086
+      tar -cf - wine-x86_64 | "$ZSTD_BIN" $ZSTD_FLAGS -T0 -o "$ARCHIVE"
     )
     ;;
   xz)

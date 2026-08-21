@@ -46,7 +46,7 @@ copy_engine_artifact_into_app() {
     return 0
   fi
 
-  format="${CYDER_ENGINE_FORMAT:-xz}"
+  format="${CYDER_ENGINE_FORMAT:-zst}"
   if [[ "$format" == "zstd" ]]; then
     format="zst"
   fi
