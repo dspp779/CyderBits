@@ -730,10 +730,26 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         let library = appMenu.addItem(withTitle: "遊戲庫…", action: #selector(showGameLibrary), keyEquivalent: "")
         library.target = self
         appMenu.addItem(NSMenuItem.separator())
-        let quit = appMenu.addItem(withTitle: "結束 Cyder", action: #selector(quitFromMenu), keyEquivalent: "")
+        let quit = appMenu.addItem(withTitle: "結束 Cyder", action: #selector(quitFromMenu), keyEquivalent: "q")
         quit.target = self
         appItem.submenu = appMenu
+
+        let windowItem = NSMenuItem()
+        main.addItem(windowItem)
+        let windowMenu = NSMenu(title: "視窗")
+        let close = windowMenu.addItem(
+            withTitle: "關閉視窗",
+            action: #selector(closeKeyWindowFromMenu(_:)),
+            keyEquivalent: "w"
+        )
+        close.target = self
+        windowItem.submenu = windowMenu
+
         NSApp.mainMenu = main
+    }
+
+    @objc private func closeKeyWindowFromMenu(_ sender: Any?) {
+        NSApp.keyWindow?.performClose(sender)
     }
 
     @objc private func showSettings() {

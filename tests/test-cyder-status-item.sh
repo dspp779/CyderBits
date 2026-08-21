@@ -64,8 +64,12 @@ assert_contains "$status_source" 'quit.isEnabled = !prefixes.isEmpty && !session
   "managed shutdown must reject duplicate stop requests"
 assert_not_contains "$status_source" 'gamecontroller.fill' \
   "the menu bar must not use the generic game-controller symbol"
-assert_contains "$app_source" '#selector(quitFromMenu), keyEquivalent: ""' \
-  "the application quit item must not advertise Command-Q"
+assert_contains "$app_source" '#selector(quitFromMenu), keyEquivalent: "q"' \
+  "the application quit item must advertise Command-Q for Preferences and the game library"
+assert_contains "$app_source" 'keyEquivalent: "w"' \
+  "the window menu must advertise Command-W to close the key Preferences or library window"
+assert_contains "$app_source" 'closeKeyWindowFromMenu' \
+  "Command-W must close the key Cyder UI window"
 assert_contains "$app_source" '"--taskmgr-prefix"' \
   "task manager must be routed to the selected prefix"
 assert_contains "$app_source" '"--stop-prefix"' \
