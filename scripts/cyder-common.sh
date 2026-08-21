@@ -1282,6 +1282,39 @@ cyder_bootstrap_substage_record() {
     "$stage" "$elapsed_ms" "$status" "${CYDER_DIAGNOSTIC_SESSION_ID:-}" >>"$timing_file"
 }
 
+# Background jobs write "status end_ms" to a stamp when they finish so elapsed
+# is not inflated by waiting until wineboot/reap.
+cyder_bg_job_elapsed_ms() {
+  local t0="$1" stamp="$2"
+  local status_field end_ms now
+  now="$(cyder_now_ms)"
+  end_ms="$now"
+  if [[ -f "$stamp" ]]; then
+    read -r status_field end_ms <"$stamp" || true
+  fi
+  if [[ ! "$end_ms" =~ ^[0-9]+$ ]]; then
+    end_ms="$now"
+  fi
+  if [[ "$t0" =~ ^[0-9]+$ ]]; then
+    printf '%s\n' "$((end_ms - t0))"
+  else
+    printf '0\n'
+  fi
+}
+
+cyder_bg_job_status_from_stamp() {
+  local stamp="$1" fallback="${2:-1}"
+  local status_field end_ms
+  if [[ -f "$stamp" ]]; then
+    read -r status_field end_ms <"$stamp" || true
+    if [[ "$status_field" =~ ^-?[0-9]+$ ]]; then
+      printf '%s\n' "$status_field"
+      return 0
+    fi
+  fi
+  printf '%s\n' "$fallback"
+}
+
 cyder_bootstrap_substage_begin() {
   local stage="$1"
   CYDER_BOOTSTRAP_STAGE_STACK+=("$stage")
@@ -1994,11 +2027,15 @@ cyder_provision_prefix_baseline() {
   local dl_now=0 dl_elapsed=0
   local gfx_payload_pid="" gfx_payload_t0=0 gfx_payload_status=0
   local gfx_payload_log=""
+  local mono_dl_stamp gecko_dl_stamp gfx_payload_stamp
   local log_dir="${CYDER_SUPPORT:-}/Logs"
   [[ -n "${CYDER_SUPPORT:-}" ]] && mkdir -p "$log_dir"
   mono_dl_log="${log_dir:-/tmp}/mono-download-$$.log"
   gecko_dl_log="${log_dir:-/tmp}/gecko-download-$$.log"
   gfx_payload_log="${log_dir:-/tmp}/graphics-payload-$$.log"
+  mono_dl_stamp="${mono_dl_log}.stamp"
+  gecko_dl_stamp="${gecko_dl_log}.stamp"
+  gfx_payload_stamp="${gfx_payload_log}.stamp"
 
   cyder_provision_kill_downloads() {
     local pid
@@ -2024,10 +2061,17 @@ cyder_provision_prefix_baseline() {
         "${CYDER_DIAGNOSTIC_SESSION_ID:-cli}" "mono-download" >&2
     fi
     mono_dl_t0="$(cyder_now_ms)"
+    rm -f "$mono_dl_stamp"
     (
-      export WINEPREFIX="$prefix" WINE_INSTALL="$engine_root" CYDER_DOWNLOADS="$CYDER_DOWNLOADS"
-      bash "$CYDER_SCRIPTS/install-wine-mono.sh" --download-only
-    ) >"$mono_dl_log" 2>&1 &
+      set +e
+      (
+        export WINEPREFIX="$prefix" WINE_INSTALL="$engine_root" CYDER_DOWNLOADS="$CYDER_DOWNLOADS"
+        bash "$CYDER_SCRIPTS/install-wine-mono.sh" --download-only
+      ) >"$mono_dl_log" 2>&1
+      status=$?
+      printf '%s %s\n' "$status" "$(cyder_now_ms)" >"$mono_dl_stamp"
+      exit "$status"
+    ) &
     mono_dl_pid=$!
   fi
 
@@ -2040,10 +2084,17 @@ cyder_provision_prefix_baseline() {
         "${CYDER_DIAGNOSTIC_SESSION_ID:-cli}" "gecko-download" >&2
     fi
     gecko_dl_t0="$(cyder_now_ms)"
+    rm -f "$gecko_dl_stamp"
     (
-      export WINEPREFIX="$prefix" WINE_INSTALL="$engine_root" CYDER_DOWNLOADS="$CYDER_DOWNLOADS"
-      bash "$CYDER_SCRIPTS/install-wine-gecko.sh" --download-only
-    ) >"$gecko_dl_log" 2>&1 &
+      set +e
+      (
+        export WINEPREFIX="$prefix" WINE_INSTALL="$engine_root" CYDER_DOWNLOADS="$CYDER_DOWNLOADS"
+        bash "$CYDER_SCRIPTS/install-wine-gecko.sh" --download-only
+      ) >"$gecko_dl_log" 2>&1
+      status=$?
+      printf '%s %s\n' "$status" "$(cyder_now_ms)" >"$gecko_dl_stamp"
+      exit "$status"
+    ) &
     gecko_dl_pid=$!
   fi
 
@@ -2056,13 +2107,20 @@ cyder_provision_prefix_baseline() {
         "${CYDER_DIAGNOSTIC_SESSION_ID:-cli}" "graphics-payload" >&2
     fi
     gfx_payload_t0="$(cyder_now_ms)"
+    rm -f "$gfx_payload_stamp"
     (
-      set -euo pipefail
-      source_dir="$(cyder_graphics_source_dir)"
-      runtime_root="${CYDER_RUNTIME_ROOT:-$HOME/.cyder/runtime}"
-      cyder_install_graphics_payload "$source_dir" "$runtime_root" dxvk
-      cyder_install_graphics_payload "$source_dir" "$runtime_root" dxmt
-    ) >"$gfx_payload_log" 2>&1 &
+      set +e
+      (
+        set -euo pipefail
+        source_dir="$(cyder_graphics_source_dir)"
+        runtime_root="${CYDER_RUNTIME_ROOT:-$HOME/.cyder/runtime}"
+        cyder_install_graphics_payload "$source_dir" "$runtime_root" dxvk
+        cyder_install_graphics_payload "$source_dir" "$runtime_root" dxmt
+      ) >"$gfx_payload_log" 2>&1
+      status=$?
+      printf '%s %s\n' "$status" "$(cyder_now_ms)" >"$gfx_payload_stamp"
+      exit "$status"
+    ) &
     gfx_payload_pid=$!
   fi
 
@@ -2081,13 +2139,10 @@ cyder_provision_prefix_baseline() {
   while (( mono_installed == 0 || gecko_installed == 0 )); do
     if (( mono_dl_done == 0 )) && [[ -n "$mono_dl_pid" ]]; then
       if ! kill -0 "$mono_dl_pid" 2>/dev/null; then
-        wait "$mono_dl_pid" || mono_dl_status=$?
+        wait "$mono_dl_pid" || true
+        mono_dl_status="$(cyder_bg_job_status_from_stamp "$mono_dl_stamp" "1")"
         mono_dl_done=1
-        dl_now="$(cyder_now_ms)"
-        dl_elapsed=0
-        if [[ "$dl_now" =~ ^[0-9]+$ && "$mono_dl_t0" =~ ^[0-9]+$ ]]; then
-          dl_elapsed=$((dl_now - mono_dl_t0))
-        fi
+        dl_elapsed="$(cyder_bg_job_elapsed_ms "$mono_dl_t0" "$mono_dl_stamp")"
         cyder_bootstrap_substage_record mono-download "$dl_elapsed" "$mono_dl_status"
         mono_dl_pid=""
         if (( mono_dl_status != 0 )); then
@@ -2101,13 +2156,10 @@ cyder_provision_prefix_baseline() {
 
     if (( gecko_dl_done == 0 )) && [[ -n "$gecko_dl_pid" ]]; then
       if ! kill -0 "$gecko_dl_pid" 2>/dev/null; then
-        wait "$gecko_dl_pid" || gecko_dl_status=$?
+        wait "$gecko_dl_pid" || true
+        gecko_dl_status="$(cyder_bg_job_status_from_stamp "$gecko_dl_stamp" "1")"
         gecko_dl_done=1
-        dl_now="$(cyder_now_ms)"
-        dl_elapsed=0
-        if [[ "$dl_now" =~ ^[0-9]+$ && "$gecko_dl_t0" =~ ^[0-9]+$ ]]; then
-          dl_elapsed=$((dl_now - gecko_dl_t0))
-        fi
+        dl_elapsed="$(cyder_bg_job_elapsed_ms "$gecko_dl_t0" "$gecko_dl_stamp")"
         cyder_bootstrap_substage_record gecko-download "$dl_elapsed" "$gecko_dl_status"
         gecko_dl_pid=""
         if (( gecko_dl_status != 0 )); then
@@ -2222,12 +2274,9 @@ cyder_provision_prefix_baseline() {
   (( component_status == 0 )) || return "$component_status"
 
   if [[ -n "$gfx_payload_pid" ]]; then
-    wait "$gfx_payload_pid" || gfx_payload_status=$?
-    dl_now="$(cyder_now_ms)"
-    dl_elapsed=0
-    if [[ "$dl_now" =~ ^[0-9]+$ && "$gfx_payload_t0" =~ ^[0-9]+$ ]]; then
-      dl_elapsed=$((dl_now - gfx_payload_t0))
-    fi
+    wait "$gfx_payload_pid" || true
+    gfx_payload_status="$(cyder_bg_job_status_from_stamp "$gfx_payload_stamp" "1")"
+    dl_elapsed="$(cyder_bg_job_elapsed_ms "$gfx_payload_t0" "$gfx_payload_stamp")"
     cyder_bootstrap_substage_record graphics-payload "$dl_elapsed" "$gfx_payload_status"
     gfx_payload_pid=""
     if (( gfx_payload_status != 0 )); then

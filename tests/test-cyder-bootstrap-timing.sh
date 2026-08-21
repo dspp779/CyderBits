@@ -51,6 +51,10 @@ assert_contains "$provision_text" "graphics-payload" \
   "provision must time graphics payload unpack"
 assert_contains "$provision_text" "graphics-winemetal" \
   "provision must time engine graphics link + winemetal after prefix exists"
+assert_contains "$common_text" "cyder_bg_job_elapsed_ms" \
+  "parallel substages must record elapsed from completion stamps, not reap time"
+assert_contains "$provision_text" ".stamp" \
+  "background download/payload jobs must write completion stamps"
 # Downloads start before wineboot; wineboot must not wait for both to finish.
 assert_contains "$provision_text" "cyder_init_bottle" \
   "provision must still wineboot the prefix"
@@ -185,5 +189,18 @@ success_k_hits="$(
 )"
 assert_eq "$success_k_hits" "" \
   "wineboot success path must keep wineserver alive for Mono/Gecko"
+
+# Parallel job stamps must measure completion time, not reap time.
+stamp="$TMP/bg.stamp"
+t0="$(cyder_now_ms)"
+sleep 0.3
+printf '0 %s\n' "$(cyder_now_ms)" >"$stamp"
+sleep 0.5
+elapsed="$(cyder_bg_job_elapsed_ms "$t0" "$stamp")"
+# Completion was ~300ms after t0; reap is ~800ms later — elapsed must stay near 300.
+if (( elapsed < 200 || elapsed > 600 )); then
+  echo "bg stamp elapsed expected ~300ms, got ${elapsed}ms" >&2
+  exit 1
+fi
 
 echo "PASS test-cyder-bootstrap-timing"
