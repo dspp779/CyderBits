@@ -6,6 +6,7 @@
 
 - 📋 **[遊戲相容性矩陣 (Compatibility Matrix)](compatibility-matrix.md)** — 彙整所有已測試單機與線上遊戲之相容性狀態、設定參數與已知 workaround。
 - 🎮 **[圖形後端偏好](../cyder-graphics-backends.zh-TW.md)** — Cyder 0.8.0+ 全域／每遊戲 WineD3D、DXVK、D3DMetal 選項與 GPTK 需求。
+- 🔎 **GameHub／CrossOver 上游設定盤點** — 見 sibling repo `cyder-wine-engine` 的 [`docs/crossover-gamehub-compatibility-settings.zh-TW.md`](../../../cyder-wine-engine/docs/crossover-gamehub-compatibility-settings.zh-TW.md)（GameSir argv HACK、`crossover.tie`、`cxfixes.xml`）。
 
 ## 遊戲
 
