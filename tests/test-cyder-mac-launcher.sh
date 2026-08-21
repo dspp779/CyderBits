@@ -22,6 +22,12 @@ assert_contains "$helper_src" '找不到 Cyder' \
   "mac launcher must alert when Cyder.app was moved or deleted"
 assert_contains "$helper_src" 'osascript' \
   "missing-target failures must show a visible alert (wrapper is LSUIElement)"
+assert_contains "$helper_src" '無法啟動遊戲' \
+  "open handoff failures must show a visible alert (wrapper is LSUIElement)"
+assert_contains "$helper_src" '無法開啟 Cyder' \
+  "recovery open failures after a missing EXE must still alert"
+assert_not_contains "$helper_src" 'exec /usr/bin/open' \
+  "open must not be exec'd so its failure can be alerted"
 assert_contains "$helper_src" 'LSUIElement' \
   "mac launcher wrapper must stay out of the Dock"
 assert_contains "$helper_src" 'AppIcon.icns' \
@@ -54,6 +60,8 @@ assert_contains "$ui" "更新 macOS 應用程式" \
   "game library should relabel when a launcher already exists"
 assert_contains "$ui" "installMacAppForSelectedGame" \
   "context menu action should install the mac launcher"
+assert_contains "$ui" "未寫入遊戲庫" \
+  "mac launcher path persist failures must not report unqualified success"
 
 assert_contains "$pack" 'cyder-create-mac-launcher.sh' \
   "Cyder.app must bundle the mac launcher helper"
@@ -82,6 +90,9 @@ assert_contains "$launcher_body" "open -n -a" "launcher script must call open -n
 assert_contains "$launcher_body" "$fake_exe" "launcher script must embed the EXE path"
 assert_contains "$launcher_body" "$fake_cyder" "launcher script must embed the Cyder.app path"
 assert_contains "$launcher_body" "找不到遊戲檔案" "launcher must include missing-EXE alert copy"
+assert_contains "$launcher_body" "無法啟動遊戲" "launcher must include open-failure alert copy"
+assert_not_contains "$launcher_body" "exec /usr/bin/open" \
+  "generated launcher must not exec open (need exit-status handling)"
 # Missing EXE must surface an alert path instead of silent open failure.
 rm -f "$fake_exe"
 set +e

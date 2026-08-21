@@ -96,11 +96,27 @@ if [[ ! -f "\$EXE" ]]; then
 
 請在 Cyder 遊戲庫重新安裝／加入遊戲後，再選擇「更新 macOS 應用程式」。"
   # Open Cyder so the user can recover from Preferences / the library.
-  /usr/bin/open -n -a "\$CYDER_APP" >/dev/null 2>&1 || true
+  if ! /usr/bin/open -n -a "\$CYDER_APP" >/dev/null 2>&1; then
+    cyder_launcher_alert "無法開啟 Cyder" \\
+      "遊戲檔案已遺失，且無法自動開啟 Cyder.app。
+
+請手動開啟 Cyder，在遊戲庫重新安裝／加入遊戲後，再選擇「更新 macOS 應用程式」。"
+  fi
   exit 1
 fi
 
-exec /usr/bin/open -n -a "\$CYDER_APP" "\$EXE"
+# Do not exec open: LSUIElement wrappers must catch Launch Services failures
+# and show an alert (otherwise Finder launches fail with no Dock icon / UI).
+if ! /usr/bin/open -n -a "\$CYDER_APP" "\$EXE"; then
+  cyder_launcher_alert "無法啟動遊戲" \\
+    "無法透過 Cyder 開啟這個遊戲（常見原因：Cyder.app 損壞、隔離屬性，或權限不足）。
+
+Cyder：\$CYDER_APP
+遊戲：\$EXE
+
+請重新開啟 Cyder.app，或在遊戲庫選擇「更新 macOS 應用程式」。"
+  exit 1
+fi
 EOF
 chmod +x "$MACOS/CyderGame"
 
