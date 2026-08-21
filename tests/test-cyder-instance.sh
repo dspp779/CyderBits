@@ -38,6 +38,12 @@ assert_not_contains "$app" 'asyncAfter(deadline: .now() + 0.35)' \
   "secondary forward must not depend on a fixed 0.35s delay"
 assert_contains "$app" 'receiveInstanceRequest' \
   "the primary must consume forwarded launch requests"
+assert_contains "$instance" 'waitUntilNoPendingRequests' \
+  "secondary must be able to wait for the primary to drain the request"
+assert_contains "$app" '無法轉交啟動要求' \
+  "forward write failures must alert before the secondary exits"
+assert_contains "$app" '無法連到執行中的 Cyder' \
+  "unacknowledged forwards must alert before the secondary exits"
 assert_contains "$app" 'queuedLaunches' \
   "queued launches must remain in the primary process"
 assert_contains "$app" 'launchArguments: launch.arguments' \

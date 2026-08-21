@@ -61,9 +61,10 @@ final class CyderInstanceCoordinator {
         }
     }
 
-    func forward(files: [String], arguments: [String]?, urls: [String] = [], showUI: Bool) {
-        guard !files.isEmpty || arguments != nil || !urls.isEmpty || showUI else { return }
-        guard ensureDirectory(requestDirectory) else { return }
+    @discardableResult
+    func forward(files: [String], arguments: [String]?, urls: [String] = [], showUI: Bool) -> Bool {
+        guard !files.isEmpty || arguments != nil || !urls.isEmpty || showUI else { return true }
+        guard ensureDirectory(requestDirectory) else { return false }
         let payload: [String: Any] = [
             "files": files,
             "arguments": arguments ?? [],
@@ -76,19 +77,41 @@ final class CyderInstanceCoordinator {
             fromPropertyList: payload,
             format: .binary,
             options: 0
-        ) else { return }
+        ) else { return false }
         let url = requestDirectory.appendingPathComponent("request-\(UUID().uuidString).plist")
         do {
             try data.write(to: url, options: .atomic)
             try FileManager.default.setAttributes([.posixPermissions: NSNumber(value: 0o600)], ofItemAtPath: url.path)
         } catch {
-            return
+            return false
         }
         DistributedNotificationCenter.default().post(
             name: notificationName,
             object: nil,
             userInfo: ["path": url.path]
         )
+        return true
+    }
+
+    /// Secondary processes wait briefly so a dead primary cannot swallow a handoff.
+    func waitUntilNoPendingRequests(timeout: TimeInterval = 5.0) -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if !hasPendingRequests() { return true }
+            Thread.sleep(forTimeInterval: 0.1)
+        }
+        return !hasPendingRequests()
+    }
+
+    private func hasPendingRequests() -> Bool {
+        guard let entries = try? FileManager.default.contentsOfDirectory(
+            at: requestDirectory,
+            includingPropertiesForKeys: [.isRegularFileKey, .isSymbolicLinkKey],
+            options: [.skipsHiddenFiles]
+        ) else {
+            return false
+        }
+        return entries.contains(where: isRequestURL)
     }
 
     func stop() {

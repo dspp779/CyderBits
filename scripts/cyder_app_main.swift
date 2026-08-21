@@ -186,7 +186,10 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
     }()
 
     private func createIndependentProfile(for executable: URL, returnToLibrary: Bool = false) {
-        guard let resourcePath = Bundle.main.resourcePath else { return }
+        guard let resourcePath = Bundle.main.resourcePath else {
+            showAlert("無法建立獨立環境", "Cyder 缺少必要的 Resources 目錄。")
+            return
+        }
         environmentPreparationInProgress = true
         settingsController.close()
         gameLibraryController.close()
@@ -236,7 +239,10 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         let context = CyderLaunchContext(resourcePath: resourcePath)
         showSetup("正在移除獨立遊戲環境…")
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            guard let self else { return }
+            guard let self else {
+                DispatchQueue.main.async { completion(false) }
+                return
+            }
             let result = self.runLauncher(
                 context: context,
                 args: [context.launcher, "--profile-remove", executable.path],
@@ -271,7 +277,10 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func rebuildEnvironment(completion: (() -> Void)? = nil) {
-        guard let resourcePath = Bundle.main.resourcePath else { return }
+        guard let resourcePath = Bundle.main.resourcePath else {
+            showAlert("無法重建環境", "Cyder 缺少必要的 Resources 目錄。")
+            return
+        }
         environmentPreparationInProgress = true
         let context = CyderLaunchContext(resourcePath: resourcePath)
         showSetup("正在重建 Windows 遊戲環境…")
@@ -636,7 +645,20 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         let urls = pendingURLs
         let arguments = pendingLaunchArguments
         let showUI = launchIntent == .appOnly && files.isEmpty && arguments == nil && urls.isEmpty
-        instanceCoordinator.forward(files: files, arguments: arguments, urls: urls, showUI: showUI)
+        guard instanceCoordinator.forward(files: files, arguments: arguments, urls: urls, showUI: showUI) else {
+            showAlert(
+                "無法轉交啟動要求",
+                "無法通知目前執行中的 Cyder。請關閉所有 Cyder 程序後再試一次。"
+            )
+            NSApp.terminate(nil)
+            return
+        }
+        if !instanceCoordinator.waitUntilNoPendingRequests(timeout: 5.0) {
+            showAlert(
+                "無法連到執行中的 Cyder",
+                "啟動要求已送出，但目前的 Cyder 沒有回應。請關閉所有 Cyder 程序後再開啟一次。"
+            )
+        }
         NSApp.terminate(nil)
     }
 
@@ -1220,6 +1242,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
     private func prepareEnvironmentAndShowSettings() {
         statusItemController.setUIVisible(true)
         guard let resourcePath = Bundle.main.resourcePath else {
+            showAlert("無法準備遊戲環境", "Cyder 缺少必要的 Resources 目錄。仍可開啟偏好設定，但無法啟動遊戲。")
             showSettings()
             return
         }
@@ -1714,7 +1737,10 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func runPrefixAction(_ action: String, prefix: URL, operation: String) {
-        guard let resourcePath = Bundle.main.resourcePath else { return }
+        guard let resourcePath = Bundle.main.resourcePath else {
+            showAlert("操作未完成", "Cyder 缺少必要的 Resources 目錄。")
+            return
+        }
         let context = CyderLaunchContext(resourcePath: resourcePath)
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             guard let self else { return }
@@ -2491,7 +2517,12 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
 
     @available(macOS 11.0, *)
     private func launchURI(_ uri: String) {
-        guard let resourcePath = Bundle.main.resourcePath else { return }
+        guard let resourcePath = Bundle.main.resourcePath else {
+            hideSetup()
+            showAlert("無法開啟 gamaniagames://", "Cyder 缺少必要的 Resources 目錄。")
+            launchNextQueuedExecutableIfReady()
+            return
+        }
         let context = CyderLaunchContext(resourcePath: resourcePath)
         let prefix = CyderPaths.sharedBottle
         CyderDiagnostics.shared.enter(.exeValidation, detail: "uri-precheck")

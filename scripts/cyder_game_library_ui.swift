@@ -1499,19 +1499,28 @@ final class CyderGameLibraryWindowController: NSWindowController, NSWindowDelega
             self.macLauncherInstallInProgress = false
             switch result {
             case .success(let appURL):
+                var persistFailed = false
                 do {
                     try self.libraryStore.setMacAppPath(appURL.path, forGameID: game.id)
                     self.games = self.libraryStore.games
                 } catch {
+                    persistFailed = true
                     CyderDiagnostics.shared.warning(
                         "mac-launcher save-failed id=\(game.id) error=\(error.localizedDescription)"
                     )
                 }
                 let alert = NSAlert()
-                alert.messageText = updating ? "已更新 macOS 應用程式" : "已加入 macOS 應用程式"
-                alert.informativeText =
-                    "可在 Launchpad 或「\(CyderMacLauncherInstaller.outputDirectory().path)」找到 \(game.displayName)。"
-                alert.alertStyle = .informational
+                if persistFailed {
+                    alert.messageText = updating ? "已更新應用程式，但未寫入遊戲庫" : "已建立應用程式，但未寫入遊戲庫"
+                    alert.informativeText =
+                        "\(appURL.path)\n\n可在 Finder 使用此捷徑，但遊戲庫可能仍顯示「加入 macOS 應用程式」。"
+                    alert.alertStyle = .warning
+                } else {
+                    alert.messageText = updating ? "已更新 macOS 應用程式" : "已加入 macOS 應用程式"
+                    alert.informativeText =
+                        "可在 Launchpad 或「\(CyderMacLauncherInstaller.outputDirectory().path)」找到 \(game.displayName)。"
+                    alert.alertStyle = .informational
+                }
                 alert.addButton(withTitle: "在 Finder 中顯示")
                 alert.addButton(withTitle: "知道了")
                 if alert.runModal() == .alertFirstButtonReturn {
