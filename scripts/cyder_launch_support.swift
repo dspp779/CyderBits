@@ -492,7 +492,9 @@ func normalizeExePaths(_ paths: [String]) -> [String] {
         if path.isEmpty { continue }
         path = (path as NSString).standardizingPath
         let ext = (path as NSString).pathExtension.lowercased()
-        if ext == "exe" || ext == "msi", seen.insert(path).inserted {
+        if (ext == "exe" || ext == "msi" || ext == "bat" || ext == "cmd"
+            || ext == "lnk" || ext == "reg"),
+           seen.insert(path).inserted {
             out.append(path)
         }
     }
@@ -503,7 +505,31 @@ func isMsiPath(_ path: String) -> Bool {
     (path as NSString).pathExtension.lowercased() == "msi"
 }
 
+func isScriptPath(_ path: String) -> Bool {
+    let ext = (path as NSString).pathExtension.lowercased()
+    return ext == "bat" || ext == "cmd"
+}
+
+func isLnkPath(_ path: String) -> Bool {
+    (path as NSString).pathExtension.lowercased() == "lnk"
+}
+
+func isRegPath(_ path: String) -> Bool {
+    (path as NSString).pathExtension.lowercased() == "reg"
+}
+
+func wineLaunchTarget(for path: String) -> CyderWineLaunchTarget {
+    if isMsiPath(path) { return .msi }
+    if isScriptPath(path) { return .script }
+    if isLnkPath(path) { return .link }
+    if isRegPath(path) { return .reg }
+    return .exe
+}
+
 enum CyderWineLaunchTarget {
     case exe
     case msi
+    case script
+    case link
+    case reg
 }

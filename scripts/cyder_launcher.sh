@@ -92,6 +92,12 @@ Options:
                       Launch .exe; arguments after -- replace saved game arguments for this launch
   --launch-msi PATH [-- ARG ...]
                       Install .msi into the shared prefix via msiexec /i
+  --launch-script PATH [-- ARG ...]
+                      Run .bat/.cmd via cmd /c (cwd = script directory)
+  --launch-lnk PATH [-- ARG ...]
+                      Open .lnk via start /wait /unix
+  --launch-reg PATH [-- ARG ...]
+                      Import .reg via regedit /s (refuses if shared prefix is busy)
   --profile-resolve PATH  Resolve PATH to its per-game bottle and exit
   --profile-create PATH [pristine|golden]  Provision a fresh per-game bottle and exit
   --profile-remove PATH  Remove a per-game bottle/profile and exit
@@ -120,6 +126,9 @@ INSTALL_WINETRICKS=0
 WINETRICKS_VERBS=()
 LAUNCH_ONLY=0
 LAUNCH_MSI_ONLY=0
+LAUNCH_SCRIPT_ONLY=0
+LAUNCH_LNK_ONLY=0
+LAUNCH_REG_ONLY=0
 PROFILE_ACTION=""
 PROFILE_EXE=""
 PROFILE_TEMPLATE="golden"
@@ -130,6 +139,9 @@ SESSION_ARGS=()
 ENGINE_SRC="$CYDER_ENGINE_SRC"
 EXE_ARGS=()
 MSI_ARGS=()
+SCRIPT_ARGS=()
+LNK_ARGS=()
+REG_ARGS=()
 FORWARDED_GAME_ARGUMENTS=()
 FORWARDED_MSI_ARGUMENTS=()
 FORWARDED_GAME_ARGUMENTS_SET=0
@@ -252,6 +264,33 @@ while [[ $# -gt 0 ]]; do
       MSI_ARGS+=("$2")
       shift 2
       ;;
+    --launch-script)
+      [[ $# -ge 2 ]] || {
+        echo "--launch-script requires PATH" >&2
+        exit 1
+      }
+      LAUNCH_SCRIPT_ONLY=1
+      SCRIPT_ARGS+=("$2")
+      shift 2
+      ;;
+    --launch-lnk)
+      [[ $# -ge 2 ]] || {
+        echo "--launch-lnk requires PATH" >&2
+        exit 1
+      }
+      LAUNCH_LNK_ONLY=1
+      LNK_ARGS+=("$2")
+      shift 2
+      ;;
+    --launch-reg)
+      [[ $# -ge 2 ]] || {
+        echo "--launch-reg requires PATH" >&2
+        exit 1
+      }
+      LAUNCH_REG_ONLY=1
+      REG_ARGS+=("$2")
+      shift 2
+      ;;
     --profile-resolve)
       [[ $# -ge 2 ]] || { echo "--profile-resolve requires PATH" >&2; exit 1; }
       [[ -z "$PROFILE_ACTION" ]] || { echo "profile action specified more than once" >&2; exit 1; }
@@ -303,10 +342,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --)
       shift
-      if [[ "$LAUNCH_MSI_ONLY" -eq 1 ]]; then
+      if [[ "$LAUNCH_MSI_ONLY" -eq 1 || "$LAUNCH_REG_ONLY" -eq 1 ]]; then
         FORWARDED_MSI_ARGUMENTS=("$@")
         FORWARDED_MSI_ARGUMENTS_SET=1
-      elif [[ "$LAUNCH_ONLY" -eq 1 ]]; then
+      elif [[ "$LAUNCH_ONLY" -eq 1 || "$LAUNCH_SCRIPT_ONLY" -eq 1 || "$LAUNCH_LNK_ONLY" -eq 1 ]]; then
         FORWARDED_GAME_ARGUMENTS=("$@")
         FORWARDED_GAME_ARGUMENTS_SET=1
       else
@@ -733,6 +772,131 @@ if [[ "$LAUNCH_MSI_ONLY" -eq 1 ]]; then
     CYDER_LAUNCH_TARGET_KIND=msi cyder_run_wine_exe "$wine" "$msi" "$prefix" "${FORWARDED_MSI_ARGUMENTS[@]}"
   else
     CYDER_LAUNCH_TARGET_KIND=msi cyder_run_wine_exe "$wine" "$msi" "$prefix"
+  fi
+  exit 0
+fi
+
+if [[ "$LAUNCH_SCRIPT_ONLY" -eq 1 ]]; then
+  cyder_set_stage script-validation
+  script="$(cyder_resolve_script_from_args "${SCRIPT_ARGS[@]}")" || {
+    echo "Missing or invalid .bat/.cmd for --launch-script" >&2
+    exit 1
+  }
+  if ! cyder_engine_is_ready_for_launch; then
+    echo "Cyder environment is not ready; open Cyder.app to finish setup." >&2
+    exit 2
+  fi
+  engine="$CYDER_ENGINES/$CYDER_ENGINE_NAME"
+  wine="$engine/bin/wine"
+  prefix="$CYDER_SHARED_PREFIX"
+  profile_script="$CYDER_SCRIPTS/cyder-profile.sh"
+  if [[ -x "$profile_script" ]]; then
+    profile_id="$(bash "$profile_script" id "$script" 2>/dev/null || true)"
+    if [[ "$profile_id" =~ ^profile-[0-9a-f]{24}$ \
+       && ( -e "$CYDER_SUPPORT/profiles/$profile_id" || -e "$CYDER_SUPPORT/bottles/$profile_id" ) ]]; then
+      prefix="$(bash "$profile_script" resolve "$script" "$CYDER_SUPPORT")" || {
+        echo "Cyder profile is damaged for: $script" >&2
+        exit 2
+      }
+    fi
+  fi
+  cyder_prepare_graphics_prefix "$wine" "$engine" "$prefix" || {
+    echo "Unable to prepare graphics payload for prefix: $prefix" >&2
+    exit 1
+  }
+  cyder_set_stage settings-apply
+  cyder_prepare_game_launch_settings "$wine" "$engine" "$prefix" "$script" || {
+    settings_status=$?
+    exit "$settings_status"
+  }
+  if [[ "$FORWARDED_GAME_ARGUMENTS_SET" -eq 1 ]]; then
+    CYDER_GAME_ARGUMENTS=("${FORWARDED_GAME_ARGUMENTS[@]}")
+  fi
+  cyder_set_stage wine-launch
+  if (( ${#CYDER_GAME_ARGUMENTS[@]} > 0 )); then
+    CYDER_LAUNCH_TARGET_KIND=script cyder_run_wine_exe "$wine" "$script" "$prefix" "${CYDER_GAME_ARGUMENTS[@]}"
+  else
+    CYDER_LAUNCH_TARGET_KIND=script cyder_run_wine_exe "$wine" "$script" "$prefix"
+  fi
+  exit 0
+fi
+
+if [[ "$LAUNCH_LNK_ONLY" -eq 1 ]]; then
+  cyder_set_stage lnk-validation
+  lnk="$(cyder_resolve_lnk_from_args "${LNK_ARGS[@]}")" || {
+    echo "Missing or invalid .lnk for --launch-lnk" >&2
+    exit 1
+  }
+  if ! cyder_engine_is_ready_for_launch; then
+    echo "Cyder environment is not ready; open Cyder.app to finish setup." >&2
+    exit 2
+  fi
+  engine="$CYDER_ENGINES/$CYDER_ENGINE_NAME"
+  wine="$engine/bin/wine"
+  prefix="$CYDER_SHARED_PREFIX"
+  profile_script="$CYDER_SCRIPTS/cyder-profile.sh"
+  if [[ -x "$profile_script" ]]; then
+    profile_id="$(bash "$profile_script" id "$lnk" 2>/dev/null || true)"
+    if [[ "$profile_id" =~ ^profile-[0-9a-f]{24}$ \
+       && ( -e "$CYDER_SUPPORT/profiles/$profile_id" || -e "$CYDER_SUPPORT/bottles/$profile_id" ) ]]; then
+      prefix="$(bash "$profile_script" resolve "$lnk" "$CYDER_SUPPORT")" || {
+        echo "Cyder profile is damaged for: $lnk" >&2
+        exit 2
+      }
+    fi
+  fi
+  cyder_prepare_graphics_prefix "$wine" "$engine" "$prefix" || {
+    echo "Unable to prepare graphics payload for prefix: $prefix" >&2
+    exit 1
+  }
+  cyder_set_stage settings-apply
+  cyder_prepare_game_launch_settings "$wine" "$engine" "$prefix" "$lnk" || {
+    settings_status=$?
+    exit "$settings_status"
+  }
+  if [[ "$FORWARDED_GAME_ARGUMENTS_SET" -eq 1 ]]; then
+    CYDER_GAME_ARGUMENTS=("${FORWARDED_GAME_ARGUMENTS[@]}")
+  fi
+  cyder_set_stage wine-launch
+  if (( ${#CYDER_GAME_ARGUMENTS[@]} > 0 )); then
+    CYDER_LAUNCH_TARGET_KIND=link cyder_run_wine_exe "$wine" "$lnk" "$prefix" "${CYDER_GAME_ARGUMENTS[@]}"
+  else
+    CYDER_LAUNCH_TARGET_KIND=link cyder_run_wine_exe "$wine" "$lnk" "$prefix"
+  fi
+  exit 0
+fi
+
+if [[ "$LAUNCH_REG_ONLY" -eq 1 ]]; then
+  cyder_set_stage reg-validation
+  reg="$(cyder_resolve_reg_from_args "${REG_ARGS[@]}")" || {
+    echo "Missing or invalid .reg for --launch-reg" >&2
+    exit 1
+  }
+  if ! cyder_engine_is_ready_for_launch; then
+    echo "Cyder environment is not ready; open Cyder.app to finish setup." >&2
+    exit 2
+  fi
+  engine="$CYDER_ENGINES/$CYDER_ENGINE_NAME"
+  wine="$engine/bin/wine"
+  prefix="$CYDER_SHARED_PREFIX"
+  if cyder_has_running_prefix "$prefix"; then
+    echo "Cannot import registry while the shared prefix is running: $prefix" >&2
+    echo "Close all Cyder games and try again." >&2
+    exit 75
+  fi
+  cyder_prepare_graphics_prefix "$wine" "$engine" "$prefix" || {
+    echo "Unable to prepare graphics payload for prefix: $prefix" >&2
+    exit 1
+  }
+  cyder_set_stage settings-apply
+  cyder_prepare_installer_launch_settings "$wine" "$engine" "$prefix" || {
+    settings_status=$?
+    exit "$settings_status"
+  }
+  if [[ "$FORWARDED_MSI_ARGUMENTS_SET" -eq 1 ]]; then
+    CYDER_LAUNCH_TARGET_KIND=reg cyder_run_wine_exe "$wine" "$reg" "$prefix" "${FORWARDED_MSI_ARGUMENTS[@]}"
+  else
+    CYDER_LAUNCH_TARGET_KIND=reg cyder_run_wine_exe "$wine" "$reg" "$prefix"
   fi
   exit 0
 fi

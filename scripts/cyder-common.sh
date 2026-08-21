@@ -1184,6 +1184,45 @@ cyder_resolve_msi_from_args() {
   return 1
 }
 
+cyder_resolve_script_from_args() {
+  local a p ext
+  for a in "$@"; do
+    p="$(cyder_abs_path "$a")"
+    ext="$(echo "${p##*.}" | tr '[:upper:]' '[:lower:]')"
+    if [[ ( "$ext" == "bat" || "$ext" == "cmd" ) && -f "$p" ]]; then
+      echo "$p"
+      return 0
+    fi
+  done
+  return 1
+}
+
+cyder_resolve_lnk_from_args() {
+  local a p ext
+  for a in "$@"; do
+    p="$(cyder_abs_path "$a")"
+    ext="$(echo "${p##*.}" | tr '[:upper:]' '[:lower:]')"
+    if [[ "$ext" == "lnk" && -f "$p" ]]; then
+      echo "$p"
+      return 0
+    fi
+  done
+  return 1
+}
+
+cyder_resolve_reg_from_args() {
+  local a p ext
+  for a in "$@"; do
+    p="$(cyder_abs_path "$a")"
+    ext="$(echo "${p##*.}" | tr '[:upper:]' '[:lower:]')"
+    if [[ "$ext" == "reg" && -f "$p" ]]; then
+      echo "$p"
+      return 0
+    fi
+  done
+  return 1
+}
+
 cyder_wine_bin_for_dry_run() {
   local engine_src="$1"
   local installed="$CYDER_ENGINES/$CYDER_ENGINE_NAME/bin/wine"
@@ -3128,21 +3167,23 @@ cyder_run_wine_exe() {
   local target_kind="${CYDER_LAUNCH_TARGET_KIND:-exe}"
   local -a game_args=("$@")
   CYDER_STEAM_ARGUMENTS=()
-  if [[ "$target_kind" == "msi" ]]; then
-    # MSI installs never participate in Steam argv rewriting or CompatDB.
+  if [[ "$target_kind" == "msi" || "$target_kind" == "reg" ]]; then
+    # MSI / registry imports never participate in Steam argv rewriting or CompatDB.
     :
   else
     # cyder_init_paths may run before a new bottle exists. Re-select and pin the
     # database immediately before launch, when the final prefix is available.
     cyder_configure_compatdb "$prefix"
-    if (( ${#game_args[@]} > 0 )); then
-      cyder_apply_steam_compatibility_arguments "$exe" "${game_args[@]}"
-    else
-      cyder_apply_steam_compatibility_arguments "$exe"
-    fi
-    game_args=()
-    if (( ${#CYDER_STEAM_ARGUMENTS[@]} > 0 )); then
-      game_args=("${CYDER_STEAM_ARGUMENTS[@]}")
+    if [[ "$target_kind" == "exe" ]]; then
+      if (( ${#game_args[@]} > 0 )); then
+        cyder_apply_steam_compatibility_arguments "$exe" "${game_args[@]}"
+      else
+        cyder_apply_steam_compatibility_arguments "$exe"
+      fi
+      game_args=()
+      if (( ${#CYDER_STEAM_ARGUMENTS[@]} > 0 )); then
+        game_args=("${CYDER_STEAM_ARGUMENTS[@]}")
+      fi
     fi
   fi
   # Login credentials often arrive through argv. Execute the original array,
@@ -3150,10 +3191,18 @@ cyder_run_wine_exe() {
   local game_args_text="(no game arguments)"
   if [[ "$target_kind" == "msi" ]]; then
     game_args_text="(no msiexec arguments)"
+  elif [[ "$target_kind" == "reg" ]]; then
+    game_args_text="(no regedit arguments)"
+  elif [[ "$target_kind" == "script" ]]; then
+    game_args_text="(no script arguments)"
+  elif [[ "$target_kind" == "link" ]]; then
+    game_args_text="(no shortcut arguments)"
   fi
   if (( ${#game_args[@]} > 0 )); then
     if [[ "$target_kind" == "msi" ]]; then
       game_args_text="<${#game_args[@]} msiexec arguments redacted>"
+    elif [[ "$target_kind" == "reg" ]]; then
+      game_args_text="<${#game_args[@]} regedit arguments redacted>"
     else
       game_args_text="<${#game_args[@]} game arguments redacted>"
     fi
@@ -3250,6 +3299,28 @@ cyder_run_wine_exe() {
       else
         cyder_exec_wine "$wine_bin" msiexec /i "$exe"
       fi
+    elif [[ "$target_kind" == "script" ]]; then
+      # cwd is already dirname($exe); invoke by basename so relative paths in the
+      # batch file resolve the way users expect on Windows.
+      local script_name
+      script_name="$(basename "$exe")"
+      if (( ${#game_args[@]} > 0 )); then
+        cyder_exec_wine "$wine_bin" cmd /c "$script_name" "${game_args[@]}"
+      else
+        cyder_exec_wine "$wine_bin" cmd /c "$script_name"
+      fi
+    elif [[ "$target_kind" == "link" ]]; then
+      if (( ${#game_args[@]} > 0 )); then
+        cyder_exec_wine "$wine_bin" start /wait /unix "$exe" "${game_args[@]}"
+      else
+        cyder_exec_wine "$wine_bin" start /wait /unix "$exe"
+      fi
+    elif [[ "$target_kind" == "reg" ]]; then
+      if (( ${#game_args[@]} > 0 )); then
+        cyder_exec_wine "$wine_bin" regedit /s "$exe" "${game_args[@]}"
+      else
+        cyder_exec_wine "$wine_bin" regedit /s "$exe"
+      fi
     elif [[ "$start_mode" == "start" ]]; then
       if (( ${#game_args[@]} > 0 )); then
         cyder_exec_wine "$wine_bin" start /wait /unix "$exe" "${game_args[@]}"
@@ -3296,11 +3367,23 @@ cyder_run_wine_exe() {
       else
         cmd_line="/usr/bin/arch -x86_64 $wine_bin msiexec /i $exe $game_args_text"
       fi
-    elif [[ "$start_mode" == "start" ]]; then
+    elif [[ "$target_kind" == "script" ]]; then
+      if [[ "${CYDER_POWER_MODE:-normal}" == background && -n "$taskpolicy_bin" ]]; then
+        cmd_line="$taskpolicy_bin -c background /usr/bin/arch -x86_64 $wine_bin cmd /c $(basename "$exe") $game_args_text"
+      else
+        cmd_line="/usr/bin/arch -x86_64 $wine_bin cmd /c $(basename "$exe") $game_args_text"
+      fi
+    elif [[ "$target_kind" == "link" || "$start_mode" == "start" ]]; then
       if [[ "${CYDER_POWER_MODE:-normal}" == background && -n "$taskpolicy_bin" ]]; then
         cmd_line="$taskpolicy_bin -c background /usr/bin/arch -x86_64 $wine_bin start /wait /unix $exe $game_args_text"
       else
         cmd_line="/usr/bin/arch -x86_64 $wine_bin start /wait /unix $exe $game_args_text"
+      fi
+    elif [[ "$target_kind" == "reg" ]]; then
+      if [[ "${CYDER_POWER_MODE:-normal}" == background && -n "$taskpolicy_bin" ]]; then
+        cmd_line="$taskpolicy_bin -c background /usr/bin/arch -x86_64 $wine_bin regedit /s $exe $game_args_text"
+      else
+        cmd_line="/usr/bin/arch -x86_64 $wine_bin regedit /s $exe $game_args_text"
       fi
     else
       if [[ "${CYDER_POWER_MODE:-normal}" == background && -n "$taskpolicy_bin" ]]; then
@@ -3314,6 +3397,12 @@ cyder_run_wine_exe() {
     echo "***** $(date '+%Y-%m-%dT%H:%M:%SZ')"
     if [[ "$target_kind" == "msi" ]]; then
       echo "Running MSI installer: \"$exe\""
+    elif [[ "$target_kind" == "script" ]]; then
+      echo "Running batch script: \"$exe\""
+    elif [[ "$target_kind" == "link" ]]; then
+      echo "Running Windows shortcut: \"$exe\""
+    elif [[ "$target_kind" == "reg" ]]; then
+      echo "Importing registry file: \"$exe\""
     else
       echo "Running command: \"$exe\""
     fi

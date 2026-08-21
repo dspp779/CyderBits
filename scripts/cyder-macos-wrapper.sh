@@ -108,14 +108,15 @@ for raw in "$@"; do
   fi
   path="${raw#file://}"
   lower="$(printf '%s' "$path" | tr '[:upper:]' '[:lower:]')"
-  if [[ -z "$exe" && ( "$lower" == *.exe || "$lower" == *.msi ) ]]; then
+  if [[ -z "$exe" && ( "$lower" == *.exe || "$lower" == *.msi \
+        || "$lower" == *.bat || "$lower" == *.cmd || "$lower" == *.lnk || "$lower" == *.reg ) ]]; then
     exe="$path"
   elif [[ -n "$exe" ]]; then
     game_args+=("$raw")
   fi
 done
 
-# On macOS 11+, explicit EXE/MSI launches also pass through the native lifecycle
+# On macOS 11+, explicit document launches also pass through the native lifecycle
 # agent so the menu-bar status remains available until the bottle is idle.
 # Catalina deliberately retains the shell-only fallback.
 if [[ -n "$exe" ]]; then
@@ -128,16 +129,17 @@ if [[ -n "$exe" ]]; then
     exit $?
   fi
   lower_exe="$(printf '%s' "$exe" | tr '[:upper:]' '[:lower:]')"
-  if [[ "$lower_exe" == *.msi ]]; then
-    if ((${#game_args[@]} > 0)); then
-      cyder_exec_launcher_with_alert --engine-src "$ENGINE_SRC" --launch-msi "$exe" -- "${game_args[@]}"
-    fi
-    cyder_exec_launcher_with_alert --engine-src "$ENGINE_SRC" --launch-msi "$exe"
-  fi
+  launch_flag="--launch-exe"
+  case "$lower_exe" in
+    *.msi) launch_flag="--launch-msi" ;;
+    *.bat|*.cmd) launch_flag="--launch-script" ;;
+    *.lnk) launch_flag="--launch-lnk" ;;
+    *.reg) launch_flag="--launch-reg" ;;
+  esac
   if ((${#game_args[@]} > 0)); then
-    cyder_exec_launcher_with_alert --engine-src "$ENGINE_SRC" --launch-exe "$exe" -- "${game_args[@]}"
+    cyder_exec_launcher_with_alert --engine-src "$ENGINE_SRC" "$launch_flag" "$exe" -- "${game_args[@]}"
   fi
-  cyder_exec_launcher_with_alert --engine-src "$ENGINE_SRC" --launch-exe "$exe"
+  cyder_exec_launcher_with_alert --engine-src "$ENGINE_SRC" "$launch_flag" "$exe"
 fi
 
 # With no explicit EXE, Big Sur and newer open the preferences / game library.

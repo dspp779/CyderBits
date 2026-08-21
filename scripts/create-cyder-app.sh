@@ -464,6 +464,49 @@ cat > "$CONTENTS/Info.plist" <<PLIST
         <string>com.microsoft.windows-installer</string>
       </array>
     </dict>
+    <dict>
+      <key>CFBundleTypeName</key>
+      <string>Windows Batch File</string>
+      <key>CFBundleTypeRole</key>
+      <string>Viewer</string>
+      <key>LSHandlerRank</key>
+      <string>Alternate</string>
+      <key>CFBundleTypeIconFile</key>
+      <string>AppIcon</string>
+      <key>CFBundleTypeExtensions</key>
+      <array>
+        <string>bat</string>
+        <string>cmd</string>
+      </array>
+    </dict>
+    <dict>
+      <key>CFBundleTypeName</key>
+      <string>Windows Shortcut</string>
+      <key>CFBundleTypeRole</key>
+      <string>Viewer</string>
+      <key>LSHandlerRank</key>
+      <string>Alternate</string>
+      <key>CFBundleTypeIconFile</key>
+      <string>AppIcon</string>
+      <key>CFBundleTypeExtensions</key>
+      <array>
+        <string>lnk</string>
+      </array>
+    </dict>
+    <dict>
+      <key>CFBundleTypeName</key>
+      <string>Windows Registry File</string>
+      <key>CFBundleTypeRole</key>
+      <string>Viewer</string>
+      <key>LSHandlerRank</key>
+      <string>Alternate</string>
+      <key>CFBundleTypeIconFile</key>
+      <string>AppIcon</string>
+      <key>CFBundleTypeExtensions</key>
+      <array>
+        <string>reg</string>
+      </array>
+    </dict>
   </array>
   <key>CFBundleURLTypes</key>
   <array>

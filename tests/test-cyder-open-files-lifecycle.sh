@@ -19,8 +19,16 @@ assert_contains "$source_text" 'file-doc=' \
   "open-url diagnostics must report file URL document delivery"
 assert_contains "$source_text" '--launch-msi' \
   "Finder MSI requests must relay to the Bash MSI launcher"
+assert_contains "$source_text" '--launch-script' \
+  "Finder bat/cmd requests must relay to the Bash script launcher"
+assert_contains "$source_text" '--launch-lnk' \
+  "Finder lnk requests must relay to the Bash lnk launcher"
+assert_contains "$source_text" '--launch-reg' \
+  "Finder reg requests must relay to the Bash reg launcher"
 assert_contains "$source_text" 'CYD-MSI-001' \
   "running-prefix MSI failures must use a dedicated actionable error"
+assert_contains "$source_text" 'CYD-REG-001' \
+  "running-prefix reg failures must use a dedicated actionable error"
 assert_contains "$source_text" 'isFileURL' \
   "open-url events must accept file URLs for .exe launches"
 assert_contains "$source_text" "documentLaunchRequested = true" \

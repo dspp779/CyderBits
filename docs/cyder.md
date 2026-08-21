@@ -227,6 +227,12 @@ Wine 的 macOS RetinaMode、DPI 與字體 registry 是整個 Wine session／bott
 
 Finder 或 CLI 可直接用 Cyder 開啟 `.msi`：經 `msiexec /i` 安裝到 shared prefix。若該 prefix 已有執行中的 Wine session，安裝會被拒絕（避免與遊戲搶同一 wineserver）；請先關閉遊戲再開 installer。
 
+同樣可用 Cyder 開啟：
+
+- **`.bat` / `.cmd`：** 以 `cmd /c` 執行，工作目錄為腳本所在目錄（相對路徑會依此解析）。
+- **`.lnk`：** 以 `start /wait /unix` 交給 Wine 解析捷徑（含工作目錄／參數）。
+- **`.reg`：** 以 `regedit /s` 安靜匯入 shared prefix；若 prefix 忙碌則拒絕（與 MSI 相同）。
+
 ### macOS 應用程式捷徑
 
 遊戲庫磁貼右鍵可選「加入 macOS 應用程式」（已存在則為「更新」）：在 `~/Applications/Cyder/` 建立精簡 `.app`，啟動時轉交 `Cyder.app` 開啟對應 EXE。捷徑不含 Wine；若遊戲沒有可用圖示則沿用 Cyder 圖示。CLI：`bash scripts/cyder-create-mac-launcher.sh --exe … --cyder-app … --output …`。

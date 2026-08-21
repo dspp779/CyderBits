@@ -16,10 +16,16 @@ assert_contains "$wrapper" 'cyder_exec_cyder_swift "$SELF/CyderSwift" "$@"' \
   "no-argument macOS 11+ launches must exec native CyderSwift"
 assert_contains "$wrapper" 'cyder_exec_launcher_with_alert' \
   "Catalina / shell launch failures must surface a visible alert"
-assert_contains "$wrapper" '--launch-exe "$exe"' \
+assert_contains "$wrapper" '--launch-exe' \
   "Catalina explicit EXE arguments must retain the Bash fallback"
-assert_contains "$wrapper" '--launch-msi "$exe"' \
+assert_contains "$wrapper" '--launch-msi' \
   "explicit MSI arguments must route through the Bash MSI launcher"
+assert_contains "$wrapper" '--launch-script' \
+  "explicit bat/cmd arguments must route through the Bash script launcher"
+assert_contains "$wrapper" '--launch-lnk' \
+  "explicit lnk arguments must route through the Bash lnk launcher"
+assert_contains "$wrapper" '--launch-reg' \
+  "explicit reg arguments must route through the Bash reg launcher"
 assert_not_contains "$wrapper" 'CyderLegacyUI.app' \
   "wrapper must not retain the removed Catalina applet"
 assert_contains "$wrapper" 'cyder_catalina_environment_ready' \

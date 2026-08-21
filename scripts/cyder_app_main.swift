@@ -1348,30 +1348,31 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         }
 
         let documentPath = docPaths[0]
-        if isMsiPath(documentPath) {
+        let target = wineLaunchTarget(for: documentPath)
+        switch target {
+        case .msi, .reg:
             return runWineThroughLauncher(
                 context: context,
                 exe: documentPath,
                 prefix: CyderPaths.sharedBottle,
                 launchArguments: pendingLaunchArguments,
-                launchTarget: .msi
+                launchTarget: target
             )
+        case .exe, .script, .link:
+            let exeURL = URL(fileURLWithPath: documentPath)
+            switch prefixForExecutable(exeURL) {
+            case .success(let prefix):
+                return runWineThroughLauncher(
+                    context: context,
+                    exe: exeURL.path,
+                    prefix: prefix,
+                    launchArguments: pendingLaunchArguments,
+                    launchTarget: target
+                )
+            case .failure(let failure):
+                return .failure(failure)
+            }
         }
-
-        let exeURL = URL(fileURLWithPath: documentPath)
-        switch prefixForExecutable(exeURL) {
-        case .success(let prefix):
-            return runWineThroughLauncher(
-                context: context,
-                exe: exeURL.path,
-                prefix: prefix,
-                launchArguments: pendingLaunchArguments,
-                launchTarget: .exe
-            )
-        case .failure(let failure):
-            return .failure(failure)
-        }
-    }
 
     private func prefixForExecutable(_ executable: URL) -> CyderPrefixResolution {
         let profileStore = CyderProfileStore(root: CyderPaths.support)
@@ -1560,6 +1561,12 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             args.append(contentsOf: ["--launch-exe", exe])
         case .msi:
             args.append(contentsOf: ["--launch-msi", exe])
+        case .script:
+            args.append(contentsOf: ["--launch-script", exe])
+        case .link:
+            args.append(contentsOf: ["--launch-lnk", exe])
+        case .reg:
+            args.append(contentsOf: ["--launch-reg", exe])
         }
         if let launchArguments, !launchArguments.isEmpty {
             args.append("--")
@@ -1580,7 +1587,15 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             // below and does not depend on Wine log text.
             "CYDER_CAPTURE_WINE_LOG": "1",
         ]) { _, internalValue in internalValue }
-        let operation = launchTarget == .msi ? "msi-launch" : "wine-launch"
+        let operation: String = {
+            switch launchTarget {
+            case .msi: return "msi-launch"
+            case .script: return "script-launch"
+            case .link: return "lnk-launch"
+            case .reg: return "reg-launch"
+            case .exe: return "wine-launch"
+            }
+        }()
         let result = runLauncher(
             context: context,
             args: args,
@@ -1599,10 +1614,29 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
                     logURL: result.logURL
                 ))
             }
+            if launchTarget == .reg && result.status == 75 {
+                return .failure(CyderFailure(
+                    code: "CYD-REG-001",
+                    stage: .wineSpawn,
+                    summary: "請先關閉所有 Wine 程序，再匯入登錄檔。",
+                    technicalDetails: result.outputTail,
+                    exitCode: result.status,
+                    logURL: result.logURL
+                ))
+            }
+            let summary: String = {
+                switch launchTarget {
+                case .msi: return "Bash 無法啟動 MSI 安裝程式。"
+                case .script: return "Bash 無法執行批次檔。"
+                case .link: return "Bash 無法開啟捷徑。"
+                case .reg: return "Bash 無法匯入登錄檔。"
+                case .exe: return "Bash 無法啟動 Wine。"
+                }
+            }()
             return .failure(failure(
                 code: "CYD-WIN-001",
                 stage: .wineSpawn,
-                summary: launchTarget == .msi ? "Bash 無法啟動 MSI 安裝程式。" : "Bash 無法啟動 Wine。",
+                summary: summary,
                 result: result
             ))
         }
