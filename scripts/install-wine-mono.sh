@@ -30,6 +30,8 @@ if [[ -f "$SCRIPT_DIR/env-x86_64.sh" ]]; then
   # shellcheck source=env-x86_64.sh
   source "$SCRIPT_DIR/env-x86_64.sh"
 fi
+# shellcheck source=cyder-download-locked.sh
+source "$SCRIPT_DIR/cyder-download-locked.sh"
 
 MONO_VER="${WINE_MONO_VERSION:-10.4.1}"
 MONO_MSI="wine-mono-${MONO_VER}-x86.msi"
@@ -42,20 +44,7 @@ case "$MONO_VER" in
   *) echo "Unsupported Wine Mono version: $MONO_VER" >&2; exit 2 ;;
 esac
 
-mkdir -p "$DOWNLOADS"
-if [[ -f "$DEST" ]] && [[ "$(shasum -a 256 "$DEST" | awk '{print $1}')" != "$MONO_SHA256" ]]; then
-  rm -f "$DEST"
-fi
-if [[ ! -f "$DEST" ]]; then
-  echo "Downloading $URL"
-  curl -fL --progress-bar -o "$DEST.part" "$URL"
-  mv -f "$DEST.part" "$DEST"
-fi
-[[ "$(shasum -a 256 "$DEST" | awk '{print $1}')" == "$MONO_SHA256" ]] || {
-  echo "Wine Mono checksum verification failed: $DEST" >&2
-  rm -f "$DEST"
-  exit 1
-}
+cyder_download_locked "$DEST" "$URL" "$MONO_SHA256"
 
 if [[ "$DOWNLOAD_ONLY" -eq 1 ]]; then
   echo "Wine Mono ${MONO_VER} download ready: $DEST"

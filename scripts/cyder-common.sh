@@ -482,7 +482,9 @@ cyder_init_paths() {
   CYDER_LEGACY_SHARED_PREFIX="${CYDER_LEGACY_SHARED_PREFIX:-$CYDER_SUPPORT/SharedPrefix}"
   CYDER_BOOTSTRAP_MARKER="$CYDER_PREFIX/.cyder-bootstrap-v1"
   CYDER_FONT_MARKER="$CYDER_PREFIX/.cyder-font-songti-v1"
-  CYDER_DOWNLOADS="$CYDER_SUPPORT/downloads"
+  # Global MSI/cache root (shared across bottles and isolated CYDER_SUPPORT).
+  # Callers may still override via the environment.
+  CYDER_DOWNLOADS="${CYDER_DOWNLOADS:-$HOME/Library/Application Support/Cyder/downloads}"
   CYDER_BUNDLE_ID="${CYDER_BUNDLE_ID:-local.cyder.app}"
   CYDER_TEMPLATE_REVISION="${CYDER_TEMPLATE_REVISION:-2}"
   export CYDER_TEMPLATE_REVISION

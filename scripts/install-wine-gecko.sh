@@ -25,6 +25,10 @@ EOF
   esac
 done
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=cyder-download-locked.sh
+source "$SCRIPT_DIR/cyder-download-locked.sh"
+
 GECKO_VER="${WINE_GECKO_VERSION:-2.47.4}"
 DOWNLOADS="${CYDER_DOWNLOADS:-$HOME/Library/Application Support/Cyder/downloads}"
 
@@ -39,29 +43,12 @@ case "$GECKO_VER" in
     ;;
 esac
 
-verify_file() {
-  local path="$1" expected="$2" actual
-  [[ -f "$path" ]] || return 1
-  actual="$(shasum -a 256 "$path" | awk '{print $1}')"
-  [[ "$actual" == "$expected" ]]
-}
-
 download_and_verify() {
   local arch_name="$1" expected="$2"
   local filename="wine-gecko-${GECKO_VER}-${arch_name}.msi"
   local destination="$DOWNLOADS/$filename"
   local url="https://dl.winehq.org/wine/wine-gecko/${GECKO_VER}/$filename"
-  if ! verify_file "$destination" "$expected"; then
-    rm -f "$destination"
-    echo "Downloading $url" >&2
-    curl -fL --progress-bar -o "$destination.part" "$url"
-    mv -f "$destination.part" "$destination"
-  fi
-  verify_file "$destination" "$expected" || {
-    echo "Wine Gecko checksum verification failed: $destination" >&2
-    rm -f "$destination"
-    return 1
-  }
+  cyder_download_locked "$destination" "$url" "$expected" || return $?
   printf '%s\n' "$destination"
 }
 
