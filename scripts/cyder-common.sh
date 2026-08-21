@@ -1531,10 +1531,27 @@ cyder_install_engine_from_dir() {
   mv "$staging" "$dest"
 }
 
+cyder_engine_signature_intact() {
+  local dest="$1"
+  local target="$dest/bin/wine"
+  if [[ ! -f "$target" ]] || ! /usr/bin/file -b "$target" 2>/dev/null | grep -q 'Mach-O'; then
+    target="$dest/bin/wineloader"
+  fi
+  [[ -f "$target" ]] || return 1
+  /usr/bin/codesign --verify --strict "$target" >/dev/null 2>&1
+}
+
 cyder_sign_installed_engine() {
   local dest="$1"
   local sign_sh="$CYDER_SCRIPTS/sign-wine.sh"
   local env_sh="$CYDER_SCRIPTS/env-x86_64.sh"
+  # Packaged artifacts are already signed; re-signing every Mach-O on first
+  # install is the dominant cost of "準備遊戲執行元件".
+  if cyder_engine_signature_intact "$dest"; then
+    echo "Shared engine signatures intact; skipping resign: $dest" >&2
+    printf 'signed\n' >"$dest/.cyder-engine-signed"
+    return 0
+  fi
   [[ -f "$sign_sh" ]] || {
     echo "Wine signing helper is missing: $sign_sh" >&2
     return 1
@@ -1954,6 +1971,7 @@ cyder_provision_prefix_baseline() {
   CYDER_BOOTSTRAP_HEALTH_CHECKED=0
   CYDER_BOOTSTRAP_STAGE_STACK=()
   CYDER_BOOTSTRAP_T0_STACK=()
+  CYDER_PROVISION_DID_GRAPHICS=0
 
   # Mono/Gecko MSI download runs in parallel with wineboot. After wineboot
   # succeeds, install whichever component is ready first (mutex: one msiexec).
@@ -1974,19 +1992,22 @@ cyder_provision_prefix_baseline() {
   local mono_installed=0 gecko_installed=0
   local mono_dl_log gecko_dl_log
   local dl_now=0 dl_elapsed=0
+  local gfx_payload_pid="" gfx_payload_t0=0 gfx_payload_status=0
+  local gfx_payload_log=""
   local log_dir="${CYDER_SUPPORT:-}/Logs"
   [[ -n "${CYDER_SUPPORT:-}" ]] && mkdir -p "$log_dir"
   mono_dl_log="${log_dir:-/tmp}/mono-download-$$.log"
   gecko_dl_log="${log_dir:-/tmp}/gecko-download-$$.log"
+  gfx_payload_log="${log_dir:-/tmp}/graphics-payload-$$.log"
 
   cyder_provision_kill_downloads() {
     local pid
-    for pid in "$mono_dl_pid" "$gecko_dl_pid"; do
+    for pid in "$mono_dl_pid" "$gecko_dl_pid" "$gfx_payload_pid"; do
       [[ -n "$pid" ]] || continue
       kill -TERM "$pid" 2>/dev/null || true
     done
     sleep 0.2
-    for pid in "$mono_dl_pid" "$gecko_dl_pid"; do
+    for pid in "$mono_dl_pid" "$gecko_dl_pid" "$gfx_payload_pid"; do
       [[ -n "$pid" ]] || continue
       kill -KILL "$pid" 2>/dev/null || true
       wait "$pid" 2>/dev/null || true
@@ -2024,6 +2045,25 @@ cyder_provision_prefix_baseline() {
       bash "$CYDER_SCRIPTS/install-wine-gecko.sh" --download-only
     ) >"$gecko_dl_log" 2>&1 &
     gecko_dl_pid=$!
+  fi
+
+  # DXVK/DXMT payload unpack does not need a bottle; overlap with wineboot.
+  if declare -F cyder_install_graphics_payload >/dev/null 2>&1 &&
+     declare -F cyder_graphics_source_dir >/dev/null 2>&1 &&
+     cyder_graphics_source_dir >/dev/null 2>&1; then
+    if [[ -n "${CYDER_DIAGNOSTIC_SESSION_ID:-}" || "${CYDER_DIAGNOSTIC_VERBOSE:-0}" == 1 ]]; then
+      printf 'diagnostic event=bootstrap-substage session=%s stage=%s phase=begin\n' \
+        "${CYDER_DIAGNOSTIC_SESSION_ID:-cli}" "graphics-payload" >&2
+    fi
+    gfx_payload_t0="$(cyder_now_ms)"
+    (
+      set -euo pipefail
+      source_dir="$(cyder_graphics_source_dir)"
+      runtime_root="${CYDER_RUNTIME_ROOT:-$HOME/.cyder/runtime}"
+      cyder_install_graphics_payload "$source_dir" "$runtime_root" dxvk
+      cyder_install_graphics_payload "$source_dir" "$runtime_root" dxmt
+    ) >"$gfx_payload_log" 2>&1 &
+    gfx_payload_pid=$!
   fi
 
   cyder_report_progress "正在建立 Windows 環境…" "wineboot"
@@ -2180,6 +2220,36 @@ cyder_provision_prefix_baseline() {
   fi
   cyder_bootstrap_substage_end verify "$component_status"
   (( component_status == 0 )) || return "$component_status"
+
+  if [[ -n "$gfx_payload_pid" ]]; then
+    wait "$gfx_payload_pid" || gfx_payload_status=$?
+    dl_now="$(cyder_now_ms)"
+    dl_elapsed=0
+    if [[ "$dl_now" =~ ^[0-9]+$ && "$gfx_payload_t0" =~ ^[0-9]+$ ]]; then
+      dl_elapsed=$((dl_now - gfx_payload_t0))
+    fi
+    cyder_bootstrap_substage_record graphics-payload "$dl_elapsed" "$gfx_payload_status"
+    gfx_payload_pid=""
+    if (( gfx_payload_status != 0 )); then
+      echo "Graphics payload unpack failed (see $gfx_payload_log)" >&2
+      return "$gfx_payload_status"
+    fi
+  fi
+
+  if declare -F cyder_graphics_link_engine_and_winemetal >/dev/null 2>&1 &&
+     declare -F cyder_graphics_source_dir >/dev/null 2>&1 &&
+     cyder_graphics_source_dir >/dev/null 2>&1; then
+    cyder_report_progress "正在準備圖形元件…" "graphics-winemetal"
+    cyder_bootstrap_substage_begin graphics-winemetal
+    cyder_graphics_link_engine_and_winemetal \
+      "${CYDER_RUNTIME_ROOT:-$HOME/.cyder/runtime}" \
+      "${CYDER_ENGINES:-${CYDER_RUNTIME_ROOT:-$HOME/.cyder/runtime}/Engines}" \
+      "$prefix" || component_status=$?
+    cyder_bootstrap_substage_end graphics-winemetal "$component_status"
+    (( component_status == 0 )) || return "$component_status"
+    CYDER_PROVISION_DID_GRAPHICS=1
+  fi
+
   CYDER_BOOTSTRAP_HEALTH_CHECKED=1
 }
 
@@ -2991,12 +3061,21 @@ cyder_bootstrap_shared_prefix() {
     printf 'revision=%s\n' "${CYDER_TEMPLATE_REVISION:-1}" >"$CYDER_BOOTSTRAP_MARKER"
   fi
 
-  # Phase C: install DXMT winemetal PE into the newly provisioned prefix.
-  # Runtime payload unpack remains Swift/settings responsibility.
+  # Phase C: DXMT winemetal + engine graphics links (payload may already have
+  # overlapped wineboot inside provision). Skip when provision finished it.
+  if [[ "${CYDER_PROVISION_DID_GRAPHICS:-0}" == 1 ]]; then
+    return 0
+  fi
   cyder_report_progress "正在準備圖形元件…" "graphics-ensure"
   if declare -F cyder_graphics_source_dir >/dev/null 2>&1 &&
      cyder_graphics_source_dir >/dev/null 2>&1; then
-    cyder_ensure_graphics "$CYDER_SHARED_PREFIX" || return $?
+    cyder_bootstrap_substage_begin graphics-ensure
+    if ! cyder_ensure_graphics "$CYDER_SHARED_PREFIX"; then
+      local graphics_status=$?
+      cyder_bootstrap_substage_end graphics-ensure "$graphics_status"
+      return "$graphics_status"
+    fi
+    cyder_bootstrap_substage_end graphics-ensure 0
   fi
 }
 

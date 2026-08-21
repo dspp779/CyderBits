@@ -145,6 +145,8 @@ bash "$SCRIPT_DIR/strip-wine-install.sh" "$ENGINE_TREE"
 VULKAN_MODE="${VULKAN_MODE:-with}" VULKAN_SOURCE=existing \
   bash "$SCRIPT_DIR/bundle-wine-dylibs.sh" "$ENGINE_TREE"
 bash "$SCRIPT_DIR/sign-wine.sh" --root "$ENGINE_TREE" --entitlements "$ENTITLEMENTS_PLIST"
+# Marker lets install skip resign when archive signatures survive extraction.
+printf 'signed\n' >"$ENGINE_TREE/.cyder-engine-signed"
 
 mkdir -p "$ARTIFACTS_DIR"
 if [[ "$DRY_RUN" -eq 1 ]]; then
