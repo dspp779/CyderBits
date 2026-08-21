@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # Dry-run: first Cyder open → Preferences-ready (ensureEnvironment mirror).
 #
-# Mirrors App order including fire-and-forget MSI prefetch overlapping
-# --bootstrap-only. Uses an isolated CYDER_SUPPORT; does not mutate the
-# live Application Support bottle.
+# Mirrors App order: ensure-engine → ensure-graphics → bootstrap-only →
+# optional health-check. Uses an isolated CYDER_SUPPORT; does not mutate the
+# live Application Support bottle. Wine Mono/Gecko are not prefetched or
+# installed during bootstrap (on-demand Wine dialogs / manual scripts).
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -15,8 +16,9 @@ usage() {
 Usage: bash scripts/cyder-measure-first-open-preferences.sh
 
 Dry-run wall-clock for first-open → Preferences-ready (environment proxy).
-Records overlapping spans (prefetch MSI ∥ bootstrap) under an isolated
-CYDER_SUPPORT and writes spans.jsonl, results.json, and timeline.md.
+Records serial spans under an isolated CYDER_SUPPORT and writes spans.jsonl,
+results.json, and timeline.md. Bootstrap substages from bootstrap-timing.jsonl
+are merged onto the same axis when present.
 
 Environment:
   CYDER_APP          Path to Cyder.app (default: dist/Cyder.app)
@@ -33,7 +35,6 @@ done
 
 RES="$APP/Contents/Resources"
 LAUNCHER="$RES/ogom-scripts/cyder_launcher.sh"
-PREFETCH="$RES/ogom-scripts/cyder-prefetch-bootstrap-msi.sh"
 
 [[ -d "$APP" ]] || {
   echo "missing Cyder.app: $APP (build dist/Cyder.app first)" >&2
@@ -41,10 +42,6 @@ PREFETCH="$RES/ogom-scripts/cyder-prefetch-bootstrap-msi.sh"
 }
 [[ -x "$LAUNCHER" || -f "$LAUNCHER" ]] || {
   echo "missing launcher: $LAUNCHER" >&2
-  exit 1
-}
-[[ -f "$PREFETCH" ]] || {
-  echo "missing prefetch script: $PREFETCH" >&2
   exit 1
 }
 
@@ -70,7 +67,7 @@ echo "app=$APP"
 echo "support=$CYDER_SUPPORT"
 echo "out=$OUT"
 
-python3 - "$OUT" "$LAUNCHER" "$ENGINE_SRC" "$PREFETCH" <<'PY'
+python3 - "$OUT" "$LAUNCHER" "$ENGINE_SRC" <<'PY'
 import json
 import os
 import plistlib
@@ -82,7 +79,6 @@ from pathlib import Path
 out = Path(sys.argv[1])
 launcher = sys.argv[2]
 engine_src = sys.argv[3]
-prefetch_script = sys.argv[4]
 
 spans_path = out / "spans.jsonl"
 if spans_path.exists():
@@ -148,32 +144,6 @@ run_serial(
     env,
 )
 
-# Prefetch fire-and-forget, then bootstrap immediately (App overlap).
-# Record prefetch end when the process actually exits (not after bootstrap).
-import threading
-
-prefetch_log = out / "logs" / "prefetch-msi.log"
-prefetch_start = elapsed_ms()
-with prefetch_log.open("w", encoding="utf-8") as log:
-    prefetch_proc = subprocess.Popen(
-        ["bash", prefetch_script],
-        stdout=log,
-        stderr=subprocess.STDOUT,
-        env=env,
-    )
-print(f"         ms  prefetch-msi started pid={prefetch_proc.pid}")
-
-prefetch_done = {"end_ms": None, "rc": None}
-
-
-def _wait_prefetch():
-    prefetch_done["rc"] = prefetch_proc.wait()
-    prefetch_done["end_ms"] = elapsed_ms()
-
-
-prefetch_thread = threading.Thread(target=_wait_prefetch, daemon=True)
-prefetch_thread.start()
-
 bootstrap_env = env.copy()
 result_file = Path(bootstrap_env.get("CYDER_RESULT_FILE", str(out / "bootstrap-result.plist")))
 if result_file.exists():
@@ -192,14 +162,6 @@ with bootstrap_log.open("w", encoding="utf-8") as log:
     )
 bootstrap_end = elapsed_ms()
 emit("bootstrap-only", bootstrap_start, bootstrap_end, bootstrap_proc.returncode)
-
-prefetch_thread.join()
-emit(
-    "prefetch-msi",
-    prefetch_start,
-    prefetch_done["end_ms"] if prefetch_done["end_ms"] is not None else elapsed_ms(),
-    prefetch_done["rc"] if prefetch_done["rc"] is not None else -1,
-)
 
 if bootstrap_proc.returncode != 0:
     print(f"FAILED bootstrap-only; see {bootstrap_log}", file=sys.stderr)
@@ -226,8 +188,7 @@ else:
 settings_ms = elapsed_ms()
 emit("settings-ready", settings_ms, settings_ms, 0)
 
-# Merge bootstrap substages onto the same axis.
-# Downloads and wineboot overlap from bootstrap_start; installs follow ready-order.
+# Merge bootstrap substages onto the same axis (serial after wineboot start).
 timing_path = Path(env["CYDER_SUPPORT"]) / "Logs" / "bootstrap-timing.jsonl"
 substage_rows = []
 if timing_path.exists():
@@ -251,33 +212,11 @@ if timing_path.exists():
     by_stage = {r["stage"]: r for r in raw}
     wineboot_elapsed = by_stage.get("wineboot", {}).get("elapsed_ms", 0.0)
     artifact_elapsed = by_stage.get("wineboot-artifact-wait", {}).get("elapsed_ms", 0.0)
-    mono_dl_elapsed = by_stage.get("mono-download", {}).get("elapsed_ms", 0.0)
-    gecko_dl_elapsed = by_stage.get("gecko-download", {}).get("elapsed_ms", 0.0)
 
     wineboot_start = bootstrap_start
     wineboot_end = bootstrap_start + wineboot_elapsed
     placements = []
 
-    if "mono-download" in by_stage:
-        placements.append(
-            (
-                "mono-download",
-                bootstrap_start,
-                bootstrap_start + mono_dl_elapsed,
-                by_stage["mono-download"]["status"],
-                mono_dl_elapsed,
-            )
-        )
-    if "gecko-download" in by_stage:
-        placements.append(
-            (
-                "gecko-download",
-                bootstrap_start,
-                bootstrap_start + gecko_dl_elapsed,
-                by_stage["gecko-download"]["status"],
-                gecko_dl_elapsed,
-            )
-        )
     if "wineboot" in by_stage:
         placements.append(
             (
@@ -301,28 +240,23 @@ if timing_path.exists():
             )
         )
 
-    mono_dl_end = bootstrap_start + mono_dl_elapsed if "mono-download" in by_stage else wineboot_end
-    gecko_dl_end = bootstrap_start + gecko_dl_elapsed if "gecko-download" in by_stage else wineboot_end
-    last_install_end = wineboot_end
+    # Stages that may overlap wineboot (e.g. graphics-payload) start at
+    # bootstrap_start; remaining stages follow wineboot serially.
+    overlapping = {"graphics-payload", "graphics-payload-unpack"}
+    last_serial_end = wineboot_end
     for row in raw:
         stage = row["stage"]
-        if stage in {
-            "mono-download",
-            "gecko-download",
-            "wineboot",
-            "wineboot-artifact-wait",
-        }:
+        if stage in {"wineboot", "wineboot-artifact-wait"}:
             continue
         elapsed = row["elapsed_ms"]
-        if stage == "mono-install":
-            start = max(wineboot_end, mono_dl_end, last_install_end)
-        elif stage == "gecko-install":
-            start = max(wineboot_end, gecko_dl_end, last_install_end)
+        if stage in overlapping:
+            start = bootstrap_start
         else:
-            start = last_install_end
+            start = last_serial_end
         end = start + elapsed
         placements.append((stage, start, end, row["status"], elapsed))
-        last_install_end = end
+        if stage not in overlapping:
+            last_serial_end = end
 
     for stage, start, end, status, elapsed in placements:
         emit(f"bootstrap/{stage}", start, end, status, parent="bootstrap-only")
@@ -337,24 +271,11 @@ if timing_path.exists():
         )
 
 by_name = {s["name"]: s for s in spans}
-prefetch = by_name["prefetch-msi"]
-bootstrap = by_name["bootstrap-only"]
-overlap = (
-    prefetch["start_ms"] < bootstrap["end_ms"]
-    and bootstrap["start_ms"] < prefetch["end_ms"]
-)
-overlap_ms = max(
-    0.0,
-    min(prefetch["end_ms"], bootstrap["end_ms"])
-    - max(prefetch["start_ms"], bootstrap["start_ms"]),
-)
 
 results = {
     "app_proxy": "ensureEnvironment → settings-ready (not NSWindow)",
     "phase_b_app_ui": False,
     "settings_ready_ms": by_name["settings-ready"]["end_ms"],
-    "prefetch_bootstrap_overlap": overlap,
-    "prefetch_bootstrap_overlap_ms": round(overlap_ms, 1),
     "health_checked_from_bootstrap": health_checked,
     "bootstrap_substage": substage_rows,
     "spans": spans,
@@ -377,57 +298,43 @@ lines = [
     "# First-open → Preferences timeline",
     "",
     f"- settings-ready: **{results['settings_ready_ms']:.1f} ms** "
-    f"({results['settings_ready_ms'] / 1000:.2f} s)",
-    f"- prefetch ∥ bootstrap overlap: **{overlap}** "
-    f"({results['prefetch_bootstrap_overlap_ms']:.1f} ms)",
-    f"- healthChecked from bootstrap: `{health_checked}`",
-    "- Phase B App UI instrumentation: **not run**",
+    f"(environment proxy; not NSWindow)",
+    f"- healthChecked from bootstrap: **{health_checked}**",
     "",
     "```mermaid",
     "gantt",
-    "    title First-open → Preferences (dry-run proxy)",
+    "    title First-open Preferences dry-run",
     "    dateFormat X",
     "    axisFormat %s",
-    "    section App path",
 ]
-
-top_names = [
+order = [
     "ensure-engine-only",
     "ensure-graphics-only",
-    "prefetch-msi",
     "bootstrap-only",
     "health-check",
     "settings-ready",
 ]
-for name in top_names:
-    span = by_name.get(name)
-    if not span:
+seen = set()
+for name in order:
+    if name in by_name:
+        seen.add(name)
+        s = by_name[name]
+        lines.append(
+            f"    {gantt_id(name)} :{int(s['start_ms'])},{int(s['end_ms'])}"
+        )
+for s in spans:
+    if s["name"] in seen or s.get("parent"):
         continue
-    start = int(span["start_ms"])
-    # Mermaid gantt needs duration; use at least 1ms for markers.
-    dur = max(1, int(round(span["duration_ms"])))
-    lines.append(f"    {name} :{gantt_id(name)}, {start}, {dur}ms")
-
-lines.append("    section Bootstrap substages")
+    lines.append(
+        f"    {gantt_id(s['name'])} :{int(s['start_ms'])},{int(s['end_ms'])}"
+    )
 for row in substage_rows:
-    name = row["stage"]
-    start = int(row["start_ms"])
-    dur = max(1, int(round(row["elapsed_ms"])))
-    lines.append(f"    {name} :{gantt_id('bs_' + name)}, {start}, {dur}ms")
-
+    name = f"bootstrap/{row['stage']}"
+    lines.append(
+        f"    {gantt_id(name)} :{int(row['start_ms'])},{int(row['end_ms'])}"
+    )
 lines.extend(["```", ""])
 (out / "timeline.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
-
-print(json.dumps(
-    {
-        "settings_ready_ms": results["settings_ready_ms"],
-        "prefetch_bootstrap_overlap": overlap,
-        "prefetch_bootstrap_overlap_ms": results["prefetch_bootstrap_overlap_ms"],
-        "health_checked_from_bootstrap": health_checked,
-    },
-    indent=2,
-))
-print(f"wrote {out / 'spans.jsonl'}")
 print(f"wrote {out / 'results.json'}")
 print(f"wrote {out / 'timeline.md'}")
 PY
