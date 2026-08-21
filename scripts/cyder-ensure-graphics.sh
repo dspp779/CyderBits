@@ -245,6 +245,21 @@ cyder_ensure_dxmt_winemetal_prefix() {
   done
 }
 
+cyder_graphics_link_engine_and_winemetal() {
+  local runtime_root engines_root engine prefix
+  runtime_root="${1:-${CYDER_RUNTIME_ROOT:-$HOME/.cyder/runtime}}"
+  engines_root="${2:-${CYDER_ENGINES:-$runtime_root/Engines}}"
+  engine="$engines_root/${CYDER_ENGINE_NAME:-wine-x86_64}"
+  prefix="${3:-${CYDER_SHARED_PREFIX:-}}"
+
+  mkdir -p "$engine/lib" "$engines_root"
+  cyder_replace_engine_graphics_link \
+    "$engine/lib/dxvk" "$runtime_root/graphics/current-dxvk" "$engine" "$engines_root"
+  cyder_replace_engine_graphics_link \
+    "$engine/lib/dxmt" "$runtime_root/graphics/current-dxmt" "$engine" "$engines_root"
+  cyder_ensure_dxmt_winemetal_prefix "$runtime_root/graphics/current-dxmt" "$prefix"
+}
+
 cyder_ensure_graphics() {
   local source_dir runtime_root engines_root engine prefix
   source_dir="$(cyder_graphics_source_dir)"
@@ -255,13 +270,7 @@ cyder_ensure_graphics() {
 
   cyder_install_graphics_payload "$source_dir" "$runtime_root" dxvk
   cyder_install_graphics_payload "$source_dir" "$runtime_root" dxmt
-
-  mkdir -p "$engine/lib" "$engines_root"
-  cyder_replace_engine_graphics_link \
-    "$engine/lib/dxvk" "$runtime_root/graphics/current-dxvk" "$engine" "$engines_root"
-  cyder_replace_engine_graphics_link \
-    "$engine/lib/dxmt" "$runtime_root/graphics/current-dxmt" "$engine" "$engines_root"
-  cyder_ensure_dxmt_winemetal_prefix "$runtime_root/graphics/current-dxmt" "$prefix"
+  cyder_graphics_link_engine_and_winemetal "$runtime_root" "$engines_root" "$prefix"
 }
 
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then

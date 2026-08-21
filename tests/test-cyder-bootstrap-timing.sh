@@ -45,6 +45,12 @@ assert_contains "$provision_text" "mono_dl_pid" \
   "Mono download must run in the background alongside wineboot"
 assert_contains "$provision_text" "gecko_dl_pid" \
   "Gecko download must run in the background alongside wineboot"
+assert_contains "$provision_text" "gfx_payload_pid" \
+  "graphics payload unpack must run in the background alongside wineboot"
+assert_contains "$provision_text" "graphics-payload" \
+  "provision must time graphics payload unpack"
+assert_contains "$provision_text" "graphics-winemetal" \
+  "provision must time engine graphics link + winemetal after prefix exists"
 # Downloads start before wineboot; wineboot must not wait for both to finish.
 assert_contains "$provision_text" "cyder_init_bottle" \
   "provision must still wineboot the prefix"
