@@ -118,12 +118,10 @@ assert_not_contains "$source_text" 'state.needsEngine || enginePresent' \
   "a current engine tree must not force ensure-engine-only"
 assert_contains "$source_text" '.cyder-engine-signed' \
   "missing ad-hoc sign marker must still count as needsEngine"
+assert_not_contains "$source_text" 'prefetchBootstrapMSI(context: context)' \
+  "settings-mode must not prefetch Wine Mono/Gecko MSI during bootstrap"
 assert_not_contains "$source_text" 'operation: "templates-ready"' \
   "settings-mode must not run the removed templates-ready probe"
-assert_contains "$source_text" 'prefetchBootstrapMSI(context: context)' \
-  "settings-mode should start MSI prefetch before bootstrap"
-assert_contains "$source_text" 'cyder-prefetch-bootstrap-msi.sh' \
-  "MSI prefetch should call the bundled prefetch helper script"
 assert_contains "$source_text" 'if !bootstrapHealthChecked && bootstrapNeeded' \
   "subsequent settings opens must not probe wine cmd when the prefix is already ready"
 run_phased_text="$(awk '

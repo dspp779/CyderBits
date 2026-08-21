@@ -29,7 +29,7 @@
 | `verify-bluecg.sh` | G1–G4 smoke 與 playbook |
 | `enable-mac-retina-hires.sh` | RetinaMode + LogPixels=192（`--off` 還原） |
 | `configure-mshtml.sh` | prefix 層級啟用/停用 mshtml |
-| `install-wine-mono.sh` | 安裝 wine-mono（BlueLauncher .NET） |
+| `install-wine-mono.sh` | 手動安裝 wine-mono（.NET）；bootstrap 不再自動執行 |
 | `install-libarchive-tar.sh` | 安裝 GnuWin bsdtar 為 prefix `syswow64/tar.exe` |
 | `resolve-wine-locale.sh` | 解析 Wine 用 locale（輸出至 stdout） |
 
@@ -48,7 +48,7 @@
 | `cyder-ensure-graphics.sh` | 將 app `Resources/graphics/` payload 依 version／SHA-256 安裝到 runtime，更新 `current-dxvk`／`current-dxmt`、建立 engine `lib` 相對 symlink，並以目前 DXMT payload 覆蓋 prefix 的 64/32 位元 `winemetal.dll` |
 | `cyder-migrate-graphics-prefix.sh` | 偵測舊 Cyder 拷入的 DXVK／DXMT DLL，還原 Wine 內建 `d3d*`／`dxgi`、清理舊 payload marker；保留 `winemetal.dll`，由 ensure-graphics 以目前 DXMT 版本覆蓋；不修改 DllOverrides registry |
 | `cyder-measure-startup.sh` | 量測 Cyder 啟動各階段 wall time（後續開啟、EXE/URI 前置檢查；`--first-prefix` 在隔離 support 做首次 prefix bootstrap，並匯總 `bootstrap-timing.jsonl` 子階段） |
-| `cyder-prefetch-bootstrap-msi.sh` | 預先下載 pinned Wine Mono/Gecko MSI（`--download-only`），可在 bootstrap 前與 engine 解包並行 |
+| `cyder-prefetch-bootstrap-msi.sh` | 預先下載 pinned Wine Mono/Gecko MSI（`--download-only`）；初始化不再安裝這兩個元件，此腳本僅供手動／量測 |
 | `cyder-winetricks.sh` | 以 Cyder engine 的 unattended CLI 安裝固定版 Winetricks 元件；目標為 SharedPrefix，供 Cyder 原生元件選擇器呼叫 |
 | `cyder_app_main.swift` | 編譯為 `Cyder.app/Contents/MacOS/Cyder`（Universal）；無 `.exe` 時顯示設定頁，有 `.exe` 時直接啟動 Wine，收到 same-prefix 的 `ActivatingAppPID` Foreground 通知後 activate 並退出 |
 | `create-cyder-pid-test-app.sh` | 建立 `dist/CyderPIDTest.app` Universal 測試工具 |
@@ -77,7 +77,7 @@ create-cyder-app.sh
     → bundle-wine-dylibs.sh, sign-wine.sh, strip-wine-install.sh
     → dist/artifacts/graphics/（由 pack-graphics-payloads.sh 預先產生）
     → cyder_launcher.sh（執行時）
-    → install-wine-mono.sh, install-libarchive-tar.sh, enable-mac-retina-hires.sh（bootstrap）
+    → install-libarchive-tar.sh, enable-mac-retina-hires.sh（bootstrap；Mono/Gecko 改由 Wine 需要時提示安裝）
 
 create-cyderbits-app.sh
     → bundle-wine-dylibs.sh, sign-wine.sh, strip-wine-install.sh

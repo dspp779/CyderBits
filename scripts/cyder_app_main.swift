@@ -1158,7 +1158,6 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             || environmentState(context: context).needsBootstrap
         var bootstrapHealthChecked = false
         if bootstrapNeeded {
-            prefetchBootstrapMSI(context: context)
             CyderDiagnostics.shared.enter(.bootstrap)
             showSetup("正在準備遊戲環境…")
             let result = runLauncher(
@@ -1370,27 +1369,6 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
     private func graphicsPayloadsPresent() -> Bool {
         let capabilities = CyderGraphicsCapabilities.current(engineRoot: CyderPaths.engine)
         return capabilities.hasDxvk || capabilities.hasDxmt
-    }
-
-    private func prefetchBootstrapMSI(context: CyderLaunchContext) {
-        let prefetchScript = URL(fileURLWithPath: context.launcher)
-            .deletingLastPathComponent()
-            .appendingPathComponent("cyder-prefetch-bootstrap-msi.sh")
-        guard FileManager.default.isReadableFile(atPath: prefetchScript.path) else {
-            return
-        }
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/bin/bash")
-        process.arguments = [prefetchScript.path]
-        process.environment = context.environment
-        process.standardOutput = FileHandle.nullDevice
-        process.standardError = FileHandle.nullDevice
-        do {
-            try process.run()
-            CyderDiagnostics.shared.info("bootstrap MSI prefetch started")
-        } catch {
-            CyderDiagnostics.shared.info("bootstrap MSI prefetch skipped: \(error.localizedDescription)")
-        }
     }
 
     private func graphicsPayloadNeedsInstall(context: CyderLaunchContext) -> Bool {

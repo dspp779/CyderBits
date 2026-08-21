@@ -117,8 +117,6 @@ if [[ "$RUN_FIRST_PREFIX" -eq 1 ]]; then
   FIRST_SUPPORT="$OUT/first-support"
   mkdir -p "$FIRST_SUPPORT"
   export CYDER_SUPPORT="$FIRST_SUPPORT"
-  time_cmd "first-prefetch-msi" \
-    bash "$ROOT/scripts/cyder-prefetch-bootstrap-msi.sh"
   time_cmd "first-ensure-engine" \
     bash "$LAUNCHER" --engine-src "$ENGINE_SRC" --ensure-engine-only
   time_cmd "first-ensure-graphics" \
@@ -180,7 +178,6 @@ summary = {
         "exe-marker-stat": group("exe-marker-stat"),
         "uri-scan-live": group("uri-scan-live"),
         "uri-scan-fixture": group("uri-scan-fixture"),
-        "first-prefetch-msi": group("first-prefetch-msi"),
         "first-ensure-engine": group("first-ensure-engine"),
         "first-ensure-graphics": group("first-ensure-graphics"),
         "first-bootstrap": group("first-bootstrap"),

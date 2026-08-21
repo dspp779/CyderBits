@@ -2002,110 +2002,40 @@ cyder_template_engine_version() {
   printf '%s\n' "$version"
 }
 
-# Provision any Wine prefix with the current-engine baseline: wineboot, mono,
-# gecko, libarchive, and golden registry settings. Pre-1.0.0 shared/profile
-# bottles use this directly; template publish/clone is deferred until 1.0.0.
+# Provision any Wine prefix with the current-engine baseline: wineboot,
+# libarchive, and golden registry settings. Wine Mono / Gecko are left to
+# Wine's own addon dialogs (mscoree / mshtml) when an app first needs them.
+# Pre-1.0.0 shared/profile bottles use this directly; template publish/clone
+# is deferred until 1.0.0.
 cyder_provision_prefix_baseline() {
   local wine_bin="$1" engine_root="$2" prefix="$3"
   local component_status=0
-  local mono_ver="${WINE_MONO_VERSION:-10.4.1}"
-  local gecko_ver="${WINE_GECKO_VERSION:-2.47.4}"
   CYDER_BOOTSTRAP_HEALTH_CHECKED=0
   CYDER_BOOTSTRAP_STAGE_STACK=()
   CYDER_BOOTSTRAP_T0_STACK=()
   CYDER_PROVISION_DID_GRAPHICS=0
 
-  # Mono/Gecko MSI download runs in parallel with wineboot. After wineboot
-  # succeeds, install whichever component is ready first (mutex: one msiexec).
-  # Install hot path still avoids download/checksum when MSI is already local.
-  [[ -f "$CYDER_SCRIPTS/install-wine-mono.sh" ]] || {
-    echo "Baseline component installer is missing: install-wine-mono.sh" >&2
-    return 1
-  }
-  [[ -f "$CYDER_SCRIPTS/install-wine-gecko.sh" ]] || {
-    echo "Baseline component installer is missing: install-wine-gecko.sh" >&2
-    return 1
-  }
-
-  local mono_dl_pid="" gecko_dl_pid=""
-  local mono_dl_t0=0 gecko_dl_t0=0
-  local mono_dl_status=0 gecko_dl_status=0
-  local mono_dl_done=0 gecko_dl_done=0
-  local mono_installed=0 gecko_installed=0
-  local mono_dl_log gecko_dl_log
-  local dl_now=0 dl_elapsed=0
   local gfx_payload_pid="" gfx_payload_t0=0 gfx_payload_status=0
-  local gfx_payload_log=""
-  local mono_dl_stamp gecko_dl_stamp gfx_payload_stamp
+  local gfx_payload_log="" gfx_payload_stamp
+  local dl_elapsed=0
   local log_dir="${CYDER_SUPPORT:-}/Logs"
   [[ -n "${CYDER_SUPPORT:-}" ]] && mkdir -p "$log_dir"
-  mono_dl_log="${log_dir:-/tmp}/mono-download-$$.log"
-  gecko_dl_log="${log_dir:-/tmp}/gecko-download-$$.log"
   gfx_payload_log="${log_dir:-/tmp}/graphics-payload-$$.log"
-  mono_dl_stamp="${mono_dl_log}.stamp"
-  gecko_dl_stamp="${gecko_dl_log}.stamp"
   gfx_payload_stamp="${gfx_payload_log}.stamp"
 
   cyder_provision_kill_downloads() {
     local pid
-    for pid in "$mono_dl_pid" "$gecko_dl_pid" "$gfx_payload_pid"; do
+    for pid in "$gfx_payload_pid"; do
       [[ -n "$pid" ]] || continue
       kill -TERM "$pid" 2>/dev/null || true
     done
     sleep 0.2
-    for pid in "$mono_dl_pid" "$gecko_dl_pid" "$gfx_payload_pid"; do
+    for pid in "$gfx_payload_pid"; do
       [[ -n "$pid" ]] || continue
       kill -KILL "$pid" 2>/dev/null || true
       wait "$pid" 2>/dev/null || true
     done
   }
-
-  if [[ -f "$prefix/.cyder-mono-$mono_ver" ]]; then
-    mono_dl_done=1
-    mono_installed=1
-  else
-    cyder_report_progress "正在準備元件下載…" "mono-download"
-    if [[ -n "${CYDER_DIAGNOSTIC_SESSION_ID:-}" || "${CYDER_DIAGNOSTIC_VERBOSE:-0}" == 1 ]]; then
-      printf 'diagnostic event=bootstrap-substage session=%s stage=%s phase=begin\n' \
-        "${CYDER_DIAGNOSTIC_SESSION_ID:-cli}" "mono-download" >&2
-    fi
-    mono_dl_t0="$(cyder_now_ms)"
-    rm -f "$mono_dl_stamp"
-    (
-      set +e
-      (
-        export WINEPREFIX="$prefix" WINE_INSTALL="$engine_root" CYDER_DOWNLOADS="$CYDER_DOWNLOADS"
-        bash "$CYDER_SCRIPTS/install-wine-mono.sh" --download-only
-      ) >"$mono_dl_log" 2>&1
-      status=$?
-      printf '%s %s\n' "$status" "$(cyder_now_ms)" >"$mono_dl_stamp"
-      exit "$status"
-    ) &
-    mono_dl_pid=$!
-  fi
-
-  if [[ -f "$prefix/.cyder-gecko-$gecko_ver" ]]; then
-    gecko_dl_done=1
-    gecko_installed=1
-  else
-    if [[ -n "${CYDER_DIAGNOSTIC_SESSION_ID:-}" || "${CYDER_DIAGNOSTIC_VERBOSE:-0}" == 1 ]]; then
-      printf 'diagnostic event=bootstrap-substage session=%s stage=%s phase=begin\n' \
-        "${CYDER_DIAGNOSTIC_SESSION_ID:-cli}" "gecko-download" >&2
-    fi
-    gecko_dl_t0="$(cyder_now_ms)"
-    rm -f "$gecko_dl_stamp"
-    (
-      set +e
-      (
-        export WINEPREFIX="$prefix" WINE_INSTALL="$engine_root" CYDER_DOWNLOADS="$CYDER_DOWNLOADS"
-        bash "$CYDER_SCRIPTS/install-wine-gecko.sh" --download-only
-      ) >"$gecko_dl_log" 2>&1
-      status=$?
-      printf '%s %s\n' "$status" "$(cyder_now_ms)" >"$gecko_dl_stamp"
-      exit "$status"
-    ) &
-    gecko_dl_pid=$!
-  fi
 
   # DXVK/DXMT payload unpack does not need a bottle; overlap with wineboot.
   if declare -F cyder_install_graphics_payload >/dev/null 2>&1 &&
@@ -2142,96 +2072,6 @@ cyder_provision_prefix_baseline() {
     return "$component_status"
   }
   cyder_bootstrap_substage_end wineboot 0
-
-  # Ready-order install: after wineboot, whichever MSI finishes first installs
-  # first. Only one msiexec at a time (single-threaded scheduler).
-  while (( mono_installed == 0 || gecko_installed == 0 )); do
-    if (( mono_dl_done == 0 )) && [[ -n "$mono_dl_pid" ]]; then
-      if ! kill -0 "$mono_dl_pid" 2>/dev/null; then
-        wait "$mono_dl_pid" || true
-        mono_dl_status="$(cyder_bg_job_status_from_stamp "$mono_dl_stamp" "1")"
-        mono_dl_done=1
-        dl_elapsed="$(cyder_bg_job_elapsed_ms "$mono_dl_t0" "$mono_dl_stamp")"
-        cyder_bootstrap_substage_record mono-download "$dl_elapsed" "$mono_dl_status"
-        mono_dl_pid=""
-        if (( mono_dl_status != 0 )); then
-          echo "Wine Mono download failed (see $mono_dl_log)" >&2
-          cyder_provision_kill_downloads
-          cyder_stop_prefix_wineserver "$wine_bin" "$prefix" || true
-          return "$mono_dl_status"
-        fi
-      fi
-    fi
-
-    if (( gecko_dl_done == 0 )) && [[ -n "$gecko_dl_pid" ]]; then
-      if ! kill -0 "$gecko_dl_pid" 2>/dev/null; then
-        wait "$gecko_dl_pid" || true
-        gecko_dl_status="$(cyder_bg_job_status_from_stamp "$gecko_dl_stamp" "1")"
-        gecko_dl_done=1
-        dl_elapsed="$(cyder_bg_job_elapsed_ms "$gecko_dl_t0" "$gecko_dl_stamp")"
-        cyder_bootstrap_substage_record gecko-download "$dl_elapsed" "$gecko_dl_status"
-        gecko_dl_pid=""
-        if (( gecko_dl_status != 0 )); then
-          echo "Wine Gecko download failed (see $gecko_dl_log)" >&2
-          cyder_provision_kill_downloads
-          cyder_stop_prefix_wineserver "$wine_bin" "$prefix" || true
-          return "$gecko_dl_status"
-        fi
-      fi
-    fi
-
-    if (( mono_dl_done == 1 && mono_installed == 0 && mono_dl_status == 0 )); then
-      if [[ -f "$prefix/.cyder-mono-$mono_ver" ]]; then
-        cyder_report_progress "Wine Mono 已就緒，略過安裝…" "mono-install"
-        cyder_bootstrap_substage_begin mono-install
-        cyder_bootstrap_substage_end mono-install 0
-      else
-        cyder_report_progress "正在安裝 .NET（Wine Mono）…" "mono-install"
-        cyder_bootstrap_substage_begin mono-install
-        (
-          export WINEPREFIX="$prefix" WINE_INSTALL="$engine_root" CYDER_DOWNLOADS="$CYDER_DOWNLOADS"
-          bash "$CYDER_SCRIPTS/install-wine-mono.sh"
-        ) || component_status=$?
-        cyder_bootstrap_substage_end mono-install "$component_status"
-        if (( component_status != 0 )); then
-          cyder_provision_kill_downloads
-          return "$component_status"
-        fi
-      fi
-      mono_installed=1
-      continue
-    fi
-
-    if (( gecko_dl_done == 1 && gecko_installed == 0 && gecko_dl_status == 0 )); then
-      if [[ -f "$prefix/.cyder-gecko-$gecko_ver" ]]; then
-        cyder_report_progress "Wine Gecko 已就緒，略過安裝…" "gecko-install"
-        cyder_bootstrap_substage_begin gecko-install
-        cyder_bootstrap_substage_end gecko-install 0
-      else
-        cyder_report_progress "正在安裝瀏覽器元件（Gecko）…" "gecko-install"
-        cyder_bootstrap_substage_begin gecko-install
-        (
-          export WINEPREFIX="$prefix" WINE_INSTALL="$engine_root" CYDER_DOWNLOADS="$CYDER_DOWNLOADS"
-          bash "$CYDER_SCRIPTS/install-wine-gecko.sh"
-        ) || component_status=$?
-        cyder_bootstrap_substage_end gecko-install "$component_status"
-        if (( component_status != 0 )); then
-          cyder_provision_kill_downloads
-          return "$component_status"
-        fi
-      fi
-      gecko_installed=1
-      continue
-    fi
-
-    if [[ -n "$mono_dl_pid" ]] || [[ -n "$gecko_dl_pid" ]]; then
-      sleep 0.2
-      continue
-    fi
-
-    echo "Bootstrap scheduler stalled waiting for Mono/Gecko" >&2
-    return 1
-  done
 
   if [[ -f "$CYDER_SCRIPTS/install-libarchive-tar.sh" ]]; then
     if [[ -f "$prefix/drive_c/windows/syswow64/tar.exe" ]]; then

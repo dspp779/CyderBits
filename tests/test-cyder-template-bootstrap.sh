@@ -46,6 +46,8 @@ chmod +x "$TMP/bin/arch" "$TMP/engine/bin/"* "$TMP/scripts/"*
 
 export PATH="$TMP/bin:$PATH"
 export CYDER_WINEBOOT_TIMEOUT=5 CYDER_ENGINE_VERSION_LABEL='wine crossover test'
+# Avoid picking up dist/artifacts/graphics during this unit test.
+export CYDER_GRAPHICS_SRC="$TMP/missing-graphics"
 source "$ROOT/scripts/cyder-common.sh"
 cyder_wine_locale_exports() { :; }
 
@@ -58,8 +60,8 @@ assert_eq "${CYDER_BOOTSTRAP_HEALTH_CHECKED:-0}" "1" \
 
 assert test ! -e "$support/templates/pristine/manifest.json"
 assert test ! -e "$support/templates/golden/manifest.json"
-assert test -f "$CYDER_SHARED_PREFIX/.cyder-mono-10.4.1"
-assert test -f "$CYDER_SHARED_PREFIX/.cyder-gecko-2.47.4"
+assert test ! -e "$CYDER_SHARED_PREFIX/.cyder-mono-10.4.1"
+assert test ! -e "$CYDER_SHARED_PREFIX/.cyder-gecko-2.47.4"
 assert test -f "$CYDER_SHARED_PREFIX/.cyder-golden-baseline-v2"
 assert test -f "$CYDER_SHARED_PREFIX/.golden-only"
 assert test -f "$CYDER_BOOTSTRAP_MARKER"

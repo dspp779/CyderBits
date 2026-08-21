@@ -37,14 +37,14 @@ provision_text="$(awk '
 ' "$ROOT/scripts/cyder-common.sh")"
 assert_contains "$provision_text" "cyder_bootstrap_substage_begin wineboot" \
   "provision must time wineboot"
-assert_contains "$provision_text" "mono-download" \
-  "provision must time Mono download separately from install"
-assert_contains "$provision_text" "gecko-download" \
-  "provision must time Gecko download separately from install"
-assert_contains "$provision_text" "mono_dl_pid" \
-  "Mono download must run in the background alongside wineboot"
-assert_contains "$provision_text" "gecko_dl_pid" \
-  "Gecko download must run in the background alongside wineboot"
+assert_not_contains "$provision_text" "mono-download" \
+  "provision must not download Wine Mono during bootstrap"
+assert_not_contains "$provision_text" "gecko-download" \
+  "provision must not download Wine Gecko during bootstrap"
+assert_not_contains "$provision_text" "install-wine-mono.sh" \
+  "provision must not msiexec Wine Mono"
+assert_not_contains "$provision_text" "install-wine-gecko.sh" \
+  "provision must not msiexec Wine Gecko"
 assert_contains "$provision_text" "gfx_payload_pid" \
   "graphics payload unpack must run in the background alongside wineboot"
 assert_contains "$provision_text" "graphics-payload" \
@@ -54,28 +54,15 @@ assert_contains "$provision_text" "graphics-winemetal" \
 assert_contains "$common_text" "cyder_bg_job_elapsed_ms" \
   "parallel substages must record elapsed from completion stamps, not reap time"
 assert_contains "$provision_text" ".stamp" \
-  "background download/payload jobs must write completion stamps"
-# Downloads start before wineboot; wineboot must not wait for both to finish.
+  "background payload jobs must write completion stamps"
 assert_contains "$provision_text" "cyder_init_bottle" \
   "provision must still wineboot the prefix"
-# Ready-order install after wineboot (mutex scheduler).
-assert_contains "$provision_text" "mono-install" \
-  "provision must still install Mono after wineboot"
-assert_contains "$provision_text" "gecko-install" \
-  "provision must still install Gecko after wineboot"
-assert_contains "$provision_text" "Bootstrap scheduler stalled" \
-  "scheduler must fail closed if Mono/Gecko never become ready"
-# msiexec hot path: install scripts without a fresh blocking --download-only
-# between wineboot success and the install invocations.
-wineboot_to_install="$(
-  awk '
-    /cyder_bootstrap_substage_end wineboot/ { found = 1 }
-    found { print }
-    /cyder_bootstrap_substage_begin mono-install|cyder_bootstrap_substage_begin gecko-install/ { exit }
-  ' <<<"$provision_text"
-)"
-assert_not_contains "$wineboot_to_install" '--download-only' \
-  "no blocking --download-only may sit on the wineboot→install hot path"
+assert_not_contains "$provision_text" "mono-install" \
+  "provision must not install Mono after wineboot"
+assert_not_contains "$provision_text" "gecko-install" \
+  "provision must not install Gecko after wineboot"
+assert_not_contains "$provision_text" "Bootstrap scheduler stalled" \
+  "Mono/Gecko scheduler must be gone from provision"
 
 # P3: structured progress
 assert_contains "$common_text" 'cyder_report_progress' \
@@ -93,10 +80,10 @@ assert_contains "$progress_helper" "elapsed_ms=" \
   "progress file must record elapsed_ms= key"
 
 # P4: idempotent skips
-assert_contains "$provision_text" ".cyder-mono-" \
-  "Mono install must skip when .cyder-mono marker exists"
-assert_contains "$provision_text" ".cyder-gecko-" \
-  "Gecko install must skip when .cyder-gecko marker exists"
+assert_not_contains "$provision_text" ".cyder-mono-" \
+  "provision must not skip/install via .cyder-mono markers"
+assert_not_contains "$provision_text" ".cyder-gecko-" \
+  "provision must not skip/install via .cyder-gecko markers"
 assert_contains "$provision_text" "syswow64/tar.exe" \
   "tar setup must skip when tar.exe already exists"
 assert_contains "$provision_text" "略過" \
@@ -139,11 +126,11 @@ set -e
 assert_eq "$timing_status" "0" "bootstrap substage timing helpers should succeed"
 
 CYDER_PROGRESS_FILE="$TMP/progress.txt"
-cyder_report_progress "正在安裝 .NET（Wine Mono）…" "mono-install" "4820"
+cyder_report_progress "正在建立 Windows 環境…" "wineboot" "4820"
 progress_out="$(cat "$CYDER_PROGRESS_FILE")"
-assert_contains "$progress_out" "stage=mono-install" \
+assert_contains "$progress_out" "stage=wineboot" \
   "progress file must include the active stage"
-assert_contains "$progress_out" "label=正在安裝 .NET（Wine Mono）…" \
+assert_contains "$progress_out" "label=正在建立 Windows 環境…" \
   "progress file must include the user-facing label"
 assert_contains "$progress_out" "elapsed_ms=4820" \
   "progress file must include elapsed_ms"
@@ -188,7 +175,7 @@ success_k_hits="$(
   ' <<<"$wineboot_text"
 )"
 assert_eq "$success_k_hits" "" \
-  "wineboot success path must keep wineserver alive for Mono/Gecko"
+  "wineboot success path must keep wineserver alive for the next bootstrap step"
 
 # Parallel job stamps must measure completion time, not reap time.
 stamp="$TMP/bg.stamp"

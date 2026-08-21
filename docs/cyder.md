@@ -70,7 +70,7 @@ bash scripts/cyder_launcher.sh --engine-src install/wine-x86_64 /path/to/game.ex
 # 只印出路徑，不裝引擎、不啟動
 bash scripts/cyder_launcher.sh /path/to/game.exe --dry-run
 
-# 只跑 bootstrap（mono、tar、高解析度）
+# 只跑 bootstrap（wineboot、tar、高解析度；不含 Mono/Gecko）
 bash scripts/cyder_launcher.sh --bootstrap-only --engine-src install/wine-x86_64
 ```
 
@@ -150,8 +150,8 @@ Cyder 目前使用一個預設 Wine bottle，所有 `.exe` 共用同一套 Windo
 
 ~/Library/Application Support/Cyder/
   bottles/shared/            # 預設 WINEPREFIX
-    drive_c/windows/mono/    # wine-mono（.NET）
     drive_c/windows/syswow64/tar.exe   # GnuWin bsdtar（大 zip 解壓）
+    # wine-mono / wine-gecko：需要時由 Wine 提示安裝，不在 bootstrap 預裝
     system.reg / user.reg
     .cyder-bootstrap-v1      # bootstrap 完成 marker
   Addons/
@@ -162,7 +162,7 @@ Cyder 目前使用一個預設 Wine bottle，所有 `.exe` 共用同一套 Windo
 
 1. 從 app 內 `engine-<version>.tar.zst` 解壓引擎至 `Engines/`（若尚未安裝或版本不同）
 2. 對 `bottles/shared` 執行 wineboot：空 bottle 用 `-i`，既有 bottle 用 `-u`（engine 升級時保留 shared，只清 `.cyder-bootstrap-v1` 以觸發再 provision；需要乾淨環境時用偏好設定「重建 Windows 遊戲環境」）
-3. 安裝 **wine-mono**、**wine-gecko**、**syswow64/tar.exe**（含 libarchive DLL）
+3. 安裝 **syswow64/tar.exe**（含 libarchive DLL）。Wine Mono／Gecko 不在初始化安裝；當程式第一次載入 `mscoree`（.NET）或 `mshtml`（內嵌網頁）時，Wine 會跳出元件安裝提示。
 4. 寫入 **Mac 高解析度** registry（RetinaMode + LogPixels=192）與其他 Golden baseline 設定
 5. 套用進階設定，並為遊戲畫面主程式 `bluecg.exe` 寫入專屬的 `ddraw=n,b` DLL override
 6. 寫入 `.cyder-bootstrap-v1`；之後啟動跳過上述步驟
@@ -257,7 +257,7 @@ BlueCG（魔力寶貝）可透過 Cyder 直接開 `BlueLauncher.exe`；遊戲目
 | 畫面糊 / 視窗太小 | bootstrap 已啟用高解析度；可對 `bottles/shared` 執行 `bash scripts/enable-mac-retina-hires.sh` |
 | 大 zip 解壓失敗 / 找不到 tar | 確認 `bottles/shared/drive_c/windows/syswow64/tar.exe` 存在；刪除 `.cyder-bootstrap-v1` 後重開 Cyder 觸發 reinstall，或執行 `--bootstrap-only` |
 | 找不到 Wine | 重新開啟 Cyder.app 以安裝共用引擎到 `Engines/` |
-| Gecko 安裝提示 | Cyder 不修改 MSHTML；若遊戲確實不需要內嵌網頁，可對 `bottles/shared` 執行 `bash scripts/configure-mshtml.sh --disable` |
+| Gecko 安裝提示 | 未預裝時，需要內嵌網頁的程式會觸發 Wine 安裝提示。若不需要，可對 `bottles/shared` 執行 `bash scripts/configure-mshtml.sh --disable` |
 | 多遊戲衝突 / registry 混亂 | 改用 [CyderBits](cyderbits.md) 為該遊戲建立獨立 bottle 的 game `.app` |
 | Dock 圖示 | Cyder 啟動 Wine 程序後即結束；Dock 上顯示的是 Wine / 遊戲視窗 |
 
