@@ -1143,7 +1143,58 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         return (needsEngine, needsBootstrap)
     }
 
+    private func ensureRosettaForEnvironment() -> CyderFailure? {
+        guard CyderRosetta.isAppleSilicon else { return nil }
+        if CyderRosetta.isInstalled { return nil }
+
+        CyderDiagnostics.shared.enter(.rosettaCheck)
+        var response: NSApplication.ModalResponse = .alertSecondButtonReturn
+        onMainThread {
+            let alert = NSAlert()
+            alert.messageText = "需要安裝 Rosetta 2"
+            alert.informativeText =
+                "Rosetta 2 是 Apple 提供的官方元件，讓 Apple Silicon Mac 能執行 x86_64 程式。"
+                + "Cyder 的遊戲執行元件需要它才能運作。"
+                + "若繼續安裝，將代表你同意 Apple 的軟體授權條款。"
+            alert.alertStyle = .informational
+            alert.addButton(withTitle: "安裝")
+            alert.addButton(withTitle: "取消")
+            response = runFrontmostAlert(alert, dockVisible: false)
+        }
+        if response != .alertFirstButtonReturn {
+            return CyderFailure(
+                code: "CYD-ROS-001",
+                stage: .rosettaCheck,
+                summary: "使用者取消安裝 Rosetta 2。",
+                technicalDetails: "user-cancelled-rosetta-install"
+            )
+        }
+
+        showSetup("正在安裝 Rosetta 2…")
+        let installResult: (ok: Bool, detail: String)
+        if Thread.isMainThread {
+            installResult = DispatchQueue.global(qos: .userInitiated).sync {
+                CyderRosetta.installWithAgreedLicense()
+            }
+        } else {
+            installResult = CyderRosetta.installWithAgreedLicense()
+        }
+        hideSetup()
+        if !installResult.ok {
+            return CyderFailure(
+                code: "CYD-ROS-001",
+                stage: .rosettaCheck,
+                summary: "無法安裝或完成 Rosetta 2。請稍後再試，或在「終端機」手動安裝。",
+                technicalDetails: installResult.detail
+            )
+        }
+        return nil
+    }
+
     private func ensureEnvironment(context: CyderLaunchContext) -> CyderFailure? {
+        if let rosettaFailure = ensureRosettaForEnvironment() {
+            return rosettaFailure
+        }
         let state = environmentState(context: context)
 
         // Sidecar version + artifact SHA (and the signed marker) already decide

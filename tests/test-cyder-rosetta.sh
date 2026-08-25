@@ -62,4 +62,14 @@ build="$(cat "$ROOT/scripts/create-cyder-app.sh")"
 assert_contains "$build" 'cyder_rosetta.swift' \
   "app build must compile cyder_rosetta.swift"
 
+app="$(cat "$ROOT/scripts/cyder_app_main.swift")"
+assert_contains "$app" 'CYD-ROS-001' \
+  "app must surface CYD-ROS-001"
+assert_contains "$app" '需要安裝 Rosetta 2' \
+  "app must show consent title"
+assert_contains "$app" 'ensureRosettaForEnvironment' \
+  "ensureEnvironment must call Rosetta gate"
+assert_contains "$app" 'installWithAgreedLicense' \
+  "app must install only after consent path"
+
 echo "PASS test-cyder-rosetta"
