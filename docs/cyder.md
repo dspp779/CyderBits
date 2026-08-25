@@ -44,6 +44,16 @@ Cyder008 引擎包已內含 MoltenVK wait-poll shim 與原始 dylib 配對，以
 
 macOS 10.15 不會載入 `CyderSwift`。首次開啟 Cyder 或在環境尚未完成時開啟 EXE，wrapper 會啟動 Terminal 執行 `cyder_launcher.sh --bootstrap-only`。Terminal 顯示目前安裝階段；同一時間只允許一個 bootstrap。成功後會重新開啟 Cyder 進入 bash 選檔流程，失敗時則保留 Terminal 並指出 `~/Library/Application Support/Cyder/Logs/bootstrap-error.log`。已完成初始化後，EXE 仍由 bash 直接呼叫 Wine，不會經過 Swift。
 
+### Rosetta 2（Apple Silicon）
+
+Apple Silicon 需要 Rosetta 2 才能執行 x86_64 Wine engine。Cyder 依啟動路徑分兩種處理：
+
+| 路徑 | Rosetta 檢查／安裝 |
+|------|-------------------|
+| **Cyder.app 環境準備**（單獨開啟 App、偏好設定、`ensureEnvironment`） | Swift 在 engine 解壓之前偵測；缺 Rosetta 時顯示知情同意對話框，同意後以 `softwareupdate --install-rosetta --agree-to-license` 安裝並顯示進度，成功後才繼續準備引擎。取消或失敗回報 `CYD-ROS-001`（不再誤報為引擎解壓錯誤）。 |
+| **直接開啟 `.exe`**（Finder document event、環境已就緒） | 不在此路徑預先檢查；bash 以 `arch -x86_64 wine` 呼叫，Rosetta 由 macOS 處理。若尚未安裝，可能出現系統提示而非 Cyder 對話框。 |
+| **CLI**（`cyder_launcher.sh`，非 GUI） | 可互動式執行 `softwareupdate --install-rosetta`（不帶 `--agree-to-license`）；或先透過 App 完成安裝。GUI 模式（`CYDER_GUI=1`）下 bash 僅檢查、不安裝。 |
+
 ## 開啟 .exe
 
 單獨開啟 `Cyder.app`、確認設定後，會以載入階段文字依序顯示：**正在儲存設定…** → **正在準備遊戲執行元件…** → **正在準備遊戲環境…** → **正在套用新設定…**。之後從 Finder 開啟 `.exe` 會直接啟動，不顯示設定或準備視窗。
@@ -241,7 +251,7 @@ Finder 或 CLI 可直接用 Cyder 開啟 `.msi`：經 `msiexec /i` 安裝到 sha
 
 直接由 Finder 打開 `.exe` 時，Cyder **不會**安裝、升級或重建環境。若 engine 不存在、版本不同或預設 bottle 尚未完成 bootstrap，只顯示提示，要求使用者先單獨開啟 `Cyder.app` 完成設定與環境建置。
 
-直接啟動 EXE 時不再顯示 loading 或執行額外的初始化流程；若 EXE 已在 argv，外層 wrapper 直接呼叫 `cyder_launcher.sh --launch-exe`。Finder 以 document event 傳入 EXE 時，Swift 只負責接收事件並轉交同一支 bash launcher；Wine 環境與最終 `/usr/bin/arch -x86_64 wine` 呼叫都由 bash 負責。Rosetta 不在此路徑預先檢查，由 `arch -x86_64` 交給 macOS 處理。
+直接啟動 EXE 時不再顯示 loading 或執行額外的初始化流程；若 EXE 已在 argv，外層 wrapper 直接呼叫 `cyder_launcher.sh --launch-exe`。Finder 以 document event 傳入 EXE 時，Swift 只負責接收事件並轉交同一支 bash launcher；Wine 環境與最終 `/usr/bin/arch -x86_64 wine` 呼叫都由 bash 負責。此路徑不在 Cyder 內預先檢查 Rosetta（見上節「Rosetta 2」），由 `arch -x86_64` 交給 macOS 處理。
 
 正式啟動路徑不設定 `WINEDLLOVERRIDES`。DLL 相容性設定存放在 prefix Registry；目前僅為 `bluecg.exe` 設定 `HKCU\Software\Wine\AppDefaults\bluecg.exe\DllOverrides` 的 `ddraw=native,builtin`，不影響 BlueLauncher 或其他 EXE。
 

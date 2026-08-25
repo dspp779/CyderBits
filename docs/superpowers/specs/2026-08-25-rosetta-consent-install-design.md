@@ -1,7 +1,7 @@
 # Rosetta 知情同意安裝（Swift）
 
 日期：2026-08-25  
-狀態：draft（待實作）  
+狀態：implemented  
 範圍：Apple Silicon 上缺 Rosetta 2 時的偵測、使用者同意、安裝與錯誤呈現。
 
 相關：
