@@ -13,9 +13,8 @@ cyder_rosetta_is_installed() {
   arch -x86_64 /usr/bin/true >/dev/null 2>&1
 }
 
-cyder_rosetta_install() {
-  # Let macOS present and own the Rosetta installation/license flow. Cyder
-  # must not silently accept Apple's software license on the user's behalf.
+cyder_rosetta_install_interactive() {
+  # CLI / non-GUI only. Do not auto-accept the license; Swift owns consented GUI install.
   /usr/sbin/softwareupdate --install-rosetta
 }
 
@@ -36,8 +35,15 @@ cyder_ensure_rosetta() {
     return 0
   fi
 
+  # AppKit path installs Rosetta after informed consent. Never run softwareupdate
+  # from GUI bash (no TTY for license; would hang or mis-report as engine errors).
+  if [[ "${CYDER_GUI:-0}" == 1 ]]; then
+    cyder_rosetta_error "請先在 Cyder 對話框同意並完成 Rosetta 2 安裝。"
+    return 1
+  fi
+
   echo "Rosetta 2 is required; installing it with softwareupdate..." >&2
-  if ! cyder_rosetta_install; then
+  if ! cyder_rosetta_install_interactive; then
     cyder_rosetta_error "請先安裝 Rosetta 2，Cyder 才能執行 x86_64 Wine 引擎。"
     return 1
   fi
