@@ -46,4 +46,20 @@ if [[ "$can_run_runtime" == 1 ]]; then
   assert_eq "$status" "0" "--ensure-rosetta-only should succeed when Rosetta is available"
 fi
 
+rosetta_swift="$(cat "$ROOT/scripts/cyder_rosetta.swift")"
+assert_contains "$rosetta_swift" '/usr/sbin/softwareupdate' \
+  "Swift Rosetta helper must invoke softwareupdate"
+assert_contains "$rosetta_swift" '--agree-to-license' \
+  "Swift consented install must pass --agree-to-license"
+assert_contains "$rosetta_swift" 'static var isInstalled' \
+  "Swift must expose Rosetta installed check"
+
+diag="$(cat "$ROOT/scripts/cyder_diagnostics.swift")"
+assert_contains "$diag" 'case rosettaCheck = "rosetta-check"' \
+  "diagnostics must define rosetta-check stage"
+
+build="$(cat "$ROOT/scripts/create-cyder-app.sh")"
+assert_contains "$build" 'cyder_rosetta.swift' \
+  "app build must compile cyder_rosetta.swift"
+
 echo "PASS test-cyder-rosetta"

@@ -7,6 +7,7 @@ enum CyderStage: String {
     case resourceValidation = "resource-validation"
     case engineValidation = "engine-validation"
     case engineExtraction = "engine-extraction"
+    case rosettaCheck = "rosetta-check"
     case bootstrap = "bootstrap"
     case settingsApply = "settings-apply"
     case exeValidation = "exe-validation"
