@@ -4,6 +4,18 @@
 簽署與公證的憑證細節見 [`release-signing.zh-TW.md`](release-signing.zh-TW.md)。  
 引擎專案：[cyder-wine-engine](https://github.com/dspp779/cyder-wine-engine)；邊界見 [`cyder-wine-engine-project.md`](cyder-wine-engine-project.md)。本 repo 是應用層。
 
+## Agent skills
+
+正式發佈請優先載入這些 skills（勿略過 verify）：
+
+| Skill | 路徑 | 用途 |
+|-------|------|------|
+| **cyder-release** | `.agents/skills/cyder-release/` | 編排：engine pack → import → `release-cyder.sh --channel release` → verify |
+| **cyder-release-verify** | `.agents/skills/cyder-release-verify/` | 強制驗收（graphics 體積／非 symlink、zip vs baseline、spctl／stapler） |
+| **engine-release-pack** | `cyder-wine-engine/.agents/skills/engine-release-pack/` | Developer ID 引擎 + 真實 graphics pack（禁 symlink 來源） |
+
+`release` 通道跑完後**必須**執行 verify；失敗則停止、勿發佈 zip。
+
 一鍵腳本：
 
 ```bash

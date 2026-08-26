@@ -14,3 +14,11 @@ patches, host minOS, or `pack-engine-artifact`:
 1. Work in `../cyder-wine-engine` (or `/Users/jjc/cyder-wine-engine`).
 2. Read that repo’s `AGENTS.md` and `docs/incremental-build-and-patches.md`.
 3. Prefer its `.agents/skills/incremental-wine-build` skill when available.
+
+Formal paths:
+
+- **Developer ID / shipping engine pack** → cyder-wine-engine
+  `.agents/skills/engine-release-pack` (never adhoc `SIGN_IDENTITY=-` for release).
+- **Full formal Cyder release** (import pin → notarize → verify) →
+  `.agents/skills/cyder-release` in this repo.
+- **Post-build acceptance only** → `.agents/skills/cyder-release-verify`.
