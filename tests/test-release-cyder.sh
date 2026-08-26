@@ -48,8 +48,8 @@ assert_contains "$script" 'cyder_pick_release_baseline_zip' \
   "release verify must auto-pick a Cyder-*.zip baseline"
 assert_contains "$(cat "$ROOT/scripts/create-cyder-app.sh")" 'cyder-app-version.txt' \
   "App build must read its version from the shared version file"
-assert_eq "$(tr -d '[:space:]' <"$ROOT/config/cyder-app-version.txt")" "0.13.1" \
-  "current 0.13.1 must be the shared App version"
+assert_eq "$(tr -d '[:space:]' <"$ROOT/config/cyder-app-version.txt")" "0.13.2" \
+  "current 0.13.2 must be the shared App version"
 
 # Dry-run test channel should not require Developer ID or network.
 # Inherit a release-looking SIGN_IDENTITY to ensure test still forces ad-hoc.
