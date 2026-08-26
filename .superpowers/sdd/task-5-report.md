@@ -1,57 +1,38 @@
-# Task 5 Report: Settings and game-library menus
+# Task 5 Report: Manual verification checklist
+
+**Branch:** `feat/rosetta-consent-install`  
+**Date:** 2026-08-25  
+**Machine:** Apple Silicon (`arm64`); Rosetta installed
+
+## Checklist
+
+| Item | Result | Notes |
+|------|--------|-------|
+| `bash tests/test-cyder-rosetta.sh` | **PASS** | Exit 0; runtime ensure + static contract checks all green. |
+| Rosetta installed on host | **PASS** | `pkgutil --pkg-info com.apple.pkg.RosettaUpdateAuto` OK; `arch -x86_64 true` exit 0. |
+| Machine **with** Rosetta: Preferences → no consent dialog | **SKIPPED** | Rosetta present; uninstall not attempted. Code review: `ensureRosettaForEnvironment()` returns early when `CyderRosetta.isInstalled` (`cyder_app_main.swift`). |
+| `create-cyder-app.sh` compiles `cyder_rosetta.swift` | **PASS** (partial) | Full pack skipped (requires graphics artifacts / heavy). Confirmed `cyder_rosetta.swift` in `SWIFT_SOURCES` (line 298). `swiftc -typecheck -sdk … -target arm64-apple-macosx11.0 scripts/cyder_rosetta.swift` exit 0. |
+| Rosetta-less Silicon: cancel → `CYD-ROS-001` | **SKIPPED** | No Rosetta-less test machine; uninstalling Rosetta on dev host out of scope. |
+| Rosetta-less Silicon: accept → progress → setup continues | **SKIPPED** | Same as above. |
+
+## Commands run
+
+```bash
+bash tests/test-cyder-rosetta.sh          # PASS
+pkgutil --pkg-info com.apple.pkg.RosettaUpdateAuto
+arch -x86_64 true
+swiftc -typecheck -sdk "$(xcrun --sdk macosx --show-sdk-path)" \
+  -target arm64-apple-macosx11.0 scripts/cyder_rosetta.swift
+```
 
 ## Summary
 
-Replaced temporary `case .dxvk2: return 0` UI stubs with real DXVK 2 menu entries (after DXVK), payload grey-out via `hasDxvk2`, and limiter/HUD gating through `usesDxvkTranslation` for both DXVK families.
+Automated contract tests pass on an Apple Silicon host with Rosetta installed. Static build integration verified (`SWIFT_SOURCES` + typecheck). GUI consent / install / cancel flows remain **unverified manually** until a Rosetta-less Silicon test environment is available.
 
-## TDD Evidence
+## Product changes
 
-### RED (Step 2 — tests fail before implementation)
-
-```bash
-$ bash tests/test-cyder-force-settings-ui.sh
-ASSERT_CONTAINS failed: prefs graphics labels include DXVK 2 after DXVK
-  missing: return ["預設", "D3DMetal", "DXMT", "DXVK", "DXVK 2", "WineD3D"]
-# exit 1
-```
-
-### GREEN (Step 4 — UI + settings tests pass after implementation)
-
-```bash
-$ bash tests/test-cyder-force-settings-ui.sh
-PASS test-cyder-force-settings-ui
-
-$ bash tests/test-cyder-settings-swift.sh
-PASS cyder-settings-harness
-PASS test-cyder-settings-swift
-
-$ bash tests/test-cyder-settings-model.sh
-PASS test-cyder-settings-model
-```
-
-## Files Changed
-
-| File | Change |
-|------|--------|
-| `tests/test-cyder-force-settings-ui.sh` | Assert DXVK 2 titles, `usesDxvkTranslation` limiter/HUD, GPTK hide for `.dxvk2`, tooltip + help strings |
-| `scripts/cyder_settings_ui.swift` | Titles + index map 0…5; `canSelectDxvk2` / `updateDxvk2MenuItemAvailability`; HUD/limiter/GPTK via `usesDxvkTranslation` |
-| `scripts/cyder_game_library_ui.swift` | Titles + index map 0…6; grey-out DXVK 2 at item 5; override/index for `.dxvk2` |
-
-## Behavior
-
-- Prefs menu: `預設`, `D3DMetal`, `DXMT`, `DXVK`, `DXVK 2`, `WineD3D` (index 4 = dxvk2, 5 = wined3d).
-- Game options: `跟隨全域` … `DXVK`, `DXVK 2`, `WineD3D` (index 5 = dxvk2, 6 = wined3d).
-- Missing payload: DXVK 2 disabled with tooltip `需要已安裝的 DXVK 2 圖形元件`; selection falls back like DXMT.
-- Frame-rate limiter + frametimes visibility for both `.dxvk` and `.dxvk2`; GPTK controls also hide for `.dxvk2`.
-- Leaving both DXVK families drops HUD `.dxvk` via `!usesDxvkTranslation`.
-
-## Out of Scope (per brief)
-
-- Pack / ensure / CompatDB
-- Unrelated dirty ogom files not staged
+None.
 
 ## Commit
 
-```
-feat(ui): add DXVK 2 graphics translation option
-```
+None (verify-only task).

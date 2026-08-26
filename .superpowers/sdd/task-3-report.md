@@ -1,54 +1,71 @@
-# Task 3 Report: Stop treating PE stdin extract as the game-library path
+# Task 3 Report: Gate `ensureEnvironment` with consent UI
 
-**Date:** 2026-08-19  
-**Branch:** `feat/exe-icon-winemenubuilder`  
-**Scope:** Test assertion message only (no product code)
+**Branch:** `feat/rosetta-consent-install`  
+**Date:** 2026-08-25
 
-## Objective
+## Summary
 
-Align `tests/test-exe-to-icns.sh` with the new architecture: game-library icon extraction runs through Wine/menubuilder (Tasks 1–2), while `--extract-icon-stdin` remains a CyderBits packager capability—not the game-library path.
+Wired `ensureRosettaForEnvironment()` at the top of `ensureEnvironment` in `cyder_app_main.swift`. Apple Silicon machines missing Rosetta now see an NSAlert consent dialog, then `CyderSetupPanel` during `--agree-to-license` install via `CyderRosetta.installWithAgreedLicense()`. Cancel or install failure returns `CYD-ROS-001` with stage `.rosettaCheck`.
 
-## Changes
+## TDD cycle
 
-### `tests/test-exe-to-icns.sh` (line 14)
+| Step | Result |
+|------|--------|
+| Append Task 3 contract asserts | Done — 4 checks before final `PASS` |
+| RED | `ASSERT_CONTAINS failed: app must surface CYD-ROS-001` |
+| Implement | `ensureRosettaForEnvironment` + gate in `ensureEnvironment` |
+| GREEN | `PASS test-cyder-rosetta` (exit 0) |
 
-**Before:**
-```bash
-assert_contains "$content" '"--extract-icon-stdin"' "game library icon extraction should accept an inherited file descriptor"
+## Files changed
+
+| File | Change |
+|------|--------|
+| `scripts/cyder_app_main.swift` | **New** `ensureRosettaForEnvironment()`; called first in `ensureEnvironment` |
+| `tests/test-cyder-rosetta.sh` | Task 3 app contract asserts (4 checks) |
+
+## Interfaces delivered
+
+```swift
+private func ensureRosettaForEnvironment() -> CyderFailure?
+// Called at start of ensureEnvironment(context:) before needsEngine
 ```
 
-**After:**
-```bash
-assert_contains "$content" '"--extract-icon-stdin"' "CyderBits packager may still extract PE icons from stdin"
-```
+- Consent title: `需要安裝 Rosetta 2`
+- Copy covers: Apple official component, x86_64 need, license acceptance on user's behalf
+- Error: `CYD-ROS-001`, stage `.rosettaCheck`
+- Install runs off main thread when `ensureEnvironment` is invoked from background queue; alert wrapped in `onMainThread` (matches `showSetup` / `showAlert` patterns)
 
-The assertion still verifies that `scripts/cyder_create_game_app.py` exposes `--extract-icon-stdin`; only the human-readable failure message was updated to stop implying the game library uses Python stdin extraction.
+## Contract asserts (Task 3)
 
-## Verification
+- App surfaces `CYD-ROS-001`
+- App shows consent title `需要安裝 Rosetta 2`
+- `ensureEnvironment` references `ensureRosettaForEnvironment`
+- App calls `installWithAgreedLicense` (consent path only)
 
-```bash
-bash tests/test-exe-to-icns.sh
-# PASS test-exe-to-icns
-```
-
-No iconutil integration run in this environment (no `dist/BlueLauncher.exe` and/or `iconutil`); static string assertions all passed.
+Task 1/2 asserts preserved; SKIP-safe runtime block unchanged.
 
 ## Commit
 
 ```
-test: stop treating PE stdin extract as the game-library path
+2348fd4 feat(app): consent and install Rosetta before engine ensure
 ```
 
-Single file: `tests/test-exe-to-icns.sh`. Not pushed.
+## Self-review
 
-## Self-review (Task 3 row)
+**Strengths**
+- Gate runs before engine/graphics/bootstrap per spec.
+- Alert on main via `onMainThread`; setup panel reuses existing helpers.
+- Background install when called from `prepareEnvironmentAndShowSettings` global queue.
+- Contract test GREEN without manual Rosetta uninstall.
 
-| Spec | Status |
-|------|--------|
-| `--extract-icon-stdin` relabeled as CyderBits, not game library | Done |
-| No engine / Dock / CyderBits GUI changes | N/A |
-| No product code changes | Confirmed |
+**Risks / follow-ups**
+- Full `create-cyder-app.sh` compile not run in this task.
+- Manual Apple Silicon test (consent → install → engine) still needed on machine without Rosetta.
+- `presentFailure` path for `CYD-ROS-001` inherits existing alert UX (not exercised here).
 
-## Notes
+**Verification**
 
-Other assertions in the same file (e.g. `def exe_to_png(` with message "game library should reuse the PE icon extractor") were left unchanged per brief; Task 3 only covered the `--extract-icon-stdin` message.
+```bash
+bash tests/test-cyder-rosetta.sh
+# PASS test-cyder-rosetta
+```
