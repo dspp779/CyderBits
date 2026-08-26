@@ -306,14 +306,11 @@ cyder_reset_shared_prefix() {
   cyder_remove_path "$CYDER_SHARED_PREFIX"
 }
 
-# Engine upgrades keep the shared bottle; clear the bootstrap marker so the next
-# open re-runs provision (wineboot -u + baseline). Users can still wipe via
-# Preferences → 重建 Windows 遊戲環境.
+# Engine upgrades keep the shared bottle and its bootstrap marker. Marker
+# records the engine label the bottle was last provisioned for; bootstrap
+# compares that to the current engine and runs wineboot -u in place on mismatch.
+# Stale template bottles (pre-1.0.0) are still dropped here.
 cyder_invalidate_shared_bootstrap_for_engine_upgrade() {
-  if [[ -f "${CYDER_SHARED_PREFIX:-}/.cyder-bootstrap-v1" ]]; then
-    echo "Engine upgrade: keeping shared bottle; clearing bootstrap marker for wineboot -u: $CYDER_SHARED_PREFIX" >&2
-    rm -f "$CYDER_SHARED_PREFIX/.cyder-bootstrap-v1"
-  fi
   if [[ -n "${CYDER_SUPPORT:-}" && -e "$CYDER_SUPPORT/templates" ]]; then
     echo "Removing stale template bottles: $CYDER_SUPPORT/templates" >&2
     cyder_remove_path "$CYDER_SUPPORT/templates"
@@ -2038,7 +2035,7 @@ cyder_rebuild_shared_prefix() {
     echo "Prefix rebuild failed while provisioning; no bottle remains." >&2
     return 1
   fi
-  printf 'revision=%s\n' "${CYDER_TEMPLATE_REVISION:-1}" >"$CYDER_BOOTSTRAP_MARKER"
+  cyder_write_bootstrap_marker "$(cyder_current_bootstrap_engine_label "$engine_root")"
   echo "Prefix rebuild completed: $active_prefix" >&2
 }
 
@@ -2326,7 +2323,7 @@ cyder_clone_golden_to_shared() {
   }
   CYDER_BOOTSTRAP_HEALTH_CHECKED=0
   cyder_profile_clone_bottle "$golden" "$CYDER_SHARED_PREFIX" || return $?
-  printf 'revision=%s\n' "$CYDER_TEMPLATE_REVISION" >"$CYDER_BOOTSTRAP_MARKER"
+  cyder_write_bootstrap_marker "$(cyder_current_bootstrap_engine_label "")"
   cyder_health_check_prefix "$wine_bin" "$CYDER_SHARED_PREFIX" || return $?
   CYDER_BOOTSTRAP_HEALTH_CHECKED=1
 }
@@ -2972,17 +2969,67 @@ cyder_has_running_exes() {
   return 1
 }
 
+# Resolve the engine label bootstrap should stamp / compare against.
+cyder_current_bootstrap_engine_label() {
+  local engine_root="${1:-}"
+  local label=""
+  if [[ -n "${CYDER_ENGINE_VERSION_LABEL:-}" ]]; then
+    label="$(cyder_engine_version_label_trim "$CYDER_ENGINE_VERSION_LABEL")"
+  fi
+  if [[ -z "$label" && -n "$engine_root" ]]; then
+    label="$(cyder_read_installed_engine_version "$engine_root" 2>/dev/null || true)"
+  fi
+  if [[ -z "$label" && -n "$engine_root" && -x "$engine_root/bin/wine" ]]; then
+    label="$(cyder_format_engine_version_from_wine "$engine_root/bin/wine" 2>/dev/null || true)"
+  fi
+  printf '%s\n' "$label"
+}
+
+# engine= line from .cyder-bootstrap-v1 (empty when absent / legacy marker).
+cyder_bootstrap_marker_engine() {
+  local marker="${1:-$CYDER_BOOTSTRAP_MARKER}"
+  local line=""
+  [[ -f "$marker" ]] || return 0
+  line="$(awk -F= '$1 == "engine" { print $2; exit }' "$marker" 2>/dev/null || true)"
+  cyder_engine_version_label_trim "$line"
+}
+
+cyder_write_bootstrap_marker() {
+  local engine_label="${1:-}"
+  local revision="${CYDER_TEMPLATE_REVISION:-1}"
+  engine_label="$(cyder_engine_version_label_trim "$engine_label")"
+  [[ -n "$CYDER_BOOTSTRAP_MARKER" ]] || {
+    echo "CYDER_BOOTSTRAP_MARKER is unset" >&2
+    return 1
+  }
+  {
+    printf 'revision=%s\n' "$revision"
+    [[ -n "$engine_label" ]] && printf 'engine=%s\n' "$engine_label"
+  } >"$CYDER_BOOTSTRAP_MARKER"
+}
+
+# Bottle has enough Wine state to salvage with wineboot -u (keep user data).
+cyder_shared_prefix_is_salvageable() {
+  [[ -f "${CYDER_SHARED_PREFIX:-}/system.reg" ]]
+}
+
 # True when the shared bottle is fully ready for the current engine. CrossOver
-# engines also require a readable cxbottle.conf; a half-built bottle without it
-# is treated as not ready so bootstrap/rebuild can replace it.
+# engines also require a readable cxbottle.conf. Marker must record matching
+# engine= (legacy markers without engine= are not ready → in-place -u).
 cyder_shared_prefix_is_ready() {
   local wine_bin="${1:-}"
+  local engine_root="${2:-}"
+  local marked="" current=""
   [[ -f "$CYDER_BOOTSTRAP_MARKER" ]] || return 1
   [[ -f "$CYDER_SHARED_PREFIX/system.reg" ]] || return 1
   [[ -f "$CYDER_SHARED_PREFIX/.cyder-golden-baseline-v2" ]] || return 1
   if [[ -n "$wine_bin" ]] && cyder_crossover_bottle_data_conf "$wine_bin" >/dev/null 2>&1; then
     [[ -r "$CYDER_SHARED_PREFIX/cxbottle.conf" ]] || return 1
   fi
+  marked="$(cyder_bootstrap_marker_engine)"
+  current="$(cyder_current_bootstrap_engine_label "$engine_root")"
+  [[ -n "$marked" && -n "$current" ]] || return 1
+  cyder_engine_versions_equal "$marked" "$current" || return 1
   return 0
 }
 
@@ -3005,51 +3052,7 @@ cyder_prepare_graphics_prefix() {
   fi
 }
 
-cyder_bootstrap_shared_prefix() {
-  local wine_bin="$1"
-  local engine_root="$2"
-  CYDER_BOOTSTRAP_HEALTH_CHECKED=0
-  # Graphics/winemetal belong after the prefix exists (Phase C). Do not prepare
-  # graphics against a missing or incomplete bottle here.
-  if cyder_shared_prefix_is_ready "$wine_bin"; then
-    return 0
-  fi
-  cyder_has_running_prefix "$CYDER_SHARED_PREFIX" && {
-    echo "Cannot replace shared prefix while Wine is running." >&2
-    return 75
-  }
-  if [[ -e "$CYDER_SHARED_PREFIX" ]]; then
-    local parent old_shared staging
-    parent="$(dirname "$CYDER_SHARED_PREFIX")"
-    old_shared="$parent/.bootstrap-previous-$(basename "$CYDER_SHARED_PREFIX")-$$"
-    staging="$parent/.bootstrap-staging-$(basename "$CYDER_SHARED_PREFIX")-$$"
-    [[ ! -e "$staging" && ! -L "$staging" && ! -e "$old_shared" && ! -L "$old_shared" ]] || {
-      echo "Bootstrap staging path already exists." >&2
-      return 1
-    }
-    # Incomplete bottle (e.g. missing OEM cxbottle.conf): replace entirely.
-    echo "Replacing incomplete bottle with a fresh prefix: $CYDER_SHARED_PREFIX" >&2
-    if ! cyder_provision_prefix_baseline "$wine_bin" "$engine_root" "$staging"; then
-      cyder_remove_path "$staging"
-      return 1
-    fi
-    if ! mv "$CYDER_SHARED_PREFIX" "$old_shared"; then
-      cyder_remove_path "$staging"
-      return 1
-    fi
-    if ! mv "$staging" "$CYDER_SHARED_PREFIX"; then
-      cyder_remove_path "$staging"
-      mv "$old_shared" "$CYDER_SHARED_PREFIX" || true
-      return 1
-    fi
-    printf 'revision=%s\n' "${CYDER_TEMPLATE_REVISION:-1}" >"$CYDER_BOOTSTRAP_MARKER"
-    # Rollback storage is temporary; never accumulate rebuilt bottles.
-    cyder_remove_path "$old_shared"
-  else
-    cyder_provision_prefix_baseline "$wine_bin" "$engine_root" "$CYDER_SHARED_PREFIX" || return $?
-    printf 'revision=%s\n' "${CYDER_TEMPLATE_REVISION:-1}" >"$CYDER_BOOTSTRAP_MARKER"
-  fi
-
+cyder_bootstrap_shared_prefix_finish_graphics() {
   # Phase C: DXMT winemetal + engine graphics links (payload may already have
   # overlapped wineboot inside provision). Skip when provision finished it.
   if [[ "${CYDER_PROVISION_DID_GRAPHICS:-0}" == 1 ]]; then
@@ -3066,6 +3069,69 @@ cyder_bootstrap_shared_prefix() {
     fi
     cyder_bootstrap_substage_end graphics-ensure 0
   fi
+  return 0
+}
+
+cyder_bootstrap_shared_prefix() {
+  local wine_bin="$1"
+  local engine_root="$2"
+  local engine_label=""
+  CYDER_BOOTSTRAP_HEALTH_CHECKED=0
+  # Graphics/winemetal belong after the prefix exists (Phase C). Do not prepare
+  # graphics against a missing or incomplete bottle here.
+  if cyder_shared_prefix_is_ready "$wine_bin" "$engine_root"; then
+    return 0
+  fi
+  cyder_has_running_prefix "$CYDER_SHARED_PREFIX" && {
+    echo "Cannot replace shared prefix while Wine is running." >&2
+    return 75
+  }
+  engine_label="$(cyder_current_bootstrap_engine_label "$engine_root")"
+
+  if cyder_shared_prefix_is_salvageable; then
+    # Engine mismatch / stale marker / missing golden: keep user data, wineboot -u.
+    echo "Updating shared bottle for engine ${engine_label:-unknown}: $CYDER_SHARED_PREFIX" >&2
+    if ! cyder_provision_prefix_baseline "$wine_bin" "$engine_root" "$CYDER_SHARED_PREFIX"; then
+      return 1
+    fi
+    cyder_write_bootstrap_marker "$engine_label"
+    cyder_bootstrap_shared_prefix_finish_graphics || return $?
+    return 0
+  fi
+
+  if [[ -e "$CYDER_SHARED_PREFIX" ]]; then
+    local parent old_shared staging
+    parent="$(dirname "$CYDER_SHARED_PREFIX")"
+    old_shared="$parent/.bootstrap-previous-$(basename "$CYDER_SHARED_PREFIX")-$$"
+    staging="$parent/.bootstrap-staging-$(basename "$CYDER_SHARED_PREFIX")-$$"
+    [[ ! -e "$staging" && ! -L "$staging" && ! -e "$old_shared" && ! -L "$old_shared" ]] || {
+      echo "Bootstrap staging path already exists." >&2
+      return 1
+    }
+    # Incomplete bottle (e.g. missing system.reg): replace entirely.
+    echo "Replacing incomplete bottle with a fresh prefix: $CYDER_SHARED_PREFIX" >&2
+    if ! cyder_provision_prefix_baseline "$wine_bin" "$engine_root" "$staging"; then
+      cyder_remove_path "$staging"
+      return 1
+    fi
+    if ! mv "$CYDER_SHARED_PREFIX" "$old_shared"; then
+      cyder_remove_path "$staging"
+      return 1
+    fi
+    if ! mv "$staging" "$CYDER_SHARED_PREFIX"; then
+      cyder_remove_path "$staging"
+      mv "$old_shared" "$CYDER_SHARED_PREFIX" || true
+      return 1
+    fi
+    cyder_write_bootstrap_marker "$engine_label"
+    # Rollback storage is temporary; never accumulate rebuilt bottles.
+    cyder_remove_path "$old_shared"
+  else
+    cyder_provision_prefix_baseline "$wine_bin" "$engine_root" "$CYDER_SHARED_PREFIX" || return $?
+    cyder_write_bootstrap_marker "$engine_label"
+  fi
+
+  cyder_bootstrap_shared_prefix_finish_graphics || return $?
 }
 
 cyder_swift_bin() {

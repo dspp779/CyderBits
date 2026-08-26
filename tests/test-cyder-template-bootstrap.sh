@@ -65,13 +65,23 @@ assert test ! -e "$CYDER_SHARED_PREFIX/.cyder-gecko-2.47.4"
 assert test -f "$CYDER_SHARED_PREFIX/.cyder-golden-baseline-v2"
 assert test -f "$CYDER_SHARED_PREFIX/.golden-only"
 assert test -f "$CYDER_BOOTSTRAP_MARKER"
+assert_contains "$(cat "$CYDER_BOOTSTRAP_MARKER")" 'engine=' \
+  "bootstrap marker must record engine label"
 
-# Replacing shared provisions a fresh baseline; mutations must not survive.
+# Engine label change: in-place update must keep user mutations.
 : >"$CYDER_SHARED_PREFIX/user-mutation"
-rm -f "$CYDER_BOOTSTRAP_MARKER"
+export CYDER_ENGINE_VERSION_LABEL='wine crossover test-v2'
 cyder_bootstrap_shared_prefix "$TMP/engine/bin/wine" "$TMP/engine"
 assert_eq "${CYDER_BOOTSTRAP_HEALTH_CHECKED:-0}" "1" \
-  "replacement Shared prefix should report its completed health probe"
+  "updated Shared prefix should report its completed health probe"
+assert test -f "$CYDER_SHARED_PREFIX/user-mutation"
+assert_contains "$(cat "$CYDER_BOOTSTRAP_MARKER")" 'engine=wine crossover test-v2' \
+  "marker must update after in-place engine upgrade"
+
+# Incomplete bottle (no system.reg): replace; mutations must not survive.
+rm -f "$CYDER_SHARED_PREFIX/system.reg"
+: >"$CYDER_SHARED_PREFIX/user-mutation"
+cyder_bootstrap_shared_prefix "$TMP/engine/bin/wine" "$TMP/engine"
 assert test ! -e "$CYDER_SHARED_PREFIX/user-mutation"
 assert test -f "$CYDER_SHARED_PREFIX/.golden-only"
 if find "$support" -type d \( -path '*/backups/*' -o -name '.bootstrap-previous-*' -o -name '.bootstrap-staging-*' \) -print -quit | grep -q .; then

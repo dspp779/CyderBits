@@ -64,8 +64,8 @@ assert_contains "$(cat "$dest/version")" "crossover 26.2.0" "installed engine sh
   echo "ASSERT failed: legacy version marker should not be written" >&2
   exit 1
 }
-[[ ! -f "$CYDER_SHARED_PREFIX/.cyder-bootstrap-v1" ]] || {
-  echo "ASSERT failed: first engine install should clear bootstrap marker for re-provision" >&2
+[[ -f "$CYDER_SHARED_PREFIX/.cyder-bootstrap-v1" ]] || {
+  echo "ASSERT failed: first engine install must keep bootstrap marker" >&2
   exit 1
 }
 [[ -d "$CYDER_SHARED_PREFIX" ]] || {
@@ -121,11 +121,8 @@ printf 'ok\n' >"$CYDER_SHARED_PREFIX/.cyder-bootstrap-v1"
 printf 'keep-me\n' >"$CYDER_SHARED_PREFIX/user-data-marker"
 output="$(cyder_ensure_shared_engine "$ENGINE_TAR_V2" 2>&1)"
 assert_contains "$output" "Upgrading shared engine" "version change should upgrade the engine"
-assert_contains "$output" "keeping shared bottle" "engine upgrade should keep SharedPrefix"
-[[ ! -f "$CYDER_SHARED_PREFIX/.cyder-bootstrap-v1" ]] || {
-  echo "ASSERT failed: engine upgrade should clear bootstrap marker for wineboot -u" >&2
-  exit 1
-}
+# Marker stays; bootstrap compares engine= and runs wineboot -u in place.
+assert test -f "$CYDER_SHARED_PREFIX/.cyder-bootstrap-v1"
 assert test -f "$CYDER_SHARED_PREFIX/user-data-marker"
 assert_contains "$(cyder_read_installed_engine_version "$dest")" "wine 12.0" "upgraded engine version file"
 

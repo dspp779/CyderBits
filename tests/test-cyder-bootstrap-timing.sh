@@ -97,8 +97,15 @@ bootstrap_shared="$(awk '
 ' "$ROOT/scripts/cyder-common.sh")"
 assert_not_contains "$(echo "$bootstrap_shared" | head -n 25)" "cyder_prepare_graphics_prefix" \
   "shared bootstrap must not prepare graphics before the prefix exists"
-assert_contains "$bootstrap_shared" "cyder_ensure_graphics" \
-  "shared bootstrap must ensure graphics after the prefix is provisioned"
+assert_contains "$bootstrap_shared" "cyder_bootstrap_shared_prefix_finish_graphics" \
+  "shared bootstrap must finish graphics after the prefix is provisioned"
+finish_graphics="$(awk '
+  /cyder_bootstrap_shared_prefix_finish_graphics\(\)/ { found = 1 }
+  found { print }
+  found && /^cyder_bootstrap_shared_prefix\(\)/ { exit }
+' "$ROOT/scripts/cyder-common.sh")"
+assert_contains "$finish_graphics" "cyder_ensure_graphics" \
+  "graphics finish helper must ensure graphics payloads"
 
 measure_text="$(cat "$ROOT/scripts/cyder-measure-startup.sh")"
 assert_contains "$measure_text" "bootstrap-timing.jsonl" \
