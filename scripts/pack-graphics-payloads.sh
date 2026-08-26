@@ -30,8 +30,17 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-[[ -d "$ENGINE/lib/dxvk" ]] || { echo "Missing DXVK payload: $ENGINE/lib/dxvk" >&2; exit 1; }
-[[ -d "$ENGINE/lib/dxmt" ]] || { echo "Missing DXMT payload: $ENGINE/lib/dxmt" >&2; exit 1; }
+cyder_graphics_require_realpath_dir() {
+  local path="$1" label="$2"
+  [[ -d "$path" ]] || { echo "Missing $label: $path" >&2; return 1; }
+  if [[ -L "$path" ]]; then
+    echo "Refusing symlinked $label source: $path (copy a real tree; symlink packs become stub archives)" >&2
+    return 1
+  fi
+}
+
+cyder_graphics_require_realpath_dir "$ENGINE/lib/dxvk" "DXVK"
+cyder_graphics_require_realpath_dir "$ENGINE/lib/dxmt" "DXMT"
 ZSTD_BIN="$(cyder_find_zstd 2>/dev/null || true)"
 [[ -x "$ZSTD_BIN" ]] || { echo "Missing bundled zstd" >&2; exit 1; }
 [[ -n "$OUTPUT_DIR" ]] || OUTPUT_DIR="$(cyder_engine_artifacts_dir)/graphics"
@@ -78,6 +87,13 @@ pack_payload() {
       cd "$STAGING"
       tar -cf - "$name" | "$ZSTD_BIN" -22 --ultra -T0 -o "$archive"
     )
+  fi
+  local min_bytes="${CYDER_GRAPHICS_ARCHIVE_MIN_BYTES:-1024}"
+  local sz
+  sz="$(stat -f%z "$archive" 2>/dev/null || stat -c%s "$archive")"
+  if (( sz < min_bytes )); then
+    echo "Refusing undersized graphics archive $archive ($sz bytes < $min_bytes)" >&2
+    return 1
   fi
   printf '%s\n' "$version" >"$version_file"
   printf '%s  %s\n' "$(shasum -a 256 "$archive" | awk '{print $1}')" "$(basename "$archive")" >"$checksum_file"
