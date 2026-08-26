@@ -82,8 +82,16 @@ fi
 settings="$(cat "$ROOT/scripts/cyder_settings.swift")"
 assert_contains "$settings" 'moltenvkVariant' "settings must store moltenvkVariant"
 assert_contains "$settings" 'schemaVersion = 13' "schema must bump to 13"
+assert_contains "$settings" 'var menuTitle: String { rawValue }' \
+  "MoltenVK menu titles must be version numbers only"
+assert_not_contains "$settings" 'MoltenVK 1.4.2' \
+  "MoltenVK menu must not prefix titles with MoltenVK"
 
 ui="$(cat "$ROOT/scripts/cyder_settings_ui.swift")"
 assert_contains "$ui" 'moltenvkVariant' "settings UI must expose MoltenVK variant"
+assert_contains "$ui" 'showMoltenvk = backend.usesDxvkTranslation' \
+  "MoltenVK picker must only show when graphics backend is DXVK"
+assert_contains "$ui" 'moltenvkVariant.isHidden = !showMoltenvk' \
+  "MoltenVK picker visibility must follow DXVK selection"
 
 echo "PASS test-cyder-moltenvk-variant"

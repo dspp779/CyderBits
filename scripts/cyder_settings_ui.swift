@@ -1257,9 +1257,13 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate,
         let backend = graphicsBackendValue
         let showFrameRate = backend.usesFrameLimiter
         let showDxvkFrametimes = backend.usesDxvkTranslation
+        let showMoltenvk = backend.usesDxvkTranslation
         let enableDxvkFrametimes = graphicsHudValue == .dxvk
         let showGptkControls = supportsD3DMetalOS
             && backend != .dxvk && backend != .wined3d && backend != .dxmt
+        moltenvkVariant.isHidden = !showMoltenvk
+        (moltenvkVariant.superview as? NSStackView)?.isHidden = !showMoltenvk
+        moltenvkHelp.isHidden = !showMoltenvk
         dxvkFrameRate.isHidden = !showFrameRate
         (dxvkFrameRate.superview as? NSStackView)?.isHidden = !showFrameRate
         dxvkHudFrametimes.isHidden = !showDxvkFrametimes

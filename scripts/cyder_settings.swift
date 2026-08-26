@@ -229,12 +229,7 @@ enum CyderMoltenvkVariant: String, Codable, CaseIterable {
         return value
     }
 
-    var menuTitle: String {
-        switch self {
-        case .v142: return "MoltenVK 1.4.2"
-        case .v1210: return "MoltenVK 1.2.10"
-        }
-    }
+    var menuTitle: String { rawValue }
 
     var menuIndex: Int {
         Self.allCases.firstIndex(of: self) ?? 0
