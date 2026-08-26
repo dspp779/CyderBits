@@ -4,9 +4,9 @@
 
 # CyderBits
 
-**在 Mac 上跑經典 Windows 遊戲 — Cyder 0.13.0 以 DirectDraw 與 GDI 為驗證基準，並提供可選圖形 backend。**
+**在 Mac 上跑經典 Windows 遊戲 — Cyder 0.13.1 以 DirectDraw 與 GDI 為驗證基準，並提供可選圖形 backend。**
 
-驗證路徑仍是傳統 2D Win32 圖形：**DirectDraw → Wine wined3d/OpenGL** 與 GDI。Cyder 0.13.0 使用 `CX26.3.0-W11-Cyder011` engine；DXVK／DXMT 以獨立 graphics payload 提供，D3DMetal 透過 GPTK 提供。實際遊戲相容性仍需依遊戲、macOS 版本與 backend 個別驗證。
+驗證路徑仍是傳統 2D Win32 圖形：**DirectDraw → Wine wined3d/OpenGL** 與 GDI。Cyder 0.13.1 使用 `CX26.3.0-W11-Cyder012` engine（dual MoltenVK）；DXVK／DXMT 以獨立 graphics payload 提供，D3DMetal 透過 GPTK 提供。實際遊戲相容性仍需依遊戲、macOS 版本與 backend 個別驗證。
 
 本 repo（CyderBits）目前主要是**應用層**：Cyder 啟動器、遊戲庫、設定、CompatDB 與打包器。實際執行 Windows `.exe` 的 Wine 核心在獨立專案 [cyder-wine-engine](https://github.com/dspp779/cyder-wine-engine)。
 
@@ -75,7 +75,7 @@ bash scripts/run-bluecg.sh
 |---|---|---|
 | DirectDraw / GDI | **支援且已驗證** | BlueCG 使用 DirectDraw；預設路徑是 wined3d/OpenGL，GDI 是相容性 fallback。 |
 | wined3d / OpenGL | **目前預設** | BlueCG 驗證用 engine 含已測試的 `winemac.drv` same-view backing 修復，可支援 Retina/DPI resize。 |
-| Vulkan / MoltenVK | **由 Cyder011 engine 提供** | x86_64 Wine 內含 `libMoltenVK.dylib`（macOS 10.15 minos）；Cyder011 不使用舊的 `libMoltenVK.real.dylib` shim pair。這不是 BlueCG 的主要繪圖路徑。 |
+| Vulkan / MoltenVK | **由 Cyder012 engine 提供** | dual-variant：shim + `.real` → `1.4.2`／`1.2.10`；偏好設定可切換；macOS &lt; 12 強制 1.2.10。這不是 BlueCG 的主要繪圖路徑。 |
 | DXVK | **已整合 runtime payload** | DXVK 由 Cyder.app 的 `Resources/graphics/` 外部 payload 提供，透過 CompatDB builtin + prepend 載入；DXVK 2 仍暫不出貨。 |
 | dxmt | **已整合 runtime payload** | DXMT 由 Cyder.app 的外部 payload 提供，需 macOS 15+；新楓之谷與經典版在 macOS 15+ 預設優先使用。 |
 | D3DMetal | **已接入產品 backend** | 透過 GPTK／Apple D3DMetal，需 macOS 14+ 與可用 GPTK；實際遊戲相容性需逐款驗證。 |
@@ -171,6 +171,7 @@ bash tests/test-verify-bluecg.sh
 
 - [Cyder 0.7.0 發布說明](docs/releases/v0.7.0.md) — CrossOver bottle 隔離、cabextract、新圖示、MapleStory OEM flavor
 - [Cyder 0.6.0 發布說明](docs/releases/v0.6.0.md) — CX26.3 engine、macOS 10.15 runtime、Winetricks、動態 argv
+- [Cyder 0.13.1 發布說明](docs/releases/v0.13.1.md) — Cyder012 dual MoltenVK、Rosetta 知情同意、GameSir 平台 patch
 - [Cyder 0.13.0 發布說明](docs/releases/v0.13.0.md) — 首次開機加速、不預裝 Mono/Gecko、偏好設定預設入口、.msi／mac 捷徑、Retina 預設關
 - [Cyder 0.12.0 發布說明](docs/releases/v0.12.0.md) — LaunchGroup 選單列、winemenubuilder 遊戲庫圖示、語系選單、捷徑名稱、UI 開啟時顯示 Dock
 - [Cyder 0.11.1 發布說明](docs/releases/v0.11.1.md) — gamaniagames://、open -n file URL、URI 冷啟動不開偏好設定
