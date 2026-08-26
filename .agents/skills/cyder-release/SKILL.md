@@ -29,7 +29,9 @@ bash scripts/import-engine-release.sh --manifest <path> --apply
 bash scripts/release-cyder.sh --channel release --version <semver>
 ```
 
-5. **Must** run verify (fail-closed):
+5. **Must** run verify (fail-closed). `release-cyder.sh --channel release`
+   already invokes verify after staple/zip (baseline = newest `dist/Cyder-*.zip`).
+   Re-run manually if needed:
 
 ```bash
 bash .agents/skills/cyder-release-verify/scripts/verify-cyder-release.sh \
@@ -37,6 +39,8 @@ bash .agents/skills/cyder-release-verify/scripts/verify-cyder-release.sh \
   --zip dist/Cyder.app.zip \
   --baseline dist/Cyder-0.13.0.zip   # or next-newest Cyder-*.zip
 ```
+
+   Emergency only: `RELEASE_SKIP_VERIFY=1` (do not use for shipping).
 
 6. On verify failure: **stop**. Do not publish the zip.
    - Undersized / symlink graphics → re-run graphics pack from a real engine tree,
@@ -48,8 +52,8 @@ bash .agents/skills/cyder-release-verify/scripts/verify-cyder-release.sh \
 Skip unchanged engine rebuild if the pin is already correct, but still:
 
 1. Pack real graphics in the engine repo (`pack-graphics-payloads.sh --force`).
-2. Re-run `release-cyder.sh --channel release`.
-3. Run `cyder-release-verify` again.
+2. Re-run `release-cyder.sh --channel release` (auto-runs verify after zip).
+3. If verify was skipped or you need a custom baseline, run `cyder-release-verify` manually.
 
 ## Related
 

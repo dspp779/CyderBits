@@ -50,6 +50,7 @@ Environment:
   CYDER_NOTARY_PROFILE    Same as --notary-profile
   SIGN_IDENTITY           Used on release when --sign-identity is omitted;
                           ignored on test unless --sign-identity is passed
+  RELEASE_SKIP_VERIFY=1   release: skip post-zip cyder-release-verify (emergency only)
 EOF
 }
 
@@ -179,6 +180,49 @@ verify_release_app_contract() {
   }
 }
 
+# Newest versioned Cyder-*.zip under OUT_DIR (previous formal release baseline).
+cyder_pick_release_baseline_zip() {
+  local dir="$1"
+  local best="" best_mtime=0 mtime f
+  shopt -s nullglob
+  for f in "$dir"/Cyder-[0-9]*.zip; do
+    [[ -f "$f" ]] || continue
+    mtime="$(stat -f%m "$f" 2>/dev/null || stat -c%Y "$f")"
+    if (( mtime >= best_mtime )); then
+      best_mtime="$mtime"
+      best="$f"
+    fi
+  done
+  shopt -u nullglob
+  [[ -n "$best" ]] || return 1
+  printf '%s\n' "$best"
+}
+
+run_release_verify() {
+  local zip_publish="$1"
+  local verify="$ROOT/.agents/skills/cyder-release-verify/scripts/verify-cyder-release.sh"
+  local baseline=""
+  local -a args
+
+  if [[ "${RELEASE_SKIP_VERIFY:-0}" == "1" ]]; then
+    echo "==> Skipping release verify (RELEASE_SKIP_VERIFY=1)"
+    return 0
+  fi
+  [[ -f "$verify" ]] || {
+    echo "Missing release verify script: $verify" >&2
+    exit 1
+  }
+  args=(--app "$APP" --zip "$zip_publish")
+  if baseline="$(cyder_pick_release_baseline_zip "$OUT_DIR")"; then
+    echo "==> Release verify baseline: $baseline"
+    args+=(--baseline "$baseline")
+  else
+    echo "==> Release verify: no Cyder-*.zip baseline under $OUT_DIR (size check skipped)"
+  fi
+  echo "==> Release acceptance verify"
+  bash "$verify" "${args[@]}"
+}
+
 notarize_and_zip() {
   local zip_submit="$OUT_DIR/Cyder-notarize.zip"
   local zip_publish="$OUT_DIR/Cyder.app.zip"
@@ -205,6 +249,8 @@ notarize_and_zip() {
 
   echo "==> Gatekeeper check"
   run spctl -a -vv "$APP"
+
+  run_release_verify "$zip_publish"
 
   echo "==> Release artifacts"
   echo "    app: $APP"

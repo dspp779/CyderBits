@@ -34,10 +34,18 @@ assert_contains "$script" '/usr/bin/lipo "$swift" -verify_arch x86_64 arm64' \
   "release channel must pass the input file before lipo verification options"
 assert_contains "$script" 'requires a stable semantic version' \
   "release channel must reject dev and rc version strings"
+assert_contains "$script" 'run_release_verify' \
+  "release channel must run cyder-release-verify after staple/zip"
+assert_contains "$script" 'verify-cyder-release.sh' \
+  "release channel must invoke the cyder-release-verify script"
+assert_contains "$script" 'RELEASE_SKIP_VERIFY' \
+  "release channel must honor RELEASE_SKIP_VERIFY emergency escape"
+assert_contains "$script" 'cyder_pick_release_baseline_zip' \
+  "release verify must auto-pick a Cyder-*.zip baseline"
 assert_contains "$(cat "$ROOT/scripts/create-cyder-app.sh")" 'cyder-app-version.txt' \
   "App build must read its version from the shared version file"
-assert_eq "$(tr -d '[:space:]' <"$ROOT/config/cyder-app-version.txt")" "0.13.0" \
-  "current 0.13.0 must be the shared App version"
+assert_eq "$(tr -d '[:space:]' <"$ROOT/config/cyder-app-version.txt")" "0.13.1" \
+  "current 0.13.1 must be the shared App version"
 
 # Dry-run test channel should not require Developer ID or network.
 # Inherit a release-looking SIGN_IDENTITY to ensure test still forces ad-hoc.

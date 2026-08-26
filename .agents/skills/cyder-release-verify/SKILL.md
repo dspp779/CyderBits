@@ -22,6 +22,9 @@ Before notarization checks: add `--skip-notarization-checks`.
 
 Exit non-zero ⇒ stop the release; fix graphics pack or re-run `release-cyder.sh`.
 
+`scripts/release-cyder.sh --channel release` calls this script automatically after
+staple/zip (unless `RELEASE_SKIP_VERIFY=1`).
+
 ## Gates
 
 - `graphics/dxvk-*.tar.zst` ≥ 2 MiB (override `CYDER_VERIFY_DXVK_MIN_BYTES`)

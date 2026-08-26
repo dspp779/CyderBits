@@ -14,7 +14,7 @@
 | **cyder-release-verify** | `.agents/skills/cyder-release-verify/` | 強制驗收（graphics 體積／非 symlink、zip vs baseline、spctl／stapler） |
 | **engine-release-pack** | `cyder-wine-engine/.agents/skills/engine-release-pack/` | Developer ID 引擎 + 真實 graphics pack（禁 symlink 來源） |
 
-`release` 通道跑完後**必須**執行 verify；失敗則停止、勿發佈 zip。
+`release-cyder.sh --channel release` 在 staple／寫出 `Cyder.app.zip` 後會**自動**跑 verify（可用 `RELEASE_SKIP_VERIFY=1` 緊急略過，正式出貨勿用）。失敗則停止、勿發佈 zip。
 
 一鍵腳本：
 
