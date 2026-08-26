@@ -14,7 +14,7 @@
 | **cyder-release-verify** | `.agents/skills/cyder-release-verify/` | 強制驗收（graphics 體積／非 symlink、zip vs baseline、spctl／stapler） |
 | **engine-release-pack** | `cyder-wine-engine/.agents/skills/engine-release-pack/` | Developer ID 引擎 + 真實 graphics pack（禁 symlink 來源） |
 
-`release-cyder.sh --channel release` 在 staple／寫出 `Cyder.app.zip` 後會**自動**跑 verify（可用 `RELEASE_SKIP_VERIFY=1` 緊急略過，正式出貨勿用）。失敗則停止、勿發佈 zip。
+`release-cyder.sh --channel release` 在 staple／寫出 `Cyder.app.zip` 與 `Cyder-<version>.zip` 後會**自動**跑 verify（可用 `RELEASE_SKIP_VERIFY=1` 緊急略過，正式出貨勿用）。失敗則停止、勿發佈 zip。
 
 一鍵腳本：
 
@@ -33,7 +33,7 @@ bash scripts/release-cyder.sh --channel release  # 正式發佈（含公證）
 | 公證 | 不做 | `notarytool` → `stapler` → **再**壓發佈 zip |
 | 預設 App 版本 | `0.13.1-dev`（可用 `--version` 改） | `0.13.1`（必須是乾淨 semver；來源為 `config/cyder-app-version.txt`） |
 | Gatekeeper | 可能需右鍵「打開」 | `spctl` 顯示 Notarized Developer ID |
-| 可否當公開下載 | **否** | **是**（staple 後的 `Cyder.app.zip`） |
+| 可否當公開下載 | **否** | **是**（staple 後的 `Cyder-<version>.zip`；另寫 `Cyder.app.zip`） |
 
 「分支版」與測試版同一通道：功能分支產物用 `test`，不要用正式憑證簽完卻略過公證就外傳。
 
@@ -51,7 +51,7 @@ pack-engine-artifact.sh  ──►  import-engine-release.sh --apply
                               release-cyder.sh --channel …
                                          │
                     test ──► dist/Cyder.app (adhoc)
-                    release ──► 公證 + staple + dist/Cyder.app.zip
+                    release ──► 公證 + staple + dist/Cyder.app.zip + Cyder-<ver>.zip
 ```
 
 ## 引擎準備（兩個通道都建議做對）
@@ -115,7 +115,7 @@ SIGN_IDENTITY=- CYDER_APP_VERSION=0.13.1-dev \
 [`release-signing.zh-TW.md`](release-signing.zh-TW.md)。
 
 ```bash
-# 完整：建置 + Developer ID + 公證 + staple + Cyder.app.zip
+# 完整：建置 + Developer ID + 公證 + staple + Cyder.app.zip + Cyder-<version>.zip
 bash scripts/release-cyder.sh --channel release --version 0.13.1
 
 # 已有簽好的 App，只做公證／staple／zip
@@ -131,10 +131,10 @@ bash scripts/release-cyder.sh --channel release --skip-notarize
 2. 確認 pinned engine 存在（或使用 `--engine-archive`）
 3. 呼叫 `create-cyder-app.sh`
 4. 確認版本字串、Universal native `CyderSwift`，再執行 `codesign --verify --deep --strict`
-5. `ditto` → `notarytool submit --wait` → `stapler staple` → 再 `ditto` 出 `dist/Cyder.app.zip`
-6. `spctl -a -vv`
+5. `ditto` → `notarytool submit --wait` → `stapler staple` → 再 `ditto` 出 `dist/Cyder.app.zip`，並複製為 `dist/Cyder-<version>.zip`
+6. `spctl -a -vv`，再跑 `cyder-release-verify`（baseline 排除當次版本檔）
 
-上傳 GitHub Release 的是 **staple 之後** 的 `Cyder.app.zip`，不是送審用的 `Cyder-notarize.zip`。
+上傳 GitHub Release 的是 **staple 之後** 的 `Cyder-<version>.zip`（與 `Cyder.app.zip` 內容相同），不是送審用的 `Cyder-notarize.zip`。
 
 ## 發佈前檢查清單
 
@@ -145,6 +145,7 @@ bash scripts/release-cyder.sh --channel release --skip-notarize
 - [ ] `codesign --verify --deep --strict`  
 - [ ] （正式）`stapler validate` 與 `spctl` → Notarized Developer ID  
 - [ ] 本機 smoke：啟動 `.exe`、必要時看 `last-launch.log`
+- [ ] （正式）產出 `dist/Cyder-<version>.zip`（與 `Cyder.app.zip` 相同內容）  
 - [ ] Release notes：引擎 label、archive SHA-256、已知限制  
 
 ## MapleStory OEM25（已退役）

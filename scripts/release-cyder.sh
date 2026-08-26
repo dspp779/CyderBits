@@ -181,12 +181,16 @@ verify_release_app_contract() {
 }
 
 # Newest versioned Cyder-*.zip under OUT_DIR (previous formal release baseline).
+# Optional second arg: basename to exclude (usually the zip being produced now).
 cyder_pick_release_baseline_zip() {
   local dir="$1"
-  local best="" best_mtime=0 mtime f
+  local exclude_base="${2:-}"
+  local best="" best_mtime=0 mtime f base
   shopt -s nullglob
   for f in "$dir"/Cyder-[0-9]*.zip; do
     [[ -f "$f" ]] || continue
+    base="$(basename "$f")"
+    [[ -n "$exclude_base" && "$base" == "$exclude_base" ]] && continue
     mtime="$(stat -f%m "$f" 2>/dev/null || stat -c%Y "$f")"
     if (( mtime >= best_mtime )); then
       best_mtime="$mtime"
@@ -200,6 +204,7 @@ cyder_pick_release_baseline_zip() {
 
 run_release_verify() {
   local zip_publish="$1"
+  local baseline_exclude="${2:-}"
   local verify="$ROOT/.agents/skills/cyder-release-verify/scripts/verify-cyder-release.sh"
   local baseline=""
   local -a args
@@ -213,7 +218,7 @@ run_release_verify() {
     exit 1
   }
   args=(--app "$APP" --zip "$zip_publish")
-  if baseline="$(cyder_pick_release_baseline_zip "$OUT_DIR")"; then
+  if baseline="$(cyder_pick_release_baseline_zip "$OUT_DIR" "$baseline_exclude")"; then
     echo "==> Release verify baseline: $baseline"
     args+=(--baseline "$baseline")
   else
@@ -226,6 +231,9 @@ run_release_verify() {
 notarize_and_zip() {
   local zip_submit="$OUT_DIR/Cyder-notarize.zip"
   local zip_publish="$OUT_DIR/Cyder.app.zip"
+  local zip_versioned="$OUT_DIR/Cyder-${CYDER_APP_VERSION}.zip"
+  local versioned_base
+  versioned_base="$(basename "$zip_versioned")"
   [[ -d "$APP" ]] || {
     echo "Missing $APP" >&2
     exit 1
@@ -244,17 +252,20 @@ notarize_and_zip() {
   run xcrun stapler validate "$APP"
 
   echo "==> Publishing zip (after staple)"
-  run rm -f "$zip_publish"
+  run rm -f "$zip_publish" "$zip_versioned"
   run ditto -c -k --keepParent "$APP" "$zip_publish"
+  # Versioned name for GitHub Release / archival; identical contents to Cyder.app.zip.
+  run cp -p "$zip_publish" "$zip_versioned"
 
   echo "==> Gatekeeper check"
   run spctl -a -vv "$APP"
 
-  run_release_verify "$zip_publish"
+  run_release_verify "$zip_versioned" "$versioned_base"
 
   echo "==> Release artifacts"
-  echo "    app: $APP"
-  echo "    zip: $zip_publish"
+  echo "    app:      $APP"
+  echo "    zip:      $zip_publish"
+  echo "    versioned: $zip_versioned"
 }
 
 case "$CHANNEL" in

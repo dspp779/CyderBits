@@ -18,6 +18,10 @@ assert_contains "$script" 'stapler staple' \
   "release channel must staple the notarization ticket"
 assert_contains "$script" 'Cyder.app.zip' \
   "release channel must produce a post-staple publish zip"
+assert_contains "$script" 'Cyder-${CYDER_APP_VERSION}.zip' \
+  "release channel must also write a versioned publish zip"
+assert_contains "$script" 'cp -p "$zip_publish" "$zip_versioned"' \
+  "versioned zip must match Cyder.app.zip contents"
 assert_contains "$script" 'resolve_pinned_engine' \
   "release channel should resolve the pinned engine archive"
 assert_contains "$script" 'create-cyder-app.sh' \

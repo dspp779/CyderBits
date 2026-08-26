@@ -30,14 +30,15 @@ bash scripts/release-cyder.sh --channel release --version <semver>
 ```
 
 5. **Must** run verify (fail-closed). `release-cyder.sh --channel release`
-   already invokes verify after staple/zip (baseline = newest `dist/Cyder-*.zip`).
+   already invokes verify after staple/zip (writes `Cyder.app.zip` and
+   `Cyder-<version>.zip`; baseline = newest other `dist/Cyder-*.zip`).
    Re-run manually if needed:
 
 ```bash
 bash .agents/skills/cyder-release-verify/scripts/verify-cyder-release.sh \
   --app dist/Cyder.app \
-  --zip dist/Cyder.app.zip \
-  --baseline dist/Cyder-0.13.0.zip   # or next-newest Cyder-*.zip
+  --zip dist/Cyder-0.13.1.zip \
+  --baseline dist/Cyder-0.13.0.zip
 ```
 
    Emergency only: `RELEASE_SKIP_VERIFY=1` (do not use for shipping).
