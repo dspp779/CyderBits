@@ -203,6 +203,53 @@ enum CyderWineLocale: String, Codable, CaseIterable {
     }
 }
 
+/// Global MoltenVK dual-variant preference (Cyder012+). Raw values match
+/// versioned dylib basenames without the `libMoltenVK-` / `.dylib` wrapper.
+enum CyderMoltenvkVariant: String, Codable, CaseIterable {
+    case v142 = "1.4.2"
+    case v1210 = "1.2.10"
+
+    static var hostSupports142: Bool {
+        ProcessInfo.processInfo.isOperatingSystemAtLeast(
+            OperatingSystemVersion(majorVersion: 12, minorVersion: 0, patchVersion: 0)
+        )
+    }
+
+    static var hostDefault: CyderMoltenvkVariant {
+        hostSupports142 ? .v142 : .v1210
+    }
+
+    static func sanitized(_ raw: String?) -> CyderMoltenvkVariant {
+        guard let raw, let value = CyderMoltenvkVariant(rawValue: raw) else {
+            return hostDefault
+        }
+        if value == .v142 && !hostSupports142 {
+            return .v1210
+        }
+        return value
+    }
+
+    var menuTitle: String {
+        switch self {
+        case .v142: return "MoltenVK 1.4.2"
+        case .v1210: return "MoltenVK 1.2.10"
+        }
+    }
+
+    var menuIndex: Int {
+        Self.allCases.firstIndex(of: self) ?? 0
+    }
+
+    init(menuIndex: Int) {
+        let cases = Self.allCases
+        if menuIndex >= 0, menuIndex < cases.count {
+            self = cases[menuIndex]
+        } else {
+            self = .hostDefault
+        }
+    }
+}
+
 enum CyderSyncMode: Int, CaseIterable {
     case off
     case msync
@@ -413,14 +460,15 @@ struct CyderExecutableSettings: Codable {
 }
 
 struct CyderSettings: Codable {
-    // Schema 12 adds the global Wine locale preference. Schema 11 adds the MapleStory WZ cache preference.
+    // Schema 13 adds the global MoltenVK dual-variant preference. Schema 12 adds
+    // the global Wine locale preference. Schema 11 adds the MapleStory WZ cache preference.
     // Schema 10 removes the experimental dxvk2 graphics backend. Schema 9 added
     // that backend; old settings are migrated to the default backend on decode.
     // Schema 8 replaces fontPreset with fontMingLiuTarget/fontSongtiTarget.
     // Schema 7 adds wineDiagnostics. Schema 6 adds dxvkHudFrametimes. Schema 5 adds graphicsHud.
     // Schema 4 adds graphics backend and DXVK frame rate. Schema 3 adds profile-keyed overrides. Keep perExecutable as a
     // legacy basename fallback; never infer a profile from a basename.
-    var schemaVersion = 12
+    var schemaVersion = 13
     var revision = 0
     /// Wall-clock time of the most recent effective settings change. Kept in
     /// settings.json so the state and its provenance travel together.
@@ -444,6 +492,8 @@ struct CyderSettings: Codable {
     var wineLocale: CyderWineLocale = .system
     /// Enable MapleStory-only read-ahead for read-only WZ/MS files.
     var maplestoryWZCache = true
+    /// Dual-variant MoltenVK preference (`1.4.2` \| `1.2.10`). macOS &lt; 12 forces 1.2.10.
+    var moltenvkVariant: CyderMoltenvkVariant = CyderMoltenvkVariant.hostDefault
     var perExecutable: [String: CyderExecutableSettings] = [:]
     var perProfile: [String: CyderExecutableSettings] = [:]
 
@@ -455,6 +505,7 @@ struct CyderSettings: Codable {
         case graphicsBackend, dxvkFrameRate, graphicsHud, dxvkHudFrametimes, wineDiagnostics
         case wineLocale
         case maplestoryWZCache
+        case moltenvkVariant
         case perExecutable, perProfile
         case fontPreset
     }
@@ -479,10 +530,10 @@ struct CyderSettings: Codable {
     init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
         let version = try values.decodeIfPresent(Int.self, forKey: .schemaVersion) ?? 1
-        guard version <= 12 else { throw DecodingError.dataCorruptedError(
+        guard version <= 13 else { throw DecodingError.dataCorruptedError(
             forKey: .schemaVersion, in: values, debugDescription: "unsupported settings schema \(version)"
         ) }
-        schemaVersion = 12
+        schemaVersion = 13
         revision = try values.decodeIfPresent(Int.self, forKey: .revision) ?? 0
         updatedAt = try values.decodeIfPresent(String.self, forKey: .updatedAt)
         lastModified = try values.decodeIfPresent([String: String].self, forKey: .lastModified) ?? [:]
@@ -518,6 +569,9 @@ struct CyderSettings: Codable {
             try values.decodeIfPresent(String.self, forKey: .wineLocale)
         )
         maplestoryWZCache = try values.decodeIfPresent(Bool.self, forKey: .maplestoryWZCache) ?? true
+        moltenvkVariant = CyderMoltenvkVariant.sanitized(
+            try values.decodeIfPresent(String.self, forKey: .moltenvkVariant)
+        )
         perExecutable = try values.decodeIfPresent([String: CyderExecutableSettings].self, forKey: .perExecutable) ?? [:]
         let decodedProfiles = try values.decodeIfPresent([String: CyderExecutableSettings].self, forKey: .perProfile) ?? [:]
         perProfile = decodedProfiles.reduce(into: [:]) { result, item in
@@ -559,6 +613,7 @@ struct CyderSettings: Codable {
         try container.encode(wineDiagnostics, forKey: .wineDiagnostics)
         try container.encode(wineLocale, forKey: .wineLocale)
         try container.encode(maplestoryWZCache, forKey: .maplestoryWZCache)
+        try container.encode(moltenvkVariant, forKey: .moltenvkVariant)
         try container.encode(perExecutable, forKey: .perExecutable)
         try container.encode(perProfile, forKey: .perProfile)
     }
@@ -911,6 +966,7 @@ struct CyderSettings: Codable {
         mark("wineDiagnostics", before.wineDiagnostics.rawValue != after.wineDiagnostics.rawValue)
         mark("wineLocale", before.wineLocale.rawValue != after.wineLocale.rawValue)
         mark("maplestoryWZCache", before.maplestoryWZCache != after.maplestoryWZCache)
+        mark("moltenvkVariant", before.moltenvkVariant.rawValue != after.moltenvkVariant.rawValue)
 
         let profileIDs = Set(before.perProfile.keys).union(after.perProfile.keys)
         for profileID in profileIDs {
@@ -954,7 +1010,7 @@ final class CyderSettingsStore {
         do {
             let data = try Data(contentsOf: url)
             let decoded = try JSONDecoder().decode(CyderSettings.self, from: data)
-            guard decoded.schemaVersion <= 12 else {
+            guard decoded.schemaVersion <= 13 else {
                 CyderDiagnostics.shared.warning("unsupported settings schema=\(decoded.schemaVersion); using defaults")
                 value = .defaults
                 return
@@ -970,7 +1026,8 @@ final class CyderSettingsStore {
         CyderDiagnostics.shared.enter(.settingsSave)
         var next = value
         work(&next)
-        next.schemaVersion = 12
+        next.schemaVersion = 13
+        next.moltenvkVariant = CyderMoltenvkVariant.sanitized(next.moltenvkVariant.rawValue)
         next.perProfile = next.perProfile.reduce(into: [:]) { result, item in
             guard CyderSettings.isValidProfileID(item.key) else { return }
             result[item.key] = CyderSettings.sanitized(item.value)
@@ -1023,6 +1080,7 @@ final class CyderSettingsStore {
             "CYDER_POWER_MODE": "normal",
             "CYDER_WINE_DIAGNOSTICS": value.wineDiagnostics.rawValue,
             "CYDER_WINE_LOCALE": value.wineLocale.unixLocale ?? "system",
+            "CYDER_MOLTENVK_VARIANT_PREFERENCE": value.moltenvkVariant.rawValue,
         ]
     }
 

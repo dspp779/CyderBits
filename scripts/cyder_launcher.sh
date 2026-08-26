@@ -941,6 +941,8 @@ cyder_prepare_game_launch_settings "$wine" "$engine" "$CYDER_SHARED_PREFIX" "$ex
   settings_status=$?
   exit "$settings_status"
 }
+# Ensure dual-variant MoltenVK .real matches preference before Wine dlopen.
+cyder_apply_moltenvk_variant_from_preference "$engine" || exit 1
 cyder_set_stage wine-launch
 if (( ${#CYDER_GAME_ARGUMENTS[@]} > 0 )); then
   cyder_run_wine_exe "$wine" "$exe" "$CYDER_SHARED_PREFIX" "${CYDER_GAME_ARGUMENTS[@]}"

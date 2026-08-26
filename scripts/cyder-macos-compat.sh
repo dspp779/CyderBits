@@ -3,6 +3,11 @@
 # shellcheck shell=bash
 
 cyder_macos_product_version() {
+  # Tests may force a host version (e.g. CYDER_MOCK_MACOS=11.0).
+  if [[ -n "${CYDER_MOCK_MACOS:-}" ]]; then
+    printf '%s\n' "$CYDER_MOCK_MACOS"
+    return 0
+  fi
   /usr/bin/sw_vers -productVersion 2>/dev/null || echo "0.0"
 }
 

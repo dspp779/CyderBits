@@ -25,6 +25,13 @@ if [[ -f "$_migrate_graphics_sh" ]]; then
 fi
 unset _migrate_graphics_sh
 
+_moltenvk_variant_sh="$CYDER_COMMON_DIR/cyder-moltenvk-variant.sh"
+if [[ -f "$_moltenvk_variant_sh" ]]; then
+  # shellcheck source=cyder-moltenvk-variant.sh
+  source "$_moltenvk_variant_sh"
+fi
+unset _moltenvk_variant_sh
+
 cyder_engine_artifacts_dir() {
   local root="${OGOM:-$(cd "$CYDER_COMMON_DIR/.." && pwd)}"
   printf '%s\n' "${CYDER_ENGINE_ARTIFACTS_DIR:-$root/dist/artifacts}"
@@ -794,6 +801,19 @@ cyder_load_saved_settings() {
     value="$(plutil -extract graphicsBackend raw -o - "$settings" 2>/dev/null || true)"
     cyder_apply_graphics_preference "${value:-default}" "${CYDER_ENGINES:-}/${CYDER_ENGINE_NAME:-}"
   fi
+  if [[ -z "${CYDER_MOLTENVK_VARIANT_PREFERENCE:-}" ]]; then
+    value="$(plutil -extract moltenvkVariant raw -o - "$settings" 2>/dev/null || true)"
+    case "$value" in
+      1.4.2 | 1.2.10) export CYDER_MOLTENVK_VARIANT_PREFERENCE="$value" ;;
+      *)
+        if declare -F cyder_default_moltenvk_variant_preference >/dev/null 2>&1; then
+          export CYDER_MOLTENVK_VARIANT_PREFERENCE="$(cyder_default_moltenvk_variant_preference)"
+        else
+          export CYDER_MOLTENVK_VARIANT_PREFERENCE=1.4.2
+        fi
+        ;;
+    esac
+  fi
   value="$(plutil -extract dxvkFrameRate raw -o - "$settings" 2>/dev/null || true)"
   case "$value" in
     sixty|60) export CYDER_DXVK_FRAME_RATE_PREFERENCE=60 ;;
@@ -808,6 +828,27 @@ cyder_load_saved_settings() {
     false|0) export CYDER_DXVK_HUD_FRAMETIMES=0 ;;
   esac
   cyder_apply_graphics_runtime_preferences
+  cyder_apply_moltenvk_variant_from_preference "${CYDER_ENGINES:-}/${CYDER_ENGINE_NAME:-}"
+}
+
+cyder_apply_moltenvk_variant_from_preference() {
+  local engine="${1:-}"
+  local pref="${CYDER_MOLTENVK_VARIANT_PREFERENCE:-}"
+  [[ -n "$engine" && -d "$engine" ]] || return 0
+  if [[ -z "$pref" ]]; then
+    if declare -F cyder_default_moltenvk_variant_preference >/dev/null 2>&1; then
+      pref="$(cyder_default_moltenvk_variant_preference)"
+    else
+      pref=1.4.2
+    fi
+  fi
+  if declare -F cyder_apply_moltenvk_variant_if_present >/dev/null 2>&1; then
+    cyder_apply_moltenvk_variant_if_present "$engine" "$pref" || {
+      echo "MoltenVK variant apply failed (engine=$engine pref=$pref)" >&2
+      return 1
+    }
+  fi
+  return 0
 }
 
 cyder_find_taskpolicy() {
@@ -897,6 +938,7 @@ cyder_resolve_shared_engine() {
       if [[ ! -f "$engine/.cyder-engine-signed" ]]; then
         cyder_sign_installed_engine "$engine" || return $?
       fi
+      cyder_apply_moltenvk_variant_from_preference "$engine" || return $?
       echo "Shared engine current (sidecar): $engine" >&2
       printf '%s\n' "$engine"
       return 0
@@ -1680,6 +1722,7 @@ cyder_ensure_shared_engine() {
       if [[ ! -f "$dest/.cyder-engine-signed" ]]; then
         cyder_sign_installed_engine "$dest" || exit 1
       fi
+      cyder_apply_moltenvk_variant_from_preference "$dest" || exit 1
       echo "$dest"
       return 0
     fi
@@ -1723,6 +1766,7 @@ cyder_ensure_shared_engine() {
   if [[ -n "$bundled_sha" ]]; then
     printf '%s\n' "$bundled_sha" >"$dest/.cyder-engine-artifact-sha256"
   fi
+  cyder_apply_moltenvk_variant_from_preference "$dest" || exit 1
   echo "$dest"
 }
 

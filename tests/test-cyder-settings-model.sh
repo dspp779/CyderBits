@@ -17,7 +17,10 @@ assert_contains "$common" 'mingliu|songti|pingfang' "common should only accept s
 assert_contains "$settings" 'var retinaMode = false' "Retina should default off"
 assert_contains "$settings" 'var dpi = 96' "DPI should default to 96"
 assert_contains "$settings" 'var graphicsHud: CyderGraphicsHud = .off' "graphics HUD should default off"
-assert_contains "$settings" 'schemaVersion = 12' "schema version 12"
+assert_contains "$settings" 'schemaVersion = 13' "schema version 13"
+assert_contains "$settings" 'enum CyderMoltenvkVariant' "settings should define MoltenVK variant"
+assert_contains "$settings" 'moltenvkVariant' "settings should store moltenvkVariant"
+assert_contains "$settings" 'CYDER_MOLTENVK_VARIANT_PREFERENCE' "global environment should export MoltenVK preference"
 assert_contains "$settings" 'enum CyderWineLocale' "settings should define the Wine locale preference"
 assert_contains "$settings" 'static var menuCases' "locale menu should omit Korean from the user-facing choices"
 assert_contains "$settings" 'CYDER_WINE_LOCALE' "global environment should export CYDER_WINE_LOCALE"
@@ -50,6 +53,10 @@ assert_contains "$common" 'cyder_apply_maplestory_wz_cache' "shell should scope 
 assert_contains "$common" 'CYDER_WINE_LOCALE' "shell should load the Wine locale preference"
 assert_contains "$common" 'plutil -extract wineLocale' "shell should read wineLocale from settings.json"
 
+assert_contains "$common" 'cyder_apply_moltenvk_variant' \
+  "shell must apply MoltenVK dual-variant preference"
+assert_contains "$common" 'moltenvkVariant' \
+  "shell settings loader must read moltenvkVariant"
 assert_contains "$common" 'cyder_apply_graphics_preference' \
   "shell settings loader must route graphicsBackend through shared preference helper"
 assert_contains "$common" 'cyder_dxmt_launch_allowed' \

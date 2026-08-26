@@ -48,8 +48,10 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate,
     private let fontSongti = NSPopUpButton()
     private let smoothing = NSPopUpButton()
     private let graphicsBackend = NSPopUpButton()
+    private let moltenvkVariant = NSPopUpButton()
     private let dxvkFrameRate = NSPopUpButton()
     private let graphicsHud = NSPopUpButton()
+    private let moltenvkHelp = NSTextField(wrappingLabelWithString: "")
     private let dxvkHudFrametimes = NSSwitch()
     private let graphicsHelp = NSTextField(wrappingLabelWithString: "")
     private let d3dmetalStatus = NSTextField(labelWithString: "")
@@ -315,6 +317,16 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate,
         graphicsBackend.action = #selector(graphicsBackendChanged)
         updateD3DMetalMenuItemAvailability()
         updateDxmtMenuItemAvailability()
+        moltenvkVariant.removeAllItems()
+        moltenvkVariant.addItems(withTitles: CyderMoltenvkVariant.allCases.map(\.menuTitle))
+        moltenvkVariant.target = self
+        moltenvkVariant.action = #selector(moltenvkVariantChanged)
+        updateMoltenvkMenuItemAvailability()
+        moltenvkHelp.stringValue = "舊 Intel 顯示異常時可改用 1.2.10；Mach Ports 修復由引擎 shim 提供。"
+        moltenvkHelp.textColor = .secondaryLabelColor
+        moltenvkHelp.font = .systemFont(ofSize: 12)
+        moltenvkHelp.maximumNumberOfLines = 3
+        moltenvkHelp.widthAnchor.constraint(equalToConstant: 460).isActive = true
         dxvkFrameRate.addItems(withTitles: ["60", "120", "144", "不限制"])
         dxvkFrameRate.target = self
         dxvkFrameRate.action = #selector(dxvkFrameRateChanged)
@@ -348,6 +360,8 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate,
         return tab("圖形", rows: [
             row("圖形轉譯", graphicsBackend),
             graphicsHelp,
+            row("MoltenVK", moltenvkVariant),
+            moltenvkHelp,
             row("限制幀率", dxvkFrameRate),
             row("顯示畫面流暢度", graphicsHud),
             row("顯示 frametimes", dxvkHudFrametimes),
@@ -682,6 +696,8 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate,
         let smoothingValues = ["off", "grayscale", "cleartype-rgb"]
         smoothing.selectItem(at: smoothingValues.firstIndex(of: value.fontSmoothing) ?? 2)
         graphicsBackend.selectItem(at: graphicsBackendIndex(value.graphicsBackend))
+        moltenvkVariant.selectItem(at: value.moltenvkVariant.menuIndex)
+        updateMoltenvkMenuItemAvailability()
         dxvkFrameRate.selectItem(at: value.dxvkFrameRate.menuIndex)
         refreshEngineVersionLabel()
         rebuildGraphicsHudMenu(selecting: value.graphicsHud)
@@ -836,6 +852,26 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate,
         rebuildGraphicsHudMenu(selecting: store.value.graphicsHud)
         refreshGraphicsControls()
         saveImmediately()
+    }
+
+    @objc private func moltenvkVariantChanged() {
+        saveImmediately()
+        _ = CyderMoltenvk.ensureVariant(preference: moltenvkVariantValue.rawValue)
+    }
+
+    private var moltenvkVariantValue: CyderMoltenvkVariant {
+        CyderMoltenvkVariant(menuIndex: moltenvkVariant.indexOfSelectedItem)
+    }
+
+    private func updateMoltenvkMenuItemAvailability() {
+        guard let item = moltenvkVariant.item(at: CyderMoltenvkVariant.v142.menuIndex) else { return }
+        item.isEnabled = CyderMoltenvkVariant.hostSupports142
+        if !CyderMoltenvkVariant.hostSupports142 {
+            item.toolTip = "需要 macOS 12 或更新版本"
+            moltenvkVariant.selectItem(at: CyderMoltenvkVariant.v1210.menuIndex)
+        } else {
+            item.toolTip = nil
+        }
     }
 
     @objc private func dxvkFrameRateChanged() {
@@ -1036,6 +1072,7 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate,
                     $0.fontSmoothing = smoothingValues[max(0, smoothing.indexOfSelectedItem)]
                 }
                 $0.graphicsBackend = graphicsBackendValue
+                $0.moltenvkVariant = moltenvkVariantValue
                 $0.dxvkFrameRate = CyderDxvkFrameRate(menuIndex: dxvkFrameRate.indexOfSelectedItem)
                 $0.graphicsHud = graphicsHudValue
                 $0.dxvkHudFrametimes = dxvkHudFrametimes.state == .on
@@ -1215,6 +1252,7 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate,
         updateD3DMetalMenuItemAvailability()
         updateDxmtMenuItemAvailability()
         updateDxvkMenuItemAvailability()
+        updateMoltenvkMenuItemAvailability()
         CyderGptk.syncEngineLink()
         let backend = graphicsBackendValue
         let showFrameRate = backend.usesFrameLimiter
