@@ -77,3 +77,12 @@ Apple 官方查核（2026-09-21）：[menuWillOpen](https://developer.apple.com/
 桌面 session 執行 `CYDER_MENU_SAMPLES=... bash tests/test-cyder-menu-responsiveness.sh`，30 筆 callback cycle 原始資料保留在 [CSV](2026-09-21-menu-callback-A-B.csv)。p95=0.029208ms、max=0.045ms；僅為同一程序內 menuNeedsUpdate→menuWillOpen→menuDidClose 呼叫時間，**不含 OS 點擊、呈現或真正 tracking 等待時間**。不據此宣稱整個 app 無 ≥250ms main hang。
 
 沙箱執行早期 harness 雖印出 shell PASS，強化為驗證完成檔必有31行後發現未產生檔案；該早期 PASS 作廢。相同 Swift harness 在桌面 session 得到完整完成檔並通過 assertion；往後 AppKit 測試必須驗證實際產物，不能只看外層 exit/PASS。production 全來源 arm64 macOS11 typecheck 通過。
+
+## 批次 C：持久與傳輸基礎（C1；正式 consumer 尚未切換）
+
+- `CyderRequestJournal` 使用單一磁碟 queue、排他 owner flock、版本化 JSON、私有目錄／檔案、O_NOFOLLOW、大小／筆數限制、原子 rename 與 fsync/F_FULLFSYNC；只有持久提交後回覆 accepted。
+- ID 帶持久 namespace，保留去重 tombstone；同 ID 不同 payload 拒絕、nil/empty argv 不混淆。完成後可移除 argv payload，保留最小結果。容量達上限先拒收，不刪除舊 tombstone 讓舊要求重播。
+- queued 在重新開啟時改 awaitingUserResume；dispatching/observing 改 uncertain。只允許確認未派送項目明確 resume；舊 executor 晚到回執不能復活已恢復的 uncertain 要求。
+- `CyderRequestChannel` 提供實際 Unix socket、同 UID peer 驗證、版本／frame 上限、每連線一筆訊息、有界讀寫 deadline／連線數，以及取消完成後才關閉 FD。
+- 實測 `tests/test-cyder-request-journal.sh`、`tests/test-cyder-request-channel.sh` 通過。包含真實子程序在 durable dispatch 後 `_exit(73)`，重開檔案只得 uncertain 且拒絕重派；也測 ACK 遺失、磁碟提交前失敗、同 journal 雙 owner、取消順序、quiescing、缺失／損壞歷史、實際 socket 重送與不回覆 peer。輸出：`.local/lifecycle-evidence/journal-C1.log`、`channel-C1.log`。
+- 上述屬 L1/L2 foundation 證據；尚未連接 app 入口、sentinel 選舉與實際 spawn，所以 V03/V05/V10/V13 **整合驗收未完成**。下一步以單一 coordinator 替換舊 outbox consumer，接上各種直接啟動與 AppKit 批次回覆，然後完成 D。
