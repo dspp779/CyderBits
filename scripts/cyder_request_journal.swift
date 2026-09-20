@@ -7,13 +7,14 @@ struct CyderRequestPayload: Codable, Equatable {
     let arguments: [String]?
     let urls: [String]
     let showUI: Bool
+    var settings: Data? = nil
     var digest: String {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys]
         return SHA256.hash(data: try! encoder.encode(self)).map { String(format: "%02x", $0) }.joined()
     }
     var isValid: Bool {
-        files.count + urls.count <= 128 && (arguments?.count ?? 0) <= 1024
+        files.count + urls.count <= 128 && (arguments?.count ?? 0) <= 1024 && (settings?.count ?? 0) <= 262144
             && (!files.isEmpty || !urls.isEmpty || showUI)
             && files.allSatisfy { $0.hasPrefix("/") && !$0.contains("\0") }
             && urls.allSatisfy { !$0.contains("\0") && $0.utf8.count <= 65536 }
@@ -38,6 +39,7 @@ final class CyderRequestJournal {
         var executorEpoch: UUID?
         var supervisorPID: Int32?
         var outcome: String?
+        var children: [String]? = nil
     }
     struct Document: Codable {
         let schema: Int
@@ -172,6 +174,30 @@ final class CyderRequestJournal {
                 return previous
             }
             guard !closing else { throw Failure.closing }
+            var children: [CyderRequestPayload] = payload.files.map {
+                CyderRequestPayload(files: [$0], arguments: payload.arguments, urls: [], showUI: false, settings: payload.settings)
+            }
+            children += payload.urls.map {
+                CyderRequestPayload(files: [], arguments: payload.arguments, urls: [$0], showUI: false, settings: payload.settings)
+            }
+            if children.count > 1 {
+                if payload.showUI { children.append(.init(files: [], arguments: nil, urls: [], showUI: true)) }
+                guard current.records.count + children.count + 1 <= limit else { throw Failure.full }
+                var childIDs: [String] = []
+                for (index, child) in children.enumerated() {
+                    let hash = SHA256.hash(data: Data("\(id):\(index)".utf8)).prefix(16).map { String(format: "%02x", $0) }.joined()
+                    let chars = Array(hash)
+                    let uuid = [String(chars[0..<8]), String(chars[8..<12]), String(chars[12..<16]), String(chars[16..<20]), String(chars[20..<32])].joined(separator: "-").uppercased()
+                    let childID = current.namespace.uuidString + ":" + uuid
+                    guard current.records[childID] == nil else { throw Failure.conflictingPayload }
+                    current.records[childID] = Record(id: childID, digest: child.digest, version: current.version + 1, phase: .queued, payload: child)
+                    childIDs.append(childID)
+                }
+                let parent = Record(id: id, digest: payload.digest, version: current.version + 1, phase: .completed,
+                                    outcome: "batchAccepted", children: childIDs)
+                current.records[id] = parent
+                return parent
+            }
             guard current.records.count < limit else { throw Failure.full }
             let record = Record(id: id, digest: payload.digest, version: current.version + 1, phase: .queued, payload: payload)
             current.records[id] = record
@@ -192,7 +218,16 @@ final class CyderRequestJournal {
             guard validID(id, namespace: current.namespace), digest.count == 64 else { throw Failure.invalid }
             var record = current.records[id] ?? Record(id: id, digest: digest, version: 0, phase: .queued)
             guard record.digest == digest else { throw Failure.conflictingPayload }
-            guard [.queued, .awaitingUserResume, .cancelled].contains(record.phase) else { throw Failure.tooLate }
+            if let children = record.children {
+                guard children.allSatisfy({ current.records[$0].map { [.queued, .awaitingUserResume, .cancelled].contains($0.phase) } == true }) else { throw Failure.tooLate }
+                for child in children {
+                    current.records[child]?.phase = .cancelled
+                    current.records[child]?.payload = nil
+                    current.records[child]?.version = current.version + 1
+                }
+            } else {
+                guard [.queued, .awaitingUserResume, .cancelled].contains(record.phase) else { throw Failure.tooLate }
+            }
             guard current.records[id] != nil || current.records.count < limit else { throw Failure.full }
             record.phase = .cancelled
             record.payload = nil

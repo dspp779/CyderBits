@@ -5,7 +5,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "$ROOT/tests/assert.sh"
 
 source_text="$(cat "$ROOT/scripts/cyder_app_main.swift")"
-assert_contains "$source_text" "application.reply(toOpenOrPrint: .success)" \
+assert_contains "$source_text" "application.reply(toOpenOrPrint: accepted ? .success : .failure)" \
   "Finder open-file requests must receive a LaunchServices reply"
 assert_contains "$source_text" "launchGameFromLibrary" \
   "Finder requests received by a visible library must use the monitored launch path"
@@ -137,7 +137,7 @@ assert_not_contains "$source_text" 'operation: "templates-ready"' \
 assert_contains "$source_text" 'if !bootstrapHealthChecked && bootstrapNeeded' \
   "subsequent settings opens must not probe wine cmd when the prefix is already ready"
 run_phased_text="$(awk '
-  /private func runPhasedLaunch/ { found = 1 }
+  /private func runDocumentLaunch/ { found = 1 }
   found { print }
   /private func prefixForExecutable/ { exit }
 ' "$ROOT/scripts/cyder_app_main.swift")"

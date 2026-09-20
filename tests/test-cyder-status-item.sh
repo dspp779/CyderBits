@@ -34,7 +34,7 @@ assert_contains "$status_source" '正在結束 Windows 程序' \
   "the menu must expose an in-progress managed shutdown"
 assert_contains "$status_source" '工作管理員…' \
   "the menu must expose Wine task manager"
-assert_contains "$status_source" '結束所有 Cyder 程序…' \
+assert_contains "$status_source" '停止所有 Windows 環境…' \
   "the menu must expose an explicit whole-environment stop"
 assert_contains "$status_source" 'cyderBottleImage(' \
   "the menu bar must use Cyder's bottle silhouette"
@@ -90,7 +90,7 @@ assert_contains "$app_source" '#selector(quitFromMenu)' \
   "the application quit command must have one routing entry"
 assert_contains "$app_source" 'func applicationShouldTerminate' \
   "AppKit must expose its termination routing entry"
-assert_contains "$app_source" 'if didRunLauncher {' \
+assert_contains "$app_source" 'instanceCoordinator.submit(' \
   "a resident Cyder process must accept later Finder EXE requests"
 
 wrapper_source="$(cat "$ROOT/scripts/cyder-macos-wrapper.sh")"

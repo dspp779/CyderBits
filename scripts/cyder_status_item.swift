@@ -33,10 +33,13 @@ final class CyderStatusItemController: NSObject, NSMenuDelegate {
     var onOpenGameLibrary: (() -> Void)?
     var onOpenTaskManager: ((URL) -> Void)?
     var onStopPrefixes: (([URL]) -> Void)?
+    var onQuit: (() -> Void)?
+    var onExecuteStop: ((URL, CyderLifecycle.Stamp, UUID) -> Void)?
     var onLifecycleIdle: (() -> Void)?
     var onSessionEnded: ((URL) -> Void)?
 
     private var sessions: [String: Session] = [:]
+    private var isQuiescing = false
     private var pendingEnvironmentAttachments = 0
     private var claimTokens: [String: UUID] = [:]
     private var claimCompletions: [String: () -> Void] = [:]
@@ -47,13 +50,55 @@ final class CyderStatusItemController: NSObject, NSMenuDelegate {
     private var launchIngressPending = false
     private var latestLifecycle = CyderLifecycle.State().snapshot
     private var hasLifecycleSnapshot = false
-    private lazy var lifecycleStore = CyderLifecycleStore { [weak self] snapshot, _ in
-        self?.applyLifecycleSnapshot(snapshot)
+    private lazy var lifecycleStore: CyderLifecycleStore = CyderLifecycleStore { [weak self] snapshot, effects in
+        guard let self else { return }
+        self.applyLifecycleSnapshot(snapshot)
+        guard !self.isQuiescing else { return }
+        for effect in effects {
+            if case .stop(let stamp, let operation) = effect,
+               let environment = snapshot.environments[stamp.environment] {
+                self.onExecuteStop?(URL(fileURLWithPath: environment.prefix), stamp, operation)
+                DispatchQueue.main.asyncAfter(deadline: .now() + 15) { [weak self] in
+                    self?.lifecycleStore.send(.stopFinished(stamp, operation, success: false))
+                }
+            }
+        }
     }
     private(set) var menuMutationCount = 0
     private(set) var statusRemovalCount = 0
     var hasStatusItem: Bool { statusItem != nil }
     var lifecycleSnapshot: CyderLifecycle.Snapshot { latestLifecycle }
+
+    func quiesce() {
+        precondition(Thread.isMainThread)
+        guard !isQuiescing else { return }
+        isQuiescing = true
+        animationTimer?.invalidate()
+        animationTimer = nil
+        lifecycleStore.send(.quit)
+        claimTokens.removeAll()
+        let completions = Array(claimCompletions.values)
+        claimCompletions.removeAll()
+        completions.forEach { $0() }
+        processQueue.async { [weak self] in
+            guard let self else { return }
+            for source in self.processSources.values { source.cancel() }
+            self.processSources.removeAll()
+        }
+    }
+
+    func requestStop(prefixes: [URL]) {
+        guard !isQuiescing else { return }
+        let paths = Set(prefixes.map(\.path))
+        for environment in latestLifecycle.environments.values where paths.contains(environment.prefix) {
+            let stamp = CyderLifecycle.Stamp(epoch: latestLifecycle.epoch, environment: environment.id, generation: environment.generation)
+            lifecycleStore.send(.stopRequested(stamp, UUID()))
+        }
+    }
+
+    func stopFinished(stamp: CyderLifecycle.Stamp, operation: UUID, success: Bool) {
+        lifecycleStore.send(.stopFinished(stamp, operation, success: success))
+    }
 
     func setIngressPending(_ pending: Bool) {
         precondition(Thread.isMainThread)
@@ -84,7 +129,7 @@ final class CyderStatusItemController: NSObject, NSMenuDelegate {
                 prefix: resolved.path, engine: "", generation: 1) : nil
             DispatchQueue.main.async {
                 guard let self else { return }
-                if let environment { self.lifecycleStore.send(.manage(environment)) }
+                if let environment, !self.isQuiescing { self.lifecycleStore.send(.manage(environment)) }
                 self.pendingEnvironmentAttachments -= 1
                 self.publishLegacyWork()
             }
@@ -96,14 +141,14 @@ final class CyderStatusItemController: NSObject, NSMenuDelegate {
         guard !hasLifecycleSnapshot || (snapshot.epoch == latestLifecycle.epoch && snapshot.revision > latestLifecycle.revision) else { return }
         hasLifecycleSnapshot = true
         latestLifecycle = snapshot
-        if snapshot.keepStatusItem { installStatusItemIfNeeded() }
+        if snapshot.keepStatusItem && !isQuiescing { installStatusItemIfNeeded() }
         refresh()
         scheduleLifecycleSettlement()
     }
 
     private func scheduleLifecycleSettlement() {
         DispatchQueue.main.async { [weak self] in
-            guard let self, !self.menuIsOpen,
+            guard let self, !self.isQuiescing, !self.menuIsOpen,
                   RunLoop.current.currentMode != .eventTracking else { return }
             self.refresh()
             self.removeStatusItemIfUnused()
@@ -142,6 +187,13 @@ final class CyderStatusItemController: NSObject, NSMenuDelegate {
         publishLegacyWork()
         visualState = .starting
         installStatusItemIfNeeded()
+        refresh()
+    }
+
+    func finishLaunchIngress() {
+        precondition(Thread.isMainThread)
+        launchIngressPending = false
+        publishLegacyWork()
         refresh()
     }
 
@@ -205,9 +257,11 @@ final class CyderStatusItemController: NSObject, NSMenuDelegate {
 
     func finishLaunchObservation(id: String, activated: Bool, completion: @escaping (Bool) -> Void) {
         precondition(Thread.isMainThread)
-        guard !activated else { completion(true); return }
+        guard !isQuiescing, !activated else { completion(true); return }
         claimLiveWindows(id: id) { [weak self] in
-            guard let self, var session = self.sessions[id] else { completion(false); return }
+            guard let self else { completion(false); return }
+            guard !self.isQuiescing else { completion(true); return }
+            guard var session = self.sessions[id] else { completion(false); return }
             // Live background processes do not prove that a window was activated.
             session.activated = true
             self.sessions[id] = session
@@ -237,7 +291,7 @@ final class CyderStatusItemController: NSObject, NSMenuDelegate {
 
     func claimLiveWindows(id: String, completion: @escaping () -> Void) {
         precondition(Thread.isMainThread)
-        guard let session = sessions[id], claimTokens[id] == nil, claimInFlight < 2 else {
+        guard !isQuiescing, let session = sessions[id], claimTokens[id] == nil, claimInFlight < 2 else {
             completion()
             return
         }
@@ -585,7 +639,7 @@ final class CyderStatusItemController: NSObject, NSMenuDelegate {
     }
 
     private func installStatusItemIfNeeded() {
-        guard statusItem == nil else { return }
+        guard !isQuiescing, statusItem == nil else { return }
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         if let button = item.button {
             button.image = Self.cyderBottleImage(liquidLevel: 1, showsAttention: false)
@@ -640,6 +694,7 @@ final class CyderStatusItemController: NSObject, NSMenuDelegate {
     }
 
     private func refresh() {
+        guard !isQuiescing else { return }
         publishLegacyWork()
         if menuIsOpen { return }
         guard let menu = statusItem?.menu else { return }
@@ -677,8 +732,13 @@ final class CyderStatusItemController: NSObject, NSMenuDelegate {
         }
         for environment in latestLifecycle.environments.values.sorted(by: { $0.prefix < $1.prefix })
             where environment.existence != .exited && !ordered.contains(where: { $0.prefix.path == environment.prefix }) {
-            let state = environment.existence == .alive && environment.health == .healthy
+            let state: String
+            switch environment.stop {
+            case .executing: state = "正在停止 Windows 環境"
+            case .unconfirmed, .failed: state = "尚未確認環境停止，可重新檢查"
+            default: state = environment.existence == .alive && environment.health == .healthy
                 ? "Windows 環境仍在執行" : "暫時無法確認執行狀態"
+            }
             let item = menu.addItem(withTitle: state, action: nil, keyEquivalent: "")
             item.isEnabled = false
         }
@@ -709,13 +769,17 @@ final class CyderStatusItemController: NSObject, NSMenuDelegate {
         }
         taskManager.isEnabled = !prefixes.isEmpty
         menu.addItem(.separator())
-        let quit = menu.addItem(withTitle: "結束所有 Cyder 程序…", action: #selector(stopWindowsEnvironment), keyEquivalent: "")
+        let stopTitle = prefixes.count > 1 ? "停止所有 Windows 環境…" : "停止 Windows 環境…"
+        let stop = menu.addItem(withTitle: stopTitle, action: #selector(stopWindowsEnvironment), keyEquivalent: "")
+        stop.target = self
+        stop.isEnabled = !prefixes.isEmpty && !latestLifecycle.environments.values.contains { $0.stop == .executing }
+        menu.addItem(.separator())
+        let quit = menu.addItem(withTitle: "退出 Cyder", action: #selector(quitCyder), keyEquivalent: "q")
         quit.target = self
-        quit.isEnabled = !prefixes.isEmpty && !sessions.values.contains { $0.isStopping }
     }
 
     private var currentVisualState: VisualState {
-        if sessions.values.contains(where: { $0.isStopping }) { return .stopping }
+        if latestLifecycle.environments.values.contains(where: { $0.stop == .executing }) { return .stopping }
         if sessions.values.contains(where: { !$0.activated && !$0.hasForeground }) { return .starting }
         if sessions.values.contains(where: { $0.activated && !$0.hasForeground }) { return .background }
         return .running
@@ -791,6 +855,7 @@ final class CyderStatusItemController: NSObject, NSMenuDelegate {
 
     var monitoredPrefixes: [URL] { activePrefixes }
 
+    @objc private func quitCyder() { onQuit?() }
     @objc private func openPreferences() { onOpenPreferences?() }
     @objc private func openGameLibrary() { onOpenGameLibrary?() }
     @objc private func openTaskManager(_ sender: NSMenuItem) {

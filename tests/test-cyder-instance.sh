@@ -14,16 +14,12 @@ assert_contains "$instance" 'menu-bar item' \
   "instance coordinator source should document menu-bar ownership"
 assert_contains "$instance" 'CyderSentinelServer' \
   "instances must use the sentinel socket as the owner lock"
-assert_contains "$instance" 'DistributedNotificationCenter' \
-  "secondary instances must forward requests to the primary"
-assert_contains "$instance" 'requestPollTimer' \
-  "the primary must recover requests when distributed notifications are delayed"
-assert_contains "$instance" 'hasArguments' \
-  "forwarded requests must preserve the distinction between nil and empty argv"
-assert_contains "$instance" '"urls"' \
-  "forwarded requests must include url payloads"
-assert_contains "$instance" 'createdAt' \
-  "stale forwarded requests must not launch unexpectedly after a crash"
+assert_contains "$instance" 'CyderRequestChannel' \
+  "secondary delivery must use the bounded request channel"
+assert_contains "$instance" 'journal.authorizeDispatch' \
+  "dispatch must cross the persistent journal before execution"
+assert_not_contains "$instance" 'requestPollTimer' \
+  "legacy polling must not run alongside the journal consumer"
 assert_not_contains "$instance" '.native-instance-' \
   "the mkdir pid lock must not remain the owner lock"
 assert_contains "$app" 'isPrimaryInstance' \
@@ -38,12 +34,10 @@ assert_not_contains "$app" 'asyncAfter(deadline: .now() + 0.35)' \
   "secondary forward must not depend on a fixed 0.35s delay"
 assert_contains "$app" 'receiveInstanceRequest' \
   "the primary must consume forwarded launch requests"
-assert_contains "$instance" 'waitUntilNoPendingRequests' \
-  "secondary must be able to wait for the primary to drain the request"
-assert_contains "$app" '無法轉交啟動要求' \
-  "forward write failures must alert before the secondary exits"
-assert_contains "$app" '無法連到執行中的 Cyder' \
-  "unacknowledged forwards must alert before the secondary exits"
+assert_not_contains "$instance" 'waitUntilNoPendingRequests' \
+  "the secondary must not block AppKit waiting for a launch"
+assert_contains "$app" '暫時無法確認啟動要求' \
+  "unacknowledged forwards must give actionable feedback"
 assert_contains "$app" 'queuedLaunches' \
   "queued launches must remain in the primary process"
 assert_contains "$app" 'launchArguments: launch.arguments' \
@@ -57,4 +51,5 @@ assert_contains "$app" 'presentResidentCyderUI' \
 assert_contains "$app" 'func applicationShouldHandleReopen' \
   "reopen must be an NSApplicationDelegate method, not a comment"
 
+bash "$ROOT/tests/test-cyder-instance-runtime.sh"
 echo "PASS test-cyder-instance"

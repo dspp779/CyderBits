@@ -38,6 +38,8 @@ final class CyderSentinelServer {
     private let queue = DispatchQueue(label: "local.cyder.sentinel")
     private var clients: [Int32: Client] = [:]
     private var ownsSocket = false
+    private var ownerFD: Int32 = -1
+    private let resources = DispatchGroup()
 
     init(
         support: URL = CyderPaths.support,
@@ -64,41 +66,66 @@ final class CyderSentinelServer {
         } catch {
             return .unavailable
         }
+        // A hung primary keeps its kernel lock. Socket responsiveness cannot
+        // authorize a replacement executor or removal of a live endpoint.
+        let lockPath = socketURL.path + ".owner"
+        let lock = open(lockPath, O_RDWR | O_CREAT | O_NOFOLLOW | O_CLOEXEC, 0o600)
+        guard lock >= 0 else { return .unavailable }
+        var identity = stat()
+        guard fstat(lock, &identity) == 0, identity.st_uid == getuid(),
+              (identity.st_mode & S_IFMT) == S_IFREG else { close(lock); return .unavailable }
+        guard flock(lock, LOCK_EX | LOCK_NB) == 0 else {
+            let busy = errno == EWOULDBLOCK || errno == EAGAIN
+            close(lock)
+            return busy ? .secondary : .unavailable
+        }
+        ownerFD = lock
         if bindListen() {
             startAccept()
             return .primary
         }
-        if CyderSentinelConnect.canConnect(to: socketURL) {
-            return .secondary
+        // Migration: an older primary may hold only the socket. Only a definite
+        // ECONNREFUSED on its endpoint permits reclaiming it; timeout is unknown.
+        let probe = socket(AF_UNIX, SOCK_STREAM, 0)
+        var status: Int32 = EINVAL
+        if probe >= 0, var address = unixSocketAddress(socketURL.path) {
+            _ = fcntl(probe, F_SETFL, O_NONBLOCK)
+            let result = withUnsafePointer(to: &address) { pointer in
+                pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                    connect(probe, $0, socklen_t(MemoryLayout<sockaddr_un>.size))
+                }
+            }
+            status = result == 0 ? 0 : errno
         }
-        unlinkSocket()
-        if bindListen() {
-            startAccept()
-            return .primary
+        if probe >= 0 { close(probe) }
+        if status == ECONNREFUSED {
+            unlinkSocket()
+            if bindListen() { startAccept(); return .primary }
         }
-        if CyderSentinelConnect.canConnect(to: socketURL) {
-            return .secondary
-        }
-        return .unavailable
+        close(ownerFD)
+        ownerFD = -1
+        return status == 0 || status == EINPROGRESS || status == EAGAIN ? .secondary : .unavailable
     }
 
-    func stop() {
-        queue.sync {
-            for fd in clients.keys { closeClient(fd) }
+    func stop(completion: @escaping () -> Void = {}) {
+        queue.async { [self] in
+            for fd in Array(clients.keys) { closeClient(fd) }
             acceptSource?.cancel()
             acceptSource = nil
-            if listenFD >= 0 {
-                close(listenFD)
-                listenFD = -1
-            }
-            if ownsSocket {
-                unlinkSocket()
-                ownsSocket = false
+            listenFD = -1
+            resources.notify(queue: queue) { [self] in
+                if ownsSocket { unlinkSocket(); ownsSocket = false }
+                if ownerFD >= 0 { close(ownerFD); ownerFD = -1 }
+                completion()
             }
         }
     }
 
-    deinit { stop() }
+    deinit {
+        acceptSource?.cancel()
+        for client in clients.values { client.source.cancel() }
+        if ownerFD >= 0 { close(ownerFD) }
+    }
 
     private func bindListen() -> Bool {
         let fd = socket(AF_UNIX, SOCK_STREAM, 0)
@@ -136,9 +163,8 @@ final class CyderSentinelServer {
         source.setEventHandler { [weak self] in
             self?.acceptPending()
         }
-        source.setCancelHandler {
-            // The listen fd is closed in stop().
-        }
+        resources.enter()
+        source.setCancelHandler { [resources] in close(fd); resources.leave() }
         acceptSource = source
         source.resume()
     }
@@ -149,6 +175,12 @@ final class CyderSentinelServer {
             if client < 0 {
                 if errno == EINTR { continue }
                 return
+            }
+            var peerUID: uid_t = 0
+            var peerGID: gid_t = 0
+            guard clients.count < 128, getpeereid(client, &peerUID, &peerGID) == 0, peerUID == getuid() else {
+                close(client)
+                continue
             }
             _ = fcntl(client, F_SETFD, FD_CLOEXEC)
             let flags = fcntl(client, F_GETFL)
@@ -166,9 +198,8 @@ final class CyderSentinelServer {
         source.setEventHandler { [weak self] in
             self?.readClient(fd)
         }
-        source.setCancelHandler {
-            close(fd)
-        }
+        resources.enter()
+        source.setCancelHandler { [resources] in close(fd); resources.leave() }
         source.resume()
     }
 
@@ -185,6 +216,7 @@ final class CyderSentinelServer {
             finish(client)
             return
         }
+        guard client.pending.count + received <= 262144 else { finish(client); return }
         client.pending.append(contentsOf: buffer.prefix(received))
         while let line = client.nextLine() {
             apply(line, to: &client)
