@@ -22,8 +22,6 @@ assert_contains "$status_source" 'withTitle: "遊戲庫…"' \
   "the status menu must expose the game library"
 assert_contains "$status_source" 'func beginLaunch(' \
   "menu-bar lifecycle must consume sentinel launch callbacks"
-assert_contains "$status_source" '已結束，等待背景程序退出' \
-  "the primary window exit must transition into leftover-process cleanup"
 assert_contains "$status_source" 'func adoptWindowedProcess(pid:' \
   "GGM-style handoff must attach the later windowed process to the same launch"
 assert_contains "$status_source" 'rootDisplayName' \
@@ -58,10 +56,6 @@ assert_not_contains "$status_source" 'destinationOut' \
   "the menu-bar decanter must not cut Windows panes from the silhouette"
 assert_contains "$status_source" 'accessibilityDisplayShouldReduceMotion' \
   "menu-bar animations must respect Reduce Motion"
-assert_contains "$status_source" '等待 ' \
-  "named leftover processes must appear in the waiting label"
-assert_contains "$status_source" 'quit.isEnabled = !prefixes.isEmpty && !sessions.values.contains' \
-  "managed shutdown must reject duplicate stop requests"
 assert_not_contains "$status_source" 'gamecontroller.fill' \
   "the menu bar must not use the generic game-controller symbol"
 assert_contains "$app_source" '#selector(quitFromMenu), keyEquivalent: "q"' \
@@ -92,16 +86,10 @@ assert_contains "$app_source" 'statusItemController.setUIVisible(true)' \
   "opening preferences or the game library must install the menu-bar item"
 assert_contains "$app_source" 'statusItemController.setUIVisible(false)' \
   "closing both Cyder windows must release the UI-only menu-bar item"
-assert_contains "$app_source" '!self.statusItemController.hasActiveSessions' \
-  "successful launches must keep native Cyder alive while Wine is active"
-assert_contains "$app_source" 'hasActiveSessions || self.libraryLaunchInProgress' \
-  "closing Cyder windows must not drop the menu bar during an in-flight library launch"
-assert_contains "$app_source" 'quitWhenSessionsEnd' \
-  "closing native windows must not abandon an active menu-bar session"
 assert_contains "$app_source" '#selector(quitFromMenu)' \
-  "the application quit command must use the managed Wine shutdown path"
+  "the application quit command must have one routing entry"
 assert_contains "$app_source" 'func applicationShouldTerminate' \
-  "Dock and system quit requests must use the managed Wine shutdown path"
+  "AppKit must expose its termination routing entry"
 assert_contains "$app_source" 'if didRunLauncher {' \
   "a resident Cyder process must accept later Finder EXE requests"
 
@@ -119,13 +107,10 @@ assert_contains "$status_source" 'let existing = wineProcessTreeIDs(root: pid)' 
   "first PID watch must snapshot children already forked before kqueue attach"
 assert_contains "$status_source" 'func claimLiveWindows(id: String)' \
   "timeout must claim on-screen Wine windows on the same LaunchGroup"
-assert_contains "$status_source" 'wineOnscreenWindows(matchingPrefix:' \
-  "timeout must claim windows by bottle prefix when the root PID already exited"
-assert_contains "$status_source" 'if kill(pid, 0) != 0 {
-            claimLiveWindows(id: id)
-        }' \
-  "attaching a dead root PID must still claim live windows in that bottle"
 assert_contains "$status_source" 'cancelOrphanedProcessSources' \
   "endLaunch must cancel process sources for PIDs no remaining group watches"
 
+# Runtime policy replaces the removed LaunchGroup-only and prefix-guess assertions.
+bash "$ROOT/tests/test-cyder-lifecycle.sh"
+bash "$ROOT/tests/test-cyder-menu-responsiveness.sh"
 echo "PASS test-cyder-status-item"

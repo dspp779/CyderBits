@@ -299,6 +299,7 @@ SWIFT_SOURCES=(
   "$SCRIPT_DIR/cyder_moltenvk.swift"
   "$SCRIPT_DIR/cyder_launch_support.swift"
   "$SCRIPT_DIR/cyder_rosetta.swift"
+  "$SCRIPT_DIR/cyder_lifecycle.swift"
   "$SCRIPT_DIR/cyder_status_item.swift"
   "$SCRIPT_DIR/cyder_profiles.swift"
   "$SCRIPT_DIR/cyder_settings_ui.swift"

@@ -1,6 +1,7 @@
 // Menu-bar lifecycle for native Cyder launches on macOS 11 and newer.
 import Cocoa
 import Foundation
+import Darwin
 
 final class CyderStatusItemController: NSObject, NSMenuDelegate {
     private enum VisualState: Equatable {
@@ -32,10 +33,87 @@ final class CyderStatusItemController: NSObject, NSMenuDelegate {
     var onOpenGameLibrary: (() -> Void)?
     var onOpenTaskManager: ((URL) -> Void)?
     var onStopPrefixes: (([URL]) -> Void)?
-    var onAllSessionsEnded: (() -> Void)?
+    var onLifecycleIdle: (() -> Void)?
     var onSessionEnded: ((URL) -> Void)?
 
     private var sessions: [String: Session] = [:]
+    private var pendingEnvironmentAttachments = 0
+    private var claimTokens: [String: UUID] = [:]
+    private var claimCompletions: [String: () -> Void] = [:]
+    private var claimInFlight = 0
+    private var sessionVersions: [String: UUID] = [:]
+    private var lastPublishedWork: Bool?
+    private var externalIngressPending = false
+    private var launchIngressPending = false
+    private var latestLifecycle = CyderLifecycle.State().snapshot
+    private var hasLifecycleSnapshot = false
+    private lazy var lifecycleStore = CyderLifecycleStore { [weak self] snapshot, _ in
+        self?.applyLifecycleSnapshot(snapshot)
+    }
+    private(set) var menuMutationCount = 0
+    private(set) var statusRemovalCount = 0
+    var hasStatusItem: Bool { statusItem != nil }
+    var lifecycleSnapshot: CyderLifecycle.Snapshot { latestLifecycle }
+
+    func setIngressPending(_ pending: Bool) {
+        precondition(Thread.isMainThread)
+        externalIngressPending = pending
+        publishLegacyWork()
+    }
+
+    private func publishLegacyWork() {
+        let pending = externalIngressPending || launchIngressPending
+            || pendingEnvironmentAttachments > 0 || sessions.values.contains { !$0.activated }
+        guard lastPublishedWork != pending else { return }
+        lastPublishedWork = pending
+        lifecycleStore.send(.ingressPending(pending))
+    }
+
+    /// Migration producer only: a root receipt proves this prefix was managed,
+    /// not that its server is still alive. Batch E supplies calibrated evidence.
+    private func registerManagedEnvironment(prefix: URL) {
+        pendingEnvironmentAttachments += 1
+        publishLegacyWork()
+        observationQueue.async { [weak self] in
+            let resolved = prefix.resolvingSymlinksInPath().standardizedFileURL
+            var info = stat()
+            let valid = stat(resolved.path, &info) == 0 && (info.st_mode & S_IFMT) == S_IFDIR
+            let environment: CyderLifecycle.Environment? = valid ? CyderLifecycle.Environment(
+                id: .init(uid: getuid(), device: UInt64(bitPattern: Int64(info.st_dev)),
+                          inode: UInt64(info.st_ino), namespace: "wine-user"),
+                prefix: resolved.path, engine: "", generation: 1) : nil
+            DispatchQueue.main.async {
+                guard let self else { return }
+                if let environment { self.lifecycleStore.send(.manage(environment)) }
+                self.pendingEnvironmentAttachments -= 1
+                self.publishLegacyWork()
+            }
+        }
+    }
+
+    func applyLifecycleSnapshot(_ snapshot: CyderLifecycle.Snapshot) {
+        precondition(Thread.isMainThread)
+        guard !hasLifecycleSnapshot || (snapshot.epoch == latestLifecycle.epoch && snapshot.revision > latestLifecycle.revision) else { return }
+        hasLifecycleSnapshot = true
+        latestLifecycle = snapshot
+        if snapshot.keepStatusItem { installStatusItemIfNeeded() }
+        refresh()
+        scheduleLifecycleSettlement()
+    }
+
+    private func scheduleLifecycleSettlement() {
+        DispatchQueue.main.async { [weak self] in
+            guard let self, !self.menuIsOpen,
+                  RunLoop.current.currentMode != .eventTracking else { return }
+            self.refresh()
+            self.removeStatusItemIfUnused()
+            if self.hasLifecycleSnapshot && self.latestLifecycle.canAutoTerminate
+                && !self.uiVisible && self.lastPublishedWork == false {
+                self.onLifecycleIdle?()
+            }
+        }
+    }
+
     private var statusItem: NSStatusItem?
     private var animationTimer: Timer?
     private var visualState: VisualState = .starting
@@ -46,25 +124,22 @@ final class CyderStatusItemController: NSObject, NSMenuDelegate {
     private let processQueue = DispatchQueue(label: "local.cyder.status-proc")
     private let observationQueue = DispatchQueue(label: "local.cyder.status-observation", qos: .utility)
 
-    var hasActiveSessions: Bool { !sessions.isEmpty }
+    var hasActiveSessions: Bool { !sessions.isEmpty } // presentation only; never an app exit policy
 
     /// Keep the menu-bar item available while a Cyder-owned window is open,
     /// even when no Wine process is currently being monitored.
     func setUIVisible(_ visible: Bool) {
         precondition(Thread.isMainThread)
         uiVisible = visible
-        if visible {
-            installStatusItemIfNeeded()
-            refresh()
-        } else if sessions.isEmpty {
-            removeStatusItemIfUnused()
-        } else {
-            refresh()
-        }
+        lifecycleStore.send(.visibleUI(visible))
+        if visible { installStatusItemIfNeeded() }
+        refresh()
     }
 
     func markLaunchStarted() {
         precondition(Thread.isMainThread)
+        launchIngressPending = true
+        publishLegacyWork()
         visualState = .starting
         installStatusItemIfNeeded()
         refresh()
@@ -78,31 +153,23 @@ final class CyderStatusItemController: NSObject, NSMenuDelegate {
         if let existing = sessions.first(where: { $0.value.adoptedPIDs.contains(pid) })?.key {
             key = existing
         } else {
-            let starting = sessions.filter {
-                $0.value.prefix.path == target && !$0.value.activated && !$0.value.hasForeground
-            }
-            let exactlyOneStartingGroup = starting.count == 1
-            if exactlyOneStartingGroup {
-                key = starting.first?.key
-            } else {
-                // Snapshot ownership on main, but query the OS away from AppKit.
-                let candidates = sessions.filter { $0.value.prefix.path == target }
-                    .map { (id: $0.key, pids: $0.value.adoptedPIDs) }
-                observationQueue.async { [weak self] in
-                    let owner = candidates.first { candidate in
-                        candidate.pids.contains { wineProcessTreeIDs(root: $0).contains(pid) }
-                    }
-                    guard let owner else { return }
-                    DispatchQueue.main.async {
-                        guard let self,
-                              let current = self.sessions[owner.id],
-                              !current.adoptedPIDs.isDisjoint(with: owner.pids),
-                              kill(pid, 0) == 0 else { return }
-                        self.adoptWindow(id: owner.id, pid: pid, name: name)
-                    }
+            // Snapshot ownership on main, but query the OS away from AppKit.
+            let candidates = sessions.filter { $0.value.prefix.path == target }
+                .map { (id: $0.key, pids: $0.value.adoptedPIDs) }
+            observationQueue.async { [weak self] in
+                let owner = candidates.first { candidate in
+                    candidate.pids.contains { wineProcessTreeIDs(root: $0).contains(pid) }
                 }
-                key = nil
+                guard let owner else { return }
+                DispatchQueue.main.async {
+                    guard let self,
+                          let current = self.sessions[owner.id],
+                          !current.adoptedPIDs.isDisjoint(with: owner.pids),
+                          self.sessionVersions[owner.id] != nil else { return }
+                    self.adoptWindow(id: owner.id, pid: pid, name: name)
+                }
             }
+            key = nil
         }
         guard let key else { return }
         adoptWindow(id: key, pid: pid, name: name)
@@ -136,11 +203,24 @@ final class CyderStatusItemController: NSObject, NSMenuDelegate {
         refresh()
     }
 
+    func finishLaunchObservation(id: String, activated: Bool, completion: @escaping (Bool) -> Void) {
+        precondition(Thread.isMainThread)
+        guard !activated else { completion(true); return }
+        claimLiveWindows(id: id) { [weak self] in
+            guard let self, var session = self.sessions[id] else { completion(false); return }
+            // Live background processes do not prove that a window was activated.
+            session.activated = true
+            self.sessions[id] = session
+            let retained = !session.adoptedPIDs.isEmpty || session.hasForeground
+            if retained { self.refresh() } else { self.endLaunch(id: id) }
+            completion(retained)
+        }
+    }
+
     func hasLiveWatchedPIDs(id: String) -> Bool {
         precondition(Thread.isMainThread)
         guard let session = sessions[id] else { return false }
-        if session.pid > 0, kill(session.pid, 0) == 0 { return true }
-        return session.adoptedPIDs.contains { kill($0, 0) == 0 }
+        return !session.adoptedPIDs.isEmpty
     }
 
     func hasClaimedWindow(id: String) -> Bool {
@@ -157,28 +237,43 @@ final class CyderStatusItemController: NSObject, NSMenuDelegate {
 
     func claimLiveWindows(id: String, completion: @escaping () -> Void) {
         precondition(Thread.isMainThread)
-        guard let session = sessions[id] else { completion(); return }
-        var pids = session.adoptedPIDs
-        if session.pid > 0 { pids.insert(session.pid) }
-        let roots = pids
-        let prefix = session.prefix.path
+        guard let session = sessions[id], claimTokens[id] == nil, claimInFlight < 2 else {
+            completion()
+            return
+        }
+        let token = UUID()
+        let sessionVersion = sessionVersions[id]
+        claimTokens[id] = token
+        claimCompletions[id] = completion
+        claimInFlight += 1
+        var roots = session.adoptedPIDs
+        if session.pid > 0 { roots.insert(session.pid) }
+        let capturedRoots = roots
+        // Timeout completes observation only. The actual worker still occupies
+        // its slot until the OS call returns; retries cannot grow blocked work.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 5) { [weak self] in
+            guard let self, self.claimTokens[id] == token else { return }
+            self.claimTokens.removeValue(forKey: id)
+            self.claimCompletions.removeValue(forKey: id)?()
+        }
         observationQueue.async { [weak self] in
-            var expanded = roots
-            for pid in roots {
-                expanded.formUnion(wineProcessTreeIDs(root: pid))
-            }
-            let windows = wineOnscreenWindows(matchingPrefix: prefix, extraPIDs: expanded)
-            let observed = expanded
+            var expanded = capturedRoots
+            for pid in capturedRoots { expanded.formUnion(wineProcessTreeIDs(root: pid)) }
+            // Prefix is not launch ownership evidence. Observe only the proven tree.
+            let windows = wineOnscreenWindows(ownedBy: expanded)
+            let live = expanded.filter { kill($0, 0) == 0 || errno == EPERM }
             DispatchQueue.main.async {
-                defer { completion() }
-                guard let self, var updated = self.sessions[id] else { return }
-                // An exit may arrive while the snapshot is being collected.
-                let live = observed.filter { kill($0, 0) == 0 }
+                guard let self else { return }
+                self.claimInFlight -= 1
+                guard self.claimTokens[id] == token else { return }
+                self.claimTokens.removeValue(forKey: id)
+                defer { self.claimCompletions.removeValue(forKey: id)?() }
+                guard self.sessionVersions[id] == sessionVersion, var updated = self.sessions[id] else { return }
                 updated.adoptedPIDs.formUnion(live)
                 self.sessions[id] = updated
                 for pid in live { self.watchPID(pid) }
-                for window in windows where kill(window.pid, 0) == 0 {
-                    self.adoptWindowedProcess(pid: window.pid, prefix: prefix, name: window.ownerName)
+                for window in windows where live.contains(window.pid) {
+                    self.adoptWindow(id: id, pid: window.pid, name: window.ownerName)
                 }
             }
         }
@@ -198,7 +293,7 @@ final class CyderStatusItemController: NSObject, NSMenuDelegate {
     }
 
     func markStopping(prefixes: [URL]) {
-        let targets = Set(prefixes.map { $0.resolvingSymlinksInPath().standardizedFileURL })
+        let targets = Set(prefixes.map { $0.standardizedFileURL })
         for (key, var session) in sessions where targets.contains(session.prefix) {
             session.isStopping = true
             sessions[key] = session
@@ -207,7 +302,7 @@ final class CyderStatusItemController: NSObject, NSMenuDelegate {
     }
 
     func markStopFailed(prefix: URL) {
-        let target = prefix.resolvingSymlinksInPath().standardizedFileURL
+        let target = prefix.standardizedFileURL
         for (key, var session) in sessions where session.prefix == target {
             session.isStopping = false
             sessions[key] = session
@@ -216,7 +311,7 @@ final class CyderStatusItemController: NSObject, NSMenuDelegate {
     }
 
     func markPrefixStopped(prefix: URL) {
-        let target = prefix.resolvingSymlinksInPath().standardizedFileURL
+        let target = prefix.standardizedFileURL
         let removed = sessions.filter { $0.value.prefix == target }
         for key in removed.keys {
             sessions.removeValue(forKey: key)
@@ -227,18 +322,21 @@ final class CyderStatusItemController: NSObject, NSMenuDelegate {
 
     func beginLaunch(id: String, prefix: URL, executableName: String, pid: Int32) {
         precondition(Thread.isMainThread)
+        sessionVersions[id] = UUID()
+        launchIngressPending = false
         let name = executableName.trimmingCharacters(in: .whitespacesAndNewlines)
         let display = name.isEmpty ? "Wine" : name
         sessions[id] = Session(
             id: id,
             pid: pid,
-            prefix: prefix.resolvingSymlinksInPath().standardizedFileURL,
+            prefix: prefix.standardizedFileURL,
             rootDisplayName: display,
             fromSentinel: true,
             displayName: display,
             helperConnected: false,
             adoptedPIDs: pid > 0 ? [pid] : []
         )
+        if pid > 0 { registerManagedEnvironment(prefix: prefix) }
         installStatusItemIfNeeded()
         watchPID(pid)
         refresh()
@@ -275,8 +373,8 @@ final class CyderStatusItemController: NSObject, NSMenuDelegate {
     func endLaunch(id: String) {
         precondition(Thread.isMainThread)
         guard let session = sessions.removeValue(forKey: id) else { return }
+        sessionVersions.removeValue(forKey: id)
         cancelOrphanedProcessSources(removed: session)
-        onSessionEnded?(session.prefix)
         refresh()
         finishIfEmpty(hadSessions: true)
     }
@@ -287,10 +385,9 @@ final class CyderStatusItemController: NSObject, NSMenuDelegate {
         session.pid = pid
         session.adoptedPIDs.insert(pid)
         sessions[id] = session
+        registerManagedEnvironment(prefix: session.prefix)
         watchPID(pid)
-        if kill(pid, 0) != 0 {
-            claimLiveWindows(id: id)
-        }
+        claimLiveWindows(id: id)
         refresh()
     }
 
@@ -303,13 +400,14 @@ final class CyderStatusItemController: NSObject, NSMenuDelegate {
         sessions[id] = Session(
             id: id,
             pid: pid,
-            prefix: prefix.resolvingSymlinksInPath().standardizedFileURL,
+            prefix: prefix.standardizedFileURL,
             rootDisplayName: name,
             fromSentinel: false,
             displayName: name,
             helperConnected: false,
             adoptedPIDs: [pid]
         )
+        if pid > 0 { registerManagedEnvironment(prefix: prefix) }
         installStatusItemIfNeeded()
         watchPID(pid)
         refresh()
@@ -352,7 +450,7 @@ final class CyderStatusItemController: NSObject, NSMenuDelegate {
 
     private func watchPIDOnQueue(_ pid: Int32) {
         guard processSources[pid] == nil else { return }
-        if kill(pid, 0) != 0 {
+        if kill(pid, 0) != 0 && errno == ESRCH {
             DispatchQueue.main.async { [weak self] in
                 self?.handleProcessExit(pid)
             }
@@ -424,7 +522,7 @@ final class CyderStatusItemController: NSObject, NSMenuDelegate {
             session.adoptedPIDs.remove(pid)
             if session.pid == pid { session.pid = 0 }
             session.foregroundPIDs.remove(pid)
-            let live = session.adoptedPIDs.filter { kill($0, 0) == 0 }
+            let live = session.adoptedPIDs
             session.adoptedPIDs = live
             session.foregroundPIDs = session.foregroundPIDs.intersection(live)
             if !session.foregroundPIDs.isEmpty {
@@ -444,15 +542,13 @@ final class CyderStatusItemController: NSObject, NSMenuDelegate {
     }
 
     private func leftoverNames(for session: Session) -> [String] {
-        session.adoptedPIDs.compactMap { pid -> String? in
-            guard kill(pid, 0) == 0 else { return nil }
-            return cyderWineArgvName(pid: pid)
-        }.filter { $0.caseInsensitiveCompare(session.displayName) != .orderedSame }
+        // Names arrive with observer snapshots; AppKit never reads argv.
+        session.leftoverNames
     }
 
     private func finishSessionIfIdle(_ id: String) {
         guard var session = sessions[id] else { return }
-        let live = session.adoptedPIDs.filter { kill($0, 0) == 0 }
+        let live = session.adoptedPIDs
         session.adoptedPIDs = live
         if !live.isEmpty {
             session.hasForeground = false
@@ -512,21 +608,17 @@ final class CyderStatusItemController: NSObject, NSMenuDelegate {
     }
 
     private func finishIfEmpty(hadSessions: Bool) {
-        guard hadSessions, sessions.isEmpty else { return }
-        animationTimer?.invalidate()
-        animationTimer = nil
-        if uiVisible {
-            refresh()
-        } else {
-            removeStatusItemIfUnused()
-        }
-        onAllSessionsEnded?()
+        publishLegacyWork()
+        scheduleLifecycleSettlement()
     }
 
     private func removeStatusItemIfUnused() {
-        guard !uiVisible, sessions.isEmpty else { return }
+        guard hasLifecycleSnapshot, !latestLifecycle.keepStatusItem, !menuIsOpen,
+              latestLifecycle.phase != .active || (!uiVisible && lastPublishedWork == false),
+              RunLoop.current.currentMode != .eventTracking else { return }
         if let statusItem {
             NSStatusBar.system.removeStatusItem(statusItem)
+            statusRemovalCount += 1
         }
         statusItem = nil
     }
@@ -535,19 +627,20 @@ final class CyderStatusItemController: NSObject, NSMenuDelegate {
         menuIsOpen = true
         animationTimer?.invalidate()
         animationTimer = nil
-        rebuild(menu)
     }
 
     func menuDidClose(_ menu: NSMenu) {
         menuIsOpen = false
-        refresh()
+        scheduleLifecycleSettlement()
     }
 
     func menuNeedsUpdate(_ menu: NSMenu) {
+        guard !menuIsOpen else { return }
         rebuild(menu)
     }
 
     private func refresh() {
+        publishLegacyWork()
         if menuIsOpen { return }
         guard let menu = statusItem?.menu else { return }
         rebuild(menu)
@@ -562,6 +655,7 @@ final class CyderStatusItemController: NSObject, NSMenuDelegate {
     }
 
     private func rebuild(_ menu: NSMenu) {
+        menuMutationCount += 1
         menu.removeAllItems()
         let ordered = sessions.values.sorted { $0.displayName.localizedStandardCompare($1.displayName) == .orderedAscending }
         for session in ordered {
@@ -573,15 +667,22 @@ final class CyderStatusItemController: NSObject, NSMenuDelegate {
             } else if !session.activated {
                 state = "正在啟動"
             } else if let leftover = session.leftoverNames.first {
-                state = "等待 \(leftover) 退出"
+                state = "背景執行：\(leftover)"
             } else {
-                state = "已結束，等待背景程序退出"
+                state = "背景執行"
             }
             let item = NSMenuItem(title: "\(session.displayName) — \(state)", action: nil, keyEquivalent: "")
             item.isEnabled = false
             menu.addItem(item)
         }
-        if !ordered.isEmpty { menu.addItem(.separator()) }
+        for environment in latestLifecycle.environments.values.sorted(by: { $0.prefix < $1.prefix })
+            where environment.existence != .exited && !ordered.contains(where: { $0.prefix.path == environment.prefix }) {
+            let state = environment.existence == .alive && environment.health == .healthy
+                ? "Windows 環境仍在執行" : "暫時無法確認執行狀態"
+            let item = menu.addItem(withTitle: state, action: nil, keyEquivalent: "")
+            item.isEnabled = false
+        }
+        if !ordered.isEmpty || latestLifecycle.hasEnvironment { menu.addItem(.separator()) }
 
         let preferences = menu.addItem(withTitle: "偏好設定…", action: #selector(openPreferences), keyEquivalent: ",")
         preferences.target = self
@@ -622,7 +723,7 @@ final class CyderStatusItemController: NSObject, NSMenuDelegate {
 
     private func updateAnimationTimer() {
         let reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
-        let shouldAnimate = !reduceMotion && visualState != .running && !menuIsOpen
+        let shouldAnimate = !reduceMotion && (visualState == .stopping || visualState == .attention) && !menuIsOpen
         if shouldAnimate, animationTimer == nil {
             let timer = Timer(timeInterval: 0.2, target: self, selector: #selector(advanceAnimation), userInfo: nil, repeats: true)
             RunLoop.main.add(timer, forMode: .default)
@@ -668,7 +769,7 @@ final class CyderStatusItemController: NSObject, NSMenuDelegate {
                 return "\(name) 執行中"
             }
             return "\(sessions.count) 個程式執行中"
-        case .background: return "Cyder 正在等待背景程序結束"
+        case .background: return "Windows 環境仍在執行"
         case .stopping: return "Cyder 正在結束 Windows 程序"
         case .attention: return "Cyder 無法確認背景程序已結束"
         }
@@ -685,7 +786,7 @@ final class CyderStatusItemController: NSObject, NSMenuDelegate {
     // First version monitors one normal launch; if the library starts more than
     // one app in a bottle, either entry still resolves to the same safe target.
     private var activePrefixes: [URL] {
-        Array(Set(sessions.values.map { $0.prefix })).sorted { $0.path < $1.path }
+        Array(Set(latestLifecycle.environments.values.filter { $0.existence != .exited }.map { URL(fileURLWithPath: $0.prefix) })).sorted { $0.path < $1.path }
     }
 
     var monitoredPrefixes: [URL] { activePrefixes }

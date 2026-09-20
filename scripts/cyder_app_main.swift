@@ -44,10 +44,14 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         var isURI = false
     }
 
-    private var queuedLaunches: [QueuedLaunch] = []
+    private var queuedLaunches: [QueuedLaunch] = [] {
+        didSet { statusItemController.setIngressPending(libraryLaunchInProgress || !queuedLaunches.isEmpty) }
+    }
     private var didFinishLaunch = false
     private var didRunLauncher = false
-    private var libraryLaunchInProgress = false
+    private var libraryLaunchInProgress = false {
+        didSet { statusItemController.setIngressPending(libraryLaunchInProgress || !queuedLaunches.isEmpty) }
+    }
     private var documentLaunchRequested = false
     private var openLibraryOnLaunch = false
     private var setupPanel: CyderSetupPanel?
@@ -75,14 +79,12 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         controller.onStopPrefixes = { [weak self] prefixes in
             self?.requestQuitAndStop(prefixes: prefixes)
         }
-        controller.onAllSessionsEnded = { [weak self] in
-            guard let self else { return }
-            if self.quitWhenSessionsEnd || (
-                self.settingsController.window?.isVisible != true
-                    && self.gameLibraryController.window?.isVisible != true
-            ) {
-                NSApp.terminate(nil)
-            }
+        controller.onLifecycleIdle = { [weak self] in
+            guard let self, !self.libraryLaunchInProgress, self.queuedLaunches.isEmpty,
+                  !self.environmentPreparationInProgress,
+                  self.settingsController.window?.isVisible != true,
+                  self.gameLibraryController.window?.isVisible != true else { return }
+            NSApp.terminate(nil)
         }
         if #available(macOS 11.0, *) {
             controller.onSessionEnded = { [weak self] prefix in
@@ -147,12 +149,9 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
                   !self.openingGameLibrary,
                   self.gameLibraryController.window?.isVisible != true else { return }
             self.statusItemController.setUIVisible(false)
-            if self.statusItemController.hasActiveSessions || self.libraryLaunchInProgress {
-                NSApp.setActivationPolicy(.accessory)
-                return
-            }
-            guard self.terminateWhenSettingsClose else { return }
-            NSApp.terminate(nil)
+            NSApp.setActivationPolicy(.accessory)
+            // The lifecycle snapshot settles after pending entry events; closing
+            // a Cyder window cannot infer that an external environment ended.
         }
         return controller
     }()
@@ -175,12 +174,9 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
                   self.settingsController.window?.isVisible != true,
                   !self.gameLibraryController.isGameSettingsVisible else { return }
             self.statusItemController.setUIVisible(false)
-            if self.statusItemController.hasActiveSessions || self.libraryLaunchInProgress {
-                NSApp.setActivationPolicy(.accessory)
-                return
-            }
-            guard self.terminateWhenSettingsClose else { return }
-            NSApp.terminate(nil)
+            NSApp.setActivationPolicy(.accessory)
+            // The lifecycle snapshot settles after pending entry events; closing
+            // a Cyder window cannot infer that an external environment ended.
         }
         return controller
     }()
@@ -1107,11 +1103,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
                     CyderDiagnostics.shared.finish(outcome: "launch-failed")
                 }
                 self.launchNextQueuedExecutableIfReady()
-                if !self.statusItemController.hasActiveSessions,
-                   !self.libraryLaunchInProgress,
-                   self.queuedLaunches.isEmpty {
-                    NSApp.terminate(nil)
-                }
+                self.statusItemController.setIngressPending(self.libraryLaunchInProgress || !self.queuedLaunches.isEmpty)
             }
         }
     }
@@ -1593,17 +1585,18 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         var cleanPrimaryExitObserved = false
         defer {
             try? FileManager.default.removeItem(at: pidURL)
-            keepLaunchGroupIfLiveOrClaimed(
-                id: launchID,
-                launchActivated: &launchActivated,
-                activatedURL: activatedURL
-            )
-            if !launchActivated {
-                try? FileManager.default.removeItem(at: exitResultURL)
-                try? FileManager.default.removeItem(at: activatedURL)
-                try? FileManager.default.removeItem(at: lifecycleURL)
-                onMainThread {
-                    statusItemController.endLaunch(id: launchID)
+            let observedActivation = launchActivated
+            DispatchQueue.main.async { [self] in
+                statusItemController.finishLaunchObservation(id: launchID, activated: observedActivation) { keepGroup in
+                    DispatchQueue.global(qos: .utility).async {
+                        if keepGroup {
+                            FileManager.default.createFile(atPath: activatedURL.path, contents: Data())
+                        } else {
+                            for url in [exitResultURL, activatedURL, lifecycleURL] {
+                                try? FileManager.default.removeItem(at: url)
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -1786,46 +1779,9 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         CyderDiagnostics.shared.warning(
             "wine activation timed out after 30s pid=\(winePID); process remains detached"
         )
-        // Spec §3.3: timeout is success only if watched PIDs still live or the
-        // group already claimed a window. An empty starting group must fall
-        // through to defer endLaunch so it cannot linger as「正在啟動」.
-        keepLaunchGroupIfLiveOrClaimed(
-            id: launchID,
-            launchActivated: &launchActivated,
-            activatedURL: activatedURL
-        )
+        // Observation finalization is asynchronous and bounded. Environment
+        // monitoring continues independently of this scheduling slot.
         return .success
-    }
-
-    /// Shared by the 30s timeout and the launch defer so an early Wine exit
-    /// cannot destroy a LaunchGroup that already adopted live PIDs or a window.
-    private func keepLaunchGroupIfLiveOrClaimed(
-        id launchID: String,
-        launchActivated: inout Bool,
-        activatedURL: URL
-    ) {
-        guard !launchActivated else { return }
-        precondition(!Thread.isMainThread)
-        var keepGroup = false
-        let observationFinished = DispatchSemaphore(value: 0)
-        DispatchQueue.main.async { [self] in
-            statusItemController.claimLiveWindows(id: launchID) {
-                keepGroup = self.statusItemController.hasLiveWatchedPIDs(id: launchID)
-                    || self.statusItemController.hasClaimedWindow(id: launchID)
-                if keepGroup {
-                    self.statusItemController.markActivated(id: launchID)
-                }
-                observationFinished.signal()
-            }
-        }
-        // Only the launch worker waits; the menu's main run loop stays available.
-        observationFinished.wait()
-        if keepGroup {
-            // Observation stops; let the Bash supervisor consume the sidecar
-            // just like an activation.
-            launchActivated = true
-            FileManager.default.createFile(atPath: activatedURL.path, contents: Data())
-        }
     }
 
     private func runPrefixAction(_ action: String, prefix: URL, operation: String) {

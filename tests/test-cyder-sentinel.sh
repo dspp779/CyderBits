@@ -43,10 +43,10 @@ assert_contains "$common" 'cyder_exec_game >"$fifo" 2>&1 3>&-' \
   "Wine must not inherit the fifo write end"
 assert_contains "$sentinel" 'closeInheritedHelperFileDescriptors' \
   "the sentinel helper must drop inherited fds so it cannot hold its own fifo write end"
-assert_contains "$status" '已結束，等待背景程序退出' \
-  "menu items must describe leftover processes after the window closes"
-assert_contains "$status" '等待 ' \
-  "named leftover processes must appear in the waiting label"
+assert_contains "$status" '背景執行' \
+  "windowless background processes must not be described as cleanup"
+assert_contains "$status" '暫時無法確認執行狀態' \
+  "unconfirmed environment presence must remain visible"
 assert_contains "$status" 'func beginLaunch(' \
   "the menu bar must track launches as LaunchGroups with a stable id"
 assert_not_contains "$app" 'sentinel.onLaunch = { [weak self] launch in
@@ -76,8 +76,8 @@ assert_contains "$status" 'noteHelperDisconnected' \
   "a crashed sentinel helper must not drop a still-running Wine launch"
 assert_not_contains "$status" 'if isMonitoring(prefix: prefix.path) { return }' \
   "a published Wine PID must attach to the existing sentinel launch instead of being ignored"
-assert_contains "$app" 'hasActiveSessions || self.libraryLaunchInProgress' \
-  "closing the game library must keep the menu bar while a launch or Wine session is active"
+assert_contains "$app" 'controller.onLifecycleIdle' \
+  "closing Cyder UI must use the shared lifecycle policy"
 
 assert_contains "$app" 'statusItemController.beginLaunch(' \
   "Swift must create the LaunchGroup when the Wine relay starts, not wait for helper hello"
@@ -90,48 +90,24 @@ assert_not_contains "$app" 'self?.statusItemController.endLaunch(id: id)' \
   "onLaunchEnded must not call endLaunch"
 assert_contains "$status" 'func attachRootPID(id: String, pid: Int32)' \
   "root PID attach is keyed by launch id"
-assert_contains "$status" 'exactlyOneStartingGroup' \
-  "window adoption must prefer the single starting group, not every group with the same prefix"
+assert_not_contains "$status" 'exactlyOneStartingGroup' \
+  "one starting group is not evidence that another prefix process belongs to it"
 assert_not_contains "$status" 'for (key, var session) in sessions where session.prefix.path == target' \
   "adoptWindowedProcess must not dump a PID into every LaunchGroup that shares the bottle"
-assert_contains "$app" 'endLaunch(id: launchID)' \
-  "a failed Wine relay must tear down the LaunchGroup created for that launch id"
-assert_contains "$app" 'keepLaunchGroupIfLiveOrClaimed(' \
-  "timeout and early-return defer must share one LaunchGroup lifetime helper"
-keep_helper_refs="$(printf '%s\n' "$app" | grep -c 'keepLaunchGroupIfLiveOrClaimed(' || true)"
-assert_eq "$keep_helper_refs" "3" \
-  "helper definition plus timeout and defer call sites must all use keepLaunchGroupIfLiveOrClaimed"
+# Old assertions demanded synchronous timeout scans and prefix-only ownership.
+# These are explicitly superseded by spec §20–23 and the runtime harness.
+assert_contains "$app" 'finishLaunchObservation(id: launchID' \
+  "the Wine relay must finish observation through the asynchronous controller adapter"
+assert_not_contains "$app" 'observationFinished.wait()' \
+  "observation finalization must not wait indefinitely for an OS query"
+assert_not_contains "$status" 'wineOnscreenWindows(matchingPrefix:' \
+  "prefix membership must not be mistaken for launch ownership"
+assert_contains "$status" 'wineOnscreenWindows(ownedBy: expanded)' \
+  "launch window claims require a proven process tree"
 assert_not_contains "$app" 'cancelMonitoring(pid: winePID' \
-  "failed launches must not cancel monitoring by pid after the group is keyed by launch id"
-assert_contains "$status" 'if !session.activated {
-            session.hasForeground = false
-            session.leftoverNames = []
-            sessions[id] = session
-            refresh()
-            return
-        }
-        endLaunch(id: id)' \
-  "finishSessionIfIdle must not endLaunch while the LaunchGroup is still starting"
+  "failed launches must not cancel unrelated monitoring by numeric PID"
 assert_contains "$status" 'func markActivated(id: String)' \
-  "LaunchGroup activation after root PID exit must be keyed by launch id"
+  "activation after root exit must still be keyed by launch ID"
 assert_contains "$app" 'markActivated(id: launchID)' \
-  "the Wine relay must activate the LaunchGroup by launch id, not only by a possibly-exited root pid"
-assert_contains "$app" 'hasLiveWatchedPIDs(id: launchID)' \
-  "timeout and defer must not keep the LaunchGroup unless watched PIDs are still live"
-assert_contains "$app" 'hasClaimedWindow(id: launchID)' \
-  "timeout and defer must keep the group only if a window was claimed or a process still lives"
-assert_contains "$app" 'claimLiveWindows(id: launchID)' \
-  "timeout must synchronously claim existing Wine windows before deciding keep/end"
-assert_contains "$status" 'wineOnscreenWindows(matchingPrefix:' \
-  "LaunchGroup timeout must scan the bottle prefix, not only watched PIDs"
-assert_contains "$status" 'func claimLiveWindows(id: String)' \
-  "status item must expose a synchronous window claim for LaunchGroup timeout"
-assert_contains "$app" 'keepLaunchGroupIfLiveOrClaimed(
-                id: launchID,
-                launchActivated: &launchActivated,
-                activatedURL: activatedURL
-            )
-            if !launchActivated {' \
-  "early-return defer must run the same keepGroup helper before endLaunch"
-
+  "the relay must apply activation to its own launch"
 echo "PASS test-cyder-sentinel"
