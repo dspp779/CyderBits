@@ -44,6 +44,7 @@ final class CyderStatusItemController: NSObject, NSMenuDelegate {
     private var menuIsOpen = false
     private var processSources: [Int32: DispatchSourceProcess] = [:]
     private let processQueue = DispatchQueue(label: "local.cyder.status-proc")
+    private let observationQueue = DispatchQueue(label: "local.cyder.status-observation", qos: .utility)
 
     var hasActiveSessions: Bool { !sessions.isEmpty }
 
@@ -83,20 +84,36 @@ final class CyderStatusItemController: NSObject, NSMenuDelegate {
             let exactlyOneStartingGroup = starting.count == 1
             if exactlyOneStartingGroup {
                 key = starting.first?.key
-            } else if let treeOwner = sessions.first(where: { session in
-                session.value.prefix.path == target
-                    && session.value.adoptedPIDs.contains(where: { wineProcessTreeIDs(root: $0).contains(pid) })
-            })?.key {
-                key = treeOwner
             } else {
+                // Snapshot ownership on main, but query the OS away from AppKit.
+                let candidates = sessions.filter { $0.value.prefix.path == target }
+                    .map { (id: $0.key, pids: $0.value.adoptedPIDs) }
+                observationQueue.async { [weak self] in
+                    let owner = candidates.first { candidate in
+                        candidate.pids.contains { wineProcessTreeIDs(root: $0).contains(pid) }
+                    }
+                    guard let owner else { return }
+                    DispatchQueue.main.async {
+                        guard let self,
+                              let current = self.sessions[owner.id],
+                              !current.adoptedPIDs.isDisjoint(with: owner.pids),
+                              kill(pid, 0) == 0 else { return }
+                        self.adoptWindow(id: owner.id, pid: pid, name: name)
+                    }
+                }
                 key = nil
             }
         }
-        guard let key, var session = sessions[key] else { return }
+        guard let key else { return }
+        adoptWindow(id: key, pid: pid, name: name)
+    }
+
+    private func adoptWindow(id: String, pid: Int32, name: String?) {
+        guard var session = sessions[id] else { return }
         session.adoptedPIDs.insert(pid)
         session.foregroundPIDs.insert(pid)
         applyWindowedHandoff(&session, preferredName: name)
-        sessions[key] = session
+        sessions[id] = session
         watchPID(pid)
         refresh()
     }
@@ -135,25 +152,35 @@ final class CyderStatusItemController: NSObject, NSMenuDelegate {
     /// Snapshot the current Wine tree and adopt any on-screen windows before a
     /// timeout decides whether to keep the LaunchGroup.
     func claimLiveWindows(id: String) {
+        claimLiveWindows(id: id, completion: {})
+    }
+
+    func claimLiveWindows(id: String, completion: @escaping () -> Void) {
         precondition(Thread.isMainThread)
-        guard let session = sessions[id] else { return }
+        guard let session = sessions[id] else { completion(); return }
         var pids = session.adoptedPIDs
         if session.pid > 0 { pids.insert(session.pid) }
-        var expanded = pids
-        for pid in pids {
-            expanded.formUnion(wineProcessTreeIDs(root: pid))
-        }
-        for pid in expanded {
-            watchPID(pid)
-        }
-        if var updated = sessions[id] {
-            updated.adoptedPIDs.formUnion(expanded)
-            sessions[id] = updated
-        }
+        let roots = pids
         let prefix = session.prefix.path
-        let windows = wineOnscreenWindows(matchingPrefix: prefix, extraPIDs: expanded)
-        for window in windows {
-            adoptWindowedProcess(pid: window.pid, prefix: prefix, name: window.ownerName)
+        observationQueue.async { [weak self] in
+            var expanded = roots
+            for pid in roots {
+                expanded.formUnion(wineProcessTreeIDs(root: pid))
+            }
+            let windows = wineOnscreenWindows(matchingPrefix: prefix, extraPIDs: expanded)
+            let observed = expanded
+            DispatchQueue.main.async {
+                defer { completion() }
+                guard let self, var updated = self.sessions[id] else { return }
+                // An exit may arrive while the snapshot is being collected.
+                let live = observed.filter { kill($0, 0) == 0 }
+                updated.adoptedPIDs.formUnion(live)
+                self.sessions[id] = updated
+                for pid in live { self.watchPID(pid) }
+                for window in windows where kill(window.pid, 0) == 0 {
+                    self.adoptWindowedProcess(pid: window.pid, prefix: prefix, name: window.ownerName)
+                }
+            }
         }
     }
 

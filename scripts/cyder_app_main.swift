@@ -1805,15 +1805,21 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         activatedURL: URL
     ) {
         guard !launchActivated else { return }
+        precondition(!Thread.isMainThread)
         var keepGroup = false
-        onMainThread {
-            statusItemController.claimLiveWindows(id: launchID)
-            keepGroup = statusItemController.hasLiveWatchedPIDs(id: launchID)
-                || statusItemController.hasClaimedWindow(id: launchID)
-            if keepGroup {
-                statusItemController.markActivated(id: launchID)
+        let observationFinished = DispatchSemaphore(value: 0)
+        DispatchQueue.main.async { [self] in
+            statusItemController.claimLiveWindows(id: launchID) {
+                keepGroup = self.statusItemController.hasLiveWatchedPIDs(id: launchID)
+                    || self.statusItemController.hasClaimedWindow(id: launchID)
+                if keepGroup {
+                    self.statusItemController.markActivated(id: launchID)
+                }
+                observationFinished.signal()
             }
         }
+        // Only the launch worker waits; the menu's main run loop stays available.
+        observationFinished.wait()
         if keepGroup {
             // Observation stops; let the Bash supervisor consume the sidecar
             // just like an activation.
