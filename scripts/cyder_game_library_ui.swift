@@ -1159,6 +1159,7 @@ final class CyderGameLibraryWindowController: NSWindowController, NSWindowDelega
     var isGameSettingsVisible: Bool { gameSettingsController?.window?.isVisible == true }
 
     private var loader = CyderLibraryLoader()
+    private var readOnly = false
     private var hasSnapshot = false
     private let loadStatus = NSTextField(labelWithString: "")
     private let environmentStatus = NSTextField(labelWithString: "首次遊玩可先準備 Windows 環境")
@@ -1173,7 +1174,7 @@ final class CyderGameLibraryWindowController: NSWindowController, NSWindowDelega
     func showRecoveryNotice() { recoveryNotice.isHidden = false; recoveryHeight?.constant = 28 }
     @objc private func dismissRecoveryNotice() { recoveryNotice.isHidden = true; recoveryHeight?.constant = 0 }
     @objc private func openRecoveryLogs() { NSWorkspace.shared.open(CyderPaths.support.appendingPathComponent("Logs")) }
-    @objc private func prepareEnvironment() { onPrepareEnvironment?() }
+    @objc private func prepareEnvironment() { if !readOnly { onPrepareEnvironment?() } }
 
     private let iconStore = CyderGameIconStore.shared
     private let collectionView = NSCollectionView()
@@ -1197,7 +1198,7 @@ final class CyderGameLibraryWindowController: NSWindowController, NSWindowDelega
     }
     @objc private func openRequests() { onOpenRequests?() }
 
-    convenience init(loader: CyderLibraryLoader = CyderLibraryLoader()) {
+    convenience init(loader: CyderLibraryLoader? = nil, readOnly: Bool = false) {
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 500, height: 420),
             styleMask: [.titled, .closable, .fullSizeContentView],
@@ -1205,6 +1206,8 @@ final class CyderGameLibraryWindowController: NSWindowController, NSWindowDelega
             defer: false
         )
         self.init(window: window)
+        self.readOnly = readOnly
+        let loader = loader ?? CyderLibraryLoader(readOnly: readOnly)
         self.loader = loader
         loader.onUpdate = { [weak self] update in self?.apply(update) }
         window.collectionBehavior.insert(.fullScreenNone)
@@ -1216,6 +1219,12 @@ final class CyderGameLibraryWindowController: NSWindowController, NSWindowDelega
         appearanceRoot.autoresizingMask = [.width, .height]
         window.contentView = appearanceRoot
         buildUI()
+        if readOnly {
+            environmentStatus.stringValue = "目前僅可瀏覽；啟動與修改暫不可用"
+            environmentButton.isEnabled = false
+            toolbarPreferencesButton.isEnabled = false
+            toolbarAddButton.isEnabled = false
+        }
     }
 
     func windowWillClose(_ notification: Notification) { onClose?() }
@@ -1228,8 +1237,8 @@ final class CyderGameLibraryWindowController: NSWindowController, NSWindowDelega
         precondition(Thread.isMainThread)
         switch update {
         case .loading: loadStatus.stringValue = "正在讀取遊戲庫…"
-        case .unconfirmed: loadStatus.stringValue = "讀取時間較長；仍可開啟設定或退出"
-        case .failed: loadStatus.stringValue = "暫時無法讀取或儲存遊戲庫；請重新整理"
+        case .unconfirmed: loadStatus.stringValue = readOnly ? "讀取時間較長；仍可退出" : "讀取時間較長；仍可開啟設定或退出"
+        case .failed: loadStatus.stringValue = readOnly ? "暫時無法讀取遊戲庫；請重新整理" : "暫時無法讀取或儲存遊戲庫；請重新整理"
         case .ready(let snapshot):
             hasSnapshot = true
             games = snapshot.games; independentIDs = snapshot.independentIDs
@@ -1239,7 +1248,7 @@ final class CyderGameLibraryWindowController: NSWindowController, NSWindowDelega
             ensureGameIcons()
         }
         toolbarRefreshButton.isEnabled = !loader.isBusy
-        toolbarAddButton.isEnabled = !loader.isBusy
+        toolbarAddButton.isEnabled = !readOnly && !loader.isBusy
         reloadGrid()
     }
 
@@ -1251,6 +1260,7 @@ final class CyderGameLibraryWindowController: NSWindowController, NSWindowDelega
     }
 
     private func ensureGameIcons() {
+        guard !readOnly else { return }
         iconStore.ensureExtracted(games: games) { [weak self] in
             self?.collectionView.reloadData()
         }
@@ -1309,6 +1319,7 @@ final class CyderGameLibraryWindowController: NSWindowController, NSWindowDelega
             target: self,
             action: #selector(addGame)
         )
+        emptyButton.isEnabled = !readOnly
         emptyButton.imagePosition = .imageLeading
         emptyButton.bezelStyle = .rounded
         emptyState.setViews([emptyIcon, emptyTitle, emptyDescription, emptyButton], in: .top)
@@ -1411,7 +1422,7 @@ final class CyderGameLibraryWindowController: NSWindowController, NSWindowDelega
         item.onContextMenu = { [weak self] in self?.contextMenu(for: game) }
         // image(for:) returns a PE logo or a neutral placeholder — never the
         // macOS generic EXE document icon — and schedules extraction when needed.
-        item.configure(record: game, independent: independentIDs.contains(game.id), image: iconStore.image(for: game))
+        item.configure(record: game, independent: independentIDs.contains(game.id), image: readOnly ? (NSImage(systemSymbolName: "gamecontroller.fill", accessibilityDescription: nil) ?? NSImage()) : iconStore.image(for: game))
         item.isSelected = game.id == selectedGameID
         return item
     }
@@ -1430,14 +1441,16 @@ final class CyderGameLibraryWindowController: NSWindowController, NSWindowDelega
     private func contextMenu(for game: CyderGameRecord) -> NSMenu {
         selectGame(game)
         let menu = NSMenu()
+        menu.autoenablesItems = false
         let macAppTitle = game.macAppPath != nil
             ? "更新 macOS 應用程式"
             : "加入 macOS 應用程式"
         let macApp = menu.addItem(withTitle: macAppTitle, action: #selector(installMacAppForSelectedGame), keyEquivalent: "")
         macApp.target = self
-        macApp.isEnabled = !macLauncherInstallInProgress
+        macApp.isEnabled = !readOnly && !macLauncherInstallInProgress
         let options = menu.addItem(withTitle: "選項", action: #selector(openSettingsForSelectedGame), keyEquivalent: "")
         options.target = self
+        options.isEnabled = !readOnly
         let reveal = menu.addItem(withTitle: "顯示於 Finder", action: #selector(revealSelectedGameInFinder), keyEquivalent: "")
         reveal.target = self
         return menu
@@ -1460,13 +1473,14 @@ final class CyderGameLibraryWindowController: NSWindowController, NSWindowDelega
     }
 
     @objc private func openPreferences() {
+        guard !readOnly else { return }
         onOpenPreferences?()
     }
 
     @objc private func refreshLibrary() { prepareForDisplay() }
 
     @objc private func addGame() {
-        guard !loader.isBusy else { return }
+        guard !readOnly, !loader.isBusy else { return }
         let panel = NSOpenPanel()
         panel.title = "加入遊戲"
         panel.message = "選擇 Windows 遊戲執行檔 (.exe)"
@@ -1482,12 +1496,13 @@ final class CyderGameLibraryWindowController: NSWindowController, NSWindowDelega
     }
 
     private func launch(_ game: CyderGameRecord) {
+        guard !readOnly else { return }
         // The accepted launch path performs file validation off AppKit.
         onLaunch?(game.executableURL, nil)
     }
 
     @objc private func openSettingsForSelectedGame() {
-        guard let game = selectedGame else { return }
+        guard !readOnly, let game = selectedGame else { return }
         let controller = CyderGameSettingsWindowController(game: game, independent: independentIDs.contains(game.id))
         controller.onLaunch = { [weak self] executable, settings in
             self?.onLaunch?(executable, settings)
@@ -1532,7 +1547,7 @@ final class CyderGameLibraryWindowController: NSWindowController, NSWindowDelega
     }
 
     @objc private func installMacAppForSelectedGame() {
-        guard let game = selectedGame, !macLauncherInstallInProgress else { return }
+        guard !readOnly, let game = selectedGame, !macLauncherInstallInProgress else { return }
         guard FileManager.default.fileExists(atPath: game.executablePath) else {
             showAlert(title: "找不到遊戲", message: "這個 EXE 已不在原本的位置。")
             return

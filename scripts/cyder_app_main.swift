@@ -82,6 +82,20 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
     private var environmentPreparationInProgress = false
     private var wineActivationWaiter: WineActivationWaiter?
     private var wineLaunchObserver: CyderLaunchObserver?
+    private var readOnlyMode = false
+    private var readOnlyReason = CyderUnavailableWindowController.Reason.ownershipUnavailable
+    private weak var existingUnavailableController: CyderUnavailableWindowController?
+    private lazy var unavailableController: CyderUnavailableWindowController = {
+        let controller = CyderUnavailableWindowController()
+        existingUnavailableController = controller
+        controller.onLibrary = { [weak self] in self?.showGameLibrary() }
+        controller.onDiagnostics = { NSWorkspace.shared.open(CyderPaths.support.appendingPathComponent("Logs")) }
+        controller.onQuit = { NSApp.terminate(nil) }
+        controller.onClose = { [weak self] in
+            if self?.existingLibraryController?.window?.isVisible != true { NSApp.terminate(nil) }
+        }
+        return controller
+    }()
     private var isPrimaryInstance = false
     private var instanceReady = false
     private var delayedLaunchNotification: Notification?
@@ -222,7 +236,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
     }()
 
     private lazy var gameLibraryController: CyderGameLibraryWindowController = {
-        let controller = CyderGameLibraryWindowController()
+        let controller = CyderGameLibraryWindowController(readOnly: readOnlyMode)
         existingLibraryController = controller
         controller.onOpenRequests = { [weak self] in self?.showRequests() }
         controller.onPrepareEnvironment = { [weak self] in self?.prepareEnvironmentFromLibrary() }
@@ -238,6 +252,10 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             self?.showSettings()
         }
         controller.onClose = { [weak self] in
+            if self?.readOnlyMode == true {
+                if self?.existingUnavailableController?.window?.isVisible != true { NSApp.terminate(nil) }
+                return
+            }
             guard let self,
                   !self.environmentPreparationInProgress,
                   self.existingSettingsController?.window?.isVisible != true,
@@ -411,8 +429,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
                 // No ownership means no executor. Keep UI available for the
                 // actionable error; never continue as an uncoordinated primary.
                 self.isPrimaryInstance = false
-                self.showAlert("暫時無法接受啟動要求", "無法取得 Cyder 的啟動協調權或讀取保存紀錄。請查看診斷資訊；現有 Windows 程式不受影響。")
-                NSApp.terminate(nil)
+                self.enterReadOnly(.ownershipUnavailable)
                 return
             }
             if let notification = self.delayedLaunchNotification {
@@ -424,6 +441,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
 
     @available(macOS 11.0, *)
     func application(_ application: NSApplication, open urls: [URL]) {
+        guard !readOnlyMode else { showReadOnlyStatus(); return }
         let fileExecutables = urls.filter(\.isFileURL).flatMap {
             normalizeExePaths([$0.path])
         }
@@ -452,6 +470,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func application(_ application: NSApplication, openFiles filenames: [String]) {
+        guard !readOnlyMode else { application.reply(toOpenOrPrint: .failure); showReadOnlyStatus(); return }
         let executableFiles = normalizeExePaths(filenames)
         if !executableFiles.isEmpty && launchIntent != .cliLaunch {
             launchIntent = .documentLaunchExpected
@@ -495,6 +514,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        guard !readOnlyMode else { return }
         guard instanceReady else { delayedLaunchNotification = notification; return }
         if !isPrimaryInstance {
             captureInvocationArguments()
@@ -709,7 +729,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func scheduleSecondaryForward() {
-        guard instanceReady, !isPrimaryInstance, !secondaryForwardScheduled else { return }
+        guard instanceReady, !readOnlyMode, !isPrimaryInstance, !secondaryForwardScheduled else { return }
         secondaryForwardScheduled = true
         // Keep the secondary alive for one main-queue turn so argv and any
         // queued openFiles/open-URL callbacks are forwarded as a single request.
@@ -732,11 +752,27 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
                 NSApp.reply(toOpenOrPrint: accepted ? .success : .failure)
                 self.pendingOpenReplies -= 1
             }
-            if !accepted {
-                self.showAlert("暫時無法確認啟動要求", "接管尚未確認；已送出的要求會保留原識別碼。請查看執行狀態，避免重複啟動同一程式。")
-            }
-            NSApp.terminate(nil)
+            guard !self.quitTransaction else { return }
+            if accepted { NSApp.terminate(nil) }
+            else { self.enterReadOnly(.forwardUnconfirmed) }
         }
+    }
+
+    private func enterReadOnly(_ reason: CyderUnavailableWindowController.Reason) {
+        guard !quitTransaction else { return }
+        readOnlyMode = true; readOnlyReason = reason
+        delayedLaunchNotification = nil; didFinishLaunch = true
+        while pendingOpenReplies > 0 { NSApp.reply(toOpenOrPrint: .failure); pendingOpenReplies -= 1 }
+        installMainMenu()
+        showReadOnlyStatus()
+    }
+
+    private func showReadOnlyStatus() {
+        guard !quitTransaction else { return }
+        unavailableController.update(readOnlyReason)
+        activateCyderUI(dockVisible: true)
+        unavailableController.showWindow(nil)
+        unavailableController.window?.makeKeyAndOrderFront(nil)
     }
 
     private func receiveInstanceRequest(_ request: CyderInstanceRequest) {
@@ -773,6 +809,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        if readOnlyMode { showReadOnlyStatus(); return false }
         // LSUIElement + accessory: Finder / Launchpad clicks reuse this process
         // and send reopen. AppKit's default does nothing when no Cyder window is
         // visible (the common case after closing the library while a game runs).
@@ -796,7 +833,12 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        guard isPrimaryInstance else { return .terminateNow }
+        if !isPrimaryInstance {
+            quitTransaction = true
+            existingLibraryController?.quiesce()
+            CyderGameIconStore.shared.quiesce()
+            return .terminateNow
+        }
         guard !quitTransaction else { return .terminateLater }
         quitTransaction = true
         statusItemController.quiesce()
@@ -827,10 +869,12 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDockMenu(_ sender: NSApplication) -> NSMenu? {
         let menu = NSMenu(title: "Cyder")
+        menu.autoenablesItems = false
         menu.addItem(withTitle: "遊戲庫…", action: #selector(showGameLibrary), keyEquivalent: "")
         menu.addItem(withTitle: "選擇 Windows 執行檔…", action: #selector(chooseExecutableFromMenu), keyEquivalent: "")
         menu.addItem(withTitle: "進階設定…", action: #selector(showSettings), keyEquivalent: "")
         for item in menu.items { item.target = self }
+        if readOnlyMode { menu.items.dropFirst().forEach { $0.isEnabled = false } }
         return menu
     }
 
@@ -839,10 +883,13 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         let appItem = NSMenuItem()
         main.addItem(appItem)
         let appMenu = NSMenu(title: "Cyder")
+        appMenu.autoenablesItems = false
         let settings = appMenu.addItem(withTitle: "設定…", action: #selector(showSettings), keyEquivalent: ",")
         settings.target = self
+        settings.isEnabled = !readOnlyMode
         let requests = appMenu.addItem(withTitle: "啟動要求…", action: #selector(showRequests), keyEquivalent: "")
         requests.target = self
+        requests.isEnabled = !readOnlyMode
         let library = appMenu.addItem(withTitle: "遊戲庫…", action: #selector(showGameLibrary), keyEquivalent: "")
         library.target = self
         appMenu.addItem(NSMenuItem.separator())
@@ -869,6 +916,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func showSettings() {
+        guard !readOnlyMode else { showReadOnlyStatus(); return }
         guard !quitTransaction else { return }
         statusItemController.setUIVisible(true)
         activateCyderUI(dockVisible: true)
@@ -879,6 +927,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func showRequests() {
+        guard !readOnlyMode else { showReadOnlyStatus(); return }
         guard !quitTransaction else { return }
         statusItemController.setUIVisible(true)
         requestController.update(requestRecords)
@@ -983,7 +1032,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func showGameLibrary() {
         guard !quitTransaction else { return }
-        statusItemController.setUIVisible(true)
+        if !readOnlyMode { statusItemController.setUIVisible(true) }
         openingGameLibrary = true
         let settingsWasVisible = existingSettingsController?.window?.isVisible == true
         activateCyderUI(dockVisible: true)
@@ -1007,7 +1056,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         authorization: CyderRequestJournal.Record? = nil,
         lease: CyderOperationGate.Lease? = nil
     ) {
-        guard !quitTransaction else {
+        guard !quitTransaction, !readOnlyMode, isPrimaryInstance else {
             if let lease { operationGate.release(lease) }
             return
         }
@@ -1194,6 +1243,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func chooseExecutableFromMenu() {
+        guard !readOnlyMode else { showReadOnlyStatus(); return }
         guard let chosen = chooseExeOnMainThread() else { return }
         presentExternalLaunchStarting()
         enqueueOrLaunch([chosen])
@@ -1428,7 +1478,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func prepareEnvironmentFromLibrary() {
-        guard !quitTransaction, !environmentPreparationInProgress else { return }
+        guard !quitTransaction, !readOnlyMode, isPrimaryInstance, !environmentPreparationInProgress else { return }
         guard let resourcePath = Bundle.main.resourcePath else {
             existingLibraryController?.updateEnvironmentStatus("缺少必要元件；請查看診斷記錄", busy: false)
             return

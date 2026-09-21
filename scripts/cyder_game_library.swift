@@ -222,19 +222,22 @@ final class CyderLibraryLoader {
     private let worker = DispatchQueue(label: "local.cyder.library-io", qos: .userInitiated)
     private let read: Read
     private let deadline: TimeInterval
+    let readOnly: Bool
     private var active: UUID?
     private var closed = false
     var onUpdate: ((Update) -> Void)?
     var isBusy: Bool { active != nil }
 
-    init(deadline: TimeInterval = 5, read: Read? = nil) {
+    init(deadline: TimeInterval = 5, readOnly: Bool = false, read: Read? = nil) {
         self.deadline = deadline
-        self.read = read ?? Self.readLibrary
+        self.readOnly = readOnly
+        self.read = read ?? { try Self.readLibrary($0, readOnly: readOnly) }
     }
 
     @discardableResult
     func request(_ operation: Operation = .refresh, completion: ((Bool) -> Void)? = nil) -> Bool {
         precondition(Thread.isMainThread)
+        if readOnly, case .refresh = operation {} else if readOnly { completion?(false); return false }
         guard !closed, active == nil else { completion?(false); return false }
         let id = UUID(); active = id
         onUpdate?(.loading)
@@ -261,11 +264,12 @@ final class CyderLibraryLoader {
         closed = true; onUpdate = nil
     }
 
-    private static func readLibrary(_ operation: Operation) throws -> CyderLibrarySnapshot {
+    private static func readLibrary(_ operation: Operation, readOnly: Bool) throws -> CyderLibrarySnapshot {
         precondition(!Thread.isMainThread)
         let profiles = CyderProfileStore(root: CyderPaths.support)
         let library = CyderGameLibraryStore(profileStore: profiles, loadImmediately: false)
         try library.reloadValidated()
+        if readOnly { return CyderLibrarySnapshot(games: library.games, independentIDs: []) }
         var selected: String?
         switch operation {
         case .refresh:

@@ -29,6 +29,18 @@ production.request()
 pump { snapshot != nil }
 precondition(snapshot!.games.first?.id == firstID, "unmounted/missing EXE deleted from library")
 let library = CyderPaths.support.appendingPathComponent("game-library.json")
+let beforeReadOnly = try Data(contentsOf: library)
+let readOnly = CyderLibraryLoader(readOnly: true)
+var readOnlySnapshot: CyderLibrarySnapshot?
+readOnly.onUpdate = { if case .ready(let value) = $0 { readOnlySnapshot = value } }
+readOnly.request(); pump { readOnlySnapshot != nil }
+precondition(readOnlySnapshot!.games.count == 1)
+var denied: Bool?
+precondition(!readOnly.request(.add(exe)) { denied = $0 })
+precondition(denied == false)
+let afterReadOnly = try Data(contentsOf: library)
+precondition(beforeReadOnly == afterReadOnly, "read-only browse mutated library history")
+readOnly.quiesce()
 let corrupt = Data("malformed-history".utf8)
 try corrupt.write(to: library)
 production.request()
@@ -94,5 +106,43 @@ var completed = false
 DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { completed = true }
 pump { completed }
 precondition(updates == 1 && !late.request(), "quit permitted late update/new work")
+let readonlyLoader = CyderLibraryLoader(readOnly: true, read: { _ in
+    .init(games: [.init(id: firstID, executablePath: exe.path)], independentIDs: [])
+})
+let readonlyController = CyderGameLibraryWindowController(loader: readonlyLoader, readOnly: true)
+var forbiddenActions = 0
+readonlyController.onLaunch = { _, _ in forbiddenActions += 1 }
+readonlyController.onPrepareEnvironment = { forbiddenActions += 1 }
+readonlyController.onOpenPreferences = { forbiddenActions += 1 }
+readonlyController.showWindow(nil); readonlyController.prepareForDisplay()
+pump { !readonlyLoader.isBusy }
+let readonlyButtons = views(readonlyController.window!.contentView!.superview!).compactMap { $0 as? NSButton }
+for button in readonlyButtons where button.title == "準備 Windows 環境" || button.toolTip == "偏好設定" || button.toolTip == "加入遊戲" {
+    precondition(!button.isEnabled); button.performClick(nil)
+}
+let collection = views(readonlyController.window!.contentView!).compactMap { $0 as? NSCollectionView }.first!
+let tile = readonlyController.collectionView(collection, itemForRepresentedObjectAt: IndexPath(item: 0, section: 0)) as! CyderGameTileItem
+tile.onDoubleClick?()
+guard let context = tile.onContextMenu?() else { fputs("FAIL missing read-only context menu\n", stderr); exit(1) }
+precondition(context.items[0].isEnabled == false && context.items[1].isEnabled == false)
+precondition(forbiddenActions == 0, "read-only UI invoked a mutation/launch callback")
+readonlyController.quiesce(); readonlyController.close()
+
+let unavailable = CyderUnavailableWindowController()
+var browsed = 0, diagnostics = 0, quits = 0
+unavailable.onLibrary = { browsed += 1 }; unavailable.onDiagnostics = { diagnostics += 1 }; unavailable.onQuit = { quits += 1 }
+unavailable.update(.forwardUnconfirmed); unavailable.showWindow(nil)
+let fallbackViews = views(unavailable.window!.contentView!)
+precondition(fallbackViews.compactMap { $0 as? NSTextField }.contains { $0.stringValue.contains("不代表取消") })
+for button in fallbackViews.compactMap({ $0 as? NSButton }) { button.performClick(nil) }
+precondition(browsed == 1 && diagnostics == 1 && quits == 1)
+if let path = ProcessInfo.processInfo.environment["CYDER_TEST_RENDER"] {
+    let view = unavailable.window!.contentView!; view.layoutSubtreeIfNeeded()
+    let bitmap = view.bitmapImageRepForCachingDisplay(in: view.bounds)!
+    view.cacheDisplay(in: view.bounds, to: bitmap)
+    try bitmap.representation(using: .png, properties: [:])!.write(to: URL(fileURLWithPath: path + ".unavailable.png"))
+}
+unavailable.close()
+print("PASS read-only fallback: unchanged persisted metadata, mutation refusal, disabled and guarded actual UI actions, uncertain wording, browse/log/quit controls")
 try Data("ok".utf8).write(to: root.appendingPathComponent("ui-completed"))
 print("PASS library: actual persisted add, unavailable EXE retained, corrupt history preserved, off-main bounded worker, actual AppKit controls during hang, inline deadline, no duplicate work, quit fences late results")

@@ -227,3 +227,17 @@ F3 不完成整體 F。接續須處理圖示／設定等主執行緒 I/O、prima
 - 舊 shortcuts source smoke 固定 Wine helper／45 秒／shared prefix，`shortcuts-F4.log` 保留失敗；改驗正式原生 reader 接線與執行上述 runtime harness。正式 library AppKit harness `library-F4.log`、settings smoke `settings-F4.log` 通過。新版 universal macOS11 build `build-F4.log` 通過；測試包 `/private/tmp/cyder-lifecycle-f4-build/Cyder.app` 已配置獨立 ID `local.cyder.lifecycle-f4`、CD2 support/runtime、ad-hoc 簽章，manifest `build-F4-source-sha256.json`。完整包本輪未啟動，沒有新的 Wine UI 結論。
 
 剩餘 F／整體缺口不變：設定及部分既有 action 的主執行緒 I/O、primary/journal unavailable 唯讀介面、outbox、不可變設定、supervisor／晚到 spawn fencing、每環境 waiter 分工、精確程序／視窗動作、V01–V14 完整交付。原生圖示測試通過不代替這些驗收。
+
+## F5：無協調權時的唯讀降級與有界初始化
+
+- coordinator start 加入五秒 monotonic 期限、一次 role 回覆與每個非同步邊界的 generation／closing／絕對期限查驗。逾時只結束觀察，不假定 owner 不存在；晚到 election／journal／channel 結果不能取得 dispatch authority，待實際返回後依序釋放自身 channel、journal、sentinel。stop completion 等真正 startup cleanup；不刪除或搶走其他 primary 的 socket／鎖。authorize 明確要求 primary，closing 後不再開始 forward。
+- app 在 ownership/journal unavailable 或 secondary forward 未確認時，保留單一非模態狀態窗，不再警告後立即退出。兩種文案分開，後者明示可能已接受、關閉不等於取消、不自動重新啟動。提供唯讀遊戲庫、診斷、退出；沒有重試即 launch 的假動作。未取得接受確認的 openFiles 回 failure，一次回覆；晚到回覆不在 quit 後重新開窗。
+- readonly library backend 只讀既有 metadata，不做 profile merge／shortcut import／add／save；UI 停用加入、設定修改、環境準備、mac launcher 安裝，tile double-click／selector 亦再次拒絕。瀏覽／重新整理／Finder 入口保留，不建立 status item 或第二個 executor。readonly 不產生 icon cache writes，使用中性圖示。正常 primary 仍走原可寫 controller。
+- `test-cyder-instance-runtime.sh` 新增真實 coordinator＋受控 election stall：0.05 秒測試期限後 unavailable、submit 拒絕；晚到真正 election 結束後 stop 才回覆，替代實例可正常取得 primary、未重播。另將實際 journal 檔改為損壞 bytes，確認 unavailable、無派送、未覆寫原檔。`instance-F5-r2.log` 通過；測試期限縮短是故障注入，不宣稱產品 startup 只需 0.05 秒。
+- 正式 AppKit library harness 驗證 readonly refresh 不改已保存 metadata、add API 拒絕；實際 disabled NSButton.performClick、tile double-click、context menu 能力均不觸發 mutation callback；fallback 的瀏覽／診斷／退出 callback 各一次，未知要求文案不冒稱取消。`library-F5-r3.log` 通過。`request-ui-F5.log`、`settings-F5.log`、`open-files-F5.log` 回歸通過。以上為 L1–2；不宣稱真實 Wine 或整個 app 不可用情境已 computer-use 通過。
+- 保留失敗：`library-F5.log` 的新增 fixture 漏解開 NSMenu?，屬編譯錯誤，修正後 r2 通過。r2 離屏圖背景透明，黑底 viewer 看不清深色文字；加上隨 appearance 重繪的正式背景後，已檢視 `.local/lifecycle-evidence/library-F5-r3.png.unavailable.png`，文字、按鈕未裁切。這是 contentView 渲染，並非桌面截圖。
+- 全來源 typecheck、三輪 universal macOS11 build 通過（最新 `build-F5-r3.log`）。隔離包 `/private/tmp/cyder-lifecycle-f5-build/Cyder.app` 使用 `local.cyder.lifecycle-f5`、CD2 support/runtime wrapper、ad-hoc 簽章，manifest `build-F5-source-sha256.json`。包本輪未啟動。
+
+追加檢查發現 `CyderRequestChannel.stop` 原本無條件 unlink：逾時 secondary 尚未啟動 channel，清理卻可能移除真實 primary 的 endpoint。現改為記錄自己 bind 的 socket device/inode，stop 只刪除仍匹配者；未 bind／重複 stop 均不刪他人 path。`instance-F5-r3.log` 增加真實 primary 存活時的逾時 secondary，清理後仍能透過另一 secondary 成功接受新要求；`channel-F5.log` 回歸通過。這個缺陷在 staged 前檢查發現並修正，沒有提交已知錯誤版。
+
+仍未完成：正常初次角色確認之前的首屏可更早呈現，目前失聯降級由五秒期限觸發；outbox 的原 ID 核對／恢復介面、完整錯誤分類與 feedback owner；設定等主執行緒 I/O、immutable settings、supervisor／late-spawn fencing、環境 waiter 整合、精確 process/window actions、V01–V14 與最終可重現交付。F5 不作全部恢復體驗完成宣告。

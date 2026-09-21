@@ -23,6 +23,13 @@ final class CyderInstanceCoordinator {
     private var onRequest: ((CyderInstanceRequest) -> Void)?
     private var namespace: UUID?
     private var closing = false
+    private var startupGeneration: UUID?
+    private var startRequested = false
+    private var startupCleanupRequested = false
+    private var startupInFlight = false
+    private var cleanupCompletions: [() -> Void] = []
+    private let startupDeadline: TimeInterval
+    private let beforeElection: () -> Void
     private var primary = false
     private var delivered = Set<String>()
     private(set) var recovered: [CyderRequestJournal.Record] = []
@@ -32,8 +39,11 @@ final class CyderInstanceCoordinator {
 
     init(support: URL = CyderPaths.support,
          bundleID: String = ProcessInfo.processInfo.environment["CYDER_BUNDLE_ID"]
-            ?? Bundle.main.bundleIdentifier ?? "local.cyder.app") {
+            ?? Bundle.main.bundleIdentifier ?? "local.cyder.app",
+         startupDeadline: TimeInterval = 5, beforeElection: @escaping () -> Void = {}) {
         self.support = support
+        self.startupDeadline = startupDeadline
+        self.beforeElection = beforeElection
         path = support.appendingPathComponent(".requests-v1.sock").path
         journal = CyderRequestJournal(directory: support.appendingPathComponent("request-journal"))
         channel = CyderRequestChannel(path: path)
@@ -42,41 +52,78 @@ final class CyderInstanceCoordinator {
 
     func start(onRequest: @escaping (CyderInstanceRequest) -> Void, completion: @escaping (Role) -> Void) {
         precondition(Thread.isMainThread)
+        guard !startRequested, !closing else { completion(.unavailable); return }
+        startRequested = true; startupInFlight = true
         self.onRequest = onRequest
+        let generation = UUID(); startupGeneration = generation
+        let expiresAt = ProcessInfo.processInfo.systemUptime + max(0, startupDeadline)
+        func finish(_ role: Role) {
+            guard self.startupGeneration == generation, !self.closing else { return }
+            self.startupGeneration = nil
+            if role == .unavailable { self.closing = true } else { self.startupInFlight = false }
+            completion(role)
+        }
+        func mayContinue() -> Bool {
+            if ProcessInfo.processInfo.systemUptime >= expiresAt { finish(.unavailable) }
+            return self.startupGeneration == generation && !self.closing
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + max(0, startupDeadline)) { [weak self] in
+            guard let self, self.startupGeneration == generation, !self.closing else { return }
+            // This ends only the observation. Physical initialization is still
+            // owned, and each later stage is fenced before dispatch authority.
+            finish(.unavailable)
+        }
         startup.async { [self] in
+            beforeElection()
             let role = sentinel.becomePrimary()
             DispatchQueue.main.async {
+                guard mayContinue() else { self.releaseStartupResources(); return }
                 switch role {
-                case .secondary: completion(.secondary)
-                case .unavailable: completion(.unavailable)
+                case .secondary: finish(.secondary)
+                case .unavailable: finish(.unavailable); self.releaseStartupResources()
                 case .primary:
                     self.journal.open { result in
+                        guard mayContinue() else { self.releaseStartupResources(); return }
                         guard case .success(let records) = result else {
-                            self.sentinel.stop { DispatchQueue.main.async { completion(.unavailable) } }
-                            return
+                            finish(.unavailable); self.releaseStartupResources(); return
                         }
-                        self.recovered = records
                         self.journal.namespace { namespace in
+                            guard mayContinue() else { self.releaseStartupResources(); return }
                             self.namespace = namespace
                             self.startup.async {
                                 let started = self.channel.start { [weak self] message, reply in
                                     DispatchQueue.main.async { self?.receive(message, reply: reply) }
                                 }
                                 DispatchQueue.main.async {
+                                    guard mayContinue() else { self.releaseStartupResources(); return }
                                     self.primary = started
                                     if started {
+                                        self.recovered = records
                                         self.onRecoveryChanged?(records)
-                                        completion(.primary)
+                                        finish(.primary)
                                     } else {
-                                        self.journal.close {
-                                            self.sentinel.stop { DispatchQueue.main.async { completion(.unavailable) } }
-                                        }
+                                        finish(.unavailable); self.releaseStartupResources()
                                     }
                                 }
                             }
                         }
                     }
                 }
+            }
+        }
+    }
+
+    private func releaseStartupResources() {
+        precondition(Thread.isMainThread)
+        guard !startupCleanupRequested else { return }
+        startupCleanupRequested = true
+        channel.stop { [self] in
+            journal.close { [self] in
+                sentinel.stop { DispatchQueue.main.async {
+                    self.startupInFlight = false
+                    let callbacks = self.cleanupCompletions; self.cleanupCompletions.removeAll()
+                    callbacks.forEach { $0() }
+                } }
             }
         }
     }
@@ -150,7 +197,7 @@ final class CyderInstanceCoordinator {
 
     func authorize(_ record: CyderRequestJournal.Record,
                    completion: @escaping (CyderRequestJournal.Record?) -> Void) {
-        guard !closing else { completion(nil); return }
+        guard primary, !closing else { completion(nil); return }
         journal.authorizeDispatch(id: record.id) { [weak self] result in
             guard let self, !self.closing, case .success(let authorized) = result else { completion(nil); return }
             self.publish(authorized)
@@ -240,6 +287,8 @@ final class CyderInstanceCoordinator {
     /// budget. Keep an unacknowledged copy; never convert it into a fresh ID.
     func forward(files: [String], arguments: [String]?, urls: [String] = [], showUI: Bool,
                  completion: @escaping (Bool) -> Void) {
+        precondition(Thread.isMainThread)
+        guard !closing else { completion(false); return }
         let payload = CyderRequestPayload(files: files, arguments: arguments, urls: urls, showUI: showUI)
         forwarding.async { [self] in
             let sender = UUID()
@@ -305,13 +354,18 @@ final class CyderInstanceCoordinator {
     func quiesce(completion: @escaping (Bool) -> Void) {
         precondition(Thread.isMainThread)
         closing = true // invalidate pending delivery callbacks immediately
+        startupGeneration = nil
         if primary { journal.quiesce(completion: completion) } else { completion(true) }
     }
 
     func stop(completion: @escaping () -> Void = {}) {
         precondition(Thread.isMainThread)
         closing = true
-        guard primary else { completion(); return }
+        startupGeneration = nil
+        guard primary else {
+            if startupInFlight { cleanupCompletions.append(completion) } else { completion() }
+            return
+        }
         primary = false
         channel.stop { [self] in
             journal.close { [self] in

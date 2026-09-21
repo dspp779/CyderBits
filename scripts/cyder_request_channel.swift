@@ -25,6 +25,7 @@ final class CyderRequestChannel {
     private let queue = DispatchQueue(label: "local.cyder.request-channel")
     private var listener: DispatchSourceRead?
     private var fd: Int32 = -1
+    private var boundIdentity: (dev_t, ino_t)?
     private let resources = DispatchGroup()
     private struct Client {
         let token: UUID
@@ -53,7 +54,11 @@ final class CyderRequestChannel {
                 bind(socketFD, $0, socklen_t(MemoryLayout<sockaddr_un>.size))
             }
         }
-        guard result == 0, chmod(path, 0o600) == 0, listen(socketFD, 16) == 0 else {
+        guard result == 0 else { close(socketFD); return false }
+        var identity = stat()
+        guard lstat(path, &identity) == 0, identity.st_mode & S_IFMT == S_IFSOCK else { close(socketFD); return false }
+        boundIdentity = (identity.st_dev, identity.st_ino)
+        guard chmod(path, 0o600) == 0, listen(socketFD, 16) == 0 else {
             close(socketFD)
             return false
         }
@@ -73,7 +78,12 @@ final class CyderRequestChannel {
             listener?.cancel()
             listener = nil
             fd = -1
-            unlink(path)
+            if let identity = boundIdentity {
+                var current = stat()
+                if lstat(path, &current) == 0, current.st_mode & S_IFMT == S_IFSOCK,
+                   current.st_dev == identity.0, current.st_ino == identity.1 { unlink(path) }
+                boundIdentity = nil
+            }
             // Sources own their FD until cancellation executes on this queue.
             resources.notify(queue: queue, execute: completion)
         }
