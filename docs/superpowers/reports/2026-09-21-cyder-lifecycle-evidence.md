@@ -455,3 +455,15 @@ C16 接通正常 root 加排空的正式完成路徑，但仍未將所有 native
 - `build-C18.log` universal macOS11 成功，編譯期间產品來源固定。隔離 `/private/tmp/cyder-lifecycle-c18-build/Cyder.app` 使用 local.cyder.lifecycle-c18、CD2 support/runtime；ad-hoc／strict verify 成功，`build-C18-source-sha256.json` 保存 41 個來源／產物 hash，含新 process evidence source，包內三支腳本與 repo bytes 相同。完整包本輪未啟動，未覆蓋正式安裝或發布。
 
 C18 改善正式程序／視窗歸屬的證據邊界；Session 呈現尚未全部遷入 LifecycleStore 的唯一模型，既有 native root 退出後才出現、已無 Unix ancestry 可驗的 Windows successor 仍需 explicit bridge／其他可靠證據，不能用 prefix 猜回。歸屬不明但受管理的程序、完整 process/window capability 與操作、server generation 到 process model 的接線、重複 waiter、其餘 UX／I/O 及 V01–V14 全矩陣仍須完成，整體目標保持進行中。
+
+## C19：共用 reducer 的環境隔離與排空收尾
+
+- 接入原生 request／process 之前，以新增 isolation harness 驅動正式 reducer，`lifecycle-isolation-C19-baseline.log` 重現 13 個失敗斷言：觀察中要求使已確認排空事件被丟棄、跨環境 exit／window close 改掉其他環境、同出生身分被移到另一環境、新世代沿用舊 launch 歸屬，以及未確認被記成 completed。基線是 C18 提交 f701f89 的 reducer；純事件 fixture 沒有啟動子程序或 Wine，失敗以 exit 1 回報，沒有 assertion crash。
+- 已確認的環境結束由 monitor 完成 executor ownership、世代與雙樣本校準後送入，store 不再因 queued／observing 要求而丟棄它。要求本身仍獨立維持 UI；環境結束不推定遊戲啟動成功。結束會撤销該環境的 process／window capability、waiter／operation；同世代晚到 alive／scan 不可復活，必須先收到更高世代的 manage。此判斷沿用正式 monitor 的證據門檻，未把 wineserver -w 返回當排空。
+- dispatchCommitted／observationFinished 現必帶 monitor epoch、environmentID、generation；store 記錄每個 launch 的原 stamp。新 server generation 清掉舊程序／視窗及 launch membership，尚未完成的舊觀察僅收為 unconfirmed 並只交付一次；新世代程序不能繼承舊 launch。匹配的 root＋drain 結果仍可在同世代環境退出之後完成。觀察完成不能宣稱 dispatch 後 cancelled；未確認要求改為 uncertain，成功與失敗保留原分類。
+- process／window exit 逐項核對所在環境；未知程序的退出 tombstone 依 environment＋完整 ProcessID 保存，不能污染另一環境。已存在的程序不能被另一環境 snapshot 搬走。processObserved 的 exited 結果同樣撤销視窗並建立 tombstone，晚到 alive 無法復活。
+- `lifecycle-isolation-C19.log` 通過新增案例及 stamp／epoch 錯配、取消邊界、重複完成、未知 exit 污染、exit snapshot；`lifecycle-C19.log` 保留既有固定取消／dispatch／quit 排列回歸。擴充原 `cyder_launch_drain_harness.swift`，讓正式 monitor 事件進入真正 CyderLifecycleStore，正式 observer 結果再回 store；`launch-drain-C19.log` 驗證正在 observing 時排空仍被接受，匹配結果完成後 canAutoTerminate，毋須第二次已不會送出的 monitor event。server 換代則保留 uncertain。clock、server／native root 證據明確注入；真實目錄身分替換案例仍保留，沒有 Wine／NGS 結論。
+- `environment-monitor-C19.log` 通過正式 monitor/store 既有恢復、阻塞隔離、世代、排空與 quit；`status-item-C19.log` 通過 reducer 與 AppKit menu callback harness。原始 30 筆 callback-cycle proxy 保存於 `menu-C19.csv`，p95 0.030375 ms、max 0.034041 ms；不代表完整點擊至呈現延遲。
+- `build-C19.log` universal macOS11 建置成功，編譯期間產品來源固定。隔離包 `/private/tmp/cyder-lifecycle-c19-build/Cyder.app` 使用 local.cyder.lifecycle-c19、CD2 support/runtime，ad-hoc／strict verify 通過；`build-C19-source-sha256.json` 保存 41 個來源／產物 hash，包內三支 scripts 與 repo bytes 相同。本輪未啟動完整包／Wine，未覆蓋正式安裝或發布。
+
+C19 修正共用模型的接線前置缺陷，並加入 monitor → store → observer 的正式元件整合證據；正式 app 的 request／launch／process／window 全部轉入單一 store 尚未完成，不能將這個 fixture 接線稱為 app 遷移已完成。其餘 C18 列出的精確視窗操作、未歸屬程序、重複 waiter、UX／I/O 及 V01–V14 全矩陣仍持續，目標不標完成。

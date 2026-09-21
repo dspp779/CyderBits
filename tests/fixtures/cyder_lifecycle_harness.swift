@@ -36,14 +36,14 @@ state.reduce(.waiterFinished(current, cancelledWaiter, cancelled: true))
 check(state.snapshot.environments[a]!.existence != .exited, "cancel is not exit")
 state.reduce(.accepted(request("one")))
 state.reduce(.accepted(request("two")))
-state.reduce(.dispatchCommitted(request: "one", launch: launch("launch-one", request: "one")))
-state.reduce(.dispatchCommitted(request: "two", launch: launch("launch-two", request: "two")))
+state.reduce(.dispatchCommitted(current, request: "one", launch: launch("launch-one", request: "one")))
+state.reduce(.dispatchCommitted(current, request: "two", launch: launch("launch-two", request: "two")))
 check(state.snapshot.environments.count == 2, "two launches share one environment")
 state.reduce(.cancellationCommitted(request: "one"))
 check(state.snapshot.requests["one"]!.phase == .observing, "late cancellation must not claim cancelled")
 state.reduce(.accepted(request("cancel-first")))
 state.reduce(.cancellationCommitted(request: "cancel-first"))
-state.reduce(.dispatchCommitted(request: "cancel-first", launch: launch("never", request: "cancel-first")))
+state.reduce(.dispatchCommitted(current, request: "cancel-first", launch: launch("never", request: "cancel-first")))
 check(state.snapshot.launches["never"] == nil, "cancel-first forbids dispatch")
 let pid = L.ProcessID(boot: "boot", pid: 42, started: 1)
 let independent = L.ProcessRecord(id: pid, name: "NGS.exe", environment: a, launch: "launch-one", ownership: nil, existence: .alive)
@@ -91,7 +91,7 @@ for sequence in [[0,1,2], [0,2,1], [1,0,2], [1,2,0], [2,0,1], [2,1,0]] {
     for event in sequence {
         switch event {
         case 0: s.reduce(.cancellationCommitted(request: "race"))
-        case 1: s.reduce(.dispatchCommitted(request: "race", launch: launch("race-launch", request: "race")))
+        case 1: s.reduce(.dispatchCommitted(s.stamp(for: a)!, request: "race", launch: launch("race-launch", request: "race")))
         default:
             check(s.reduce(.quit).allSatisfy { if case .stop = $0 { return false }; return true }, "quit never kills")
         }

@@ -29,6 +29,7 @@ final class Fixture {
     let input = Input(), epoch = UUID(), authority: CyderLaunchObserver.Authority
     let prefix: URL, identity: CyderEnvironmentProbe.Identity, observer: CyderLaunchObserver
     var monitor: CyderEnvironmentMonitor!
+    var store: CyderLifecycleStore!, snapshot: CyderLifecycle.Snapshot?
     var token: UUID!, generation: UInt64 = 1, result: CyderLaunchObserver.Result?, completions = 0
     var confirmed = false, exited = false
     init(_ name: String, realProbe: Bool = false) throws {
@@ -37,10 +38,12 @@ final class Fixture {
         identity = CyderEnvironmentProbe.identify(prefix: prefix, engine: engine)!
         authority = .init(request: name, launch: name, digest: "fixture", epoch: epoch)
         observer = CyderLaunchObserver(authority: authority)
+        store = CyderLifecycleStore(epoch: epoch) { [weak self] snapshot, _ in self?.snapshot = snapshot }
         monitor = CyderEnvironmentMonitor(epoch: epoch, directory: root.appendingPathComponent(name + "-history"),
             waitersEnabled: false, clock: input.time,
             probe: { [input] identity in realProbe ? CyderEnvironmentProbe.inspect(identity) : input.probe(identity) },
             event: { [weak self] event in
+                self?.store.send(event)
                 DispatchQueue.main.async {
                     if case .manage(let environment) = event { self?.generation = environment.generation }
                     if case .reconciled(_, _, .exited, _) = event { self?.exited = true }
@@ -50,6 +53,10 @@ final class Fixture {
             self?.observer.receiveEnvironmentEnded(prefixScope: scope)
         }) }
         pump { self.token != nil }
+        store.send(.accepted(.init(id: name, digest: "fixture", environment: identity.environment, phase: .queued)))
+        store.send(.dispatchCommitted(.init(epoch: epoch, environment: identity.environment, generation: generation),
+            request: name, launch: .init(id: name, request: name, environment: identity.environment, name: name, deadline: .infinity)))
+        pump { self.snapshot?.launches[name] != nil }
         observer.observeDrain { [weak self] scope in
             guard let self else { return }
             self.monitor.confirmRootExit(self.token, prefixScope: scope)
@@ -63,9 +70,14 @@ final class Fixture {
     }
     func wait(_ duration: TimeInterval = 2) {
         let deadline = ProcessInfo.processInfo.systemUptime + duration
+        let stamp = CyderLifecycle.Stamp(epoch: epoch, environment: identity.environment, generation: generation)
         Task {
             let value = await observer.wait(until: deadline, signal: WineActivationWaiter(prefix: prefix.path))
             result = value; completions += 1
+            // These cases inject only clean root exits; other results are kept
+            // uncertain, never inferred as successful from environment exit.
+            store.send(.observationFinished(stamp, launch: authority.launch,
+                outcome: value == .finishedWithoutWindow ? .finishedWithoutWindow : .unconfirmed))
         }
     }
     func release() { var done = false; monitor.endExecution(token) { done = true }; pump { done }; settle() }
@@ -103,6 +115,10 @@ clean.input.change { $0.result = .empty }; clean.sample(104)
 precondition(clean.result == nil, "live successor did not reset empty calibration")
 clean.sample(104.6)
 pump { clean.result != nil }; precondition(clean.result == .finishedWithoutWindow && clean.exited)
+pump { clean.snapshot?.requests[clean.authority.request]?.phase == .completed }
+precondition(clean.snapshot?.environments[clean.identity.environment]?.existence == .exited,
+    "active observation lost the formal monitor drain event")
+precondition(clean.snapshot?.canAutoTerminate == true, "drained environment should not require a second monitor event")
 clean.observer.receiveEnvironmentEnded(prefixScope: clean.identity.executionScope); clean.stop(); settle()
 precondition(clean.completions == 1)
 
@@ -118,6 +134,7 @@ generation.input.change { $0.result = .alive(.init(boot: "injected", pid: 123, s
 generation.sample(0); precondition(generation.generation == 2)
 generation.input.change { $0.result = .empty }; generation.sample(31); generation.sample(32)
 pump { generation.result != nil }; precondition(generation.result == .unconfirmed, "old generation drained new server")
+pump { generation.snapshot?.requests[generation.authority.request]?.phase == .uncertain }
 generation.stop()
 
 // The production probe, with real directory identities and an absent isolated

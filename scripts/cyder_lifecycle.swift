@@ -103,9 +103,9 @@ enum CyderLifecycle {
         case ingressPending(Bool)
         case manage(Environment)
         case accepted(Request) // emitted only after durable acceptance
-        case dispatchCommitted(request: String, launch: Launch)
+        case dispatchCommitted(Stamp, request: String, launch: Launch)
         case cancellationCommitted(request: String)
-        case observationFinished(launch: String, outcome: Outcome)
+        case observationFinished(Stamp, launch: String, outcome: Outcome)
         case deadline(TimeInterval)
         case waiterStarted(Stamp, UUID)
         case waiterFinished(Stamp, UUID, cancelled: Bool)
@@ -139,7 +139,9 @@ enum CyderLifecycle {
         private(set) var processes: [ProcessID: ProcessRecord] = [:]
         private(set) var windows: [WindowID: Window] = [:]
         // Tombstones prevent an older scan from resurrecting the same process instance.
-        private var exitedProcesses: Set<ProcessID> = []
+        private struct ProcessKey: Hashable { let environment: EnvironmentID; let process: ProcessID }
+        private var exitedProcesses: Set<ProcessKey> = []
+        private var launchStamps: [String: Stamp] = [:]
         init(epoch: UUID = UUID()) { self.epoch = epoch }
         var snapshot: Snapshot {
             Snapshot(epoch: epoch, revision: revision, phase: phase, visibleUI: visibleUI,
@@ -150,15 +152,21 @@ enum CyderLifecycle {
             guard let environment = environments[id] else { return nil }
             return Stamp(epoch: epoch, environment: id, generation: environment.generation)
         }
-        private func accepts(_ stamp: Stamp) -> Bool {
+        private func accepts(_ stamp: Stamp, includingExited: Bool = false) -> Bool {
             phase == .active && stamp.epoch == epoch && environments[stamp.environment]?.generation == stamp.generation
+                && (includingExited || environments[stamp.environment]?.existence != .exited)
         }
         private mutating func finish(_ id: String, _ outcome: Outcome) -> [Effect] {
             guard var launch = launches[id], launch.outcome == nil else { return [] }
             launch.outcome = outcome
             launches[id] = launch
             if var request = requests[launch.request] {
-                request.phase = outcome == .failed ? .failed : .completed
+                switch outcome {
+                case .failed: request.phase = .failed
+                case .unconfirmed: request.phase = .uncertain
+                case .cancelled: request.phase = .cancelled
+                case .confirmedStarted, .finishedWithoutWindow: request.phase = .completed
+                }
                 request.outcome = outcome
                 requests[request.id] = request
             }
@@ -181,6 +189,12 @@ enum CyderLifecycle {
                     // A new execution generation invalidates all old window capabilities.
                     processes = processes.filter { $0.value.environment != environment.id }
                     windows = windows.filter { processes[$0.key.process] != nil }
+                    for id in launches.keys where launches[id]?.environment == environment.id {
+                        launches[id]?.processes.removeAll()
+                        // A different server cannot finish or inherit an old
+                        // observation. Release it without guessing success.
+                        effects += finish(id, .unconfirmed)
+                    }
                 }
                 environments[environment.id] = environment
             case .accepted(var request):
@@ -188,9 +202,9 @@ enum CyderLifecycle {
                 // Late journal completion must never cause a post-quit dispatch.
                 if phase != .active && (request.phase == .queued || request.phase == .submitted) { request.phase = .awaitingUserResume }
                 requests[request.id] = request
-            case .dispatchCommitted(let id, let launch):
-                guard phase == .active, var request = requests[id], request.phase == .queued,
-                      environments[launch.environment] != nil, request.environment == launch.environment,
+            case .dispatchCommitted(let stamp, let id, let launch):
+                guard accepts(stamp), stamp.environment == launch.environment,
+                      var request = requests[id], request.phase == .queued, request.environment == launch.environment,
                       launch.request == id, launches[launch.id] == nil,
                       environments[launch.environment]?.stop != .executing,
                       environments[launch.environment]?.stop != .unconfirmed else { return [] }
@@ -198,13 +212,17 @@ enum CyderLifecycle {
                 request.launch = launch.id
                 requests[id] = request
                 launches[launch.id] = launch
+                launchStamps[launch.id] = stamp
             case .cancellationCommitted(let id):
                 guard var request = requests[id], [.submitted, .queued, .awaitingUserResume].contains(request.phase) else { return [] }
                 request.phase = .cancelled
                 request.outcome = .cancelled
                 requests[id] = request
-            case .observationFinished(let id, let outcome):
-                guard phase == .active else { return [] }
+            case .observationFinished(let stamp, let id, let outcome):
+                // A root+drain outcome can arrive after the environment exit
+                // event, but never after a new server generation takes over.
+                guard accepts(stamp, includingExited: true), launchStamps[id] == stamp,
+                      outcome != .cancelled else { return [] } // dispatch has already committed
                 effects += finish(id, outcome)
             case .deadline(let now):
                 guard phase == .active else { return [] }
@@ -228,38 +246,47 @@ enum CyderLifecycle {
             case .reconciled(let stamp, let token, let existence, let health):
                 guard accepts(stamp), environments[stamp.environment]?.reconciliation == token else { return [] }
                 environments[stamp.environment]?.reconciliation = nil
-                // An empty observation while dispatch is pending cannot prove its future environment ended.
-                let pending = requests.values.contains { $0.environment == stamp.environment && $0.phase.isActive }
-                if existence != .exited || !pending { environments[stamp.environment]?.existence = existence }
+                // The monitor has already checked executor ownership and the
+                // calibration token. Pending requests retain UI separately;
+                // they do not keep this drained server generation alive.
+                environments[stamp.environment]?.existence = existence
                 environments[stamp.environment]?.health = health
-                if existence == .exited && !pending {
+                if existence == .exited {
                     if environments[stamp.environment]?.stop != .idle { environments[stamp.environment]?.stop = .finished }
                     environments[stamp.environment]?.operation = nil
+                    environments[stamp.environment]?.waiter = nil
                     for id in processes.keys where processes[id]?.environment == stamp.environment {
-                        exitedProcesses.insert(id)
+                        exitedProcesses.insert(.init(environment: stamp.environment, process: id))
                         processes[id]?.existence = .exited
                     }
                     windows = windows.filter { processes[$0.key.process]?.existence != .exited }
                 }
             case .processObserved(let stamp, var process):
-                guard accepts(stamp), process.environment == stamp.environment, !exitedProcesses.contains(process.id) else { return [] }
-                if process.ownership == nil || process.launch.flatMap({ launches[$0]?.environment }) != stamp.environment {
+                guard accepts(stamp), process.environment == stamp.environment,
+                      !exitedProcesses.contains(.init(environment: stamp.environment, process: process.id)),
+                      processes[process.id] == nil || processes[process.id]?.environment == stamp.environment else { return [] }
+                if process.ownership == nil || process.launch.flatMap({ launchStamps[$0] }) != stamp {
                     process.launch = nil
                     process.ownership = nil
                 }
                 processes[process.id] = process
                 if let id = process.launch { launches[id]?.processes.insert(process.id) }
+                if process.existence == .exited {
+                    exitedProcesses.insert(.init(environment: stamp.environment, process: process.id))
+                    windows = windows.filter { $0.key.process != process.id }
+                }
             case .processExited(let stamp, let id):
-                guard accepts(stamp) else { return [] }
-                exitedProcesses.insert(id)
+                guard accepts(stamp), processes[id] == nil || processes[id]?.environment == stamp.environment else { return [] }
+                exitedProcesses.insert(.init(environment: stamp.environment, process: id))
                 processes[id]?.existence = .exited
                 windows = windows.filter { $0.key.process != id }
             case .windowObserved(let stamp, let window):
                 guard accepts(stamp), processes[window.id.process]?.environment == stamp.environment,
-                      processes[window.id.process]?.existence == .alive, !exitedProcesses.contains(window.id.process) else { return [] }
+                      processes[window.id.process]?.existence == .alive,
+                      !exitedProcesses.contains(.init(environment: stamp.environment, process: window.id.process)) else { return [] }
                 windows[window.id] = window
             case .windowClosed(let stamp, let id):
-                guard accepts(stamp) else { return [] }
+                guard accepts(stamp), processes[id.process]?.environment == stamp.environment else { return [] }
                 windows.removeValue(forKey: id)
             case .stopRequested(let stamp, let token):
                 guard accepts(stamp), let environment = environments[stamp.environment],
