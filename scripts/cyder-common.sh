@@ -3680,18 +3680,27 @@ cyder_run_wine_exe() {
           rm -rf "$(dirname "$CYDER_SENTINEL_WATCH_FILE")"
         fi
       ) &
+      local supervisor_pid=$!
       # The supervisor now owns both the Wine child and runtime session.
       session_id=""
-      # Keep the launcher handshake synchronous: Swift reads the PID as soon
-      # as this function returns, while the later exit result stays async.
-      for _ in {1..250}; do
-        [[ -s "$pid_file" ]] && break
-        sleep 0.01
+      # The native ProcessRunner owns this worker until the real handoff. Its
+      # observation deadline may expire, but returning early here would release
+      # the environment lease while this child could still start Wine later.
+      # Use Bash's own child-job table, not kill -0 on a potentially reused PID.
+      while [[ ! -s "$pid_file" ]]; do
+        case $'\n'"$(jobs -pr)"$'\n' in
+          *$'\n'"$supervisor_pid"$'\n'*) sleep 0.1 ;;
+          *)
+            local supervisor_status=0
+            wait "$supervisor_pid" || supervisor_status=$?
+            # The child may have published the PID immediately before exit.
+            [[ ! -s "$pid_file" ]] || break
+            echo "Detached Wine supervisor exited before publishing its PID." >&2
+            [[ "$supervisor_status" -ne 0 ]] || supervisor_status=1
+            return "$supervisor_status"
+            ;;
+        esac
       done
-      if [[ ! -s "$pid_file" ]]; then
-        echo "Detached Wine supervisor did not publish its PID." >&2
-        return 1
-      fi
     else
       # CLI launches keep Wine in the foreground so the caller owns the game
       # lifetime. Finder's native entry point opts into the detached branch.

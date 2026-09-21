@@ -310,3 +310,14 @@ C6 仍有明確範圍限制：未接受副本目前只核對、保留與呈現�
 C7 補齊 primary 端未接受副本的明確恢復操作；secondary fallback 的遠端狀態核對、詳細 feedback owner／錯誤分類、supervisor 與跨崩潰 late-spawn fencing、環境 waiter、精確程序／視窗動作、剩餘主執行緒 action I/O 與 V01–V14 最終交付仍待完成。目標保持進行中。
 
 C7 提交前追加：恢復核對返回時也直接比較同一 monotonic expiresAt，不能只依主佇列 deadline callback 是否已送達；r8 與第二次 universal build 重新通過。
+
+## C8：supervisor 握手前不得提早釋放實際操作
+
+- 確認並重現正式 shell 的缺陷：detached supervisor 尚在前置 attach 工作，父 launcher 的 250×0.01 秒握手輪詢到期便返回失敗；ProcessRunner 因父程序實際退出而釋放環境 lease，但背景子程序仍可能稍後啟動。`supervisor-C8-baseline-r3.log` 以正式 `cyder_run_wine_exe`＋`CyderProcessRunner`＋`CyderOperationGate` 重現「native launcher released mutation ownership before its delayed supervisor handoff」。失敗前先釋放受控 gate、等待子結果，不留下故意卡住的 fixture。
+- 正式 `cyder-common.sh` 不再以握手觀察期限代替 executor 結束。父程序持續等待 PID 發布，或由 Bash 自己的 child job table 確認該直接子工作已結束，再 wait 取真實退出碼；不以系統 kill -0／PID 重用猜測。握手前失敗保留非零 child status，無狀態且無 PID 才回一般失敗。背景輪詢為 0.1 秒，AppKit 不等待；既有 native 觀察期限仍可回 unconfirmed，實際 owner 不因此釋放。
+- 新 `test-cyder-supervisor-owner.sh` 使用隔離 support/runtime/prefix、空 EXE 路徑；只把 sentinel attach 與最末 Wine 執行替換成受控 native 函式，正式 launch、PID/result 發布、wait、runner、gate 都實際執行。六秒 attach stall 中主 event loop 可前進、觀察先 unconfirmed、同環境後續 lease 仍等待；放行後 native worker 才成功返回、lease 一次釋放，root result 保留 53。握手前 supervisor exit 37 回原碼且未 spawn。另驗 runner quiesce 不終止已授權子工作，觀察結果不改寫、實際返回後才 release。`supervisor-C8-r2.log` 及 artifacts 通過。
+- 保留 fixture 失敗：baseline／r2 未進入目標點，r2 保存 launcher log 後確認 `cyder_init_paths` 參數錯用 repo root，導致 resolve-wine-locale 路徑錯誤；改用 scripts directory 後 r3 才算有效基線。新增每個等待點的呼叫行號與可選 artifacts 保存；清理先放行本 fixture 的 gate，不全域終止程序。
+- `test-cyder-launcher.sh` 回歸通過（`launcher-C8.log`），事前已讀取全檔，使用其隔離 runtime／fake arch、Wine、wineserver 及安裝器；測試 log 內兩行 fake wineserver 的空 stop-log 警告仍保留，不當真實 Wine 執行。`test-cyder-sentinel.sh` 靜態接線回歸通過（`sentinel-C8.log`），不當 runtime 證據。Bash syntax／diff 檢查通過。
+- universal macOS11 build `build-C8.log` 通過。隔離包 `/private/tmp/cyder-lifecycle-c8-build/Cyder.app` 配置 local.cyder.lifecycle-c8、CD2 support/runtime 與 ad-hoc 簽章，manifest `build-C8-source-sha256.json`。完整包本輪未啟動；以上為 L1–2，不是真實 Wine／NGS 或完整退出 computer-use 證據。
+
+C8 只修復「握手前父程序自行逾時退出」造成的實際所有權破口。PID 目前仍可能代表 log/Wine wrapper，而非已完成 Wine exec 的證據；PID 發布後的 wrapper lifetime、持久關聯回執、跨 primary crash 的操作鎖接管仍未完成。既有每 launch shell waiter 也尚未與每環境 monitor waiter 整合。後續須繼續解決這些核心門檻，以及精確 process/window action、剩餘 UX／I/O 與 V01–V14 全矩陣，不能標目標完成。
