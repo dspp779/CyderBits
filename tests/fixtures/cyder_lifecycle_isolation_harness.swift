@@ -157,5 +157,37 @@ check(actionState.snapshot.windowAction?.result == .windowGone, "higher generati
 actionState.reduce(.quit)
 check(actionState.snapshot.windowAction == nil, "explicit quit clears pending window feedback without stopping an environment")
 
+var history = fresh()
+let historyStamp = history.stamp(for: a)!
+let historicRequest = L.Request(id: "history", digest: "history", environment: nil, phase: .uncertain, launch: "history-launch")
+let historicLaunch = L.Launch(id: "history-launch", request: "history", environment: a, name: "History", deadline: 300)
+history.reduce(.restoring(true)); check(history.snapshot.hasActiveWork, "metadata recovery temporarily retains the app")
+history.reduce(.journalRequest(historicRequest, version: 2))
+check(history.reduce(.recoveredLaunch(historyStamp, request: "history", launch: historicLaunch, root: process)).isEmpty, "uncalibrated environment cannot restore a process")
+reconcile(&history, existence: .alive)
+check(history.reduce(.recoveredLaunch(historyStamp, request: "history", launch: historicLaunch, root: process)) == [.restoreObservation(historyStamp, "history")], "restoration emits observation only")
+history.reduce(.restoring(false))
+check(!history.snapshot.hasActiveWork && history.snapshot.requests["history"]?.phase == .uncertain, "restoration cannot resume the old observation or change its outcome")
+check(history.reduce(.windowObserved(historyStamp, window)).isEmpty, "restored window does not send launch-success feedback")
+check(history.reduce(.deadline(1000)).isEmpty, "historical observation has no restarted deadline")
+history.reduce(.journalRequest(.init(id: "history", digest: "history", environment: nil, phase: .queued), version: 1))
+check(history.snapshot.requests["history"]?.phase == .uncertain, "stale journal version cannot revive dispatch")
+
+var admitted = fresh()
+admitted.reduce(.journalRequest(.init(id: "next", digest: "next", environment: nil, phase: .queued), version: 1))
+check(admitted.snapshot.hasActiveWork, "durably queued request enters common retention policy")
+admitted.reduce(.journalRequest(.init(id: "next", digest: "next", environment: nil, phase: .dispatching, launch: "next-launch"), version: 2))
+let nextStamp = admitted.stamp(for: a)!
+admitted.reduce(.executionAttached(nextStamp, .init(id: "next", digest: "next", environment: a, phase: .dispatching, launch: "next-launch"),
+    .init(id: "next-launch", request: "next", environment: a, name: "Next", deadline: .infinity)))
+check(admitted.snapshot.launches["next-launch"] != nil, "published journal dispatch can attach its matching executor")
+admitted.reduce(.observationFinished(nextStamp, launch: "next-launch", outcome: .failed))
+admitted.reduce(.journalRequest(.init(id: "next", digest: "next", environment: nil, phase: .observing, launch: "next-launch"), version: 3))
+check(admitted.snapshot.requests["next"]?.phase == .failed, "late native receipt cannot regress the observer outcome")
+admitted.reduce(.quit)
+admitted.reduce(.journalRequest(.init(id: "late-dispatch", digest: "late", environment: nil, phase: .dispatching, launch: "late"), version: 1))
+check(admitted.snapshot.requests["late-dispatch"]?.phase == .uncertain, "post-quit dispatched receipt is not offered for resume")
+check(!admitted.snapshot.restoring, "quit releases metadata recovery retention")
+
 if !failures.isEmpty { failures.forEach { print("FAIL \($0)") }; exit(1) }
 print("PASS lifecycle environment isolation, generation replacement, drain and uncertain outcomes")

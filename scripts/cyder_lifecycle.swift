@@ -98,13 +98,14 @@ enum CyderLifecycle {
         let phase: Phase
         let visibleUI: Bool
         let ingressPending: Bool
+        let restoring: Bool
         let environments: [EnvironmentID: Environment]
         let requests: [String: Request]
         let launches: [String: Launch]
         let processes: [ProcessID: ProcessRecord]
         let windows: [WindowID: Window]
         let windowAction: WindowAction?
-        var hasActiveWork: Bool { ingressPending || requests.values.contains { $0.phase.isActive }
+        var hasActiveWork: Bool { restoring || ingressPending || requests.values.contains { $0.phase.isActive }
             || (windowAction != nil && windowAction?.result != .shown) }
         var hasEnvironment: Bool { environments.values.contains { $0.existence != .exited } }
         var keepStatusItem: Bool { phase == .active && (visibleUI || hasActiveWork || hasEnvironment) }
@@ -113,6 +114,9 @@ enum CyderLifecycle {
     enum Event {
         case visibleUI(Bool)
         case ingressPending(Bool)
+        case restoring(Bool)
+        case journalRequest(Request, version: UInt64)
+        case recoveredLaunch(Stamp, request: String, launch: Launch, root: ProcessID)
         case manage(Environment)
         case accepted(Request) // emitted only after durable acceptance
         case dispatchCommitted(Stamp, request: String, launch: Launch)
@@ -146,6 +150,7 @@ enum CyderLifecycle {
         case observationCompleted(String, Outcome)
         case windowConfirmed(String)
         case activateWindow(Stamp, WindowID, UUID)
+        case restoreObservation(Stamp, String)
         case persistQuiescing
         case cancelOwnedObservers
     }
@@ -155,6 +160,8 @@ enum CyderLifecycle {
         private(set) var phase: Phase = .active
         private(set) var visibleUI = false
         private(set) var ingressPending = false
+        private(set) var restoring = false
+        private var journalVersions: [String: UInt64] = [:]
         private(set) var environments: [EnvironmentID: Environment] = [:]
         private(set) var requests: [String: Request] = [:]
         private(set) var launches: [String: Launch] = [:]
@@ -168,7 +175,7 @@ enum CyderLifecycle {
         init(epoch: UUID = UUID()) { self.epoch = epoch }
         var snapshot: Snapshot {
             Snapshot(epoch: epoch, revision: revision, phase: phase, visibleUI: visibleUI,
-                     ingressPending: ingressPending, environments: environments, requests: requests,
+                     ingressPending: ingressPending, restoring: restoring, environments: environments, requests: requests,
                      launches: launches, processes: processes, windows: windows, windowAction: windowAction)
         }
         func stamp(for id: EnvironmentID) -> Stamp? {
@@ -216,6 +223,42 @@ enum CyderLifecycle {
             case .ingressPending(let pending):
                 guard phase == .active else { return [] }
                 ingressPending = pending
+            case .restoring(let pending):
+                guard phase == .active else { return [] }
+                restoring = pending
+            case .journalRequest(let incoming, let version):
+                guard journalVersions[incoming.id].map({ version > $0 }) ?? true,
+                      requests[incoming.id].map({ $0.digest == incoming.digest }) ?? true else { return [] }
+                let previous = requests[incoming.id]
+                var request = Request(id: incoming.id, digest: incoming.digest,
+                    environment: previous?.environment ?? incoming.environment, phase: incoming.phase,
+                    launch: incoming.launch ?? previous?.launch, outcome: incoming.outcome)
+                // The current observer owns its bounded outcome; a later native
+                // receipt must not regress or restart that observation.
+                if let launch = request.launch.flatMap({ launches[$0] }), let previous,
+                   launch.request == incoming.id {
+                    request.phase = previous.phase; request.outcome = previous.outcome
+                }
+                if phase != .active {
+                    if [.queued, .submitted].contains(request.phase) { request.phase = .awaitingUserResume }
+                    else if [.dispatching, .observing].contains(request.phase) { request.phase = .uncertain }
+                }
+                requests[incoming.id] = request; journalVersions[incoming.id] = version
+            case .recoveredLaunch(let stamp, let id, var launch, let root):
+                guard accepts(stamp), environments[stamp.environment]?.existence == .alive,
+                      environments[stamp.environment]?.health == .healthy, let request = requests[id],
+                      [.completed, .failed, .uncertain].contains(request.phase), request.launch == launch.id,
+                      request.environment == nil || request.environment == stamp.environment,
+                      launch.request == id, launch.environment == stamp.environment, launches[launch.id] == nil,
+                      processes[root] == nil, !exitedProcesses.contains(.init(environment: stamp.environment, process: root)) else { return [] }
+                launch.deadline = 0; launch.outcome = request.outcome ?? .unconfirmed
+                launch.processes = [root]
+                launches[launch.id] = launch; launchStamps[launch.id] = stamp
+                requests[id] = Request(id: request.id, digest: request.digest, environment: stamp.environment,
+                    phase: request.phase, launch: request.launch, outcome: request.outcome)
+                processes[root] = .init(id: root, name: launch.name, environment: stamp.environment,
+                    launch: launch.id, ownership: .rootReceipt, existence: .alive)
+                effects = [.restoreObservation(stamp, id)]
             case .manage(let environment):
                 guard phase == .active else { return [] }
                 if let previous = environments[environment.id] {
@@ -251,8 +294,12 @@ enum CyderLifecycle {
                 guard accepts(stamp), request.environment == stamp.environment,
                       launch.environment == stamp.environment, launch.request == request.id,
                       request.launch == launch.id, [.dispatching, .observing].contains(request.phase),
-                      !request.id.isEmpty, !request.digest.isEmpty, launches[launch.id] == nil,
-                      requests[request.id] == nil else { return [] }
+                      !request.id.isEmpty, !request.digest.isEmpty, launches[launch.id] == nil else { return [] }
+                if let previous = requests[request.id] {
+                    guard previous.digest == request.digest, previous.launch == launch.id,
+                          [.dispatching, .observing].contains(previous.phase),
+                          previous.environment == nil || previous.environment == stamp.environment else { return [] }
+                }
                 request.phase = .observing
                 requests[request.id] = request
                 launches[launch.id] = launch
@@ -393,6 +440,7 @@ enum CyderLifecycle {
                 guard phase == .active else { return [] }
                 phase = .quiescing
                 windowAction = nil
+                restoring = false
                 ingressPending = false
                 for (id, request) in requests where request.phase == .queued || request.phase == .submitted {
                     requests[id]?.phase = .awaitingUserResume

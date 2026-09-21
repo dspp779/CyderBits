@@ -97,7 +97,7 @@ print("callback-cycle proxy samples=30 p95_ms=\(sorted[28]) max_ms=\(sorted.last
 precondition(sorted[28] <= 100 && sorted.last! < 250, "callback responsiveness target missed")
 try! ("sample,callback_cycle_ms\n" + samples.enumerated().map { "\($0.offset + 1),\($0.element)" }.joined(separator: "\n") + "\n").write(toFile: CommandLine.arguments[1], atomically: true, encoding: .utf8)
 SWIFT
-swiftc -module-cache-path "$TEST_DIR/module-cache" "$ROOT/scripts/cyder_lifecycle.swift" "$ROOT/scripts/cyder_process_evidence.swift" "$ROOT/scripts/cyder_launch_observer.swift" "$ROOT/scripts/cyder_window_access.swift" "$ROOT/scripts/cyder_status_item.swift" "$TEST_DIR/main.swift" -o "$TEST_DIR/test-menu"
+swiftc -module-cache-path "$TEST_DIR/module-cache" "$ROOT/scripts/cyder_lifecycle.swift" "$ROOT/scripts/cyder_process_evidence.swift" "$ROOT/scripts/cyder_launch_observer.swift" "$ROOT/scripts/cyder_recovery_observer.swift" "$ROOT/scripts/cyder_window_access.swift" "$ROOT/scripts/cyder_status_item.swift" "$TEST_DIR/main.swift" -o "$TEST_DIR/test-menu"
 "$TEST_DIR/test-menu" "$TEST_DIR/passed"
 [[ "$(wc -l < "$TEST_DIR/passed" | tr -d ' ')" == 31 ]]
 if [[ -n "${CYDER_MENU_SAMPLES:-}" ]]; then cp "$TEST_DIR/passed" "$CYDER_MENU_SAMPLES"; fi

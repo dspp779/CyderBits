@@ -51,7 +51,7 @@ SIGN_IDENTITY=- CYDER_REQUIRE_NATIVE_SWIFT=1 CYDER_SWIFT_OPTIMIZATION=-Onone \
 
 ## 驗證矩陣（持續更新）
 
-以下為截至 C22 的證據摘要；各批次段落保留當時缺口與失敗，不以早期矩陣覆蓋後續結果。
+以下為截至 C23 的證據摘要；各批次段落保留當時缺口與失敗，不以早期矩陣覆蓋後續結果。
 
 | 項目 | 目前證據 | 剩餘／限制 |
 |---|---|---|
@@ -67,7 +67,7 @@ SIGN_IDENTITY=- CYDER_REQUIRE_NATIVE_SWIFT=1 CYDER_SWIFT_OPTIMIZATION=-Onone \
 | V10 | D/E/C3 真實 Command-Q 保留 Wine births；C11 owner crash 保留 child；C17/C21/C22 quit fencing | 最新完整測試包及所有入口的最終回歸 |
 | V11 | E 真實設定明確停止後 UI 保留；正式 reducer／gate 區分 stop 與 quit | 最新 status stop 的實際 tracking 未測 |
 | V12 | C22 真實原生同名雙視窗／最小化有限通過；正式 action 注入替換、PID reuse、焦點變更、逾時、quit | Wine、其他 Space、VoiceOver 未驗；原生不穩定輪次保留 |
-| V13 | 真實 E 重開校準環境且無 replay；journal/registry 損壞、prior-boot、outbox 恢復與 quit 故障注入 | 完整歷史／queued／live model 恢復呈現仍須接線 |
+| V13 | 真實 E 重開校準環境且無 replay；C23 正式 journal／registry reopen、原生出生身分接回選單、queued/historical 進入共用模型；prior-boot／重用／late generation／quit 故障注入 | 原 root 已退出且失去可驗 Unix ancestry 的後繼仍未接回；最新版完整 Wine GUI 重開尚未實測 |
 | V14 | E/C21 engine／prefix／probe/identity 失聯故障注入；一個 worker 受阻仍有另一環境前進，退出可用 | 最终 app 局部降級 UX 與主執行緒 I/O 回歸 |
 
 
@@ -519,3 +519,18 @@ C21 修復已重現的正常空環境接新 launch 路徑；校準後、實際 s
 - 已送入 OS 的呼叫不能原子撤回；取消會封鎖後續指令與晚到結果，不能承諾回收已在途的系統訊息。native harness 為可選桌面測試，`bash tests/test-cyder-window-native.sh` 會建立／操作自己的兩個視窗並清理 helper；一般故障回歸使用 `bash tests/test-cyder-window-actions.sh`，不操作其他 app 視窗。
 
 本批只完成可用 AX 能力下的精確操作及降級；先前 Wine 不可綁定 computer use target 的限制仍在。完整歷史／queued 接回、未歸屬程序發現、重複 waiter、其餘 UX／I/O 與 V01–V14 最終矩陣仍需收斂，目標保持進行中。
+
+
+## C23：歷史要求與仍存活原生 root 的正式恢復
+
+- 確認 C22 的接線缺口：onRecoveryChanged 雖讀到 native receipt，但 status 的 attachNativeRoot 要求既有 Session；重開後 Session 為空，回執被忽略。新增正式 recovery record mapper／observer，app 的 journal callback 同時交付共用狀態與候選；正常啟動仍經原 attachNativeRoot 核對，不另建 dispatch consumer。
+- journalRequest 以 request ID／digest／version 更新 LifecycleStore，queued 納入共用存續政策；較舊版本不回退狀態。已綁定 observer 的期限／結果保留，不因新 native receipt 又回 observing。executionAttached 可接受已發布、完全匹配的 dispatching 紀錄，仍拒絕歷史 uncertain；恢復不是重新派送。退出後晚到 dispatching 保存為 uncertain，不能誤列為可繼續的未派送工作。
+- 候選必須有相符 request／launch／digest／executor epoch 的 native spawned receipt，且唯一對上目前 alive／healthy 的 wine-user 環境 UID/device/inode scope。背景以真正 boot UUID／PID／微秒出生時間及本 UID 核對原程序；歷史名稱只作顯示，不是存活或視窗能力證據。若候選資料對同一 birth 提出矛盾要求歸屬，不任選一筆。未校準、舊 boot、PID 重用、已 exited、無 receipt 的資料不建立活程序。
+- store 以當前 stamp 原子建立 recovered launch／root，僅發 restoreObservation；沒有 spawn effect、不重設 30 秒 observer、不發恢復成功或視窗切換。原 request 保持 uncertain／completed／failed，launch 的歷史 observation 已收尾；接回後正常 process watcher 與 AX adapter 重新觀察，後代只沿現行驗證過的 Unix tree 認領。session 安裝與更新 receipt 之間的版本變化，交由原不可變 ticket／birth／scope 檢查處理，不能換 root。
+- recovery reader 與 monitor／UI 分離，最多兩個 physical lookup；五秒邏輯期限不釋放仍受阻的實際占位。舊世代 read 返回不能套用新世代；新版需重新查核。初始 metadata retention 最多五秒，completion 遺失不永久維持已關閉 UI；startup idle 亦等待 AppKit launch 與 coordinator role 確認。quit 撤銷 late recovery，不終止遊戲。
+- 新 `test-cyder-recovery.sh` 寫入正式 journal／environment registry，再關閉重開；receipt 的相關 metadata／server calibration／window probe 明確注入，原生 child 與實際出生身分是真實的。正式 mapper → monitor → store → status/session → menu 通過：重開 uncertain／awaitingUserResume 保持原類別，未校準前零活程序，校準及 native 檢查後接回，沒有 starting 或 activation；同 ID 拒絕再次 authorize，40 次相同版本不重建，退出觀察後 native child 仍活。
+- `recovery-C23-r5.log` 為最後完整 harness，另涵蓋實際 native reads 拒絕 prior-boot／數值 PID reuse、矛盾候選不任選、單一受阻環境不阻擋另一環境、新世代需新 read、quit 拒絕替代 read、metadata 無 completion 的五秒釋放、兩個受阻 lookup 不增生及 late-result fence。30 筆 callback-cycle proxy 在 `recovery-menu-C23.csv`：p95 0.035209 ms、max 0.109416 ms；是 callback 代理量測，非點擊至呈現或真實 tracking。r1–r4 的逐步擴充結果保留，沒有挑较小數字替代最後樣本。
+- `lifecycle-binding-C23-r2.log` 加上真正 queued／authorized journal record 經正式 mapper 先進入 store，再走正常 launch attachment，原有 monitor／observer／窗口歸屬斷言通過。`lifecycle-isolation-C23-r2.log` 驗 journal 版本、不重啟歷史 observer、未校準拒絕、late receipt 不回退 outcome、已派送的 post-quit 紀錄不能 resume。`window-actions-C23.log`、`open-files-C23.log`、`status-item-C23-r2.log` 回歸通過。status-item 首輪仍要求 app 直接呼叫 attachNativeRoot，已改驗 app → receiveHistory → attachNativeRoot 接線；保留正式 binding／recovery runtime 證據，沒有把字串測試當恢復實測。
+- 最後 `build-C23-r2.log` universal macOS11 建置成功；staged review 發現 pending recovery 應先比對 stamp 再移除，避免舊 effect 刪到新等待項，修正後重跑 recovery 並重建。先前 build／hash 保留，39 個最終輸入 hash 在編譯前後相同。`/private/tmp/cyder-lifecycle-c23-build/Cyder.app` 配置 local.cyder.lifecycle-c23、CD2 support/runtime，ad-hoc／strict verify 及 arm64／x86_64 核對通過。`build-C23-source-sha256.json` 保留 45 個來源／產物 hash，三支包內 Bash scripts bytes 與 repo 相同。本輪完整 Cyder.app／Wine GUI 未啟動，沒有新的 Wine／NGS 相容性宣稱；原生 recovery harness 的 process／AppKit 是真實、server／receipt metadata 則為標示的替代證據。
+
+C23 接通有完整 native root 證據的重新觀察及 queued/history 共用政策；原 root 已退出、後繼失去 Unix ancestry、缺少環境登錄的可信 bottle 補查與未歸屬程序呈現仍待完成。重複 waiter、其餘 UX／I/O、完整 V01–V14 最終驗收及可重現交付亦未完成，目標保持進行中。

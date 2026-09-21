@@ -12,6 +12,6 @@ cat > "$BUNDLE/Contents/Info.plist" <<'PLIST'
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict><key>CFBundleExecutable</key><string>NativeFixture</string><key>CFBundleIdentifier</key><string>local.cyder.c22-native-fixture</string><key>CFBundleName</key><string>Cyder C22 Native</string><key>CFBundlePackageType</key><string>APPL</string></dict></plist>
 PLIST
-swiftc -module-cache-path "$TEST_DIR/cache" "$ROOT/scripts/cyder_lifecycle.swift" "$ROOT/scripts/cyder_process_evidence.swift" "$ROOT/scripts/cyder_launch_observer.swift" "$ROOT/scripts/cyder_window_access.swift" "$ROOT/scripts/cyder_status_item.swift" "$TEST_DIR/main.swift" -o "$TEST_DIR/test"
+swiftc -module-cache-path "$TEST_DIR/cache" "$ROOT/scripts/cyder_lifecycle.swift" "$ROOT/scripts/cyder_process_evidence.swift" "$ROOT/scripts/cyder_launch_observer.swift" "$ROOT/scripts/cyder_recovery_observer.swift" "$ROOT/scripts/cyder_window_access.swift" "$ROOT/scripts/cyder_status_item.swift" "$TEST_DIR/main.swift" -o "$TEST_DIR/test"
 cp "$TEST_DIR/test" "$BUNDLE/Contents/MacOS/NativeFixture"
 "$TEST_DIR/test" "$BUNDLE/Contents/MacOS/NativeFixture"

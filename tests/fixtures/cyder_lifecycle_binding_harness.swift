@@ -62,11 +62,14 @@ journal.submit(id: requestID, payload: .init(files: ["/fixture.exe"], arguments:
 }
 pump { record != nil }
 precondition(record!.phase == .queued)
+controller.receiveHistory([CyderRecoveryObserver.Record(record!)!])
+pump { controller.lifecycleSnapshot.requests[requestID]?.phase == .queued }
 record = nil
 journal.authorizeDispatch(id: requestID) { if case .success(let value) = $0 { record = value } }
 pump { record != nil }
 let committed = record!
 precondition(committed.phase == .dispatching)
+controller.receiveHistory([CyderRecoveryObserver.Record(committed)!])
 let authority = CyderLaunchObserver.Authority(request: committed.id, launch: committed.launchID!, digest: committed.digest, epoch: committed.executorEpoch!)
 controller.beginLaunch(id: authority.launch, prefix: prefix, executableName: "Committed fixture", authority: authority, stamp: boundStamp,
     committedRequest: .init(id: committed.id, digest: committed.digest, environment: boundStamp.environment, phase: .dispatching, launch: authority.launch))

@@ -99,8 +99,10 @@ assert_contains "$wrapper_source" 'cyder_exec_cyder_swift "$SELF/CyderSwift" "$e
 assert_contains "$wrapper_source" 'Catalina deliberately retains the shell-only fallback' \
   "Catalina must keep the existing Bash-only behavior"
 
-assert_contains "$app_source" 'statusItemController.attachNativeRoot(proof)' \
-  "library and Finder launches must attach exact native root proof to their LaunchGroup"
+assert_contains "$app_source" 'statusItemController.receiveHistory(history)' \
+  "library, Finder and recovery receipts must enter the shared history adapter"
+assert_contains "$status_source" 'if let root = record.root { attachNativeRoot(root) }' \
+  "history updates must still attach exact native proof to an active LaunchGroup"
 assert_contains "$status_source" 'func attachNativeRoot(_ receipt: CyderLaunchObserver.NativeRoot)' \
   "status item must require correlated native root proof"
 assert_contains "$status_source" 'let children = CyderProcessEvidence.tree(roots: [root])' \

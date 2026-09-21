@@ -112,15 +112,9 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         coordinator.onRecoveryChanged = { [weak self] records in
             guard let self, !self.quitTransaction else { return }
             self.requestRecords = records
-            for record in records {
-                guard let receipt = record.executionReceipt, let root = receipt.nativeSpawn,
-                      let pid = root.processPID, let boot = root.processBoot, let started = root.processStarted else { continue }
-                let proof = CyderLaunchObserver.NativeRoot(authority: .init(request: receipt.requestID, launch: receipt.launchID,
-                    digest: receipt.digest, epoch: receipt.epoch), ticket: receipt.ticketID, phase: root.phase,
-                    pid: pid, boot: boot, started: started, status: root.status, signalled: root.signalled, prefixScope: receipt.prefixScope)
-                self.statusItemController.attachNativeRoot(proof)
-                self.wineLaunchObserver?.receive(proof)
-            }
+            let history = records.compactMap { CyderRecoveryObserver.Record($0) }
+            for record in history { if let proof = record.root { self.wineLaunchObserver?.receive(proof) } }
+            self.statusItemController.receiveHistory(history)
             self.existingLibraryController?.updateRequestSummary(CyderRequestRow.summary(records, outbox: self.outboxNotices))
             self.existingRequestController?.update(records, outbox: self.outboxNotices)
         }
@@ -179,7 +173,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             self?.runStopEnvironment(prefix: prefix, stamp: stamp, operation: operation)
         }
         controller.onLifecycleIdle = { [weak self] in
-            guard let self, !self.libraryLaunchInProgress, self.queuedLaunches.isEmpty, self.activeProcessOperations == 0, self.pendingLaunchAcquisitions.isEmpty,
+            guard let self, self.didFinishLaunch, self.instanceReady, !self.libraryLaunchInProgress, self.queuedLaunches.isEmpty, self.activeProcessOperations == 0, self.pendingLaunchAcquisitions.isEmpty,
                   !self.environmentPreparationInProgress,
                   self.existingSettingsController?.window?.isVisible != true,
                   self.existingRequestController?.window?.isVisible != true,
@@ -443,6 +437,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         // Preferences promote to the Dock via activateCyderUI; EXE/URI launches
         // stay accessory unless they need a question or error.
         NSApp.setActivationPolicy(.accessory)
+        statusItemController.beginRecovery()
         instanceCoordinator.start(onRequest: { [weak self] request in
             self?.receiveInstanceRequest(request)
         }) { [weak self] role in
@@ -451,12 +446,15 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             switch role {
             case .primary:
                 self.isPrimaryInstance = true
-                self.environmentMonitor.restore {}
+                self.environmentMonitor.restore { [weak self] in self?.statusItemController.receiveLifecycleEvent(.restoring(false)) }
                 self.instanceCoordinator.sentinel.onLaunchEnded = { [weak self] id in
                     self?.statusItemController.noteHelperDisconnected(id: id)
                 }
-            case .secondary: self.isPrimaryInstance = false
+            case .secondary:
+                self.isPrimaryInstance = false
+                self.statusItemController.receiveLifecycleEvent(.restoring(false))
             case .unavailable:
+                self.statusItemController.receiveLifecycleEvent(.restoring(false))
                 // No ownership means no executor. Keep UI available for the
                 // actionable error; never continue as an uncoordinated primary.
                 self.isPrimaryInstance = false

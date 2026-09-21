@@ -60,13 +60,23 @@ final class CyderStatusItemController: NSObject, NSMenuDelegate {
     private var latestLifecycle = CyderLifecycle.State().snapshot
     private var hasLifecycleSnapshot = false
     private let windowDriver: CyderWindowAccess.Driver
+    private let recoveryInspect: (Int32) -> CyderProcessEvidence.Presence
+    private var historyRecords: [String: CyderRecoveryObserver.Record] = [:]
+    private var pendingRecovered: [String: (CyderRecoveryObserver.Record, CyderLifecycle.Stamp)] = [:]
+    private lazy var recoveryObserver = CyderRecoveryObserver(inspect: recoveryInspect) { [weak self] record, stamp in
+        self?.proposeRecovered(record, stamp: stamp)
+    }
     private lazy var windowAccess = CyderWindowAccess(driver: windowDriver, event: { [weak self] in self?.lifecycleStore.send($0) })
-    init(windowDriver: CyderWindowAccess.Driver = .system) { self.windowDriver = windowDriver; super.init() }
+    init(windowDriver: CyderWindowAccess.Driver = .system,
+         recoveryInspect: @escaping (Int32) -> CyderProcessEvidence.Presence = CyderProcessEvidence.inspect) {
+        self.windowDriver = windowDriver; self.recoveryInspect = recoveryInspect; super.init()
+    }
     private lazy var lifecycleStore: CyderLifecycleStore = CyderLifecycleStore(epoch: lifecycleEpoch) { [weak self] snapshot, effects in
         guard let self else { return }
         self.applyLifecycleSnapshot(snapshot)
         guard !self.isQuiescing else { return }
         for effect in effects {
+            if case .restoreObservation(let stamp, let request) = effect { self.installRecovered(request, stamp: stamp) }
             if case .activateWindow(let stamp, let window, let operation) = effect {
                 self.windowAccess.activate(stamp: stamp, window: window, operation: operation)
             }
@@ -94,6 +104,7 @@ final class CyderStatusItemController: NSObject, NSMenuDelegate {
         animationTimer = nil
         lifecycleStore.send(.quit)
         windowAccess.stop()
+        recoveryObserver.stop(); pendingRecovered.removeAll()
         claimTokens.removeAll()
         let completions = Array(claimCompletions.values)
         claimCompletions.removeAll()
@@ -143,6 +154,61 @@ final class CyderStatusItemController: NSObject, NSMenuDelegate {
     func receiveLifecycleEvent(_ event: CyderLifecycle.Event) { lifecycleStore.send(event) }
     func noteFrontmostApplication(_ pid: Int32) { windowAccess.focusChanged(to: pid) }
 
+    func beginRecovery() {
+        lifecycleStore.send(.restoring(true))
+        // Loading historical metadata is not a reason to keep a closed UI
+        // alive forever if its filesystem stops responding. Late valid evidence
+        // may still attach while this app remains active for other work.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 5) { [weak self] in
+            guard let self, !self.isQuiescing else { return }
+            self.lifecycleStore.send(.restoring(false))
+        }
+    }
+    func receiveHistory(_ records: [CyderRecoveryObserver.Record]) {
+        precondition(Thread.isMainThread)
+        guard !isQuiescing else { return }
+        var events: [CyderLifecycle.Event] = [], changed: [CyderRecoveryObserver.Record] = []
+        for record in records {
+            let id = record.request.id
+            guard historyRecords[id].map({ record.version > $0.version && record.request.digest == $0.request.digest }) ?? true else { continue }
+            historyRecords[id] = record; changed.append(record)
+            events.append(.journalRequest(record.request, version: record.version))
+            if let root = record.root { attachNativeRoot(root) }
+        }
+        if !events.isEmpty { lifecycleStore.send(events); recoveryObserver.update(changed) }
+    }
+    private func proposeRecovered(_ record: CyderRecoveryObserver.Record, stamp: CyderLifecycle.Stamp) {
+        guard !isQuiescing, historyRecords[record.request.id] == record, let root = record.root,
+              sessions[root.authority.launch] == nil, latestLifecycle.epoch == stamp.epoch,
+              let environment = latestLifecycle.environments[stamp.environment], environment.generation == stamp.generation,
+              environment.existence == .alive, environment.health == .healthy else { return }
+        if pendingRecovered[record.request.id]?.1 == stamp { return }
+        pendingRecovered[record.request.id] = (record, stamp)
+        lifecycleStore.send(.recoveredLaunch(stamp, request: record.request.id,
+            launch: .init(id: root.authority.launch, request: record.request.id, environment: stamp.environment,
+                          name: record.name, deadline: 0, outcome: .unconfirmed),
+            root: .init(boot: root.boot, pid: root.pid, started: root.started)))
+    }
+    private func installRecovered(_ request: String, stamp: CyderLifecycle.Stamp) {
+        guard !isQuiescing, let (record, pendingStamp) = pendingRecovered[request],
+              pendingStamp == stamp, let root = record.root,
+              let environment = latestLifecycle.environments[stamp.environment], environment.generation == stamp.generation,
+              sessions[root.authority.launch] == nil else { return }
+        pendingRecovered.removeValue(forKey: request)
+        let id = root.authority.launch
+        sessionVersions[id] = UUID()
+        var session = Session(id: id, root: nil, authority: root.authority, stamp: stamp,
+            prefix: URL(fileURLWithPath: environment.prefix), rootDisplayName: record.name,
+            fromSentinel: false, displayName: record.name, helperConnected: false, adoptedPIDs: [])
+        session.activated = true // observing an existing process, never a new launch
+        sessions[id] = session
+        attachNativeRoot(root)
+        // Receipt polling may advance between store acceptance and effect
+        // delivery. Install the verified birth, then consume its latest terminal
+        // proof through the same immutable receipt checks as an active launch.
+        if let latest = historyRecords[request]?.root, latest != root { attachNativeRoot(latest) }
+    }
+
     func monitorEnvironment(prefix: URL) {
         guard !isQuiescing, let onManageEnvironment else { return }
         pendingEnvironmentAttachments += 1
@@ -161,6 +227,7 @@ final class CyderStatusItemController: NSObject, NSMenuDelegate {
         hasLifecycleSnapshot = true
         latestLifecycle = snapshot
         windowAccess.update(snapshot)
+        recoveryObserver.update(snapshot)
         let endedScopes = Set(snapshot.environments.values.filter { $0.existence == .exited }.map {
             "\($0.id.uid):\(Int64(bitPattern: $0.id.device)):\($0.id.inode)"
         })
@@ -840,7 +907,7 @@ final class CyderStatusItemController: NSObject, NSMenuDelegate {
         guard !isQuiescing, let target = item.representedObject as? WindowTarget else { return }
         lifecycleStore.send(.activateWindow(target.id, UUID()))
     }
-    @objc private func recheckWindows() { windowAccess.refresh() }
+    @objc private func recheckWindows() { windowAccess.refresh(); recoveryObserver.refresh() }
     @objc private func requestWindowPermission() {
         guard !isQuiescing, !windowPermissionRequested else { return }
         windowPermissionRequested = true
