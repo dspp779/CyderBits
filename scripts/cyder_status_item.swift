@@ -105,6 +105,13 @@ final class CyderStatusItemController: NSObject, NSMenuDelegate {
         lifecycleStore.send(.stopFinished(stamp, operation, success: success))
     }
 
+    func canExecuteStop(stamp: CyderLifecycle.Stamp, operation: UUID) -> Bool {
+        precondition(Thread.isMainThread)
+        guard !isQuiescing, latestLifecycle.epoch == stamp.epoch,
+              let environment = latestLifecycle.environments[stamp.environment] else { return false }
+        return environment.generation == stamp.generation && environment.operation == operation && environment.existence != .exited
+    }
+
     func setIngressPending(_ pending: Bool) {
         precondition(Thread.isMainThread)
         externalIngressPending = pending

@@ -168,3 +168,14 @@ C3 程序盤點發現的舊 helper 殘留有一個明確競態：supervisor 先 
 新增 `test-cyder-sentinel-helper.sh`：真正建立 Unix sentinel server、FIFO、helper 子程序與原生 sleep root，固定 writer 先關再啟 helper，確認連接與 PID update、root exit 後 helper exit；缺 PID 有界退出；primary stop 後 helper exit 而 root 留存。正式 sentinel／instance runtime tests 與全來源 typecheck 通過（只剩既有 activation API deprecated warning）。原始 logs：`helper-E2.log`、`helper-E2-r2.log`、`helper-E2-r3.log`、`sentinel-E2.log`、`instance-E2.log`、`typecheck-E2.log`。
 
 這是正式 helper 的原生整合測試，尚未重建 Wine 測試包，不把它寫成真實 Wine 收尾已通過；舊版已啟動的 helper 不會被此 source 修正自動替換。每 launch 的 shell -w 與 supervisor descendant ownership 仍待下一單位完成。
+
+## C4：同環境原生操作序列化
+
+- 正式 `CyderOperationGate` 以 canonical prefix 作衝突範圍；同環境 FIFO、不同環境可越過不相關的等待，全環境修改作 barrier。lease 有獨立 UUID，舊 release／cancel 不影響新 owner；quit 拒绝 pending／新 acquire，不撤銷正在執行的 mutation。這是 app 內原生 executor 協調，尚不宣稱跨 primary crash／detached supervisor 的完整 fencing。
+- app 的已接受 EXE／URI 先在背景解析 scope、取得 lease，再呼叫 journal authorize；因此環境停止中仍維持 queued，可由正式 journal／channel 取消，不會提早變成 cancellationTooLate。相同入口的 scope 準備使用序列 worker 保持交付順序；ready queue 才占用 activation 排程。等待 scope 也納入 app retention。
+- `runLauncher` 正式 caller 全數共用 gate：launch 傳入已取得的 prefix lease，task manager／stop-prefix 用對應環境，其他修改操作用全環境 barrier；唯讀 running query 不取得 mutation lease。準備錯誤釋放 lease，成功 spawn 後只由 runner 的 actual-exit release 釋放。停止觀察十五秒後可以 unconfirmed，但不釋放仍存活的執行者、不自動補送停止指令。
+- status stop effect 在主執行緒收到意圖時立即預約 canonical scope，避免 Task 排程讓較新的 launch 超車。取得 lease 後、spawn 前背景重新核對 prefix UID/device/inode，並查當前快照的 epoch/generation/operation；已結束、已更換環境或舊操作不再執行。底層 stop 仍作用整個 prefix；這不是跨外部程式建立新 wineserver 的原子保證。
+- `test-cyder-operation-gate.sh` 用正式 gate + runner + journal、真實原生 sleep 程序驗證：stop deadline 未到 actual exit 不能放行同環境 launch；另一環境可取得操作權；全環境 barrier 不被超車；舊 release 無效；queued cancel 在取得 scope 後仍拒絕 dispatch；quit 取消 pending 並拒絕新 effect。這是 L1–2 替代證據，不宣稱 Wine stop/start 交錯實測通過。
+- `gate-C4.log`／`gate-C4-r2.log`、open-files／settings／sentinel smoke 通過；完整 Swift typecheck 通過。雙架構 macOS11 build 兩輪通過，第二輪含停止意圖預約修正：`build-C4-r2.log`。測試包 `/private/tmp/cyder-lifecycle-c4-build/Cyder.app` 已配置 `local.cyder.lifecycle-c4` 與本任務 CD2 support/runtime wrapper，ad-hoc 重簽；SHA256 manifest `build-C4-source-sha256.json`。此包本輪尚未啟動，沒有新增 C4 Wine 實測結論。
+
+下一步缺口仍明確保留：scope 解析 worker 卡住時的隔離／有界回饋、等待與取消的原位置 UI、設定不可變快照；detached supervisor receipt／晚到 spawn、跨崩潰環境操作 fencing 及每 launch -w；程序／視窗身分與精確動作；F 恢復／非模態錯誤／首屏及完整 V01–V14。C4 的原生 lease 不代替這些驗收。

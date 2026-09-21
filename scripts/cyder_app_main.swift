@@ -38,6 +38,8 @@ private enum CyderLaunchIntent: Equatable {
 }
 
 final class CyderAppDelegate: NSObject, NSApplicationDelegate {
+    private let operationGate = CyderOperationGate()
+    private let launchPreparation = DispatchQueue(label: "local.cyder.launch-preparation", qos: .userInitiated)
     private let processRunner = CyderProcessRunner(delivery: DispatchQueue(label: "local.cyder.process-delivery", qos: .utility))
     private var pendingFiles: [String] = []
     private var pendingURLs: [String] = []
@@ -50,17 +52,21 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         let arguments: [String]?
         var isURI = false
         var authorization: CyderRequestJournal.Record? = nil
+        var lease: CyderOperationGate.Lease? = nil
     }
 
     private var queuedLaunches: [QueuedLaunch] = [] {
-        didSet { statusItemController.setIngressPending(libraryLaunchInProgress || !queuedLaunches.isEmpty || activeProcessOperations > 0) }
+        didSet { statusItemController.setIngressPending(libraryLaunchInProgress || !queuedLaunches.isEmpty || activeProcessOperations > 0 || pendingLaunchAcquisitions > 0) }
     }
     private var didFinishLaunch = false
     private var libraryLaunchInProgress = false {
-        didSet { statusItemController.setIngressPending(libraryLaunchInProgress || !queuedLaunches.isEmpty || activeProcessOperations > 0) }
+        didSet { statusItemController.setIngressPending(libraryLaunchInProgress || !queuedLaunches.isEmpty || activeProcessOperations > 0 || pendingLaunchAcquisitions > 0) }
     }
     private var activeProcessOperations = 0 {
-        didSet { statusItemController.setIngressPending(libraryLaunchInProgress || !queuedLaunches.isEmpty || activeProcessOperations > 0) }
+        didSet { statusItemController.setIngressPending(libraryLaunchInProgress || !queuedLaunches.isEmpty || activeProcessOperations > 0 || pendingLaunchAcquisitions > 0) }
+    }
+    private var pendingLaunchAcquisitions = 0 {
+        didSet { statusItemController.setIngressPending(libraryLaunchInProgress || !queuedLaunches.isEmpty || activeProcessOperations > 0 || pendingLaunchAcquisitions > 0) }
     }
     private var documentLaunchRequested = false
     private var openLibraryOnLaunch = false
@@ -109,7 +115,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             self?.runStopEnvironment(prefix: prefix, stamp: stamp, operation: operation)
         }
         controller.onLifecycleIdle = { [weak self] in
-            guard let self, !self.libraryLaunchInProgress, self.queuedLaunches.isEmpty, self.activeProcessOperations == 0,
+            guard let self, !self.libraryLaunchInProgress, self.queuedLaunches.isEmpty, self.activeProcessOperations == 0, self.pendingLaunchAcquisitions == 0,
                   !self.environmentPreparationInProgress,
                   self.settingsController.window?.isVisible != true,
                   self.gameLibraryController.window?.isVisible != true else { return }
@@ -770,6 +776,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         statusItemController.quiesce()
         environmentMonitor.stop()
         processRunner.quiesce()
+        operationGate.quiesce()
         wineLaunchObserver?.cancel()
         var replied = false
         func finishQuit() {
@@ -937,9 +944,13 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         _ executable: URL,
         settings: CyderExecutableSettings?,
         launchArguments: [String]? = nil,
-        authorization: CyderRequestJournal.Record? = nil
+        authorization: CyderRequestJournal.Record? = nil,
+        lease: CyderOperationGate.Lease? = nil
     ) {
-        guard !quitTransaction else { return }
+        guard !quitTransaction else {
+            if let lease { operationGate.release(lease) }
+            return
+        }
         if authorization == nil {
             var payload = CyderRequestPayload(files: [executable.path], arguments: launchArguments, urls: [], showUI: false)
             if let settings { payload.settings = try? JSONEncoder().encode(settings) }
@@ -950,10 +961,13 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             return
         }
         guard !libraryLaunchInProgress else {
+            if let lease { operationGate.release(lease) }
+            finishRequestPart(authorization, failed: true)
             showAlert("正在啟動另一個遊戲", "請等待目前的遊戲顯示視窗後再試一次。")
             return
         }
         guard let resourcePath = Bundle.main.resourcePath else {
+            if let lease { operationGate.release(lease) }
             finishRequestPart(authorization, failed: true)
             statusItemController.finishLaunchIngress()
             showAlert("無法啟動遊戲", "Cyder 缺少必要的 Resources 目錄。")
@@ -984,13 +998,14 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
                 }
                 outcome = await self.runDocumentLaunch(context: context, executable: executable,
                     launchArguments: launchArguments, launchEnvironment: launchEnvironment,
-                    authorization: authorization)
+                    authorization: authorization, lease: lease)
                 retainRequest = outcome.isUnconfirmed
             } catch {
                 outcome = .failure(CyderFailure(code: "CYD-REQ-001", stage: .resourceValidation,
                     summary: "無法建立啟動設定。", technicalDetails: error.localizedDescription))
             }
             DispatchQueue.main.async {
+                if !outcome.isUnconfirmed, let lease { self.operationGate.release(lease) }
                 self.libraryLaunchInProgress = false
                 self.finishRequestPart(authorization, failed: outcome.requestFailed, uncertain: outcome.isUnconfirmed)
                 self.statusItemController.finishLaunchIngress()
@@ -1026,10 +1041,33 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             }
             return
         }
-        queuedLaunches.append(contentsOf: executableFiles.map {
-            QueuedLaunch(executable: $0, arguments: arguments, authorization: authorization)
-        })
-        launchNextQueuedExecutableIfReady()
+        for file in executableFiles {
+            prepareQueuedLaunch(QueuedLaunch(executable: file, arguments: arguments, authorization: authorization))
+        }
+    }
+
+    private func prepareQueuedLaunch(_ launch: QueuedLaunch) {
+        pendingLaunchAcquisitions += 1
+        launchPreparation.async { [weak self] in
+            guard let self else { return }
+            var scope: CyderOperationGate.Scope = .allEnvironments
+            let target = wineLaunchTarget(for: launch.executable)
+            if launch.isURI || target == .msi || target == .reg {
+                scope = .prefix(CyderPaths.sharedBottle)
+            } else if case .success(let prefix) = self.prefixForExecutable(URL(fileURLWithPath: launch.executable)) {
+                scope = .prefix(prefix)
+            }
+            // Stay queued in the durable journal while a conflicting stop or
+            // mutation owns this environment. Authorization follows the lease.
+            self.operationGate.acquire(scope) { lease in
+                self.pendingLaunchAcquisitions -= 1
+                guard let lease else { return }
+                guard !self.quitTransaction else { self.operationGate.release(lease); return }
+                var ready = launch; ready.lease = lease
+                self.queuedLaunches.append(ready)
+                self.launchNextQueuedExecutableIfReady()
+            }
+        }
     }
 
     private func launchNextQueuedExecutableIfReady() {
@@ -1038,23 +1076,27 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         libraryLaunchInProgress = true
         let launch = queuedLaunches.removeFirst()
         guard let queued = launch.authorization else {
+            if let lease = launch.lease { operationGate.release(lease) }
             libraryLaunchInProgress = false
             return
         }
         instanceCoordinator.authorize(queued) { [weak self] authorization in
             guard let self else { return }
             self.libraryLaunchInProgress = false
-            guard !self.quitTransaction else { return }
-            guard let authorization else { self.launchNextQueuedExecutableIfReady(); return }
+            guard !self.quitTransaction, let authorization else {
+                if let lease = launch.lease { self.operationGate.release(lease) }
+                self.launchNextQueuedExecutableIfReady(); return
+            }
             if #available(macOS 11.0, *), launch.isURI {
-                self.launchURI(launch.executable, authorization: authorization)
+                self.launchURI(launch.executable, authorization: authorization, lease: launch.lease)
                 return
             }
             self.launchGameFromLibrary(
                 URL(fileURLWithPath: launch.executable),
                 settings: authorization.payload?.settings.flatMap { try? JSONDecoder().decode(CyderExecutableSettings.self, from: $0) },
                 launchArguments: launch.arguments,
-                authorization: authorization
+                authorization: authorization,
+                lease: launch.lease
             )
         }
     }
@@ -1372,7 +1414,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
 
     private func runDocumentLaunch(context: CyderLaunchContext, executable: URL,
                                    launchArguments: [String]?, launchEnvironment: [String: String],
-                                   authorization: CyderRequestJournal.Record?) async -> CyderLaunchOutcome {
+                                   authorization: CyderRequestJournal.Record?, lease: CyderOperationGate.Lease?) async -> CyderLaunchOutcome {
         // Opening an EXE is a launch-only path. It must never create or repair
         // a prefix invisibly; the user can open Cyder.app to see setup progress
         // and recovery errors.
@@ -1417,6 +1459,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
                 launchArguments: launchArguments,
                 launchEnvironment: launchEnvironment,
                 authorization: authorization,
+                lease: lease,
                 launchTarget: target
             )
         case .exe, .script, .link:
@@ -1430,6 +1473,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
                     launchArguments: launchArguments,
                 launchEnvironment: launchEnvironment,
                 authorization: authorization,
+                    lease: lease,
                     launchTarget: target
                 )
             case .failure(let failure):
@@ -1558,6 +1602,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         launchArguments: [String]? = nil,
         launchEnvironment: [String: String] = [:],
         authorization: CyderRequestJournal.Record? = nil,
+        lease: CyderOperationGate.Lease? = nil,
         launchTarget: CyderWineLaunchTarget = .exe
     ) async -> CyderLaunchOutcome {
         let observationDeadline = ProcessInfo.processInfo.systemUptime + 30
@@ -1681,6 +1726,8 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             stage: .wineSpawn,
             operation: operation,
             extraEnvironment: wineLaunchEnvironment,
+            lease: lease,
+            operationScope: .prefix(prefix),
             onSpawn: { [weak self] receipt in
                 guard let self, let authorization else { return }
                 let birth = CyderEnvironmentProbe.processIdentity(receipt.supervisorPID)
@@ -1820,12 +1867,23 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
     private func runStopEnvironment(prefix: URL, stamp: CyderLifecycle.Stamp, operation: UUID) {
         guard !quitTransaction, let resourcePath = Bundle.main.resourcePath else { return }
         let context = CyderLaunchContext(resourcePath: resourcePath)
-        Task.detached(priority: .userInitiated) { [weak self] in
-            guard let self else { return }
-            let result = await self.runLauncher(context: context,
-                args: [context.launcher, "--stop-prefix", prefix.path], stage: .wineSpawn, operation: "stop-prefix")
-            DispatchQueue.main.async {
-                self.statusItemController.stopFinished(stamp: stamp, operation: operation, success: result.succeeded)
+        // Prefix here comes from the monitor's canonical snapshot. Reserve the
+        // effect's position now, before dispatching any background preparation.
+        operationGate.acquire(.environment(prefix.path)) { [weak self] lease in
+            guard let self, let lease else { return }
+            guard !self.quitTransaction else { self.operationGate.release(lease); return }
+            Task.detached(priority: .userInitiated) {
+                let result = await self.runLauncher(context: context,
+                    args: [context.launcher, "--stop-prefix", prefix.path], stage: .wineSpawn, operation: "stop-prefix",
+                    lease: lease,
+                    validateBeforeSpawn: {
+                        guard let identity = CyderEnvironmentProbe.identify(prefix: prefix, engine: CyderPaths.engine.appendingPathComponent("bin/wineserver")),
+                              identity.environment == stamp.environment else { return false }
+                        return self.onMainThread { self.statusItemController.canExecuteStop(stamp: stamp, operation: operation) }
+                    })
+                DispatchQueue.main.async {
+                    self.statusItemController.stopFinished(stamp: stamp, operation: operation, success: result.succeeded)
+                }
             }
         }
     }
@@ -2277,12 +2335,31 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         stage: CyderStage,
         operation: String,
         extraEnvironment: [String: String] = [:],
+        lease: CyderOperationGate.Lease? = nil,
+        operationScope: CyderOperationGate.Scope? = nil,
         expectsMachineResult: Bool = false,
+        validateBeforeSpawn: @escaping () -> Bool = { true },
         onSpawn: @escaping (CyderProcessRunner.Receipt) -> Void = { _ in },
         onRelease: @escaping () -> Void = {}
     ) async -> CyderProcessResult {
         CyderDiagnostics.shared.enter(stage, detail: operation)
         let operationLog = CyderDiagnostics.shared.makeOperationLog(operation)
+        let isLaunch = args.contains(where: { $0.hasPrefix("--launch-") })
+        let isObservation = args.contains("--has-running-exes")
+        var scope = operationScope ?? .allEnvironments
+        if operationScope == nil,
+           let index = args.firstIndex(where: { $0 == "--stop-prefix" || $0 == "--taskmgr-prefix" }),
+           args.indices.contains(index + 1) { scope = .prefix(URL(fileURLWithPath: args[index + 1])) }
+        let acquired: CyderOperationGate.Lease?
+        if isObservation { acquired = nil }
+        else if let lease { acquired = lease }
+        else { acquired = await operationGate.acquire(scope) }
+        var transferredLease = false
+        defer { if !transferredLease, let acquired { operationGate.release(acquired) } }
+        guard (isObservation || (acquired != nil && acquired?.scope == scope)), validateBeforeSpawn() else {
+            return CyderProcessResult(status: 125, terminationReason: .exit, logURL: operationLog,
+                outputTail: "Environment operation cancelled or target changed before dispatch", didStart: false)
+        }
         do {
             try CyderDiagnostics.shared.prepareOperationLog(at: operationLog)
         } catch {
@@ -2367,13 +2444,14 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         }
 
         let started = ProcessInfo.processInfo.systemUptime
-        let isLaunch = args.contains(where: { $0.hasPrefix("--launch-") })
-        let isObservation = args.contains("--has-running-exes")
         onMainThread { activeProcessOperations += 1 }
+        transferredLease = true
+        let gate = operationGate
         let outcome = await processRunner.run(process: process,
             policy: isLaunch ? .launch : (isObservation ? .observation : .mutation),
-            deadline: isLaunch ? 30 : (isObservation ? 5 : nil), output: handle,
+            deadline: isLaunch ? 30 : (isObservation ? 5 : ((args.contains("--stop-prefix") || args.contains("--stop-all")) ? 15 : nil)), output: handle,
             onSpawn: onSpawn, onRelease: { [weak self] in
+                if let acquired { gate.release(acquired) }
                 onRelease()
                 guard let self else { return }
                 DispatchQueue.main.async { self.activeProcessOperations -= 1 }
@@ -2495,9 +2573,8 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         }
         presentExternalLaunchStarting()
         for uri in uris {
-            queuedLaunches.append(QueuedLaunch(executable: uri, arguments: nil, isURI: true, authorization: authorization))
+            prepareQueuedLaunch(QueuedLaunch(executable: uri, arguments: nil, isURI: true, authorization: authorization))
         }
-        launchNextQueuedExecutableIfReady()
     }
 
     private func presentExternalLaunchStarting() {
@@ -2519,9 +2596,11 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @available(macOS 11.0, *)
-    private func launchURI(_ uri: String, authorization: CyderRequestJournal.Record? = nil) {
-        guard !quitTransaction else { return }
+    private func launchURI(_ uri: String, authorization: CyderRequestJournal.Record? = nil,
+                           lease: CyderOperationGate.Lease? = nil) {
+        guard !quitTransaction else { if let lease { operationGate.release(lease) }; return }
         guard let resourcePath = Bundle.main.resourcePath else {
+            if let lease { operationGate.release(lease) }
             hideSetup()
             finishRequestPart(authorization, failed: true)
             statusItemController.finishLaunchIngress()
@@ -2547,9 +2626,10 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             case .success(let handler):
                 outcome = await self.runWineThroughLauncher(context: context,
                     exe: handler.resolvedExecutable, prefix: prefix, launchArguments: [uri],
-                    authorization: authorization)
+                    authorization: authorization, lease: lease)
             }
             DispatchQueue.main.async {
+                if !outcome.isUnconfirmed, let lease { self.operationGate.release(lease) }
                 self.libraryLaunchInProgress = false
                 self.finishRequestPart(authorization, failed: outcome.requestFailed, uncertain: outcome.isUnconfirmed)
                 self.statusItemController.finishLaunchIngress()
