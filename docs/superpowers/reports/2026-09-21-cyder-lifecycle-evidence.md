@@ -285,3 +285,15 @@ F6 fixture 清理追記：11:29 左右重新核對，前批 80423／81445 仍在
 - 已檢視正式 contentView 渲染 `settings-F7-r4.png`；一般內容與 footer 可讀，Aqua tab header 離屏黑色限制仍在，並非桌面截圖。完整 universal macOS11 build `build-F7.log` 通過；隔離包 `/private/tmp/cyder-lifecycle-f7-build/Cyder.app` 設 local.cyder.lifecycle-f7、CD2 support/runtime、ad-hoc 簽章，manifest `build-F7-source-sha256.json`。本輪未啟動完整 app，以上為 L1–2 證據。
 
 仍待完成：遊戲庫 Finder／mac launcher 等 action 的主執行緒 I/O、詳細衝突處理與 feedback owner、outbox 原 ID 核對／恢復、supervisor／跨崩潰 late-spawn fencing、環境 waiter 整合、精確 process/window action，以及 V01–V14 最終矩陣。F7 只完成本節設定維護改動，整體目標繼續。
+
+## C6：未確認轉送副本的原 ID 核對
+
+- 正式 forward 改用 `CyderRequestOutbox`：private directory FD、NOFOLLOW／NONBLOCK、同 UID 與權限檢查；跨程序 nonblocking flock 序列化副本新增與清理。逐檔 O_EXCL 寫入並 fsync 檔案／目錄；最多 512 筆、16 MiB 容量，單筆小於 wire 的 256 KiB。滿載、損壞、權限／鎖失敗不無界排隊或丟棄其他副本。
+- primary 取得持久 journal 後在背景核對 outbox，也由要求視窗重新整理觸發。讀取原 request ID、版本、payload digest，與正式持久快照比對；只移除已接受且 ID／digest 相同的副本，移除前重新核對 inode／device／size／mtime／ctime。核對本身完全不 submit／resume／dispatch，不把舊 ID 換成新 UUID。queued 紀錄照舊 awaitingUserResume；已派送照舊 uncertain。
+- 缺少相符紀錄、內容衝突、舊 namespace、legacy／損壞／FIFO／symlink 皆保留。新增 notices 進正式要求視窗及遊戲庫摘要；不展示 argv，不提供無法保證的繼續／取消。掃描一個實際 worker、五秒觀察期限，重複 refresh 不增加 scanner；晚到結果不穿越 quit。狀態／刷新正常，沒有另建 directory consumer。
+- forward 也限制一個實際 worker，五秒 monotonic budget 從 main admission 起算。副本寫入卡住時仍回一次未確認，物理工作占位保留；真正返回若已過期，保留原 ID 副本、不補送。收到 matching durable ACK 即回 accepted，後續 best-effort 副本清理不延遲這個已知結果；清理完成才釋放 physical worker。
+- `test-cyder-outbox.sh` 驅動正式 journal／coordinator／outbox 與 AppKit projection：保存 ACK 遺失副本、已派送副本後重開，僅清理 matching accepted、無重播；缺失／衝突／舊 namespace／legacy／FIFO／symlink 原檔保留；正式 action 入口拒絕 unknown notices，argv 不外露。60 次 refresh 遇到受控 reader stall 只有一個 physical read，主 event loop 可前進，quit 後無晚到 UI。512 筆容量拒絕新寫入，超額掃描回錯誤而不清空。`outbox-C6-r4.log` 為最終通過，要求 completion artifact 存在。
+- 同一 harness 的實際 socket secondary 於副本寫入前受控卡住，縮短至 0.2 秒的測試期限回 false；60 次額外 forward 均 busy。釋放後留下唯一原副本、primary 沒有收到 launch、沒有第二次 completion。這是故障注入期限，產品仍五秒。`instance-C6-r3.log`、`request-ui-C6.log`、`channel-C6.log` 回歸通過，涵蓋單一 primary、真實 socket framing／lost ACK retry、batch、quit/dispatch race、重開與正式 AppKit resume/cancel 能力。
+- 本批新增測試各輪皆通過；後續兩項檢查改善了 admission 起算期限及 accepted 與 cleanup 的分離，改動後重跑相關測試與建置。完整 universal macOS11 build 最新 `build-C6-r2.log`，隔離包 `/private/tmp/cyder-lifecycle-c6-build/Cyder.app` 配置 local.cyder.lifecycle-c6、CD2 support/runtime、ad-hoc 簽章，manifest `build-C6-source-sha256.json`。本輪未啟動完整 app／Wine；本節證據為 L1–2，不代表 Wine／NGS 相容性。
+
+C6 仍有明確範圍限制：未接受副本目前只核對、保留與呈現，尚未提供經驗證的原 ID 明確重送／撤回；secondary 未確認 fallback 尚未接上遠端狀態查詢。詳細 feedback owner／錯誤分類、跨崩潰 supervisor ownership／late-spawn fencing、環境 waiter 分工、精確程序／視窗操作、剩餘 action I/O 及 V01–V14 最終矩陣繼續處理，目標不標完成。

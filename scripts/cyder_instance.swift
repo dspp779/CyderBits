@@ -12,12 +12,187 @@ struct CyderInstanceRequest {
     let record: CyderRequestJournal.Record
 }
 
+/// A retained delivery copy is evidence of an attempt, never permission to
+/// launch. Only a matching durable journal record acknowledges this copy.
+struct CyderOutboxNotice: Equatable {
+    let id: String
+    let title: String
+    let detail: String
+}
+
+enum CyderRequestOutbox {
+    enum Failure: Error { case unavailable, invalid, full }
+    private static let maxEntries = 512
+    private static let maxBytes = 16 * 1024 * 1024
+    private static func withDirectory<T>(_ support: URL, create: Bool = false,
+                                         _ body: (Int32) throws -> T) throws -> T {
+        precondition(!Thread.isMainThread)
+        let path = support.appendingPathComponent("request-outbox").path
+        if create, mkdir(path, 0o700) != 0, errno != EEXIST { throw Failure.unavailable }
+        let fd = Darwin.open(path, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC | O_NONBLOCK)
+        guard fd >= 0 else { throw Failure.unavailable }
+        defer { Darwin.close(fd) }
+        var info = stat()
+        guard fstat(fd, &info) == 0, info.st_uid == getuid(), info.st_mode & 0o077 == 0 else { throw Failure.invalid }
+        let lock = openat(fd, ".owner-lock", O_RDWR | O_CREAT | O_NOFOLLOW | O_CLOEXEC | O_NONBLOCK, 0o600)
+        guard lock >= 0 else { throw Failure.unavailable }
+        defer { Darwin.close(lock) }
+        var lockInfo = stat()
+        guard fstat(lock, &lockInfo) == 0, lockInfo.st_mode & S_IFMT == S_IFREG,
+              lockInfo.st_uid == getuid(), lockInfo.st_mode & 0o077 == 0,
+              flock(lock, LOCK_EX | LOCK_NB) == 0 else { throw Failure.unavailable }
+        defer { _ = flock(lock, LOCK_UN) }
+        return try body(fd)
+    }
+    private static func names(_ directory: Int32) throws -> [String] {
+        let copy = dup(directory)
+        guard copy >= 0 else { throw Failure.unavailable }
+        guard let stream = fdopendir(copy) else { Darwin.close(copy); throw Failure.unavailable }
+        defer { closedir(stream) }
+        var result: [String] = []
+        while let entry = readdir(stream) {
+            let name = withUnsafePointer(to: &entry.pointee.d_name) {
+                $0.withMemoryRebound(to: CChar.self, capacity: Int(MAXNAMLEN) + 1) { String(cString: $0) }
+            }
+            guard name != ".", name != "..", name != ".owner-lock" else { continue }
+            guard result.count < maxEntries else { throw Failure.full }
+            result.append(name)
+        }
+        return result.sorted()
+    }
+    private static func read(_ directory: Int32, _ name: String) throws -> (CyderRequestMessage, stat, Int) {
+        let fd = openat(directory, name, O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC)
+        guard fd >= 0 else { throw Failure.invalid }
+        defer { Darwin.close(fd) }
+        var before = stat(), after = stat()
+        guard fstat(fd, &before) == 0, before.st_mode & S_IFMT == S_IFREG,
+              before.st_uid == getuid(), before.st_mode & 0o077 == 0,
+              before.st_size > 0, before.st_size < CyderRequestChannel.maxFrame else { throw Failure.invalid }
+        var bytes = Data(count: Int(before.st_size))
+        let count = bytes.withUnsafeMutableBytes { raw -> Int in
+            var offset = 0
+            while offset < raw.count {
+                let n = Darwin.read(fd, raw.baseAddress!.advanced(by: offset), raw.count - offset)
+                if n < 0 && errno == EINTR { continue }
+                guard n > 0 else { return -1 }; offset += n
+            }
+            return offset
+        }
+        guard count == bytes.count, fstat(fd, &after) == 0,
+              before.st_size == after.st_size,
+              before.st_mtimespec.tv_sec == after.st_mtimespec.tv_sec,
+              before.st_mtimespec.tv_nsec == after.st_mtimespec.tv_nsec,
+              before.st_ctimespec.tv_sec == after.st_ctimespec.tv_sec,
+              before.st_ctimespec.tv_nsec == after.st_ctimespec.tv_nsec,
+              let message = try? JSONDecoder().decode(CyderRequestMessage.self, from: bytes),
+              valid(message) else { throw Failure.invalid }
+        return (message, after, count)
+    }
+    private static func valid(_ message: CyderRequestMessage) -> Bool {
+        guard message.protocolVersion == 1, message.kind == "submit",
+              let id = message.requestID, let payload = message.payload,
+              payload.isValid, message.payloadDigest == payload.digest else { return false }
+        let parts = id.split(separator: ":", omittingEmptySubsequences: false)
+        return parts.count == 2 && parts.allSatisfy { UUID(uuidString: String($0)) != nil }
+    }
+    private static func filename(_ id: String) -> String { id.replacingOccurrences(of: ":", with: "-") + ".json" }
+
+    static func save(_ message: CyderRequestMessage, support: URL) throws {
+        guard valid(message), let id = message.requestID else { throw Failure.invalid }
+        let bytes = try JSONEncoder().encode(message)
+        guard bytes.count < CyderRequestChannel.maxFrame else { throw Failure.full }
+        try withDirectory(support, create: true) { directory in
+            let entries = try names(directory)
+            guard entries.count < maxEntries else { throw Failure.full }
+            var total = bytes.count
+            for name in entries {
+                var info = stat()
+                guard fstatat(directory, name, &info, AT_SYMLINK_NOFOLLOW) == 0 else { throw Failure.unavailable }
+                guard info.st_size >= 0, info.st_size <= maxBytes else { throw Failure.full }
+                total += Int(info.st_size)
+                guard total <= maxBytes else { throw Failure.full }
+            }
+            let fd = openat(directory, filename(id), O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0o600)
+            guard fd >= 0 else { throw Failure.unavailable }
+            defer { Darwin.close(fd) }
+            let written = bytes.withUnsafeBytes { raw -> Bool in
+                var offset = 0
+                while offset < raw.count {
+                    let n = Darwin.write(fd, raw.baseAddress!.advanced(by: offset), raw.count - offset)
+                    if n < 0 && errno == EINTR { continue }
+                    guard n > 0 else { return false }; offset += n
+                }
+                return fsync(fd) == 0
+            }
+            guard written, fsync(directory) == 0 else { throw Failure.unavailable }
+        }
+    }
+    private static func remove(_ directory: Int32, name: String, identity: stat) throws {
+        var current = stat()
+        guard fstatat(directory, name, &current, AT_SYMLINK_NOFOLLOW) == 0,
+              current.st_dev == identity.st_dev, current.st_ino == identity.st_ino,
+              current.st_size == identity.st_size,
+              current.st_mtimespec.tv_sec == identity.st_mtimespec.tv_sec,
+              current.st_mtimespec.tv_nsec == identity.st_mtimespec.tv_nsec,
+              current.st_ctimespec.tv_sec == identity.st_ctimespec.tv_sec,
+              current.st_ctimespec.tv_nsec == identity.st_ctimespec.tv_nsec else { throw Failure.invalid }
+        guard unlinkat(directory, name, 0) == 0, fsync(directory) == 0 else { throw Failure.unavailable }
+    }
+    static func acknowledge(_ record: CyderRequestJournal.Record, support: URL) throws {
+        try withDirectory(support) { directory in
+            let name = filename(record.id)
+            let (message, identity, _) = try read(directory, name)
+            guard message.requestID == record.id, message.payloadDigest == record.digest else { throw Failure.invalid }
+            try remove(directory, name: name, identity: identity)
+        }
+    }
+    static func reconcile(support: URL, records: [CyderRequestJournal.Record]) throws -> [CyderOutboxNotice] {
+        let path = support.appendingPathComponent("request-outbox").path
+        var info = stat()
+        if lstat(path, &info) != 0, errno == ENOENT { return [] }
+        let accepted = Dictionary(uniqueKeysWithValues: records.map { ($0.id, $0) })
+        return try withDirectory(support) { directory in
+            var notices: [CyderOutboxNotice] = [], bytesRead = 0
+            for name in try names(directory) {
+                let fallback = CyderOutboxNotice(id: "outbox-file:" + name, title: "未確認的舊要求",
+                    detail: "無法核對原始要求；已保留檔案，請查看診斷記錄。不會自動啟動。")
+                var size = stat()
+                guard fstatat(directory, name, &size, AT_SYMLINK_NOFOLLOW) == 0,
+                      size.st_mode & S_IFMT == S_IFREG,
+                      size.st_size > 0, size.st_size < CyderRequestChannel.maxFrame else {
+                    notices.append(fallback); continue
+                }
+                bytesRead += Int(size.st_size)
+                guard bytesRead <= maxBytes else { throw Failure.full }
+                guard let (message, identity, _) = try? read(directory, name), let id = message.requestID else {
+                    notices.append(fallback); continue
+                }
+                if let record = accepted[id], record.digest == message.payloadDigest {
+                    do { try remove(directory, name: name, identity: identity) }
+                    catch { notices.append(.init(id: "outbox:" + id, title: "已核對啟動要求", detail: "要求已被接受；本機副本尚未移除，不會重複派送。")) }
+                } else {
+                    notices.append(.init(id: "outbox:" + id, title: message.payload?.displayName ?? "未確認的啟動要求",
+                        detail: accepted[id] == nil
+                            ? "尚無相符的接受紀錄；請重新整理核對。不會自動啟動或產生新要求。"
+                            : "原要求與接受紀錄不一致；已保留副本，請查看診斷記錄。"))
+                }
+            }
+            return notices
+        }
+    }
+}
+
 final class CyderInstanceCoordinator {
     enum Role { case primary, secondary, unavailable }
     private let support: URL
     private let path: String
     private let startup = DispatchQueue(label: "local.cyder.instance-start")
     private let forwarding = DispatchQueue(label: "local.cyder.instance-forward")
+    private let outboxQueue = DispatchQueue(label: "local.cyder.instance-outbox")
+    private var outboxScan: UUID?
+    private var forwardInFlight = false
+    private(set) var outboxNotices: [CyderOutboxNotice] = []
+    var onOutboxChanged: (([CyderOutboxNotice]) -> Void)?
     private let journal: CyderRequestJournal
     private let channel: CyderRequestChannel
     private var onRequest: ((CyderInstanceRequest) -> Void)?
@@ -30,6 +205,10 @@ final class CyderInstanceCoordinator {
     private var cleanupCompletions: [() -> Void] = []
     private let startupDeadline: TimeInterval
     private let beforeElection: () -> Void
+    private let outboxDeadline: TimeInterval
+    private let beforeOutboxRead: () -> Void
+    private let forwardDeadline: TimeInterval
+    private let beforeForwardSave: () -> Void
     private var primary = false
     private var delivered = Set<String>()
     private(set) var recovered: [CyderRequestJournal.Record] = []
@@ -41,10 +220,16 @@ final class CyderInstanceCoordinator {
          bundleID: String = ProcessInfo.processInfo.environment["CYDER_BUNDLE_ID"]
             ?? Bundle.main.bundleIdentifier ?? "local.cyder.app",
          startupDeadline: TimeInterval = 5, beforeElection: @escaping () -> Void = {},
+         outboxDeadline: TimeInterval = 5, beforeOutboxRead: @escaping () -> Void = {},
+         forwardDeadline: TimeInterval = 5, beforeForwardSave: @escaping () -> Void = {},
          normalizeSettings: @escaping (Data) throws -> Data = { $0 }) {
         self.support = support
         self.startupDeadline = startupDeadline
         self.beforeElection = beforeElection
+        self.outboxDeadline = outboxDeadline
+        self.beforeOutboxRead = beforeOutboxRead
+        self.forwardDeadline = forwardDeadline
+        self.beforeForwardSave = beforeForwardSave
         path = support.appendingPathComponent(".requests-v1.sock").path
         journal = CyderRequestJournal(directory: support.appendingPathComponent("request-journal"),
             captureSettings: { try normalizeSettings(CyderAcceptedSettings.capture(at: support.appendingPathComponent("settings.json"))) })
@@ -103,6 +288,7 @@ final class CyderInstanceCoordinator {
                                         self.recovered = records
                                         self.onRecoveryChanged?(records)
                                         finish(.primary)
+                                        self.refreshOutbox(records: records)
                                     } else {
                                         finish(.unavailable); self.releaseStartupResources()
                                     }
@@ -286,6 +472,34 @@ final class CyderInstanceCoordinator {
             for record in records where record.version >= (latest[record.id]?.version ?? 0) { latest[record.id] = record }
             self.recovered = Array(latest.values)
             self.onRecoveryChanged?(self.recovered)
+            self.refreshOutbox(records: records)
+        }
+    }
+
+    /// Reconcile against a durable snapshot without submit, resume, or dispatch.
+    /// A deadline does not release the physical scanner or create another one.
+    private func refreshOutbox(records: [CyderRequestJournal.Record]) {
+        guard primary, !closing, outboxScan == nil else { return }
+        let token = UUID(); outboxScan = token
+        DispatchQueue.main.asyncAfter(deadline: .now() + max(0, outboxDeadline)) { [weak self] in
+            guard let self, !self.closing, self.outboxScan == token else { return }
+            self.outboxNotices = [.init(id: "outbox-scan", title: "正在核對舊要求",
+                detail: "核對尚未確認；不會自動啟動，其他操作仍可使用。")]
+            self.onOutboxChanged?(self.outboxNotices)
+        }
+        outboxQueue.async { [self] in
+            beforeOutboxRead()
+            let result = Result { try CyderRequestOutbox.reconcile(support: support, records: records) }
+            DispatchQueue.main.async { [self] in
+                guard outboxScan == token else { return }; outboxScan = nil
+                guard !closing else { return }
+                switch result {
+                case .success(let notices): outboxNotices = notices
+                case .failure: outboxNotices = [.init(id: "outbox-scan", title: "舊要求尚未核對",
+                    detail: "暫時無法讀取或要求過多；請重新整理或查看診斷記錄。不會自動啟動。")]
+                }
+                onOutboxChanged?(outboxNotices)
+            }
         }
     }
 
@@ -294,15 +508,25 @@ final class CyderInstanceCoordinator {
     func forward(files: [String], arguments: [String]?, urls: [String] = [], showUI: Bool,
                  completion: @escaping (Bool) -> Void) {
         precondition(Thread.isMainThread)
-        guard !closing else { completion(false); return }
+        guard !closing, !forwardInFlight else { completion(false); return }
+        forwardInFlight = true
+        let deadline = ProcessInfo.processInfo.systemUptime + max(0, forwardDeadline)
+        var reported = false // accessed only on main
+        DispatchQueue.main.asyncAfter(deadline: .now() + max(0, forwardDeadline)) {
+            guard !reported else { return }; reported = true
+            completion(false) // the worker still owns its physical slot
+        }
         let payload = CyderRequestPayload(files: files, arguments: arguments, urls: urls, showUI: showUI)
         forwarding.async { [self] in
             let sender = UUID()
-            let deadline = ProcessInfo.processInfo.systemUptime + 5
             var id: String?
-            var outbox: URL?
+            var outboxSaved = false
             var attempts = 0
-            func done(_ accepted: Bool) { DispatchQueue.main.async { completion(accepted) } }
+            func done(_ accepted: Bool) { DispatchQueue.main.async {
+                self.forwardInFlight = false
+                guard !reported else { return }; reported = true
+                completion(accepted)
+            } }
             while attempts < 6, ProcessInfo.processInfo.systemUptime < deadline {
                 attempts += 1
                 let remaining = min(0.7, deadline - ProcessInfo.processInfo.systemUptime)
@@ -318,34 +542,27 @@ final class CyderInstanceCoordinator {
                 if let id {
                     let message = CyderRequestMessage(protocolVersion: 1, kind: "submit", requestID: id,
                         payloadDigest: payload.digest, senderEpoch: sender, payload: payload)
-                    if outbox == nil {
-                        let directory = support.appendingPathComponent("request-outbox")
+                    if !outboxSaved {
                         do {
-                            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true,
-                                                                    attributes: [.posixPermissions: 0o700])
-                            let url = directory.appendingPathComponent(id.replacingOccurrences(of: ":", with: "-") + ".json")
-                            let data = try JSONEncoder().encode(message)
-                            let fd = Darwin.open(url.path, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0o600)
-                            guard fd >= 0 else { done(false); return }
-                            defer { Darwin.close(fd) }
-                            let written = data.withUnsafeBytes { bytes -> Bool in
-                                var offset = 0
-                                while offset < bytes.count {
-                                    let count = Darwin.write(fd, bytes.baseAddress!.advanced(by: offset), bytes.count - offset)
-                                    if count < 0 && errno == EINTR { continue }
-                                    guard count > 0 else { return false }
-                                    offset += count
-                                }
-                                return Darwin.fsync(fd) == 0
-                            }
-                            guard written else { done(false); return }
-                            outbox = url
-                        } catch { done(false); return }
+                            beforeForwardSave()
+                            try CyderRequestOutbox.save(message, support: support); outboxSaved = true
+                        }
+                        catch { done(false); return }
                     }
+                    // Persistence can finish after the observation deadline.
+                    // Retain that original-ID copy without starting a late send.
+                    let remaining = min(0.7, deadline - ProcessInfo.processInfo.systemUptime)
+                    guard remaining > 0 else { break }
                     if let response = CyderRequestChannel.exchange(path: path, message: message, timeout: remaining),
                        response.status == "accepted", let record = response.record,
                        record.id == id, record.digest == payload.digest {
-                        if let outbox { try? FileManager.default.removeItem(at: outbox) }
+                        // Durable acceptance is already known. Best-effort
+                        // copy cleanup must not turn it into an unknown result.
+                        DispatchQueue.main.async {
+                            guard !reported else { return }; reported = true
+                            completion(true)
+                        }
+                        try? CyderRequestOutbox.acknowledge(record, support: support)
                         done(true)
                         return
                     }

@@ -41,6 +41,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
     private let operationGate = CyderOperationGate()
     private let launchPreparation = CyderLaunchPreparation<CyderOperationGate.Scope?>()
     private var requestRecords: [CyderRequestJournal.Record] = []
+    private var outboxNotices: [CyderOutboxNotice] = []
     private weak var existingSettingsController: CyderSettingsWindowController?
     private weak var existingLibraryController: CyderGameLibraryWindowController?
     private weak var existingRequestController: CyderRequestWindowController?
@@ -111,8 +112,14 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         coordinator.onRecoveryChanged = { [weak self] records in
             guard let self else { return }
             self.requestRecords = records
-            self.existingLibraryController?.updateRequestSummary(CyderRequestRow.summary(records))
-            self.existingRequestController?.update(records)
+            self.existingLibraryController?.updateRequestSummary(CyderRequestRow.summary(records, outbox: self.outboxNotices))
+            self.existingRequestController?.update(records, outbox: self.outboxNotices)
+        }
+        coordinator.onOutboxChanged = { [weak self] notices in
+            guard let self, !self.quitTransaction else { return }
+            self.outboxNotices = notices
+            self.existingLibraryController?.updateRequestSummary(CyderRequestRow.summary(self.requestRecords, outbox: notices))
+            self.existingRequestController?.update(self.requestRecords, outbox: notices)
         }
         coordinator.onRequestCancelled = { [weak self] id in self?.cancelQueuedRequest(id) }
         return coordinator
@@ -241,7 +248,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         existingLibraryController = controller
         controller.onOpenRequests = { [weak self] in self?.showRequests() }
         controller.onPrepareEnvironment = { [weak self] in self?.prepareEnvironmentFromLibrary() }
-        controller.updateRequestSummary(CyderRequestRow.summary(requestRecords))
+        controller.updateRequestSummary(CyderRequestRow.summary(requestRecords, outbox: outboxNotices))
         controller.onLaunch = { [weak self] executable, settings in
             self?.launchGameFromLibrary(executable, settings: settings)
         }
@@ -939,7 +946,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         guard !readOnlyMode else { showReadOnlyStatus(); return }
         guard !quitTransaction else { return }
         statusItemController.setUIVisible(true)
-        requestController.update(requestRecords)
+        requestController.update(requestRecords, outbox: outboxNotices)
         activateCyderUI(dockVisible: true)
         requestController.showWindow(nil)
         requestController.window?.makeKeyAndOrderFront(nil)
