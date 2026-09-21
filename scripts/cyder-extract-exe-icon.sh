@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Legacy standalone helper; Cyder.app uses cyder_pe_icon.swift instead.
 # Extract a PNG from a Windows EXE via a temp .lnk and winemenubuilder -t.
 # Does not parse PE. Reuses the caller's WINEPREFIX (Cyder: bottles/shared) so
 # we do not initialize a second prefix. Cost: first extract can hitch a game

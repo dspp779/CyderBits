@@ -35,48 +35,23 @@ assert_contains "$pack" "cyder_bottle_shortcuts.swift" \
   "app bundle must compile the shortcut scanner source"
 assert_not_contains "$icon" "/usr/bin/python3" \
   "game library icon extraction must not invoke the CLT python3 stub"
-assert_contains "$icon" "cyder-extract-exe-icon.sh" \
-  "game library must call the bundled winemenubuilder helper"
-assert_contains "$icon" "45" \
-  "icon extraction timeout must be 45 seconds against the existing shared prefix"
+assert_contains "$icon" "CyderPEIcon.extract" \
+  "game icons must read PE resources without starting Wine"
+assert_contains "$icon" "CyderLaunchPreparation" \
+  "icon reads must use bounded physical workers and observation deadlines"
 assert_contains "$icon" "pendingCompletions" \
-  "overlapping extract requests must queue completions instead of dropping them"
-assert_contains "$icon" "failedExecutableDate" \
-  "failed extracts must retry after the EXE mtime changes"
+  "overlapping requests should coalesce bounded callbacks"
 assert_contains "$icon" "game-icons" \
-  "extracted PNGs must persist under Application Support for reuse"
-assert_contains "$icon" '"WINEPREFIX": CyderPaths.sharedBottle.path' \
-  "icon extraction must reuse the shared bottle, not initialize a second prefix"
-assert_not_contains "$icon" "iconExtractPrefix" \
-  "icon extraction must not create a dedicated Wine prefix"
-assert_not_contains "$icon" "CYDER_ICON_EXTRACT_ISOLATED" \
-  "shared-prefix extracts must not wineserver -k"
-paths="$(cat "$ROOT/scripts/cyder_paths.swift")"
-assert_not_contains "$paths" "iconExtractPrefix" \
-  "CyderPaths must not expose a scratch Wine prefix for icons"
-assert_not_contains "$paths" "MapleStory OEM" \
-  "path comments must not describe the retired OEM flavor"
-
-python3 - "$ROOT/scripts/cyder_game_icon.swift" <<'PY'
-from pathlib import Path
-import sys
-src = Path(sys.argv[1]).read_text()
-marker = src.find("CyderPaths.bootstrapMarker")
-read_handle = src.find("FileHandle(forReadingFrom:")
-create = src.find("createFile")
-write = src.find("forWritingTo:")
-assert marker != -1, "bootstrapMarker guard must exist"
-assert read_handle != -1, "source FileHandle open must exist"
-assert create != -1 and write != -1, "staging createFile/forWritingTo must exist"
-assert marker < read_handle, "bootstrapMarker check must run before opening the source FileHandle"
-assert marker < create and marker < write, "bootstrapMarker check must run before staging the EXE"
-logo = src.find("func logo(for")
-mem = src.find("if let cached = memory[game.id]", logo)
-assert mem != -1, "logo() must consult the in-memory cache"
-block = src[mem:mem + 280]
-assert "isFresh" in block, "memory hit must still honor EXE vs PNG mtime"
-assert "return cached" in block, "fresh memory logos must still return"
-PY
+  "native PNGs must persist under Application Support"
+assert_not_contains "$icon" "Process()" \
+  "browsing icons must not create native or Wine executors"
+assert_not_contains "$icon" "WINEPREFIX" \
+  "browsing icons must not mutate or join a Wine environment"
+assert_contains "$pack" "cyder_pe_icon.swift" \
+  "the app must compile its native PE resource reader"
+# Pixel-level PE32/PE32+, corrupt resource, cache and stalled-reader behavior is
+# covered by the formal runtime harness, not assumptions about old shell text.
+bash "$ROOT/tests/test-cyder-game-icons.sh"
 
 parsed="$(
   python3 - <<'PY'

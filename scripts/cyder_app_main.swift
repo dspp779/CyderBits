@@ -805,6 +805,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         operationGate.quiesce()
         launchPreparation.quiesce()
         existingLibraryController?.quiesce()
+        CyderGameIconStore.shared.quiesce()
         wineLaunchObserver?.cancel()
         var replied = false
         func finishQuit() {

@@ -215,3 +215,15 @@ F 尚未完成：直接開啟仍是旧設定首屏，遊戲庫 prepare 的同步
 - 全來源 typecheck 與 universal macOS11 build 通過，`build-F3.log`。隔離包 `/private/tmp/cyder-lifecycle-f3-build/Cyder.app` 已配置 `local.cyder.lifecycle-f3`、CD2 support/runtime wrapper、ad-hoc 簽章；`build-F3-source-sha256.json` 對應本批來源。此包本輪未啟動，不新增 Wine 實測宣稱。
 
 F3 不完成整體 F。接續須處理圖示／設定等主執行緒 I/O、primary unavailable 唯讀 UI、outbox、不可變設定、supervisor ownership／單一環境 waiter、精確程序／視窗 action 與 V01–V14 最終矩陣。
+
+## F4：遊戲圖示不再隱含啟動 Wine
+
+- 正式 `CyderGameIconStore` 改為 main 上的記憶體投影：logo／tile render 不碰磁碟，freshness、cache decode、EXE 資源读取与 PNG 保存皆由有界背景讀取器執行。兩個實際 worker、五秒觀察期限、最多 512 pending ID／每 ID 16 個重繪 callback、128 張記憶體圖片；逾時不釋出物理占位、晚到不覆寫，quit quiesce 後無新 work／UI 回覆。重新整理明確重新檢查失敗圖示；cache eviction 後可按需再讀。
+- 移除 app 的 Wine winemenubuilder 呼叫、整個 EXE 複製與 helper scratch lifetime。新增 `CyderPEIcon` 原生只讀 PE32／PE32+ 資源：依 section RVA 取資源，固定三層目錄、8 MiB 總讀取額度、96 section／4096 entry／64 group image 上限，regular file＋NONBLOCK，讀取後核對同 FD 的 size/mtime/ctime。PNG 直接 ImageIO；常見未壓縮 24/32-bit RGB DIB 處理上下方向與 AND mask，其餘 ICO 走受限 ImageIO。輸入像素尺寸上限 1024、輸出最多 256；不支援／損壞時保留中性圖示，無 Wine fallback。
+- 格式核對：[Microsoft PE format](https://learn.microsoft.com/en-us/windows/win32/debug/pe-format)、[icon resource 結構](https://devblogs.microsoft.com/oldnewthing/20120720-00/?p=7083)、[資源內 DIB／PNG](https://learn.microsoft.com/en-us/windows/win32/menurc/resource-file-formats)。這是應用層讀取器，沒有引擎修改。舊 shell helper 保留為 standalone legacy，正式 app 已無呼叫點。
+- `test-cyder-game-icons.sh` 使用自行建立、無程式碼的 PE32／PE32+ PNG／DIB resource fixture，檢查解碼紅色像素，不只是非 nil；RVA 越界、cycle、entry count、長度不符、截斷、非 PE、96 個固定種子突變；正式 store 快取生成／損壞再生／新 store 讀取；40 個要求在兩個 reader 卡住後期限回覆，沒有多開 worker；晚到真實 CGImage 不穿越 quit/deadline。`icons-F4-r3.log`、`shortcuts-F4-r2.log` 通過。這是原生格式／故障注入測試，不是真實 Wine 視窗相容性。
+- 加做已知既有 Wine 記事本 EXE 的唯讀測試：`/private/tmp/cy-cd2/support/bottles/shared/drive_c/windows/system32/notepad.exe` 解出 256×256 圖示；命令只讀 PE，不啟動 EXE／Wine，不能換稱 L3 遊戲執行通過。
+- 保留失敗：首輪 typecheck 漏一個 `try`、首輪 fixture 將 throwing read 放進 precondition autoclosure，分別修正。`icons-F4-r2.log` 發現 ImageIO 對有效小尺寸 ICO 包裝回 count=0，保留 `.local/lifecycle-evidence/icons-F4-failed-fixtures` 與原始輸出；改成原生 PNG／RGB DIB 路徑後像素測試通過。該首輪 fatal-error 子程序 PID 63073 在 OS 顯示 UE，即使核對身分並對它送 SIGKILL 仍未立即退出；它不是 Wine／app 監控器，不把此工具／崩潰收尾當產品通過證據。
+- 舊 shortcuts source smoke 固定 Wine helper／45 秒／shared prefix，`shortcuts-F4.log` 保留失敗；改驗正式原生 reader 接線與執行上述 runtime harness。正式 library AppKit harness `library-F4.log`、settings smoke `settings-F4.log` 通過。新版 universal macOS11 build `build-F4.log` 通過；測試包 `/private/tmp/cyder-lifecycle-f4-build/Cyder.app` 已配置獨立 ID `local.cyder.lifecycle-f4`、CD2 support/runtime、ad-hoc 簽章，manifest `build-F4-source-sha256.json`。完整包本輪未啟動，沒有新的 Wine UI 結論。
+
+剩餘 F／整體缺口不變：設定及部分既有 action 的主執行緒 I/O、primary/journal unavailable 唯讀介面、outbox、不可變設定、supervisor／晚到 spawn fencing、每環境 waiter 分工、精確程序／視窗動作、V01–V14 完整交付。原生圖示測試通過不代替這些驗收。

@@ -314,6 +314,7 @@ SWIFT_SOURCES=(
   "$SCRIPT_DIR/cyder_settings_ui.swift"
   "$SCRIPT_DIR/cyder_game_library.swift"
   "$SCRIPT_DIR/cyder_bottle_shortcuts.swift"
+  "$SCRIPT_DIR/cyder_pe_icon.swift"
   "$SCRIPT_DIR/cyder_game_icon.swift"
   "$SCRIPT_DIR/cyder_mac_launcher.swift"
   "$SCRIPT_DIR/cyder_game_library_ui.swift"

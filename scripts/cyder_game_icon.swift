@@ -1,250 +1,134 @@
 import AppKit
 import Foundation
+import Darwin
+import ImageIO
 
-/// Loads cached PE icons and asks the bundled winemenubuilder helper to extract a
-/// missing icon off the main thread. Never falls back to macOS's generic
-/// `.exe` document icon (`NSWorkspace`); tiles use a neutral SF Symbol until
-/// the PE resource is available.
+/// Main-thread memory projection with bounded background PE/cache reads.
+/// Browsing a tile never opens a file or launches a Wine client on AppKit.
 final class CyderGameIconStore {
     static let shared = CyderGameIconStore()
-
-    private let queue = DispatchQueue(label: "local.cyder.game-icons", qos: .utility)
+    typealias Read = (CyderGameRecord) -> CGImage?
+    private let preparation = CyderLaunchPreparation<CGImage?>()
+    private let read: Read
+    private let deadline: TimeInterval
     private var memory: [String: NSImage] = [:]
-    private var pending: Set<String> = []
+    private var memoryOrder: [String] = []
+    private var checked: Set<String> = []
+    private var paths: [String: String] = [:]
     private var pendingCompletions: [String: [() -> Void]] = [:]
-    private var failed: Set<String> = []
-    private var failedExecutableDate: [String: Date] = [:]
+    private var closed = false
 
-    func image(for game: CyderGameRecord) -> NSImage {
-        if let logo = logo(for: game) { return logo }
-        ensureExtracted(game)
-        return placeholderImage()
+    init(deadline: TimeInterval = 5, read: Read? = nil) {
+        self.deadline = deadline
+        self.read = read ?? Self.readIcon
     }
 
-    /// Returns only an icon extracted from the executable. Unlike `image(for:)`,
-    /// this does not fall back to a placeholder, so title bars can omit the
-    /// image when the game has no logo yet.
-    func logo(for game: CyderGameRecord) -> NSImage? {
-        let cacheURL = iconURL(for: game)
-        if let cached = memory[game.id] {
-            if isFresh(cacheURL: cacheURL, executableURL: game.executableURL) {
-                return cached
-            }
-            memory.removeValue(forKey: game.id)
-        }
-        guard isFresh(cacheURL: cacheURL, executableURL: game.executableURL),
-              let image = NSImage(contentsOf: cacheURL) else { return nil }
-        memory[game.id] = image
+    func image(for game: CyderGameRecord) -> NSImage {
+        precondition(Thread.isMainThread)
+        if let cached = logo(for: game) { return cached }
+        ensureExtracted(game)
+        let image = NSImage(systemSymbolName: "gamecontroller.fill", accessibilityDescription: nil) ?? NSImage()
+        image.isTemplate = true
         return image
     }
 
-    /// Call immediately after NSOpenPanel returns so the app opens the EXE
-    /// while its user-granted file access is active. The helper receives a
-    /// staged copy written from the granted file handle and never reopens the
-    /// protected source path.
+    /// A snapshot only. Freshness checks happen during background refresh.
+    func logo(for game: CyderGameRecord) -> NSImage? {
+        precondition(Thread.isMainThread)
+        guard paths[game.id] == game.executablePath else { return nil }
+        return memory[game.id]
+    }
+
     func extractSelectedGame(_ game: CyderGameRecord, completion: @escaping () -> Void) {
-        failed.remove(game.id)
-        failedExecutableDate.removeValue(forKey: game.id)
         ensureExtracted(game, force: true, completion: completion)
     }
 
-    /// Extract a PE icon when missing. Safe for bottle paths under Application Support.
-    func ensureExtracted(
-        _ game: CyderGameRecord,
-        force: Bool = false,
-        completion: (() -> Void)? = nil
-    ) {
-        let cacheURL = iconURL(for: game)
-        if !force,
-           isFresh(cacheURL: cacheURL, executableURL: game.executableURL),
-           FileManager.default.fileExists(atPath: cacheURL.path) {
-            completion?()
-            return
-        }
-        if pending.contains(game.id) {
+    func ensureExtracted(_ game: CyderGameRecord, force: Bool = false, completion: (() -> Void)? = nil) {
+        precondition(Thread.isMainThread)
+        guard !closed else { completion?(); return }
+        if var callbacks = pendingCompletions[game.id] {
             if let completion {
-                pendingCompletions[game.id, default: []].append(completion)
+                // Callers use completion to redraw, not as proof of extraction.
+                // Keep even repeated UI refreshes bounded while a read is stuck.
+                if callbacks.count < 16 { callbacks.append(completion); pendingCompletions[game.id] = callbacks }
+                else { completion() }
             }
             return
         }
-        if !force, failed.contains(game.id) {
-            if let stamped = failedExecutableDate[game.id],
-               let current = executableDate(game.executableURL),
-               stamped == current {
-                completion?()
-                return
+        let samePath = paths[game.id] == game.executablePath
+        guard force || !samePath || !checked.contains(game.id) else { completion?(); return }
+        guard pendingCompletions.count < 512 else { completion?(); return }
+        if !samePath { memory.removeValue(forKey: game.id) }
+        if paths.count >= 1024 {
+            let evictable = paths.keys.filter { pendingCompletions[$0] == nil && memory[$0] == nil }
+            for id in evictable { paths.removeValue(forKey: id); checked.remove(id) }
+        }
+        paths[game.id] = game.executablePath
+        pendingCompletions[game.id] = completion.map { [$0] } ?? []
+        let reader = read
+        preparation.resolve(deadline: deadline, work: { reader(game) }) { [weak self] outcome in
+            guard let self, !self.closed else { return }
+            self.checked.insert(game.id)
+            if case .resolved(let image) = outcome, let image {
+                self.memory[game.id] = NSImage(cgImage: image, size: NSSize(width: image.width, height: image.height))
+                self.memoryOrder.removeAll { $0 == game.id }; self.memoryOrder.append(game.id)
+                while self.memoryOrder.count > 128 {
+                    let evicted = self.memoryOrder.removeFirst()
+                    self.memory.removeValue(forKey: evicted); self.checked.remove(evicted)
+                }
             }
-            failed.remove(game.id)
-            failedExecutableDate.removeValue(forKey: game.id)
+            let callbacks = self.pendingCompletions.removeValue(forKey: game.id) ?? []
+            callbacks.forEach { $0() }
         }
-        guard let resources = Bundle.main.resourceURL else {
-            completion?()
-            return
-        }
-        let helper = resources.appendingPathComponent("ogom-scripts/cyder-extract-exe-icon.sh")
-        guard FileManager.default.fileExists(atPath: helper.path) else {
-            completion?()
-            return
-        }
-        let wine = CyderPaths.engine.appendingPathComponent("bin/wine")
-        guard FileManager.default.fileExists(atPath: CyderPaths.bootstrapMarker.path),
-              FileManager.default.fileExists(atPath: wine.path) else {
-            completion?()
-            return
-        }
-        let executable: FileHandle
-        do {
-            executable = try FileHandle(forReadingFrom: game.executableURL)
-        } catch {
-            recordFailure(id: game.id, executableURL: game.executableURL)
-            CyderDiagnostics.shared.warning("game-icon source-open-failed id=\(game.id)")
-            completion?()
-            return
-        }
-        pending.insert(game.id)
-        extract(game: game, cacheURL: cacheURL, helper: helper, executable: executable, completion: completion ?? {})
     }
 
+    /// Explicit library refresh rechecks mtimes off main, including failed icons.
     func ensureExtracted(games: [CyderGameRecord], completion: (() -> Void)? = nil) {
+        precondition(Thread.isMainThread)
         let group = DispatchGroup()
         for game in games {
             group.enter()
-            ensureExtracted(game) { group.leave() }
+            ensureExtracted(game, force: true) { group.leave() }
         }
-        group.notify(queue: .main) { completion?() }
+        group.notify(queue: .main) { [weak self] in if self?.closed == false { completion?() } }
     }
 
-    private func placeholderImage() -> NSImage {
-        let symbol = NSImage(
-            systemSymbolName: "gamecontroller.fill",
-            accessibilityDescription: nil
-        ) ?? NSImage()
-        symbol.isTemplate = true
-        return symbol
+    func quiesce() {
+        precondition(Thread.isMainThread)
+        closed = true; preparation.quiesce()
+        let callbacks = pendingCompletions.values.flatMap { $0 }
+        pendingCompletions.removeAll()
+        callbacks.forEach { $0() }
     }
 
-    private func iconURL(for game: CyderGameRecord) -> URL {
-        CyderPaths.support
-            .appendingPathComponent("game-icons", isDirectory: true)
-            .appendingPathComponent("\(game.id).png")
-    }
-
-    private func executableDate(_ url: URL) -> Date? {
-        try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate
-    }
-
-    private func isFresh(cacheURL: URL, executableURL: URL) -> Bool {
-        guard let iconDate = executableDate(cacheURL),
-              let exeDate = executableDate(executableURL) else {
-            return false
-        }
-        return iconDate >= exeDate
-    }
-
-    private func recordFailure(id: String, executableURL: URL) {
-        failed.insert(id)
-        failedExecutableDate[id] = executableDate(executableURL)
-    }
-
-    private func finishExtract(id: String, extra: () -> Void) {
-        pending.remove(id)
-        extra()
-        let queued = pendingCompletions.removeValue(forKey: id) ?? []
-        queued.forEach { $0() }
-    }
-
-    private func extract(
-        game: CyderGameRecord,
-        cacheURL: URL,
-        helper: URL,
-        executable: FileHandle,
-        completion: @escaping () -> Void
-    ) {
-        CyderDiagnostics.shared.info("game-icon extract-start id=\(game.id) helper=\(helper.path)")
-
-        queue.async { [weak self] in
-            guard let self else { return }
-            try? FileManager.default.createDirectory(
-                at: cacheURL.deletingLastPathComponent(),
-                withIntermediateDirectories: true
-            )
-            let scratch = CyderPaths.iconExtractRoot
-                .appendingPathComponent(game.id, isDirectory: true)
-            let stagedExe = scratch.appendingPathComponent("game.exe")
-            try? FileManager.default.createDirectory(at: scratch, withIntermediateDirectories: true)
-            do {
-                if FileManager.default.fileExists(atPath: stagedExe.path) {
-                    try FileManager.default.removeItem(at: stagedExe)
-                }
-                FileManager.default.createFile(atPath: stagedExe.path, contents: nil)
-                let dest = try FileHandle(forWritingTo: stagedExe)
-                defer { try? dest.close() }
-                while true {
-                    let chunk = executable.readData(ofLength: 1024 * 1024)
-                    if chunk.isEmpty { break }
-                    dest.write(chunk)
-                }
-            } catch {
-                try? executable.close()
-                try? FileManager.default.removeItem(at: scratch)
-                DispatchQueue.main.async {
-                    self.recordFailure(id: game.id, executableURL: game.executableURL)
-                    CyderDiagnostics.shared.warning("game-icon stage-failed id=\(game.id)")
-                    self.finishExtract(id: game.id, extra: completion)
-                }
-                return
-            }
-            try? executable.close()
-
-            let wine = CyderPaths.engine.appendingPathComponent("bin/wine")
-            let process = Process()
-            process.executableURL = URL(fileURLWithPath: "/bin/bash")
-            process.arguments = [
-                helper.path,
-                "--exe", stagedExe.path,
-                "--png", cacheURL.path,
-                "--wine", wine.path,
-                "--scratch", scratch.path,
-            ]
-            // Cost of reusing bottles/shared: the first extract per EXE attaches
-            // to that wineserver (a running game on shared can hitch). Timeout
-            // only SIGTERM's this bash helper — never terminate wineserver.
-            // Independent profile tiles also extract against shared. After
-            // game-icons/<id>.png is written, later library opens do not start Wine.
-            process.environment = ProcessInfo.processInfo.environment.merging([
-                "WINEPREFIX": CyderPaths.sharedBottle.path,
-                "WINESERVER": CyderPaths.engine.appendingPathComponent("bin/wineserver").path,
-            ]) { _, new in new }
-            process.standardOutput = FileHandle.nullDevice
-            process.standardError = FileHandle.nullDevice
-            var status: Int32 = -1
-            do {
-                let finished = DispatchSemaphore(value: 0)
-                process.terminationHandler = { _ in finished.signal() }
-                try process.run()
-                if finished.wait(timeout: .now() + 45) == .success {
-                    status = process.terminationStatus
-                } else {
-                    process.terminate()
-                    status = -2
-                }
-            } catch {
-                // Keep the neutral placeholder when extraction is unavailable.
-            }
-            try? FileManager.default.removeItem(at: scratch)
-            DispatchQueue.main.async {
-                let extracted = status == 0 ? NSImage(contentsOf: cacheURL) : nil
-                if let extracted {
-                    self.failed.remove(game.id)
-                    self.failedExecutableDate.removeValue(forKey: game.id)
-                    self.memory[game.id] = extracted
-                    CyderDiagnostics.shared.info("game-icon extract-success id=\(game.id)")
-                } else {
-                    self.recordFailure(id: game.id, executableURL: game.executableURL)
-                    CyderDiagnostics.shared.warning("game-icon extract-failed id=\(game.id) status=\(status)")
-                }
-                self.finishExtract(id: game.id, extra: completion)
+    private static func readIcon(_ game: CyderGameRecord) -> CGImage? {
+        precondition(!Thread.isMainThread)
+        guard game.id.range(of: "^profile-[0-9a-f]{24}$", options: .regularExpression) != nil else { return nil }
+        let cache = CyderPaths.support.appendingPathComponent("game-icons").appendingPathComponent("\(game.id).png")
+        let date = try? game.executableURL.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate
+        if let date, let cachedDate = try? cache.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate,
+           cachedDate >= date, let data = readCache(cache), let image = CyderPEIcon.decode(data) { return image }
+        guard let image = try? CyderPEIcon.extract(from: game.executableURL) else { return nil }
+        let data = NSMutableData()
+        if let destination = CGImageDestinationCreateWithData(data, "public.png" as CFString, 1, nil) {
+            CGImageDestinationAddImage(destination, image, nil)
+            if CGImageDestinationFinalize(destination) {
+                try? FileManager.default.createDirectory(at: cache.deletingLastPathComponent(), withIntermediateDirectories: true)
+                try? (data as Data).write(to: cache, options: .atomic)
             }
         }
+        return image
+    }
+
+    private static func readCache(_ url: URL) -> Data? {
+        let fd = open(url.path, O_RDONLY | O_CLOEXEC | O_NONBLOCK | O_NOFOLLOW)
+        guard fd >= 0 else { return nil }
+        defer { close(fd) }
+        var info = stat()
+        guard fstat(fd, &info) == 0, info.st_mode & S_IFMT == S_IFREG,
+              info.st_size > 0, info.st_size <= 4 * 1024 * 1024 else { return nil }
+        var data = Data(count: Int(info.st_size))
+        let count = data.withUnsafeMutableBytes { Darwin.read(fd, $0.baseAddress, $0.count) }
+        return count == data.count ? data : nil
     }
 }
