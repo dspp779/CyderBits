@@ -51,7 +51,7 @@ SIGN_IDENTITY=- CYDER_REQUIRE_NATIVE_SWIFT=1 CYDER_SWIFT_OPTIMIZATION=-Onone \
 
 ## 驗證矩陣（持續更新）
 
-以下為截至 C26 的證據摘要；各批次段落保留當時缺口與失敗，不以早期矩陣覆蓋後續結果。
+以下為截至 C27 的證據摘要；各批次段落保留當時缺口與失敗，不以早期矩陣覆蓋後續結果。
 
 | 項目 | 目前證據 | 剩餘／限制 |
 |---|---|---|
@@ -67,7 +67,7 @@ SIGN_IDENTITY=- CYDER_REQUIRE_NATIVE_SWIFT=1 CYDER_SWIFT_OPTIMIZATION=-Onone \
 | V10 | D/E/C3 真實 Command-Q 保留 Wine births；C11 owner crash 保留 child；C17/C21/C22 quit fencing | 最新完整測試包及所有入口的最終回歸 |
 | V11 | E 真實設定明確停止後 UI 保留；正式 reducer／gate 區分 stop 與 quit | 最新 status stop 的實際 tracking 未測 |
 | V12 | C22 真實原生同名雙視窗／最小化有限通過；正式 action 注入替換、PID reuse、焦點變更、逾時、quit | Wine、其他 Space、VoiceOver 未驗；原生不穩定輪次保留 |
-| V13 | 真實 E 重開校準環境且無 replay；C23 正式 journal／registry reopen、原生出生身分接回選單、queued/historical 進入共用模型；prior-boot／重用／late generation／quit 故障注入 | C24 以引擎／prefix 證據接回原生孤兒程序，保持未歸屬；C25 目錄補查及損壞 registry 保留／當前世代保護通過；最新版完整 Wine GUI 重開尚未實測 |
+| V13 | 真實 E 重開校準環境且無 replay；C23 正式 journal／registry reopen、原生出生身分接回選單、queued/historical 進入共用模型；prior-boot／重用／late generation／quit 故障注入 | C24 以引擎／prefix 證據接回原生孤兒程序，保持未歸屬；C25 目錄補查及損壞 registry 保留／當前世代保護、C27 首次 registry 與 admission 排序通過；最新版完整 Wine GUI 重開尚未實測 |
 | V14 | E/C21 engine／prefix／probe/identity 失聯故障注入；一個 worker 受阻仍有另一環境前進，退出可用 | 最终 app 局部降級 UX 與主執行緒 I/O 回歸 |
 
 
@@ -580,3 +580,18 @@ C23 接通有完整 native root 證據的重新觀察及 queued/history 共用�
 - `build-C26.log` universal macOS11 建置成功；41 個來源輸入在編譯前後 hash 相同。隔離包 `/private/tmp/cyder-lifecycle-c26-build/Cyder.app` 使用 local.cyder.lifecycle-c26 與既有 CD2 support/runtime，ad-hoc／strict verify 和 arm64／x86_64 核對通過，三支包內 shell bytes 與 repo 相同；`build-C26-source-sha256.json` 保存 47 項。完整 app／Wine GUI 未啟動，沒有正式安裝覆蓋或發布。
 
 本批修正正常 track 及可信補查的活動容量，不宣稱所有啟動交錯已收斂：restore 的磁碟紀錄與先建立的新 entry 合併仍需檢查總容量，不能直接截斷而遺失外部 prefix 的恢復資格。滿載時新 admission 的校準優先序、重複 waiter／runtime session 分工、其餘 UX／I/O 及 V01–V14 最終交付繼續處理；目標保持進行中。
+
+
+## C27：首次 registry 讀取與 admission 排序
+
+- 根因不是單純合併後多一筆：manage 先寫環境紀錄、restore 後讀取的順序可能直接覆蓋未讀的外部 prefix。monitor 現在讓 restore、track／beginExecution、recoverVerified 共用同一次背景 registry 讀取；任何新 entry／快照保存都在這個讀取之後。有效的最多 32 筆歷史紀錄先保留監控位置，再處理新入口，無須截斷歷史、擴張 registry schema 或放寬容量。
+- 讀取等待佇列上限 32，單一實體 reader；每個等待者五秒內完成或失敗，逾時移除要求但不釋放仍卡住的讀取。beginExecution 的原五秒期限包含 registry、identity 與校準，晚到讀取不能重新認領已逾時 admission。stop 立即清除等待工作並完成 caller；晚到 reader 不 emit、不保存、不啟動 identity。重複 restore 共用結果，不用檔案中的較大 generation 覆蓋現行程序。
+- 原安全讀檔邏輯提取為 readRegistryFile，仍限制私有 regular file／UID／64 KiB／O_NOFOLLOW，ENOENT 才視為沒有歷史；取消額外 fileExists 查詢。readRegistry closure 是故障注入接點，正式預設仍走該讀檔路徑。損壞紀錄保留原 bytes，明確新入口及可信 bottle 補查仍可運作；没有新 Wine 動作。
+- 另修正滿載時 admission 校準排在一般輪詢後方的問題：新的待執行 entry 優先嘗試 probe；實體工作槽返回時優先服務等待中的 executor，仍最多兩個實體 probe。未知／尚待雙 empty 的要求依實際 monotonic 時間限制自動重試，每次至少相隔半秒，避免以高速重試換取五秒內成功。一般環境 round-robin 保留；期限內仍拿不到可靠證據就不准執行。
+- 新 `bash tests/test-cyder-environment-restore-admission.sh` 的正式 monitor/store harness 通過：track 先到、明確 restore 後到仍完整保留 32 筆外部 prefix；可信 recovery 不能超額；未讀完成前零 identity／零寫入；10 次 restore 共用一次 reader；40 個 track 加 executor 的排隊上限、五秒失敗及單次完成；晚到歷史不復活逾時要求；讀取中退出立即返回且拒絕晚到權威。磁碟紀錄／讀取與 callback 是真實，server／prefix 身分與 stall 是注入，不是 Wine 相容性證據。
+- 同 harness 再讓兩個正式 probe 工作槽停住，向排序最後的 prefix 要求 beginExecution；釋放一個槽後能在原期限內得到 executor，另一個仍卡住。接著注入 unknown，驗證重試次數有界、沒有 executor，quit 可結束 pending admission。最終 `environment-restore-admission-C27-r4.log` 四組 PASS 且有完成檔。首輪只因 test check autoclosure 包含 throwing Data read 而編譯失敗，改為普通 Bool 後 r2 通過；r3 增加優先序／重試測試；review 再讓一般輪詢略過待 admission 的 entry，避免繞過優先排程器的半秒下限，r4 與相關回歸通過，所有輸出保留。
+- `environment-monitor-C27-r3.log`、`launch-generation-C27-r3.log`、`bottle-recovery-C27-r2.log`、`environment-capacity-C27.log` 通過。bottle recovery 中原「late restore 不覆蓋」案例改為「重複 restore 不重新讀檔」的準確描述，保留相同世代不變斷言；新的受阻 reader 測試負責真正的首次讀取交錯。
+- 原生桌面 `recovery-C27.log` 通過正式 journal／registry／native birth／AppKit 接回回歸。自建 child、native birth 與 AppKit 真實，server 證據仍注入；30 個 callback-cycle proxy 原始樣本保存 `recovery-menu-C27.csv`，p95 0.036292 ms、max 0.111167 ms。這是 callback 代理量測，非真實 tracking／點擊至呈現，也不代表整個 app 沒有主執行緒停頓。
+- 最終 `build-C27-r2.log` universal macOS11 建置通過，41 個輸入編譯前後 hash 相同；第一輪 log／hash 留存，後續為輪詢排除 admission 的修正重新建置，舊 app 產物已由新建置取代；隔離包 `/private/tmp/cyder-lifecycle-c27-build/Cyder.app` 設 local.cyder.lifecycle-c27、CD2 support/runtime，ad-hoc／strict verify 和雙架構核對通過。`build-C27-source-sha256.json` 有 47 項，包內三支 shell bytes 與 repo 相同。本輪未啟動完整 Cyder.app／Wine GUI，未發布或覆蓋正式安裝。
+
+C26 留下的首次恢復合併容量及 admission 排序問題已有正式路徑證據。下一步仍是 shell detached supervisor 的 per-launch -w 與原生 monitor 的分工：不能只刪等待而提早釋放 session guard，亦不能用 socket 存在當成精確存活證據。其餘 UX／I/O 與 V01–V14 最終驗收、可重現整包交付持續進行，目標未完成。

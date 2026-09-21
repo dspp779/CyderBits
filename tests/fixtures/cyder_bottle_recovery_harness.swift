@@ -79,8 +79,8 @@ settle(); precondition(snapshot!.environments[identity.environment]!.generation 
 recovery.stop(); monitor.stop()
 print("PASS formal directory → readonly probe → monitor → store restores only alive environment, no launch/replay; corrupt registry retained, existing generation not overwritten (server proof injected)")
 
-// An explicit request may have installed a live execution before disk restore
-// finishes. Historical generation numbers cannot replace that current entry.
+// An explicit request loads history before admission. A later restore call
+// shares that result; external file changes cannot replace the live generation.
 let raceDirectory = root.appendingPathComponent("race-history")
 var raceSnapshot: L.Snapshot?
 let raceEpoch = UUID()
@@ -99,7 +99,7 @@ var raceRestored = false; raceMonitor.restore { raceRestored = true }
 pump("late history restored") { raceRestored }; settle()
 precondition(raceSnapshot!.environments[identity.environment]!.generation == beforeGeneration)
 raceMonitor.stop()
-print("PASS late disk restoration cannot replace a current live environment with a historical generation")
+print("PASS repeated disk restoration cannot replace a current live environment with a historical generation")
 
 let otherIdentity = CyderEnvironmentProbe.identify(prefix: inactive, engine: engine)!
 let oneGate = DispatchSemaphore(value: 0); var otherRecovered = false
