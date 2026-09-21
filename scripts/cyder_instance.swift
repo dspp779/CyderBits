@@ -27,6 +27,7 @@ final class CyderInstanceCoordinator {
     private var delivered = Set<String>()
     private(set) var recovered: [CyderRequestJournal.Record] = []
     var onRecoveryChanged: (([CyderRequestJournal.Record]) -> Void)?
+    var onRequestCancelled: ((String) -> Void)?
     let sentinel: CyderSentinelServer
 
     init(support: URL = CyderPaths.support,
@@ -107,9 +108,11 @@ final class CyderInstanceCoordinator {
             }
         case "cancel":
             guard let digest = message.payloadDigest else { respond("rejected"); return }
-            journal.cancel(id: id, digest: digest) { result in
+            journal.cancel(id: id, digest: digest) { [weak self] result in
                 switch result {
-                case .success(let record): respond("cancelled", record)
+                case .success(let record):
+                    self?.cancelled(record)
+                    respond("cancelled", record)
                 case .failure(let failure): respond(failure == .tooLate ? "cancellationTooLate" : "rejected")
                 }
             }
@@ -129,6 +132,7 @@ final class CyderInstanceCoordinator {
     }
 
     private func deliver(_ record: CyderRequestJournal.Record) {
+        publish(record)
         guard !closing, !delivered.contains(record.id) else { return }
         delivered.insert(record.id)
         if let children = record.children {
@@ -149,6 +153,7 @@ final class CyderInstanceCoordinator {
         guard !closing else { completion(nil); return }
         journal.authorizeDispatch(id: record.id) { [weak self] result in
             guard let self, !self.closing, case .success(let authorized) = result else { completion(nil); return }
+            self.publish(authorized)
             completion(authorized)
         }
     }
@@ -156,12 +161,69 @@ final class CyderInstanceCoordinator {
     func recordSpawn(_ record: CyderRequestJournal.Record, pid: Int32, boot: String?, started: UInt64?) {
         guard let launch = record.launchID, let epoch = record.executorEpoch else { return }
         journal.receipt(id: record.id, launchID: launch, epoch: epoch, supervisorPID: pid,
-                        layer: "native-launcher", boot: boot, started: started) { _ in }
+                        layer: "native-launcher", boot: boot, started: started) { [weak self] result in
+            if case .success(let updated) = result { self?.publish(updated) }
+        }
     }
 
     func finish(_ record: CyderRequestJournal.Record, outcome: String, failed: Bool = false, uncertain: Bool = false) {
         guard let launch = record.launchID, let epoch = record.executorEpoch else { return }
-        journal.complete(id: record.id, launchID: launch, epoch: epoch, outcome: outcome, failed: failed, uncertain: uncertain) { _ in }
+        journal.complete(id: record.id, launchID: launch, epoch: epoch, outcome: outcome, failed: failed, uncertain: uncertain) { [weak self] result in
+            if case .success(let updated) = result { self?.publish(updated) }
+        }
+    }
+
+    private func publish(_ record: CyderRequestJournal.Record) {
+        precondition(Thread.isMainThread)
+        if let index = recovered.firstIndex(where: { $0.id == record.id }) {
+            guard record.version >= recovered[index].version else { return }
+            recovered[index] = record
+        } else { recovered.append(record) }
+        onRecoveryChanged?(recovered)
+    }
+
+    private func cancelled(_ record: CyderRequestJournal.Record) {
+        publish(record)
+        onRequestCancelled?(record.id)
+        for id in record.children ?? [] {
+            onRequestCancelled?(id)
+            journal.query(id: id) { [weak self] result in
+                if case .success(let child) = result { self?.publish(child) }
+            }
+        }
+    }
+
+    func cancelRequest(id: String, completion: @escaping (Bool) -> Void) {
+        precondition(Thread.isMainThread)
+        guard primary, !closing, let record = recovered.first(where: { $0.id == id }) else { completion(false); return }
+        journal.cancel(id: id, digest: record.digest) { [weak self] result in
+            guard case .success(let updated) = result else { completion(false); return }
+            self?.cancelled(updated)
+            completion(true)
+        }
+    }
+
+    func resumeRequest(id: String, completion: @escaping (Bool) -> Void) {
+        precondition(Thread.isMainThread)
+        guard primary, !closing else { completion(false); return }
+        journal.resume(id: id) { [weak self] result in
+            guard let self, case .success(let updated) = result else { completion(false); return }
+            self.delivered.remove(id)
+            self.deliver(updated) // deliver also checks quiescing; no automatic replay on open
+            completion(true)
+        }
+    }
+
+    func refreshRequests() {
+        precondition(Thread.isMainThread)
+        guard primary, !closing else { return }
+        journal.snapshot { [weak self] result in
+            guard let self, case .success(let records) = result else { return }
+            var latest = Dictionary(uniqueKeysWithValues: self.recovered.map { ($0.id, $0) })
+            for record in records where record.version >= (latest[record.id]?.version ?? 0) { latest[record.id] = record }
+            self.recovered = Array(latest.values)
+            self.onRecoveryChanged?(self.recovered)
+        }
     }
 
     /// Same-ID automatic retries are confined to one monotonic five-second

@@ -40,6 +40,11 @@ private enum CyderLaunchIntent: Equatable {
 final class CyderAppDelegate: NSObject, NSApplicationDelegate {
     private let operationGate = CyderOperationGate()
     private let launchPreparation = DispatchQueue(label: "local.cyder.launch-preparation", qos: .userInitiated)
+    private var requestRecords: [CyderRequestJournal.Record] = []
+    private weak var existingLibraryController: CyderGameLibraryWindowController?
+    private weak var existingRequestController: CyderRequestWindowController?
+    private var cancelledRequestIDs = Set<String>()
+    private var pendingRequestAcquisitions: [String: UUID] = [:]
     private let processRunner = CyderProcessRunner(delivery: DispatchQueue(label: "local.cyder.process-delivery", qos: .utility))
     private var pendingFiles: [String] = []
     private var pendingURLs: [String] = []
@@ -56,17 +61,17 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private var queuedLaunches: [QueuedLaunch] = [] {
-        didSet { statusItemController.setIngressPending(libraryLaunchInProgress || !queuedLaunches.isEmpty || activeProcessOperations > 0 || pendingLaunchAcquisitions > 0) }
+        didSet { statusItemController.setIngressPending(libraryLaunchInProgress || !queuedLaunches.isEmpty || activeProcessOperations > 0 || !pendingLaunchAcquisitions.isEmpty) }
     }
     private var didFinishLaunch = false
     private var libraryLaunchInProgress = false {
-        didSet { statusItemController.setIngressPending(libraryLaunchInProgress || !queuedLaunches.isEmpty || activeProcessOperations > 0 || pendingLaunchAcquisitions > 0) }
+        didSet { statusItemController.setIngressPending(libraryLaunchInProgress || !queuedLaunches.isEmpty || activeProcessOperations > 0 || !pendingLaunchAcquisitions.isEmpty) }
     }
     private var activeProcessOperations = 0 {
-        didSet { statusItemController.setIngressPending(libraryLaunchInProgress || !queuedLaunches.isEmpty || activeProcessOperations > 0 || pendingLaunchAcquisitions > 0) }
+        didSet { statusItemController.setIngressPending(libraryLaunchInProgress || !queuedLaunches.isEmpty || activeProcessOperations > 0 || !pendingLaunchAcquisitions.isEmpty) }
     }
-    private var pendingLaunchAcquisitions = 0 {
-        didSet { statusItemController.setIngressPending(libraryLaunchInProgress || !queuedLaunches.isEmpty || activeProcessOperations > 0 || pendingLaunchAcquisitions > 0) }
+    private var pendingLaunchAcquisitions = Set<String>() {
+        didSet { statusItemController.setIngressPending(libraryLaunchInProgress || !queuedLaunches.isEmpty || activeProcessOperations > 0 || !pendingLaunchAcquisitions.isEmpty) }
     }
     private var documentLaunchRequested = false
     private var openLibraryOnLaunch = false
@@ -88,7 +93,28 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
     private var deferredInstanceRequests: [CyderInstanceRequest] = []
     private lazy var instanceCoordinator: CyderInstanceCoordinator = {
         let coordinator = CyderInstanceCoordinator()
+        coordinator.onRecoveryChanged = { [weak self] records in
+            guard let self else { return }
+            self.requestRecords = records
+            self.existingLibraryController?.updateRequestSummary(CyderRequestRow.summary(records))
+            self.existingRequestController?.update(records)
+        }
+        coordinator.onRequestCancelled = { [weak self] id in self?.cancelQueuedRequest(id) }
         return coordinator
+    }()
+    private lazy var requestController: CyderRequestWindowController = {
+        let controller = CyderRequestWindowController()
+        existingRequestController = controller
+        controller.onResume = { [weak self] id, done in self?.instanceCoordinator.resumeRequest(id: id, completion: done) }
+        controller.onCancel = { [weak self] id, done in self?.instanceCoordinator.cancelRequest(id: id, completion: done) }
+        controller.onRefresh = { [weak self] in self?.instanceCoordinator.refreshRequests() }
+        controller.onOpenDiagnostics = { NSWorkspace.shared.open(CyderPaths.support.appendingPathComponent("Logs")) }
+        controller.onClose = { [weak self] in
+            guard let self, self.settingsController.window?.isVisible != true,
+                  self.existingLibraryController?.window?.isVisible != true else { return }
+            self.statusItemController.setUIVisible(false)
+        }
+        return controller
     }()
     private lazy var environmentMonitor: CyderEnvironmentMonitor = CyderEnvironmentMonitor(
         epoch: statusItemController.lifecycleEpoch, directory: CyderPaths.support,
@@ -115,9 +141,10 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             self?.runStopEnvironment(prefix: prefix, stamp: stamp, operation: operation)
         }
         controller.onLifecycleIdle = { [weak self] in
-            guard let self, !self.libraryLaunchInProgress, self.queuedLaunches.isEmpty, self.activeProcessOperations == 0, self.pendingLaunchAcquisitions == 0,
+            guard let self, !self.libraryLaunchInProgress, self.queuedLaunches.isEmpty, self.activeProcessOperations == 0, self.pendingLaunchAcquisitions.isEmpty,
                   !self.environmentPreparationInProgress,
                   self.settingsController.window?.isVisible != true,
+                  self.existingRequestController?.window?.isVisible != true,
                   self.gameLibraryController.window?.isVisible != true else { return }
             NSApp.terminate(nil)
         }
@@ -182,6 +209,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             guard let self,
                   !self.environmentPreparationInProgress,
                   !self.openingGameLibrary,
+                  self.existingRequestController?.window?.isVisible != true,
                   self.gameLibraryController.window?.isVisible != true else { return }
             self.statusItemController.setUIVisible(false)
             NSApp.setActivationPolicy(.accessory)
@@ -193,6 +221,9 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
 
     private lazy var gameLibraryController: CyderGameLibraryWindowController = {
         let controller = CyderGameLibraryWindowController()
+        existingLibraryController = controller
+        controller.onOpenRequests = { [weak self] in self?.showRequests() }
+        controller.updateRequestSummary(CyderRequestRow.summary(requestRecords))
         controller.onLaunch = { [weak self] executable, settings in
             self?.launchGameFromLibrary(executable, settings: settings)
         }
@@ -207,6 +238,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             guard let self,
                   !self.environmentPreparationInProgress,
                   self.settingsController.window?.isVisible != true,
+                  self.existingRequestController?.window?.isVisible != true,
                   !self.gameLibraryController.isGameSettingsVisible else { return }
             self.statusItemController.setUIVisible(false)
             NSApp.setActivationPolicy(.accessory)
@@ -812,6 +844,8 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         let appMenu = NSMenu(title: "Cyder")
         let settings = appMenu.addItem(withTitle: "設定…", action: #selector(showSettings), keyEquivalent: ",")
         settings.target = self
+        let requests = appMenu.addItem(withTitle: "啟動要求…", action: #selector(showRequests), keyEquivalent: "")
+        requests.target = self
         let library = appMenu.addItem(withTitle: "遊戲庫…", action: #selector(showGameLibrary), keyEquivalent: "")
         library.target = self
         appMenu.addItem(NSMenuItem.separator())
@@ -845,6 +879,27 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         settingsController.showWindow(nil)
         settingsController.window?.makeKeyAndOrderFront(nil)
         settingsController.window?.orderFrontRegardless()
+    }
+
+    @objc private func showRequests() {
+        guard !quitTransaction else { return }
+        statusItemController.setUIVisible(true)
+        requestController.update(requestRecords)
+        activateCyderUI(dockVisible: true)
+        requestController.showWindow(nil)
+        requestController.window?.makeKeyAndOrderFront(nil)
+    }
+
+    private func cancelQueuedRequest(_ id: String) {
+        cancelledRequestIDs.insert(id)
+        pendingLaunchAcquisitions.remove(id)
+        if let acquisition = pendingRequestAcquisitions.removeValue(forKey: id) { operationGate.cancel(acquisition) }
+        for launch in queuedLaunches where launch.authorization?.id == id {
+            if let lease = launch.lease { operationGate.release(lease) }
+        }
+        queuedLaunches.removeAll { $0.authorization?.id == id }
+        requestRemaining.removeValue(forKey: id)
+        launchNextQueuedExecutableIfReady()
     }
 
     private func exportLastGameLog() {
@@ -1047,7 +1102,8 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func prepareQueuedLaunch(_ launch: QueuedLaunch) {
-        pendingLaunchAcquisitions += 1
+        guard let requestID = launch.authorization?.id else { return }
+        pendingLaunchAcquisitions.insert(requestID)
         launchPreparation.async { [weak self] in
             guard let self else { return }
             var scope: CyderOperationGate.Scope = .allEnvironments
@@ -1059,13 +1115,20 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             }
             // Stay queued in the durable journal while a conflicting stop or
             // mutation owns this environment. Authorization follows the lease.
-            self.operationGate.acquire(scope) { lease in
-                self.pendingLaunchAcquisitions -= 1
-                guard let lease else { return }
-                guard !self.quitTransaction else { self.operationGate.release(lease); return }
-                var ready = launch; ready.lease = lease
-                self.queuedLaunches.append(ready)
-                self.launchNextQueuedExecutableIfReady()
+            let resolvedScope = scope
+            DispatchQueue.main.async {
+                guard let id = launch.authorization?.id, !self.quitTransaction, !self.cancelledRequestIDs.contains(id) else {
+                    self.pendingLaunchAcquisitions.remove(requestID); return
+                }
+                self.pendingRequestAcquisitions[id] = self.operationGate.acquire(resolvedScope) { lease in
+                    self.pendingRequestAcquisitions.removeValue(forKey: id)
+                    self.pendingLaunchAcquisitions.remove(requestID)
+                    guard let lease else { return }
+                    guard !self.quitTransaction, !self.cancelledRequestIDs.contains(id) else { self.operationGate.release(lease); return }
+                    var ready = launch; ready.lease = lease
+                    self.queuedLaunches.append(ready)
+                    self.launchNextQueuedExecutableIfReady()
+                }
             }
         }
     }

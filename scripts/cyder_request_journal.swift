@@ -8,6 +8,10 @@ struct CyderRequestPayload: Codable, Equatable {
     let urls: [String]
     let showUI: Bool
     var settings: Data? = nil
+    var displayName: String {
+        let raw = files.first.map { URL(fileURLWithPath: $0).lastPathComponent } ?? (urls.isEmpty ? "啟動要求" : "開啟連結")
+        return String(raw.unicodeScalars.filter { !CharacterSet.controlCharacters.contains($0) }.map(String.init).joined().prefix(100))
+    }
     var digest: String {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys]
@@ -43,6 +47,7 @@ final class CyderRequestJournal {
         var processStarted: UInt64? = nil
         var outcome: String?
         var children: [String]? = nil
+        var displayName: String? = nil
     }
     struct Document: Codable {
         let schema: Int
@@ -193,7 +198,7 @@ final class CyderRequestJournal {
                     let uuid = [String(chars[0..<8]), String(chars[8..<12]), String(chars[12..<16]), String(chars[16..<20]), String(chars[20..<32])].joined(separator: "-").uppercased()
                     let childID = current.namespace.uuidString + ":" + uuid
                     guard current.records[childID] == nil else { throw Failure.conflictingPayload }
-                    current.records[childID] = Record(id: childID, digest: child.digest, version: current.version + 1, phase: .queued, payload: child)
+                    current.records[childID] = Record(id: childID, digest: child.digest, version: current.version + 1, phase: .queued, payload: child, displayName: child.displayName)
                     childIDs.append(childID)
                 }
                 let parent = Record(id: id, digest: payload.digest, version: current.version + 1, phase: .completed,
@@ -202,7 +207,7 @@ final class CyderRequestJournal {
                 return parent
             }
             guard current.records.count < limit else { throw Failure.full }
-            let record = Record(id: id, digest: payload.digest, version: current.version + 1, phase: .queued, payload: payload)
+            let record = Record(id: id, digest: payload.digest, version: current.version + 1, phase: .queued, payload: payload, displayName: payload.displayName)
             current.records[id] = record
             return record
         }
@@ -212,6 +217,14 @@ final class CyderRequestJournal {
         queue.async { [self] in
             let result: Result<Record, Failure> = available
                 ? document?.records[id].map { .success($0) } ?? .failure(.missing) : .failure(.unavailable)
+            delivery.async { completion(result) }
+        }
+    }
+
+    func snapshot(completion: @escaping (Result<[Record], Failure>) -> Void) {
+        queue.async { [self] in
+            let result: Result<[Record], Failure> = available && document != nil
+                ? .success(Array(document!.records.values)) : .failure(.unavailable)
             delivery.async { completion(result) }
         }
     }

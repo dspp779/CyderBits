@@ -179,3 +179,16 @@ C3 程序盤點發現的舊 helper 殘留有一個明確競態：supervisor 先 
 - `gate-C4.log`／`gate-C4-r2.log`、open-files／settings／sentinel smoke 通過；完整 Swift typecheck 通過。雙架構 macOS11 build 兩輪通過，第二輪含停止意圖預約修正：`build-C4-r2.log`。測試包 `/private/tmp/cyder-lifecycle-c4-build/Cyder.app` 已配置 `local.cyder.lifecycle-c4` 與本任務 CD2 support/runtime wrapper，ad-hoc 重簽；SHA256 manifest `build-C4-source-sha256.json`。此包本輪尚未啟動，沒有新增 C4 Wine 實測結論。
 
 下一步缺口仍明確保留：scope 解析 worker 卡住時的隔離／有界回饋、等待與取消的原位置 UI、設定不可變快照；detached supervisor receipt／晚到 spawn、跨崩潰環境操作 fencing 及每 launch -w；程序／視窗身分與精確動作；F 恢復／非模態錯誤／首屏及完整 V01–V14。C4 的原生 lease 不代替這些驗收。
+
+## F1：持久要求的恢復／取消介面
+
+- coordinator 發布帶 record version 的狀態，追加正式 resume／cancel／refresh API；恢復只呈現紀錄，不呼叫 deliver。只有 journal `awaitingUserResume` 可沿原 ID 繼續，queued／awaiting 可取消；dispatching／observing／uncertain 不提供偽取消或立即重試。snapshot 只讀 journal owner 的記憶體狀態，UI 不輪詢磁碟。
+- 新增非模態「啟動要求」視窗、app menu 入口與遊戲庫可收合提示。NSTableView 僅建立可見列，穩定 request ID 綁定按鈕；UI capability 與 journal 再次核對，連點／舊按鈕不會重派。錯誤與儲存回饋留在原視窗，沒有完成彈窗。結果未確認項目明示不自動重試，保留診斷記錄入口。
+- app 收到成功取消後取消 pending gate acquisition、釋放尚未派送的 ready lease、移除排程；scope 準備中的取消以 ID set 攔截晚到 callback，等待存續由 ID set 計算，取消不因舊 worker 未回覆繼續保留 ingress。要求視窗也納入可見 UI 的存續理由。
+- journal 只額外保存去除控制字元、最多 100 字的檔案 basename／泛稱「開啟連結」，供 payload 清除後辨識失敗；不在清單顯示 argv、完整 URI 或完整路徑。舊 schema1 沒有這個 optional 欄位仍可讀。
+- `test-cyder-request-ui.sh` 驅動正式 journal 開啟→關閉→新 coordinator 恢復，再建立正式 AppKit table cell、點其 NSButton selector：恢復不自動 dispatch；resume 原 ID 只派送一次；cancel 持久保存；stale button 無效；uncertain 不提供 resume/cancel；直接呼叫 coordinator resume uncertain 仍拒絕；重開保留 cancelled／uncertain；failed 清 payload 後仍有短名稱；秘密測試 argv 不進 UI。測試必須產生 `ui-completed` artifact 才算成功，避免只見 process exit 誤報。
+- 以上為 L1–2 正式 AppKit adapter／原生整合證據，不是 Wine 視窗或 NGS 實測。`CYDER_TEST_RENDER=/absolute/path.png bash tests/test-cyder-request-ui.sh` 可輸出正式 contentView 渲染；已檢視 `.local/lifecycle-evidence/request-ui-F1.png`，四列的名稱、狀態與按鈕未裁切。圖為 contentView 離屏渲染，透明外緣不代表桌面實際黑底；不把它當 computer-use screenshot。
+- journal、instance runtime、open-files smoke、settings smoke 通過。settings 原固定 top=32 字串與新增提示不相容，保留 `settings-F1.log` 失敗；改驗提示 top=32／空文字 height=0／內容接在提示下方，`settings-F1-r2.log` 通過。runtime logs：`request-ui-F1.log`、`request-ui-F1-r2.log`、`request-ui-F1-r3.log`、`journal-F1.log`、`instance-F1-r2.log`。
+- 全來源 typecheck 與 universal macOS11 build 通過：`build-F1.log`；隔離測試包 `/private/tmp/cyder-lifecycle-f1-build/Cyder.app` 已配置 ID `local.cyder.lifecycle-f1`、CD2 support/runtime wrapper 與 ad-hoc 簽章。來源／binary manifest `build-F1-source-sha256.json`。本輪尚未啟動此完整 app，不新增真實 Wine UI 通過宣稱。
+
+F 尚未完成：直接開啟仍是旧設定首屏，遊戲庫 prepare 的同步掃描須遷移；primary／journal unavailable 尚需唯讀 UI；scope preparation 的卡住隔離、outbox 恢復、不可變設定快照與 supervisor fencing；完整程序／視窗 action capability、全 V01–V14 及最終測試版交付仍待完成。

@@ -293,6 +293,7 @@ SWIFT_SOURCES=(
   "$SCRIPT_DIR/cyder_paths.swift"
   "$SCRIPT_DIR/cyder_sentinel.swift"
   "$SCRIPT_DIR/cyder_request_journal.swift"
+  "$SCRIPT_DIR/cyder_request_ui.swift"
   "$SCRIPT_DIR/cyder_request_channel.swift"
   "$SCRIPT_DIR/cyder_instance.swift"
   "$SCRIPT_DIR/cyder_uri_handler.swift"
