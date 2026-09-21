@@ -255,3 +255,21 @@ F3 不完成整體 F。接續須處理圖示／設定等主執行緒 I/O、prima
 - 全來源 typecheck 通過；最新 universal macOS11 build 為 `build-C5-r2.log`。隔離包 `/private/tmp/cyder-lifecycle-c5-build/Cyder.app` 使用 `local.cyder.lifecycle-c5`、CD2 support/runtime 與 ad-hoc 簽章，manifest `build-C5-source-sha256.json`。本輪未啟動完整 app；本節為 L1–2 原生／故障注入證據，不是真實 Wine 或 NGS 相容性結論。
 
 仍須完成：設定 UI 與部分 action 的主執行緒 I/O、outbox／feedback owner、supervisor 與跨崩潰執行權、環境 waiter、精確 process/window 動作、完整 V01–V14 及最終交付。C5 固定設定內容，不把動態 profile 路由或環境身分也宣稱為已固定。目標保持進行中。
+
+## F6：設定視窗的背景交易與草稿衝突保護
+
+- 移除正式 UI 對同步 shared settings store 的存取。`CyderSettingsAccess` 為 app 內唯一設定交易入口，單一實際背景工作、不排隊；五秒觀察期限只回報 unconfirmed，不釋出卡住的工作占位。忙碌時拒絕新寫入，UI 保留草稿；真正返回後才交付結果。quit 拒絕新工作與晚到 UI 回覆，不把正在原子寫入的結果推定為取消。
+- 讀取以同 UID regular FD、NOFOLLOW／NONBLOCK、256 KiB 及前後 size/mtime/ctime 檢查，只有真正不存在才採預設；寫入也限制 256 KiB，避免產生自己無法讀回的檔案。損壞／不支援／不可讀設定不變成 defaults 後覆寫。每筆交易重新讀取實際檔案；UI 使用自己的記憶體快照，沒有主執行緒等待 owner 的同步取值。
+- `CyderSettingsPatch` 僅合併畫面實際修改的 global 欄位及 per-profile/per-executable 條目，保留其他視窗修改的不同欄位／條目；同欄位或同規則已改成第三個值時，在寫入前回 conflict。revision／updatedAt／lastModified 仍由原正式 store 根據真正變化產生。這是 app 內交易協調，不宣稱與外部 CLI／其他程式的設定寫入已有跨程序鎖。
+- 偏好設定與遊戲選項 constructor 僅建立 UI 與不觸發字型掃描的暫時顯示值，載入完成前不允許把暫時值當設定送出。設定、引擎版本、profile 清單、圖形元件能力及 GPTK 狀態皆由背景載入；畫面刷新只讀這份投影。載入中的分頁控制項全數停用，但遊戲庫／記錄／停止環境等獨立入口與視窗關閉保留。一般儲存先在 main 擷取純資料 patch，背景寫入；失敗／busy／期限留在原處，提供重試，沒有儲存成功彈窗。
+- 一般設定寫入超過觀察期限，仍追蹤 physical outcome，成功後按同 UI revision 接續既有 Windows 設定套用路徑。若等待期間較新編輯使舊回覆失效，保留 prefixApplyPending，下一次明確重試不能遺漏套用。舊 running-state query 也核對 settings revision，不把新草稿提前顯示為已儲存。遊戲選項儲存期間停止編輯，關閉後以 view generation 拒絕晚到成功回覆，不關閉後來的 modal，也不宣稱關閉等於取消寫入。
+- app 移除 profile 後的設定更新也走同一背景入口。非 launch 的偏好依賴操作使用背景 strict read；唯讀 running query 與明確 stop 則由內部 flag 同時略過 native/Bash 的設定讀取，因此損壞／FIFO 設定不阻擋查詢與停止。這不改 Wine stop 的既有範圍與授權檢查。
+- `test-cyder-settings-access.sh` 驅動正式 owner、patch 與真實原子檔案：不同修改合併、同欄位衝突不改 bytes、不同 profile 保留、corrupt 原檔保存、FIFO 立即拒絕；一個 reader 卡住時 60 次請求均 busy、只一個 physical read，期限一次／晚到一次；quit fence。另以正式 Bash entry 的 `--help` 和 FIFO 設定验证 preferences-independent 分支不碰該檔；此 fixture 不進 Wine spawn。`settings-access-F6-r4.log` 通過。
+- `test-cyder-settings-ui.sh` 使用正式兩個 AppKit controller 與受控 reader：40 次 reopen 不增生工作、未選取分頁亦停用、main event-loop tick 與實際遊戲庫 NSButton 可用；真正 NSSwitch action／套用 NSButton 寫回全域與 per-game 設定，保留另一層內容。受控 save stall 驗 unconfirmed 後仍套用；等待中再次編輯→busy→原寫入完成→重試，仍完成待套用環境更新；關閉選項後晚到寫入不回呼 UI。測試必須有 ui-completed artifact，腳本明確列印驗證成功；`settings-ui-F6-r6.log` 及 `settings-ui-F6-r6-artifacts/Logs` 通過。此處的 Windows 套用 callback 是替身，沒有跑 Wine registry。
+- 保留失敗與修正：r1 真實發現 `subviews` 不包含未選取 NSTabViewItem，載入時 Retina 仍 enabled；改走全部 tab item views。原 precondition trap fixture 留在 OS UE，新 fixture 失敗改輸出條件與 exit 1，沒有放寬斷言。r3 在冷讀較慢時暴露 unconfirmed 提早完成 continuation、晚到 save 不再 apply；r4 的再次通過未作結案，r5/r6 加受控延遲與重試競態並修正式路徑。診斷初始化會重導 stdout/stderr，新增 fixture log 保存，避免只看空輸出判斷。
+- 已檢視 `.local/lifecycle-evidence/settings-F6-r5.png`／r6 的正式 contentView 渲染：背景與 footer 可讀；Aqua tab header 在離屏渲染呈黑色，不能以此證明實際桌面 tab 標籤外觀。內容有正式 scroll view，較下方引擎資訊不在當前 viewport。此圖不是 computer-use screenshot。沒有新增真實 Wine／NGS 相容性結論。
+- settings Swift、settings shell、open-files lifecycle、library AppKit、C5 Bash snapshot 回歸通過（`settings-swift-F6.log`、`settings-shell-F6-r2.log`、`open-files-F6-r2.log`、`library-F6.log`、`settings-snapshot-F6.log`）。完整 universal macOS11 build 最新為 `build-F6-r2.log`；隔離包 `/private/tmp/cyder-lifecycle-f6-build/Cyder.app` 設 `local.cyder.lifecycle-f6`、CD2 support/runtime、ad-hoc 簽章，manifest `build-F6-source-sha256.json`。本輪未啟動完整 app。
+
+F6 尚未清除所有既有 action I/O：GPTK 掛載掃描／安裝／移除、MoltenVK ensure、選 EXE 後 resolve，以及遊戲庫 Finder／mac launcher 檢查仍待遷移；詳細錯誤分類／衝突後的草稿解決流程也尚未完整。outbox、supervisor／跨崩潰 late-spawn、waiter、精確 process/window actions、V01–V14 整體交付仍未完成，不將本批當作目標完成。
+
+F6 fixture 清理追記：11:29 左右重新核對，前批 80423／81445 仍在 OS UE；未重複向它們送訊號。本批首次失敗 fixture 87784 的映像確認為 `/private/tmp/cy-settings-ui.NPuuk7/test` 後只對該 PID 嘗試 SIGKILL，不宣稱已成功排空。它們皆為原生測試，不是 Wine 或使用者遊戲。

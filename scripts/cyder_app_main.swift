@@ -348,13 +348,20 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
                     ))
                     return
                 }
-                do {
+                var replied = false
+                CyderSettingsAccess.shared.perform({ store in
                     let profileID = try CyderProfileStore(root: CyderPaths.support).profileID(for: executable)
-                    try CyderSettingsStore.shared.update { $0.perProfile.removeValue(forKey: profileID) }
-                    completion(true)
-                } catch {
-                    completion(false)
-                    self.showAlert("設定未完成", "prefix 已移除，但無法更新設定檔：\(error.localizedDescription)")
+                    try store.update { $0.perProfile.removeValue(forKey: profileID) }
+                }) { update in
+                    guard !replied else { return }
+                    replied = true
+                    switch update {
+                    case .ready: completion(true)
+                    default:
+                        completion(false)
+                        guard !self.quitTransaction else { return }
+                        self.showAlert("設定尚未確認", "prefix 已移除，但設定檔更新尚未確認；請稍後重新開啟選項檢查。")
+                    }
                 }
             }
         }
@@ -848,6 +855,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         launchPreparation.quiesce()
         existingLibraryController?.quiesce()
         CyderGameIconStore.shared.quiesce()
+        CyderSettingsAccess.shared.quiesce()
         wineLaunchObserver?.cancel()
         var replied = false
         func finishQuit() {
@@ -2462,6 +2470,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         let operationLog = CyderDiagnostics.shared.makeOperationLog(operation)
         let isLaunch = args.contains(where: { $0.hasPrefix("--launch-") })
         let isObservation = args.contains("--has-running-exes")
+        let settingsIndependent = isObservation || args.contains("--stop-prefix") || args.contains("--stop-all")
         var scope = operationScope ?? .allEnvironments
         if operationScope == nil,
            let index = args.firstIndex(where: { $0 == "--stop-prefix" || $0 == "--taskmgr-prefix" }),
@@ -2503,14 +2512,21 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         process.executableURL = URL(fileURLWithPath: "/bin/bash")
         process.arguments = args
         var environment = context.environment
-        if extraEnvironment["CYDER_WINE_SETTINGS_SNAPSHOT"] == nil {
-            for (key, value) in CyderSettingsStore.shared.environment {
-                environment[key] = value
+        if !settingsIndependent, extraEnvironment["CYDER_WINE_SETTINGS_SNAPSHOT"] == nil {
+            do {
+                let saved = try CyderSettingsStore.readValidated(at: CyderPaths.support.appendingPathComponent("settings.json"))
+                environment.merge(CyderSettingsStore.environment(saved)) { _, saved in saved }
+            } catch {
+                try? handle.close()
+                return CyderProcessResult(status: 1, terminationReason: .exit, logURL: operationLog,
+                    outputTail: "Unable to read saved settings; operation was not started", didStart: false)
             }
         }
         for (key, value) in extraEnvironment {
             environment[key] = value
         }
+        // Observation and explicit stop must remain usable with broken settings.
+        environment["CYDER_WINE_SETTINGS_INDEPENDENT"] = settingsIndependent ? "1" : "0"
         let resultURL = operationLog
             .deletingPathExtension()
             .appendingPathExtension("result.plist")

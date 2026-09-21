@@ -1,5 +1,6 @@
 import Foundation
 import CoreText
+import Darwin
 
 /// True when the Mac already has a MingLiU / 細明體 family the user can select.
 func cyderSystemProvidesMingLiU() -> Bool {
@@ -475,7 +476,7 @@ struct CyderSettings: Codable {
     var esync: Bool? = false
     var retinaMode = false
     var dpi = 96
-    var fontMingLiuTarget = cyderDefaultMingLiuFontTarget()
+    var fontMingLiuTarget = "songti"
     var fontSongtiTarget = "songti"
     var fontSmoothing = "cleartype-rgb"
     var graphicsBackend: CyderGraphicsBackend = CyderProduct.defaultGraphicsBackend
@@ -516,8 +517,8 @@ struct CyderSettings: Codable {
         }
     }
 
-    init() {
-        fontMingLiuTarget = cyderDefaultMingLiuFontTarget()
+    init(fontMingLiuTarget: String = cyderDefaultMingLiuFontTarget()) {
+        self.fontMingLiuTarget = fontMingLiuTarget
         fontSongtiTarget = "songti"
         graphicsBackend = CyderProduct.defaultGraphicsBackend
     }
@@ -985,7 +986,6 @@ struct CyderSettings: Codable {
 }
 
 final class CyderSettingsStore {
-    static let shared = CyderSettingsStore()
     private(set) var value: CyderSettings
     private let url: URL
 
@@ -1017,6 +1017,37 @@ final class CyderSettingsStore {
         }
     }
 
+    init(value: CyderSettings, url: URL) {
+        self.value = value
+        self.url = url
+    }
+
+    static func readValidated(at url: URL) throws -> CyderSettings {
+        let fd = Darwin.open(url.path, O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC)
+        guard fd >= 0 else {
+            if errno == ENOENT {
+                var info = stat()
+                if lstat(url.path, &info) != 0, errno == ENOENT { return .defaults }
+            }
+            throw CyderSettingsAccess.Failure.invalid
+        }
+        defer { Darwin.close(fd) }
+        var before = stat(), after = stat()
+        guard fstat(fd, &before) == 0, before.st_mode & S_IFMT == S_IFREG,
+              before.st_uid == getuid(), before.st_size >= 0, before.st_size <= 262144 else {
+            throw CyderSettingsAccess.Failure.invalid
+        }
+        let data = try FileHandle(fileDescriptor: fd, closeOnDealloc: false).read(upToCount: 262145) ?? Data()
+        guard fstat(fd, &after) == 0, data.count == before.st_size, before.st_size == after.st_size,
+              before.st_mtimespec.tv_sec == after.st_mtimespec.tv_sec,
+              before.st_mtimespec.tv_nsec == after.st_mtimespec.tv_nsec,
+              before.st_ctimespec.tv_sec == after.st_ctimespec.tv_sec,
+              before.st_ctimespec.tv_nsec == after.st_ctimespec.tv_nsec else {
+            throw CyderSettingsAccess.Failure.invalid
+        }
+        return try JSONDecoder().decode(CyderSettings.self, from: data)
+    }
+
     func update(_ work: (inout CyderSettings) -> Void) throws {
         CyderDiagnostics.shared.enter(.settingsSave)
         var next = value
@@ -1043,8 +1074,15 @@ final class CyderSettingsStore {
         let directory = url.deletingLastPathComponent()
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let data = try JSONEncoder.pretty.encode(next)
+        guard data.count <= 262144 else { throw CyderSettingsAccess.Failure.invalid }
         try data.write(to: url, options: .atomic)
         value = next
+    }
+
+    func apply(_ patch: CyderSettingsPatch) throws {
+        var next = value
+        try patch.apply(to: &next)
+        try update { $0 = next }
     }
 
     func reset() throws { try update { $0 = .defaults } }
@@ -1182,5 +1220,95 @@ extension JSONEncoder {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         return encoder
+    }
+}
+
+/// A settings transaction has one physical owner. Observation timeout keeps
+/// that owner occupied; repeated UI requests cannot multiply blocked I/O.
+final class CyderSettingsAccess {
+    static let shared = CyderSettingsAccess()
+    enum Failure: Error { case invalid, conflict }
+    enum Update<Value> { case ready(Value), unconfirmed, busy, failed(Error) }
+    private let queue = DispatchQueue(label: "local.cyder.settings-io", qos: .userInitiated)
+    private let url: URL
+    private let read: (URL) throws -> CyderSettings
+    private let deadline: TimeInterval
+    private var active: UUID?
+    private var closing = false
+
+    init(url: URL = CyderPaths.support.appendingPathComponent("settings.json"), deadline: TimeInterval = 5,
+         read: @escaping (URL) throws -> CyderSettings = CyderSettingsStore.readValidated) {
+        self.url = url; self.deadline = deadline; self.read = read
+    }
+
+    /// Callback may first report unconfirmed, then the actual result. No work
+    /// is queued behind a busy physical transaction; the caller keeps its draft.
+    func perform<Value>(_ work: @escaping (CyderSettingsStore) throws -> Value,
+                        completion: @escaping (Update<Value>) -> Void) {
+        precondition(Thread.isMainThread)
+        guard !closing, active == nil else { completion(.busy); return }
+        let token = UUID(); active = token
+        DispatchQueue.main.asyncAfter(deadline: .now() + max(0, deadline)) { [weak self] in
+            guard let self, !self.closing, self.active == token else { return }
+            completion(.unconfirmed)
+        }
+        queue.async { [self] in
+            let result = Result { try work(CyderSettingsStore(value: read(url), url: url)) }
+            DispatchQueue.main.async { [self] in
+                guard active == token else { return }
+                active = nil
+                guard !closing else { return }
+                switch result {
+                case .success(let value): completion(.ready(value))
+                case .failure(let error): completion(.failed(error))
+                }
+            }
+        }
+    }
+
+    var isBusy: Bool { precondition(Thread.isMainThread); return active != nil }
+    func quiesce() { precondition(Thread.isMainThread); closing = true }
+}
+
+/// Optimistic field-level edits preserve unrelated changes from another window.
+/// A conflicting edit fails before writing instead of silently losing a draft.
+struct CyderSettingsPatch {
+    let before: CyderSettings
+    let after: CyderSettings
+
+    func apply(to current: inout CyderSettings) throws {
+        func object(_ settings: CyderSettings) throws -> [String: Any] {
+            try JSONSerialization.jsonObject(with: JSONEncoder().encode(settings)) as! [String: Any]
+        }
+        func equal(_ a: Any?, _ b: Any?) -> Bool {
+            switch (a, b) {
+            case (nil, nil): return true
+            case let (a?, b?): return (a as? NSObject)?.isEqual(b) == true
+            default: return false
+            }
+        }
+        let original = try object(before), edited = try object(after)
+        var merged = try object(current)
+        let metadata: Set<String> = ["schemaVersion", "revision", "updatedAt", "lastModified"]
+        for key in Set(original.keys).union(edited.keys) where !metadata.contains(key) {
+            if key == "perProfile" || key == "perExecutable" {
+                let oldRules = original[key] as? [String: Any] ?? [:]
+                let newRules = edited[key] as? [String: Any] ?? [:]
+                var rules = merged[key] as? [String: Any] ?? [:]
+                for id in Set(oldRules.keys).union(newRules.keys) where !equal(oldRules[id], newRules[id]) {
+                    guard equal(rules[id], oldRules[id]) || equal(rules[id], newRules[id]) else {
+                        throw CyderSettingsAccess.Failure.conflict
+                    }
+                    rules[id] = newRules[id]
+                }
+                merged[key] = rules
+            } else if !equal(original[key], edited[key]) {
+                guard equal(merged[key], original[key]) || equal(merged[key], edited[key]) else {
+                    throw CyderSettingsAccess.Failure.conflict
+                }
+                merged[key] = edited[key]
+            }
+        }
+        current = try JSONDecoder().decode(CyderSettings.self, from: JSONSerialization.data(withJSONObject: merged))
     }
 }

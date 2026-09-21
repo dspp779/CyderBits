@@ -11,7 +11,10 @@ if cyder_resources_has_bundled_engine "$(dirname "$SCRIPT_DIR")"; then
 else
   cyder_init_paths "$SCRIPT_DIR"
 fi
-cyder_load_saved_settings
+# Native read-only observation and explicit stop do not depend on preferences.
+if [[ "${CYDER_WINE_SETTINGS_INDEPENDENT:-0}" != 1 ]]; then
+  cyder_load_saved_settings
+fi
 
 CYDER_DIAGNOSTIC_STAGE="${CYDER_DIAGNOSTIC_STAGE:-launcher-start}"
 CYDER_DIAGNOSTIC_LAST_ERROR=""

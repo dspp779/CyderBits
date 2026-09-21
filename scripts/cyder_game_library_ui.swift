@@ -482,13 +482,19 @@ private final class CyderPlaceholderTextView: NSTextView {
     }
 }
 
-private final class CyderGameSettingsWindowController: NSWindowController, NSWindowDelegate {
+final class CyderGameSettingsWindowController: NSWindowController, NSWindowDelegate {
     var onLaunch: ((URL, CyderExecutableSettings) -> Void)?
     var onRemoveProfile: ((URL, @escaping (Bool) -> Void) -> Void)?
     var onSettingsChanged: (() -> Void)?
 
     private let game: CyderGameRecord
-    private let settingsStore = CyderSettingsStore.shared
+    private var settingsValue = CyderSettings(fontMingLiuTarget: "songti")
+    private var presentation = CyderSettingsPresentation()
+    private var settingsReady = false
+    private var executableAvailable = false
+    private var settingsInFlight = false
+    private let settingsAccess: CyderSettingsAccess
+    private var settingsViewGeneration = UUID()
     private var independent: Bool
 
     private let launchButton = NSButton()
@@ -508,9 +514,10 @@ private final class CyderGameSettingsWindowController: NSWindowController, NSWin
     private let cancelButton = NSButton()
     private let confirmButton = NSButton()
 
-    init(game: CyderGameRecord, independent: Bool) {
+    init(game: CyderGameRecord, independent: Bool, settingsAccess: CyderSettingsAccess = .shared) {
         self.game = game
         self.independent = independent
+        self.settingsAccess = settingsAccess
         let window = NSPanel(
             contentRect: NSRect(x: 0, y: 0, width: 560, height: 420),
             styleMask: [.titled, .closable, .fullSizeContentView],
@@ -540,6 +547,7 @@ private final class CyderGameSettingsWindowController: NSWindowController, NSWin
     required init?(coder: NSCoder) { nil }
 
     func windowWillClose(_ notification: Notification) {
+        settingsViewGeneration = UUID()
         if NSApp.modalWindow === window {
             NSApp.stopModal(withCode: .cancel)
         }
@@ -547,8 +555,41 @@ private final class CyderGameSettingsWindowController: NSWindowController, NSWin
 
     func prepareForDisplay(independent: Bool? = nil) {
         if let independent { self.independent = independent }
-        let global = settingsStore.value
-        let rule = settingsStore.value.perProfile[game.id]
+        guard !settingsInFlight else { return }
+        settingsInFlight = true; settingsReady = false
+        setControlsEnabled(false); launchButton.isEnabled = false; confirmButton.isEnabled = false
+        removeProfileButton.isEnabled = false
+        launchHint.stringValue = "正在讀取設定…"
+        let generation = settingsViewGeneration
+        let executablePath = game.executablePath
+        settingsAccess.perform({ store in
+            (store.value, CyderSettingsPresentation.load(), FileManager.default.fileExists(atPath: executablePath))
+        }) { [weak self] update in
+            guard let self else { return }
+            if case .ready = update { self.settingsInFlight = false }
+            if case .failed = update { self.settingsInFlight = false }
+            guard self.settingsViewGeneration == generation else { return }
+            switch update {
+            case .ready(let result):
+                self.settingsInFlight = false; self.settingsReady = true
+                self.settingsValue = result.0; self.presentation = result.1
+                self.applyLoadedSettings(executableExists: result.2)
+                self.launchHint.stringValue = "使用目前選項啟動；測試會寫入 Logs/last-launch.log"
+            case .unconfirmed: self.launchHint.stringValue = "讀取尚未確認；可關閉視窗，稍後再開啟。"
+            case .busy:
+                self.settingsInFlight = false
+                self.launchHint.stringValue = "另一項設定操作仍在進行；請稍後重新開啟。"
+            case .failed:
+                self.settingsInFlight = false
+                self.launchHint.stringValue = "無法讀取設定；原檔未變更。"
+            }
+        }
+    }
+
+    private func applyLoadedSettings(executableExists: Bool) {
+        executableAvailable = executableExists
+        let global = settingsValue
+        let rule = settingsValue.perProfile[game.id]
         let hasFonts = rule?.fontMingLiuTarget != nil
             || rule?.fontSongtiTarget != nil
             || rule?.fontSmoothing != nil
@@ -569,7 +610,7 @@ private final class CyderGameSettingsWindowController: NSWindowController, NSWin
         arguments.string = formatArguments(rule?.arguments ?? [])
         refreshOptionalTabs()
 
-        let executableExists = FileManager.default.fileExists(atPath: game.executablePath)
+        confirmButton.isEnabled = true
         launchButton.isEnabled = executableExists
         removeProfileButton.isHidden = !self.independent
         removeProfileButton.isEnabled = self.independent
@@ -599,6 +640,8 @@ private final class CyderGameSettingsWindowController: NSWindowController, NSWin
         cancelButton.target = self
         cancelButton.action = #selector(cancelSettings)
         cancelButton.keyEquivalent = "\u{1b}"
+        confirmButton.identifier = NSUserInterfaceItemIdentifier("game-settings-save")
+        retina.identifier = NSUserInterfaceItemIdentifier("game-settings-retina")
         confirmButton.title = "套用"
         confirmButton.bezelStyle = .rounded
         confirmButton.keyEquivalent = "\r"
@@ -803,12 +846,14 @@ private final class CyderGameSettingsWindowController: NSWindowController, NSWin
     }
 
     @objc private func launchGame() {
+        guard settingsReady, executableAvailable, !settingsInFlight else { return }
         // Testing is intentionally non-destructive: keep the draft window
         // open so the user can compare, adjust, and test again before Apply.
         onLaunch?(game.executableURL, currentRule())
     }
 
     @objc private func removeProfile() {
+        guard settingsReady, independent, !settingsInFlight else { return }
         let alert = NSAlert()
         alert.messageText = "移除「\(game.displayName)」的獨立設定？"
         alert.informativeText = "這會刪除專屬的 Windows 環境；遊戲檔案與遊戲庫項目不會刪除。"
@@ -851,7 +896,7 @@ private final class CyderGameSettingsWindowController: NSWindowController, NSWin
     }
 
     private func currentRule() -> CyderExecutableSettings {
-        var rule = settingsStore.value.perProfile[game.id] ?? CyderExecutableSettings()
+        var rule = settingsValue.perProfile[game.id] ?? CyderExecutableSettings()
         // Sync / power are global-only; clear any legacy per-game overrides.
         rule.msync = nil
         rule.esync = nil
@@ -1029,13 +1074,36 @@ private final class CyderGameSettingsWindowController: NSWindowController, NSWin
     }
 
     private func persistRule() {
-        let rule = currentRule()
-        do {
-            try settingsStore.update { $0.perProfile[game.id] = rule }
-            onSettingsChanged?()
-            stopModal(.OK)
-        } catch {
-            showAlert(title: "無法套用設定", message: error.localizedDescription)
+        guard settingsReady, !settingsInFlight else { return }
+        var draft = settingsValue
+        draft.perProfile[game.id] = currentRule()
+        let patch = CyderSettingsPatch(before: settingsValue, after: draft)
+        settingsInFlight = true
+        let generation = settingsViewGeneration
+        confirmButton.isEnabled = false
+        setControlsEnabled(false); launchButton.isEnabled = false
+        launchHint.stringValue = "正在儲存…"
+        settingsAccess.perform({ store in try store.apply(patch); return store.value }) { [weak self] update in
+            guard let self else { return }
+            if case .ready = update { self.settingsInFlight = false }
+            if case .failed = update { self.settingsInFlight = false }
+            guard self.settingsViewGeneration == generation else { return }
+            switch update {
+            case .ready(let value):
+                self.settingsInFlight = false; self.settingsValue = value
+                self.confirmButton.isEnabled = true
+                self.onSettingsChanged?()
+                self.stopModal(.OK)
+            case .unconfirmed: self.launchHint.stringValue = "儲存尚未確認；關閉視窗不代表取消。"
+            case .busy:
+                self.settingsInFlight = false; self.confirmButton.isEnabled = true
+                self.setControlsEnabled(self.executableAvailable); self.launchButton.isEnabled = self.executableAvailable
+                self.launchHint.stringValue = "另一項設定操作仍在進行；請稍後套用。"
+            case .failed:
+                self.settingsInFlight = false; self.confirmButton.isEnabled = true
+                self.setControlsEnabled(self.executableAvailable); self.launchButton.isEnabled = self.executableAvailable
+                self.launchHint.stringValue = "無法儲存或設定已被其他視窗修改；草稿仍保留。"
+            }
         }
     }
 
@@ -1055,7 +1123,7 @@ private final class CyderGameSettingsWindowController: NSWindowController, NSWin
     }
 
     private var canSelectD3DMetal: Bool {
-        supportsD3DMetalOS && CyderGptk.preferredSource() != nil
+        supportsD3DMetalOS && presentation.hasD3DMetal
     }
 
     /// DXMT raises the OS floor to macOS 15 (Sequoia); it does not share
@@ -1065,11 +1133,11 @@ private final class CyderGameSettingsWindowController: NSWindowController, NSWin
     }
 
     private var canSelectDxmt: Bool {
-        supportsDxmtOS && CyderGraphicsCapabilities.current(engineRoot: CyderPaths.engine).hasDxmt
+        supportsDxmtOS && presentation.hasDxmt
     }
 
     private var canSelectDxvk: Bool {
-        CyderGraphicsCapabilities.current(engineRoot: CyderPaths.engine).hasDxvk
+        presentation.hasDxvk
     }
 
     private var graphicsBackendTitles: [String] {
@@ -1082,7 +1150,7 @@ private final class CyderGameSettingsWindowController: NSWindowController, NSWin
         item.isEnabled = canSelectD3DMetal
         if !supportsD3DMetalOS {
             item.toolTip = "需要 macOS 14+"
-        } else if CyderGptk.preferredSource() == nil {
+        } else if !presentation.hasD3DMetal {
             item.toolTip = "需要本機 CrossOver 或已安裝的評估版 GPTK"
         } else {
             item.toolTip = nil
@@ -1094,7 +1162,7 @@ private final class CyderGameSettingsWindowController: NSWindowController, NSWin
         item.isEnabled = canSelectDxmt
         if !supportsDxmtOS {
             item.toolTip = "需要 macOS 15+"
-        } else if !CyderGraphicsCapabilities.current(engineRoot: CyderPaths.engine).hasDxmt {
+        } else if !presentation.hasDxmt {
             item.toolTip = "需要已安裝的 DXMT 圖形元件"
         } else {
             item.toolTip = nil

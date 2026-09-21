@@ -15,6 +15,37 @@ private let cyderWinetricksComponentGroups: [(String, [CyderWinetricksComponent]
     ]),
 ]
 
+/// Loaded with settings on the same bounded background owner, never by menu
+/// validation or AppKit control construction.
+struct CyderSettingsPresentation {
+    var engineVersion = "尚未安裝"
+    var hasD3DMetal = false
+    var hasDxmt = false
+    var hasDxvk = false
+    var gptkStatus: String?
+    var hasInstalledGptk = false
+    var profiles: [CyderProfileRecord] = []
+    var defaults = CyderSettings(fontMingLiuTarget: "songti")
+
+    static func load() -> Self {
+        var result = Self()
+        let caps = CyderGraphicsCapabilities.current(engineRoot: CyderPaths.engine)
+        result.hasD3DMetal = CyderGptk.preferredSource() != nil
+        result.hasDxmt = caps.hasDxmt; result.hasDxvk = caps.hasDxvk
+        result.engineVersion = CyderPaths.installedEngineVersion ?? "尚未安裝"
+        result.gptkStatus = CyderGptk.activeInfo()?.statusLine
+        result.hasInstalledGptk = FileManager.default.fileExists(atPath: CyderPaths.appleGptkRuntime.path)
+        result.profiles = CyderProfileStore(root: CyderPaths.support).listRecords()
+        result.defaults = .defaults
+        return result
+    }
+}
+
+private final class CyderSettingsBackgroundView: NSView {
+    override func draw(_ dirtyRect: NSRect) { NSColor.windowBackgroundColor.setFill(); dirtyRect.fill() }
+    override func viewDidChangeEffectiveAppearance() { needsDisplay = true }
+}
+
 final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate, NSTableViewDataSource, NSTableViewDelegate {
     var onImmediateSave: ((_ registrySetting: String) async -> Bool)?
     /// Live Wine `reg add` with draft env; return true only after registry apply succeeds.
@@ -35,7 +66,12 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate,
     var hasRunningExes: (() async -> Bool)?
     /// Stops all Cyder Wine processes (wineserver -k) and waits (-w). Returns true on success.
     var onStopAllWine: (() async -> Bool)?
-    private let store = CyderSettingsStore.shared
+    private var settingsValue = CyderSettings(fontMingLiuTarget: "songti")
+    private var presentation = CyderSettingsPresentation()
+    private var settingsReady = false
+    private var settingsLoadInFlight = false
+    private var loadGeneration = UUID()
+    private var settingsAccess = CyderSettingsAccess.shared
     private let applyButton = NSButton()
     private var wineIsRunning = false
     private let engineVersion = NSTextField(labelWithString: "")
@@ -62,6 +98,7 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate,
     private var settingsRevision = 0
     private var runningRefreshToken = UUID()
     private var explicitApplyInProgress = false
+    private var prefixApplyPending = false
     private let wineDiagnostics = NSPopUpButton()
     private let maplestoryWZCache = NSSwitch()
     private let diagnosticsWarning = NSTextField(wrappingLabelWithString: "")
@@ -83,7 +120,8 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate,
     private var selectedProfileID: String?
     private var profileDrafts: [String: CyderExecutableSettings] = [:]
     private var deletedProfiles: Set<String> = []
-    private let status = NSTextField(labelWithString: "設定已儲存")
+    private let status = NSTextField(wrappingLabelWithString: "正在讀取設定…")
+    private let retrySettingsButton = NSButton(title: "重試", target: nil, action: nil)
     private var isDirty = false
     private var settingsTabView: NSTabView?
     private var uriHandlerTabItem: NSTabViewItem?
@@ -98,7 +136,7 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate,
     private let uriHandlerProgress = NSProgressIndicator()
     private let uriHandlerRescanButton = NSButton()
 
-    convenience init() {
+    convenience init(settingsAccess: CyderSettingsAccess = .shared) {
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 560, height: 380),
             styleMask: [.titled, .closable],
@@ -106,10 +144,14 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate,
             defer: false
         )
         self.init(window: window)
+        self.settingsAccess = settingsAccess
         window.title = "Cyder 偏好設定"
         window.isReleasedWhenClosed = false
         window.delegate = self
         window.center()
+        let background = CyderSettingsBackgroundView(frame: window.contentView?.bounds ?? .zero)
+        background.autoresizingMask = [.width, .height]
+        window.contentView = background
         buildUI()
         reload()
     }
@@ -160,6 +202,14 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate,
         content.addSubview(status)
         content.addSubview(applyButton)
         content.addSubview(reset)
+        retrySettingsButton.target = self
+        retrySettingsButton.action = #selector(retrySettings)
+        retrySettingsButton.bezelStyle = .rounded
+        retrySettingsButton.isHidden = true
+        retrySettingsButton.translatesAutoresizingMaskIntoConstraints = false
+        content.addSubview(retrySettingsButton)
+        status.maximumNumberOfLines = 2
+        retina.identifier = NSUserInterfaceItemIdentifier("settings-retina")
         NSLayoutConstraint.activate([
             tabs.topAnchor.constraint(equalTo: content.topAnchor, constant: 16),
             tabs.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 18),
@@ -167,7 +217,9 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate,
             tabs.bottomAnchor.constraint(equalTo: status.topAnchor, constant: -14),
             status.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 22),
             status.bottomAnchor.constraint(equalTo: content.bottomAnchor, constant: -18),
-            status.trailingAnchor.constraint(lessThanOrEqualTo: applyButton.leadingAnchor, constant: -12),
+            status.trailingAnchor.constraint(lessThanOrEqualTo: retrySettingsButton.leadingAnchor, constant: -8),
+            retrySettingsButton.trailingAnchor.constraint(equalTo: applyButton.leadingAnchor, constant: -8),
+            retrySettingsButton.centerYAnchor.constraint(equalTo: status.centerYAnchor),
             applyButton.trailingAnchor.constraint(equalTo: reset.leadingAnchor, constant: -10),
             applyButton.centerYAnchor.constraint(equalTo: status.centerYAnchor),
             reset.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -20),
@@ -683,11 +735,56 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate,
     }
 
     private func refreshEngineVersionLabel() {
-        engineVersion.stringValue = CyderPaths.installedEngineVersion ?? "尚未安裝"
+        engineVersion.stringValue = presentation.engineVersion
+    }
+
+    private func setSettingsControlsEnabled(_ enabled: Bool) {
+        var visited = Set<ObjectIdentifier>()
+        func visit(_ view: NSView) {
+            guard visited.insert(ObjectIdentifier(view)).inserted else { return }
+            if let control = view as? NSControl, control !== status, control !== retrySettingsButton {
+                let navigation: [Selector] = [#selector(openGameLibrary), #selector(exportLastGameLog), #selector(cleanDebugLogs), #selector(stopAllWine)]
+                control.isEnabled = control.action.map { navigation.contains($0) } == true || enabled
+            }
+            for child in view.subviews { visit(child) }
+            if let tabs = view as? NSTabView {
+                tabs.tabViewItems.compactMap { $0.view }.forEach(visit)
+            }
+        }
+        if let content = window?.contentView { visit(content) }
     }
 
     private func reload() {
-        let value = store.value
+        guard !settingsLoadInFlight else { return }
+        settingsLoadInFlight = true
+        let wasReady = settingsReady
+        let token = UUID(); loadGeneration = token
+        settingsReady = false
+        setSettingsControlsEnabled(false)
+        setNormalStatus("正在讀取設定…")
+        settingsAccess.perform({ store in (store.value, CyderSettingsPresentation.load()) }) { [weak self] update in
+            guard let self, self.loadGeneration == token else { return }
+            switch update {
+            case .ready(let result):
+                self.settingsLoadInFlight = false
+                self.settingsValue = result.0; self.presentation = result.1; self.settingsReady = true
+                self.setSettingsControlsEnabled(true)
+                self.applyLoadedSettings()
+            case .unconfirmed: self.showSettingsIssue("讀取尚未確認；可關閉視窗，稍後再開啟。")
+            case .busy:
+                self.settingsLoadInFlight = false; self.settingsReady = wasReady
+                self.setSettingsControlsEnabled(wasReady)
+                if wasReady { self.refreshGraphicsControls() }
+                self.showSettingsIssue("另一項設定操作仍在進行；請稍後重新開啟。")
+            case .failed:
+                self.settingsLoadInFlight = false
+                self.showSettingsIssue("無法讀取設定；保留原檔，請檢查記錄。")
+            }
+        }
+    }
+
+    private func applyLoadedSettings() {
+        let value = settingsValue
         syncMode.selectItem(at: CyderSyncMode(msync: value.msync, esync: value.esync ?? false).rawValue)
         updateSyncModeDescription()
         wineLocale.selectItem(at: value.wineLocale.menuIndex)
@@ -715,7 +812,7 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate,
         diagnosticsWarning.isHidden = value.wineDiagnostics == .quiet
         refreshGraphicsControls()
         profileDrafts = value.perProfile
-        profileRecords = Dictionary(uniqueKeysWithValues: profileStore.listRecords().map { ($0.profileId, $0) })
+        profileRecords = Dictionary(uniqueKeysWithValues: presentation.profiles.map { ($0.profileId, $0) })
         deletedProfiles.removeAll()
         selectedProfileID = nil
         executableName.stringValue = "尚未選擇 EXE"
@@ -734,10 +831,11 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate,
     private func refreshRunningChrome(persistPendingWhenIdle: Bool = false) {
         let token = UUID()
         runningRefreshToken = token
+        let revision = settingsRevision
         Task { @MainActor [weak self] in
             guard let self else { return }
             let running = await self.hasRunningExes?() ?? true
-            guard self.runningRefreshToken == token else { return }
+            guard self.runningRefreshToken == token, self.settingsReady, self.settingsRevision == revision else { return }
             self.wineIsRunning = running
             if !running && persistPendingWhenIdle && self.deferredSettingsChanged() {
                 self.saveImmediately(registrySetting: "all", deferredChange: true)
@@ -748,7 +846,18 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate,
         }
     }
 
+    @objc private func retrySettings() {
+        if settingsReady { saveImmediately(registrySetting: "all", deferredChange: true) }
+        else { reload() }
+    }
+
+    private func showSettingsIssue(_ message: String) {
+        setNormalStatus(message)
+        retrySettingsButton.isHidden = false
+    }
+
     private func setNormalStatus(_ message: String = "設定已儲存") {
+        retrySettingsButton.isHidden = true
         status.stringValue = message
         status.textColor = .secondaryLabelColor
         status.font = .systemFont(ofSize: 11)
@@ -762,6 +871,7 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate,
     }
 
     private func saveImmediately(registrySetting: String? = nil, deferredChange: Bool = false) {
+        guard settingsReady else { return }
         settingsRevision += 1
         let revision = settingsRevision
         Task { @MainActor [weak self] in
@@ -779,15 +889,16 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate,
             return
         }
 
-        let requiresPrefixApply = !running && prefixSettingsChanged()
+        let requiresPrefixApply = !running && (prefixApplyPending || prefixSettingsChanged())
         isDirty = true
-        guard saveControls(persistDeferredSettings: !running) else { return }
+        guard await saveControls(persistDeferredSettings: !running, revision: revision, needsPrefixApply: requiresPrefixApply), settingsRevision == revision else { return }
         if !running && requiresPrefixApply {
             status.stringValue = "正在套用設定…"
             let ok = await onImmediateSave?(registrySetting ?? "all") ?? false
             guard settingsRevision == revision else { return }
+            prefixApplyPending = !ok
             if !ok {
-                status.stringValue = "設定已儲存，但無法更新 Windows 環境"
+                showSettingsIssue("設定已儲存，但無法更新 Windows 環境；可重試。")
                 status.textColor = .systemRed
                 status.font = .systemFont(ofSize: 11)
                 return
@@ -832,7 +943,8 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate,
             status.textColor = .systemRed
             return
         }
-        guard saveControls(persistDeferredSettings: true) else { return }
+        guard await saveControls(persistDeferredSettings: true, revision: revision), settingsRevision == revision else { return }
+        prefixApplyPending = false
         isDirty = false
         applyButton.isHidden = true
         setNormalStatus("設定已儲存；關閉所有 Wine 程序後重新啟動才會生效。")
@@ -873,11 +985,9 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate,
     }
 
     @objc private func graphicsBackendChanged() {
-        if !graphicsBackendValue.usesDxvkTranslation, store.value.graphicsHud == .dxvk {
-            // Drop an invalid DXVK-only HUD choice when leaving DXVK families.
-            try? store.update { $0.graphicsHud = .off }
-        }
-        rebuildGraphicsHudMenu(selecting: store.value.graphicsHud)
+        let preferred: CyderGraphicsHud = !graphicsBackendValue.usesDxvkTranslation && settingsValue.graphicsHud == .dxvk
+            ? .off : settingsValue.graphicsHud
+        rebuildGraphicsHudMenu(selecting: preferred)
         refreshGraphicsControls()
         saveImmediately()
     }
@@ -940,7 +1050,7 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate,
             alert.addButton(withTitle: "啟用")
             alert.addButton(withTitle: "取消")
             if alert.runModal() != .alertFirstButtonReturn {
-                switch store.value.wineDiagnostics {
+                switch settingsValue.wineDiagnostics {
                 case .quiet: wineDiagnostics.selectItem(at: 0)
                 case .errors: wineDiagnostics.selectItem(at: 1)
                 case .sync: wineDiagnostics.selectItem(at: 2)
@@ -1076,37 +1186,38 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate,
         saveImmediately(deferredChange: true)
     }
 
-    private func saveControls(persistDeferredSettings: Bool = true) -> Bool {
+    @MainActor private func saveControls(persistDeferredSettings: Bool = true, revision: Int, needsPrefixApply: Bool = false) async -> Bool {
+        guard settingsReady else { return false }
         let dpiValues = [96, 120, 144, 168, 192, 240]
         let smoothingValues = ["off", "grayscale", "cleartype-rgb"]
-        do {
-            try store.update {
-                let previousProfiles = $0.perProfile
+        var draft = settingsValue
+
+                let previousProfiles = draft.perProfile
                 let mode = CyderSyncMode.allCases[max(0, min(syncMode.indexOfSelectedItem, CyderSyncMode.allCases.count - 1))]
                 if persistDeferredSettings {
-                    $0.msync = mode == .msync
-                    $0.esync = mode == .esync
-                    $0.retinaMode = retina.state == .on
-                    $0.dpi = dpiValues[max(0, dpi.indexOfSelectedItem)]
-                    $0.fontMingLiuTarget = cyderFontTarget(at: fontMingLiu.indexOfSelectedItem)
-                    $0.fontSongtiTarget = cyderFontTarget(at: fontSongti.indexOfSelectedItem)
-                    $0.fontSmoothing = smoothingValues[max(0, smoothing.indexOfSelectedItem)]
+                    draft.msync = mode == .msync
+                    draft.esync = mode == .esync
+                    draft.retinaMode = retina.state == .on
+                    draft.dpi = dpiValues[max(0, dpi.indexOfSelectedItem)]
+                    draft.fontMingLiuTarget = cyderFontTarget(at: fontMingLiu.indexOfSelectedItem)
+                    draft.fontSongtiTarget = cyderFontTarget(at: fontSongti.indexOfSelectedItem)
+                    draft.fontSmoothing = smoothingValues[max(0, smoothing.indexOfSelectedItem)]
                 }
-                $0.graphicsBackend = graphicsBackendValue
-                $0.moltenvkVariant = moltenvkVariantValue
-                $0.dxvkFrameRate = CyderDxvkFrameRate(menuIndex: dxvkFrameRate.indexOfSelectedItem)
-                $0.graphicsHud = graphicsHudValue
-                $0.dxvkHudFrametimes = dxvkHudFrametimes.state == .on
+                draft.graphicsBackend = graphicsBackendValue
+                draft.moltenvkVariant = moltenvkVariantValue
+                draft.dxvkFrameRate = CyderDxvkFrameRate(menuIndex: dxvkFrameRate.indexOfSelectedItem)
+                draft.graphicsHud = graphicsHudValue
+                draft.dxvkHudFrametimes = dxvkHudFrametimes.state == .on
                 switch wineDiagnostics.indexOfSelectedItem {
-                case 1: $0.wineDiagnostics = .errors
-                case 2: $0.wineDiagnostics = .sync
-                case 3: $0.wineDiagnostics = .unwind
-                default: $0.wineDiagnostics = .quiet
+                case 1: draft.wineDiagnostics = .errors
+                case 2: draft.wineDiagnostics = .sync
+                case 3: draft.wineDiagnostics = .unwind
+                default: draft.wineDiagnostics = .quiet
                 }
-                $0.wineLocale = CyderWineLocale(menuIndex: wineLocale.indexOfSelectedItem)
-                $0.maplestoryWZCache = maplestoryWZCache.state == .on
+                draft.wineLocale = CyderWineLocale(menuIndex: wineLocale.indexOfSelectedItem)
+                draft.maplestoryWZCache = maplestoryWZCache.state == .on
                 for profileID in deletedProfiles {
-                    $0.perProfile.removeValue(forKey: profileID)
+                    draft.perProfile.removeValue(forKey: profileID)
                 }
                 for (profileID, rule) in profileDrafts where !deletedProfiles.contains(profileID) {
                     var next = rule
@@ -1120,18 +1231,37 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate,
                         next.fontSongtiTarget = previous?.fontSongtiTarget
                         next.fontSmoothing = previous?.fontSmoothing
                     }
-                    $0.perProfile[profileID] = next
+                    draft.perProfile[profileID] = next
+                }
+        let patch = CyderSettingsPatch(before: settingsValue, after: draft)
+        status.stringValue = "正在儲存…"
+        return await withCheckedContinuation { continuation in
+            var replied = false
+            settingsAccess.perform({ store in try store.apply(patch); return store.value }) { [weak self] update in
+                func finish(_ success: Bool) {
+                    guard !replied else { return }; replied = true; continuation.resume(returning: success)
+                }
+                guard let self else { finish(false); return }
+                switch update {
+                case .ready(let value):
+                    self.settingsValue = value
+                    self.prefixApplyPending = self.prefixApplyPending || needsPrefixApply
+                    if self.settingsRevision == revision {
+                        self.isDirty = false; self.setNormalStatus("已儲存")
+                    }
+                    finish(true)
+                case .unconfirmed:
+                    // Keep the continuation until the physical outcome. Ending
+                    // it here would skip the required prefix apply on late save.
+                    if self.settingsRevision == revision { self.setNormalStatus("儲存尚未確認；仍在追蹤實際結果。") }
+                case .busy:
+                    if self.settingsRevision == revision { self.showSettingsIssue("另一項設定操作仍在進行；草稿尚未儲存。") }
+                    finish(false)
+                case .failed:
+                    if self.settingsRevision == revision { self.showSettingsIssue("無法儲存或設定已被其他視窗修改；草稿仍保留。") }
+                    finish(false)
                 }
             }
-            status.stringValue = "已儲存"
-            status.textColor = .secondaryLabelColor
-            isDirty = false
-            return true
-        } catch {
-            CyderDiagnostics.shared.warning("unable to save settings error=\(error)")
-            status.stringValue = "無法儲存設定：\(error.localizedDescription)"
-            status.textColor = .systemRed
-            return false
         }
     }
 
@@ -1144,7 +1274,7 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate,
             alert.addButton(withTitle: "我知道了")
             alert.addButton(withTitle: "取消")
             if alert.runModal() == .alertSecondButtonReturn {
-                fontMingLiu.selectItem(at: cyderFontTargetIndex(store.value.fontMingLiuTarget))
+                fontMingLiu.selectItem(at: cyderFontTargetIndex(settingsValue.fontMingLiuTarget))
             }
         }
         saveImmediately(registrySetting: "font-mingliu", deferredChange: true)
@@ -1159,7 +1289,7 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate,
     }
 
     private var canSelectD3DMetal: Bool {
-        supportsD3DMetalOS && CyderGptk.preferredSource() != nil
+        supportsD3DMetalOS && presentation.hasD3DMetal
     }
 
     /// DXMT raises the OS floor to macOS 15 (Sequoia); it does not share
@@ -1169,11 +1299,11 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate,
     }
 
     private var canSelectDxmt: Bool {
-        supportsDxmtOS && CyderGraphicsCapabilities.current(engineRoot: CyderPaths.engine).hasDxmt
+        supportsDxmtOS && presentation.hasDxmt
     }
 
     private var canSelectDxvk: Bool {
-        CyderGraphicsCapabilities.current(engineRoot: CyderPaths.engine).hasDxvk
+        presentation.hasDxvk
     }
 
     private var graphicsBackendTitles: [String] {
@@ -1186,7 +1316,7 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate,
         item.isEnabled = canSelectD3DMetal
         if !supportsD3DMetalOS {
             item.toolTip = "需要 macOS 14+"
-        } else if CyderGptk.preferredSource() == nil {
+        } else if !presentation.hasD3DMetal {
             item.toolTip = "需要本機 CrossOver 或已安裝的評估版 GPTK"
         } else {
             item.toolTip = nil
@@ -1198,7 +1328,7 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate,
         item.isEnabled = canSelectDxmt
         if !supportsDxmtOS {
             item.toolTip = "需要 macOS 15+"
-        } else if !CyderGraphicsCapabilities.current(engineRoot: CyderPaths.engine).hasDxmt {
+        } else if !presentation.hasDxmt {
             item.toolTip = "需要已安裝的 DXMT 圖形元件"
         } else {
             item.toolTip = nil
@@ -1274,7 +1404,6 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate,
         updateDxmtMenuItemAvailability()
         updateDxvkMenuItemAvailability()
         updateMoltenvkMenuItemAvailability()
-        CyderGptk.syncEngineLink()
         let backend = graphicsBackendValue
         let showFrameRate = backend.usesFrameLimiter
         let showDxvkFrametimes = backend.usesDxvkTranslation
@@ -1298,8 +1427,8 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate,
         case .d3dmetal: "使用 Apple D3DMetal／GPTK；需要 macOS 14+ 與可用的 GPTK。"
         }
         gptkNote.stringValue = "D3DMetal 可使用本機 CrossOver 內附的 GPTK，或自行從 Apple 下載並安裝；若兩者皆有，Cyder 優先使用已安裝版本。"
-        if let info = CyderGptk.activeInfo() {
-            d3dmetalStatus.stringValue = info.statusLine
+        if let line = presentation.gptkStatus {
+            d3dmetalStatus.stringValue = line
         } else {
             d3dmetalStatus.stringValue = supportsD3DMetalOS
                 ? "D3DMetal 不可用：找不到 CrossOver 或已安裝的 GPTK"
@@ -1309,7 +1438,7 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate,
         // the views themselves, not superview (that would hide the whole tab).
         d3dmetalStatus.isHidden = !showGptkControls
         installGptkButton.isHidden = !showGptkControls
-        removeGptkButton.isHidden = !FileManager.default.fileExists(atPath: CyderPaths.appleGptkRuntime.path)
+        removeGptkButton.isHidden = !presentation.hasInstalledGptk
             || !showGptkControls
         (installGptkButton.superview as? NSStackView)?.isHidden = !showGptkControls
         gptkNote.isHidden = !showGptkControls
@@ -1443,7 +1572,7 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate,
     }
 
     private func defaultExecutableSettings() -> CyderExecutableSettings {
-        let value = store.value
+        let value = settingsValue
         var rule = CyderExecutableSettings()
         rule.msync = value.msync
         rule.esync = value.esync ?? false
@@ -1594,7 +1723,7 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate,
         alert.addButton(withTitle: "恢復預設值")
         alert.addButton(withTitle: "取消")
         guard alert.runModal() == .alertFirstButtonReturn else { return }
-        let value = CyderSettings.defaults
+        let value = presentation.defaults
         let dpiValues = [96, 120, 144, 168, 192, 240]
         syncMode.selectItem(at: CyderSyncMode(msync: value.msync, esync: value.esync ?? false).rawValue)
         updateSyncModeDescription()
@@ -1628,7 +1757,7 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate,
     }
 
     private func prefixSettingsChanged() -> Bool {
-        let value = store.value
+        let value = settingsValue
         let dpiValues = [96, 120, 144, 168, 192, 240]
         let smoothingValues = ["off", "grayscale", "cleartype-rgb"]
         return value.retinaMode != (retina.state == .on)
@@ -1642,7 +1771,7 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate,
     /// Keep this separate from graphics/HUD/diagnostics so those controls can
     /// continue to save immediately while a game is running.
     private func deferredSettingsChanged() -> Bool {
-        let value = store.value
+        let value = settingsValue
         let selectedMode = CyderSyncMode.allCases[max(0, min(syncMode.indexOfSelectedItem, CyderSyncMode.allCases.count - 1))]
         if value.msync != (selectedMode == .msync)
             || (value.esync ?? false) != (selectedMode == .esync) {
@@ -1675,7 +1804,7 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate,
     }
 
     private func sessionSettingsChanged() -> Bool {
-        let value = store.value
+        let value = settingsValue
         let selectedMode = CyderSyncMode.allCases[max(0, min(syncMode.indexOfSelectedItem, CyderSyncMode.allCases.count - 1))]
         if value.msync != (selectedMode == .msync)
             || (value.esync ?? false) != (selectedMode == .esync) {
