@@ -86,9 +86,12 @@ pump { stopped }
 // join its original request on re-election, then be safely pruned only after
 // the journal has saved it. This is explicitly injected native-layer evidence.
 let correlatedTicket = CyderExecutionOwner.Ticket(schema: 1, id: UUID(), issuer: dispatched!.executorEpoch!,
-    scope: nil, phase: "finished", owner: .init(boot: "injected-native-boot", pid: 12345, started: 10),
+    scope: "injected-prefix-scope", prefix: CyderPaths.support.path, phase: "finished", owner: .init(boot: "injected-native-boot", pid: 12345, started: 10),
     child: .init(boot: "injected-native-boot", pid: 12346, started: 11), status: 0, signalled: false,
-    correlation: .init(requestID: dispatched!.id, launchID: dispatched!.launchID!, digest: dispatched!.digest))
+    correlation: .init(requestID: dispatched!.id, launchID: dispatched!.launchID!, digest: dispatched!.digest),
+    handoff: .init(executable: "/injected/wine", pidFile: CyderPaths.support.appendingPathComponent("injected.pid").path),
+    nativeSpawn: .init(phase: "exited", bridge: .init(boot: "injected-native-boot", pid: 12347, started: 12),
+        process: .init(boot: "injected-native-boot", pid: 12348, started: 13), status: 53, signalled: false))
 let correlatedURL = ownerDirectory.appendingPathComponent(correlatedTicket.id.uuidString + ".json")
 try JSONEncoder().encode(correlatedTicket).write(to: correlatedURL)
 chmod(correlatedURL.path, 0o600)
@@ -103,6 +106,8 @@ precondition(replacement.recovered.filter { $0.phase == .awaitingUserResume }.co
 precondition(replacement.recovered.contains { $0.id == dispatched!.id && $0.phase == .uncertain })
 pump { replacement.recovered.first { $0.id == dispatched!.id }?.executionReceipt?.ticketID == correlatedTicket.id }
 pump { !FileManager.default.fileExists(atPath: correlatedURL.path) }
+precondition(replacement.recovered.first { $0.id == dispatched!.id }?.executionReceipt?.nativeSpawn?.status == 53,
+             "executor pruning lost the distinct native Wine root result")
 precondition(replacement.recovered.first { $0.id == dispatched!.id }?.phase == .uncertain,
              "native exit was incorrectly promoted to a confirmed Windows launch")
 precondition(replayCount == 0)

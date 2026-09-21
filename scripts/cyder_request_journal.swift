@@ -74,6 +74,17 @@ enum CyderAcceptedSettings {
 /// Its owner queue is exclusively for disk transactions, never LifecycleStore
 /// or AppKit. No transport handler may acknowledge before its callback.
 final class CyderRequestJournal {
+    struct NativeSpawnReceipt: Codable, Equatable {
+        let phase: String
+        let bridgePID: Int32
+        let bridgeBoot: String
+        let bridgeStarted: UInt64
+        let processPID: Int32?
+        let processBoot: String?
+        let processStarted: UInt64?
+        let status: Int32?
+        let signalled: Bool?
+    }
     struct ExecutionReceipt: Codable, Equatable {
         let ticketID: UUID
         let requestID: String
@@ -89,6 +100,7 @@ final class CyderRequestJournal {
         let childStarted: UInt64?
         let status: Int32?
         var signalled: Bool? = nil
+        var nativeSpawn: NativeSpawnReceipt? = nil
     }
     enum Phase: String, Codable {
         case queued, dispatching, observing, completed, failed, cancelled, uncertain, awaitingUserResume
@@ -367,7 +379,7 @@ final class CyderRequestJournal {
             do {
                 guard !closing, available, var next = document else { throw Failure.unavailable }
                 guard receipts.count <= 512 else { throw Failure.full }
-                let ranks = ["prepared": 0, "active": 1, "uncertain": 2, "finished": 3, "revoked": 3]
+                let ranks = ["prepared": 0, "active": 1, "uncertain": 2, "handedOff": 2, "finished": 3, "revoked": 3]
                 var confirmed: [UUID] = []
                 for receipt in receipts {
                     guard let rank = ranks[receipt.phase], var record = next.records[receipt.requestID],
@@ -384,6 +396,19 @@ final class CyderRequestJournal {
                         if old.childPID != nil {
                             guard old.childPID == receipt.childPID, old.childBoot == receipt.childBoot,
                                   old.childStarted == receipt.childStarted else { continue }
+                        }
+                        if let prior = old.nativeSpawn {
+                            let spawnRanks = ["claiming": 0, "spawned": 1, "exited": 2, "failed": 2]
+                            guard let current = receipt.nativeSpawn,
+                                  prior.bridgePID == current.bridgePID, prior.bridgeBoot == current.bridgeBoot,
+                                  prior.bridgeStarted == current.bridgeStarted,
+                                  let priorRank = spawnRanks[prior.phase], let currentRank = spawnRanks[current.phase],
+                                  currentRank >= priorRank,
+                                  !(priorRank == 2 && prior != current) else { continue }
+                            if prior.processPID != nil {
+                                guard prior.processPID == current.processPID, prior.processBoot == current.processBoot,
+                                      prior.processStarted == current.processStarted else { continue }
+                            }
                         }
                     }
                     if record.executionReceipt != receipt {

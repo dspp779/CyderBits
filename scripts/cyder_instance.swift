@@ -514,11 +514,18 @@ final class CyderInstanceCoordinator {
                 guard !closing, let tickets else { finishExecutionReceiptRead(); return }
                 let receipts = tickets.compactMap { ticket -> CyderRequestJournal.ExecutionReceipt? in
                     guard let correlation = ticket.correlation else { return nil }
+                    let spawn = ticket.nativeSpawn.map {
+                        CyderRequestJournal.NativeSpawnReceipt(phase: $0.phase,
+                            bridgePID: $0.bridge.pid, bridgeBoot: $0.bridge.boot, bridgeStarted: $0.bridge.started,
+                            processPID: $0.process?.pid, processBoot: $0.process?.boot,
+                            processStarted: $0.process?.started, status: $0.status, signalled: $0.signalled)
+                    }
                     return .init(ticketID: ticket.id, requestID: correlation.requestID,
                         launchID: correlation.launchID, epoch: ticket.issuer, digest: correlation.digest,
                         phase: ticket.phase, ownerPID: ticket.owner?.pid, ownerBoot: ticket.owner?.boot,
                         ownerStarted: ticket.owner?.started, childPID: ticket.child?.pid,
-                        childBoot: ticket.child?.boot, childStarted: ticket.child?.started, status: ticket.status, signalled: ticket.signalled)
+                        childBoot: ticket.child?.boot, childStarted: ticket.child?.started, status: ticket.status,
+                        signalled: ticket.signalled, nativeSpawn: spawn)
                 }
                 journal.reconcileExecutions(receipts) { [self] result in
                     guard !closing, case .success(let confirmed) = result else { finishExecutionReceiptRead(); return }

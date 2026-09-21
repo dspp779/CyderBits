@@ -1,6 +1,6 @@
 import Foundation
 import Darwin
-if CommandLine.arguments.dropFirst().first == "--execution-owner" { exit(CyderExecutionOwner.run(arguments: CommandLine.arguments)) }
+if ["--execution-owner", "--execution-wine"].contains(CommandLine.arguments.dropFirst().first ?? "") { exit(CyderExecutionOwner.run(arguments: CommandLine.arguments)) }
 func check(_ value: @autoclosure () -> Bool, _ message: String, line: UInt = #line) {
     guard value() else { fputs("FAIL executor line \(line): \(message)\n", stderr); exit(1) }
 }
@@ -165,6 +165,20 @@ try io { try CyderExecutionOwner.prune(root: retention, confirmed: [retained]) }
 let afterAcknowledgement = try io { try CyderExecutionOwner.snapshot(root: retention) }
 check(!afterAcknowledgement.contains(retained) && afterAcknowledgement.contains(unresolved), "exact durable confirmation did not release only its terminal ticket")
 print("PASS retention: 512-ticket capacity reclaims only disposable terminal history, correlated evidence waits for exact durable ACK, unresolved/live authority retained and pruned tickets cannot replay")
+
+let invalidSpawnRoot = root.appendingPathComponent("invalid-spawn")
+try FileManager.default.createDirectory(at: invalidSpawnRoot, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+let invalidSpawn = CyderExecutionOwner.Ticket(schema: 1, id: UUID(), issuer: issuer, scope: "injected-scope",
+    prefix: root.path, phase: "handedOff", handoff: .init(executable: "/injected/wine", pidFile: root.appendingPathComponent("pid").path),
+    nativeSpawn: .init(phase: "unknown-future-state", bridge: .init(boot: "injected-boot", pid: 123, started: 456)))
+let invalidSpawnURL = invalidSpawnRoot.appendingPathComponent(invalidSpawn.id.uuidString + ".json")
+let invalidSpawnBytes = try JSONEncoder().encode(invalidSpawn)
+try invalidSpawnBytes.write(to: invalidSpawnURL); chmod(invalidSpawnURL.path, 0o600)
+var rejectedInvalidSpawn = false
+do { _ = try io { try CyderExecutionOwner.snapshot(root: invalidSpawnRoot) } } catch { rejectedInvalidSpawn = true }
+let preservedInvalidSpawn = try Data(contentsOf: invalidSpawnURL)
+check(rejectedInvalidSpawn && preservedInvalidSpawn == invalidSpawnBytes, "unknown native spawn state was treated as a confirmed handoff")
+print("PASS handoff schema: unknown native spawn proof is rejected and original bytes remain intact")
 
 let corrupt = ledger.appendingPathComponent(UUID().uuidString + ".json")
 let corruptBytes = Data("broken receipt".utf8)

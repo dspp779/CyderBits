@@ -3422,6 +3422,9 @@ cyder_run_wine_exe() {
     fi
   fi
   cyder_exec_game() {
+    # Only the final game call consumes the owner's one-use native handoff.
+    # Prefix preparation and standalone CLI calls keep their existing paths.
+    export CYDER_EXECUTION_FINAL=1
     if [[ "$target_kind" == "msi" ]]; then
       if (( ${#game_args[@]} > 0 )); then
         cyder_exec_wine "$wine_bin" msiexec /i "$exe" "${game_args[@]}"
@@ -3615,13 +3618,27 @@ cyder_run_wine_exe() {
         cyder_sentinel_attach "$prefix" "$exe" || true
         cyder_exec_game_with_launch_log "$log_file" &
         wine_pid=$!
-        cyder_sentinel_publish_pid "$wine_pid"
+        local reported_wine_pid="$wine_pid"
+        if [[ -n "${CYDER_EXECUTION_OWNER_TICKET:-}" ]]; then
+          # The native bridge publishes its actual Wine child only after spawn.
+          # A log wrapper PID is never a successful handoff receipt.
+          while [[ ! -s "$pid_file" ]]; do
+            case $'\n'"$(jobs -pr)"$'\n' in
+              *$'\n'"$wine_pid"$'\n'*) sleep 0.1 ;;
+              *) break ;;
+            esac
+          done
+          reported_wine_pid="$(cat "$pid_file" 2>/dev/null || true)"
+          [[ "$reported_wine_pid" =~ ^[1-9][0-9]*$ ]] || reported_wine_pid=0
+        else
+          printf '%s\n' "$wine_pid" >"${pid_file}.tmp"
+          mv -f "${pid_file}.tmp" "$pid_file"
+        fi
+        cyder_sentinel_publish_pid "$reported_wine_pid"
         cyder_sentinel_close_write
-        printf '%s\n' "$wine_pid" >"${pid_file}.tmp"
-        mv -f "${pid_file}.tmp" "$pid_file"
         if [[ -n "$detached_session_id" ]]; then
-          sed -i '' "s/^pid=.*/pid=$wine_pid/" "$detached_session_id" 2>/dev/null || \
-            sed -i "s/^pid=.*/pid=$wine_pid/" "$detached_session_id"
+          sed -i '' "s/^pid=.*/pid=$reported_wine_pid/" "$detached_session_id" 2>/dev/null || \
+            sed -i "s/^pid=.*/pid=$reported_wine_pid/" "$detached_session_id"
         fi
         wine_status=0
         wait "$wine_pid" || wine_status=$?
@@ -3636,7 +3653,7 @@ cyder_run_wine_exe() {
         if [[ -n "$result_file" ]]; then
           {
             printf 'schema=1\n'
-            printf 'pid=%s\n' "$wine_pid"
+            printf 'pid=%s\n' "$reported_wine_pid"
             printf 'exit_status=%s\n' "$wine_status"
           } >"${result_file}.tmp"
           mv -f "${result_file}.tmp" "$result_file"
@@ -3679,6 +3696,9 @@ cyder_run_wine_exe() {
         if [[ -n "${CYDER_SENTINEL_WATCH_FILE:-}" ]]; then
           rm -rf "$(dirname "$CYDER_SENTINEL_WATCH_FILE")"
         fi
+        # If no PID was published, the waiting parent must receive the actual
+        # final-executor failure, not the status of this cleanup block.
+        exit "$wine_status"
       ) &
       local supervisor_pid=$!
       # The supervisor now owns both the Wine child and runtime session.
@@ -3722,6 +3742,21 @@ cyder_exec_wine() {
   local mode="${CYDER_POWER_MODE:-normal}"
   local taskpolicy_bin=""
   taskpolicy_bin="$(cyder_find_taskpolicy || true)"
+  if [[ "${CYDER_EXECUTION_FINAL:-0}" == 1 && -n "${CYDER_EXECUTION_OWNER_TICKET:-}" ]]; then
+    local helper="${CYDER_EXECUTION_OWNER_HELPER:-}" owner_root="${CYDER_EXECUTION_OWNER_ROOT:-}"
+    [[ -x "$helper" && -n "$owner_root" ]] || return 75
+    local -a native_command=("$helper" --execution-wine "$owner_root" "$CYDER_EXECUTION_OWNER_TICKET" -- "$wine_bin")
+    if (( ${#frontend_args[@]} > 0 )); then native_command+=("${frontend_args[@]}"); fi
+    if [[ "$mode" == background && -n "$taskpolicy_bin" ]]; then
+      "$taskpolicy_bin" -c background "${native_command[@]}" "$@"
+    elif [[ "$mode" == normal ]]; then
+      "${native_command[@]}" "$@"
+    else
+      echo "error: taskpolicy is unavailable; select Standard energy mode" >&2
+      return 127
+    fi
+    return $?
+  fi
   if [[ "$mode" == background && -n "$taskpolicy_bin" ]]; then
     if (( ${#frontend_args[@]} > 0 )); then
       "$taskpolicy_bin" -c background /usr/bin/arch -x86_64 "$wine_bin" "${frontend_args[@]}" "$@"

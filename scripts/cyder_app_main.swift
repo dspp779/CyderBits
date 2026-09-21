@@ -2575,7 +2575,13 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
                     }
                     correlation = .init(requestID: authorization.id, launchID: launchID, digest: authorization.digest)
                 } else { correlation = nil }
-                let ticket = try CyderExecutionOwner.prepare(root: ownerRoot, issuer: issuer, scope: prefix, correlation: correlation)
+                let handoff: CyderExecutionOwner.Handoff?
+                if extraEnvironment["CYDER_WINE_DETACH"] == "1", let pidFile = extraEnvironment["CYDER_WINE_PID_FILE"] {
+                    handoff = .init(executable: CyderPaths.engine.appendingPathComponent("bin/wine").resolvingSymlinksInPath().path,
+                                    pidFile: pidFile)
+                } else { handoff = nil }
+                let ticket = try CyderExecutionOwner.prepare(root: ownerRoot, issuer: issuer, scope: prefix,
+                                                            correlation: correlation, handoff: handoff)
                 process.executableURL = helper
                 process.arguments = ["--execution-owner", ownerRoot.path, ticket.uuidString, "--", "/bin/bash"] + args
             } catch {
@@ -2850,7 +2856,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
 @main
 struct CyderMain {
     static func main() {
-        if CommandLine.arguments.dropFirst().first == "--execution-owner" {
+        if ["--execution-owner", "--execution-wine"].contains(CommandLine.arguments.dropFirst().first ?? "") {
             exit(CyderExecutionOwner.run(arguments: CommandLine.arguments))
         }
         if CommandLine.arguments.dropFirst().contains("--sentinel-connect") {

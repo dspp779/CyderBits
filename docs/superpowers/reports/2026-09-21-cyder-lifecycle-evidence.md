@@ -346,3 +346,26 @@ C9 尚未解決 detached Bash 返回後的 wrapper late-spawn 交接；helper �
 - universal macOS11 build 最新 `build-C10-r2.log` 通過；隔離包 `/private/tmp/cyder-lifecycle-c10-build/Cyder.app` 配置 local.cyder.lifecycle-c10、CD2 support/runtime、ad-hoc 簽章並驗證；manifest `build-C10-source-sha256.json`。本輪只啟動正式包的原生 helper，不是 GUI／Wine／NGS 相容性驗收。
 
 C10 補齊 executor 與原要求的可核對關聯及安全終態回收；它仍不能把 Bash 返回當作 Windows 已 exec。detached wrapper 的 late-spawn／最終執行權交接、helper 崩潰後的同 boot uncertainty 收斂、環境 waiter、精確 process/window action、剩餘 UX／I/O 與完整 V01–V14 矩陣繼續處理，目標保持進行中。
+
+### C11 基線：PID 公布後的 late-spawn
+
+- `.local/lifecycle-evidence/late-spawn-C11-baseline.py`／log 使用 C10 完整建置的原生 helper＋正式 cyder_run_wine_exe，只把 sentinel attach 與最後 Wine call 換成受控 native function。實測 pidPublished=true、nativeExit=0、ticket.phase=finished，但 effectBeforeRelease=false；放行後才產生 effect，正式 result 保存 exit_status=53。fixture 位於 `/private/tmp/cy-c11-late-spawn-2os1a2fz`，已放行並收到 result，未啟動 Wine。這是確認存在的產品交接缺口，不是修復通過。
+- 已核對隔離 engine 的 bin/wine 為 Mach-O x86_64。後續實作需把最末 Wine spawn 經過一次性原生執行入口，並將 PID／回執發布延至這個入口的真實 spawn；維持原 power policy 與 stdout／stderr 生命週期，同 prefix 後續 launch 不應等遊戲退出。
+- Apple 官方 [posix_spawn(2)](https://developer.apple.com/library/archive/documentation/System/Conceptual/ManPages_iPhoneOS/man2/posix_spawn.2.html) 記載成功返回會提供新 child PID，失敗回錯誤且不建立 child；[setbinpref_np](https://developer.apple.com/library/archive/documentation/System/Conceptual/ManPages_iPhoneOS/man3/posix_spawnattr_setbinpref_np.3.html) 可明確選取 x86_64 slice；[setflags](https://developer.apple.com/library/archive/documentation/System/Conceptual/ManPages_iPhoneOS/man3/posix_spawnattr_setflags.3.html) 說明 START_SUSPENDED 在 user-space 執行前暫停，但單靠暫停會引入 helper 崩潰後留下停止程序的風險，尚未採用。這些文件是 API 決策依據，不是本產品執行或相容性證據。
+
+
+## C11：最後 Wine spawn 的一次性交接
+
+- 正式 detached launch 現在使用同一張 executor 票據中的 Handoff：prepare 以 Foundation 固定 Wine executable canonical path，最後 wrapper 必須驗 owner boot／PID／出生時間、目前 prefix UID／device／inode 及 executable。先在 spawn lock 下持久保存 claiming，才可建立原生 Wine 子程序；同一 ticket 不得再認領。owner 的 Bash 結束結算也取得同一把鎖，避免「Bash 已退出、舊 wrapper 尚能 spawn」競態。
+- 原生入口在 AppKit 初始化前執行，直接 posix_spawn Mach-O Wine，明確要求 x86_64 slice；taskpolicy 若有選用仍套在此 helper 與其後代之前，並保留原 stdin／stdout／stderr、cwd、Wine environment。Wine 不繼承 CYDER_EXECUTION_ 執行權 transport。spawn 成功後核對尚未 reap 的直接 child 出生身分（包含立即結束的 zombie），保存 spawned／handedOff 後才原子公布 PID；該 PID 不再是 log wrapper。sentinel、session registry 與 shell result 對應實際原生 Wine PID。
+- handedOff 只表示原生 Wine executable 已建立，不代表 Windows 根程序或視窗已可用。外層 scope 仍持有至 Bash 真正返回；之後同 prefix 操作可前進，不等遊戲退出。native helper 等待自己的 child 並保存 exact exit／signal；此等待不在 UI。Bash 結果及原生 root 結果分開保存，第二個結果到達才封存 finished，避免快退出時寫入不完整且不可更新的終態。
+- owner 崩潰時，未取得合法 claim 的 wrapper 不得再 spawn；已有原生 spawn 證據的 handoff 可接回，child 不被終止。尚無足夠證據者仍 uncertain，不猜沒有啟動。讀取驗證 Handoff／NativeSpawn schema，未知 phase／缺少原生出生身分不能当作交接成功；corrupt bytes 保留。GC 同時取得 owner／spawn locks，回執持久進 journal 後才刪 terminal，root 結果不因原 executor 副本回收而丟失。
+- journal 新增原生 spawn 子回執，bridge／root 各自含 boot／PID／出生時間，並獨立拒絕階段倒退、換 bridge 或換 root。仍不把 native success 改成 request completed，也不授權舊要求重播。`journal-C11-r2.log` 通過含這些注入身分的斷言；`execution-owner-C11-r2.log` 通過所有 C9／C10 回歸及未知 handoff schema 保留檢查。
+- 新 `test-cyder-native-handoff.sh` 編譯可信最小 x86_64 Mach-O 替身。正式 shell 的 quiet-log wrapper 在 mkfifo 前受控停滯，正式 cyder_exec_wine／native bridge 不替換：未放行前 scope 仍占用且不公布 PID；別的 prefix 可前進，recovery 不撤銷活 owner。放行後 receipt／PID 檔與真正 x86_64 child 一致，重複 bridge 拒絕，同 prefix 下一個操作在原 child 退出前成功。放行 child 後保存 exact 53；另跑十次立即退出保留出生身分及兩層結果。
+- 同一 fixture 只終止自己尚未 reap 的 Popen owner child：spawn 前 owner crash，late wrapper 拒絕且沒有 native child；spawn 後 owner crash，native child 繼續、handoff 可恢復，新 scope 可取得；root 後來退出保存 53，但不捏造已失去的 Bash result。不可執行的 Mach-O 測試保證 posix_spawn 錯誤不公布 PID、不卡住，並修復 supervisor cleanup 蓋掉實際 failure 的缺陷。最新 standalone `native-handoff-C11-r6.log`、完整包 helper 加包內 scripts 的 `native-handoff-C11-app-r6.log`／artifacts 全通過。這是 L2 原生 x86／故障注入，不是 Windows／NGS 測試。
+- 保留失敗：最初 r1/r2 票據由 Python 手寫 executable path，與 Foundation 對 /private/tmp 的 canonical 表示不同，正式 guard 回 executableChanged；改由正式 prepare 正規化並建票據後 r3 通過，不放寬比對。app-r3 誤與同路徑重建重疊而找不到 helper，未啟動 fixture owner；之後只在建置完成後測。最終 harness 清理也等待 detached native receipt 與 orphan test Bash 的完成確認，未確認時保留 fixture，不先刪 release markers。app-r4 把包內 ogom-scripts 當 Resources 傳入，fixture 缺正式 context 的 CYDER_SCRIPTS，找不到 locale helper；按正式 launcher 的 Resources-root 初始化及 context 修正後 app-r5 通過。失敗 logs／artifacts 皆保留，未算成功樣本。
+- `supervisor-C11-r2.log` 保留 C8 的延遲握手／原碼／quiesce 不殺子程序斷言並通過；`launcher-C11.log` fake-engine 回歸通過，原本兩行 fake wineserver 空 stop-log 警告仍在；`sentinel-C11.log` 是靜態接線通過。`instance-C11-r2.log` 另驗正式 coordinator 將獨立 root status 53 保存進原 request，才回收 executor 副本；request 仍 uncertain。
+- 另以真實已知 test engine、全新 private prefix、正式 C11 helper 執行 `wine --version`，`wine-version-C11-r2.log` 返回 wine-11.0／status 0，PID／出生回執與結果吻合。這證明真實 x86 Wine CLI 可通過原生入口；沒有 Windows app／GUI／NGS 相容性結論。
+- 最新 universal macOS11 build `build-C11-r3.log` 通過；`/private/tmp/cyder-lifecycle-c11-build/Cyder.app` 使用 local.cyder.lifecycle-c11、CD2 support/runtime、ad-hoc 簽章並驗證，manifest `build-C11-source-sha256.json` 同時核對包內 common／launcher 與 repo bytes 相同。完整 GUI 本輪未操作，未覆蓋正式安裝或發布。
+
+後續仍須完成：獨立 taskmgr 的舊 detached 路徑尚未接 final handoff；launch 中的 GPTK runtime symlink 設定須再核對全域互斥範圍；legacy sidecar／log-drain 與每環境 waiter 仍待整合到原生關聯事件。C11 修復本節的正常遊戲 launch 最末 spawn 交接，但沒有解決所有同 boot uncertainty 的收斂、精確 process/window action、剩餘 UX／I/O 或 V01–V14 全矩陣，不能標整體完成。
