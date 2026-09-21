@@ -71,11 +71,21 @@ enum CyderLifecycle {
         var launch: String?
         var ownership: Ownership?
         var existence: Existence
+        var windowCapability: Capability? = nil
     }
     struct Window: Equatable {
         let id: WindowID
         var title: String
         var capability: Capability
+        var minimized: Bool? = nil
+        var focused: Bool? = nil
+    }
+    enum WindowResult: String { case shown, windowGone, processEnded, permissionRequired, unsupported, unconfirmed }
+    struct WindowAction {
+        let id: UUID
+        let window: WindowID
+        var showingProgress = false
+        var result: WindowResult?
     }
     struct Stamp: Equatable {
         let epoch: UUID
@@ -93,7 +103,9 @@ enum CyderLifecycle {
         let launches: [String: Launch]
         let processes: [ProcessID: ProcessRecord]
         let windows: [WindowID: Window]
-        var hasActiveWork: Bool { ingressPending || requests.values.contains { $0.phase.isActive } }
+        let windowAction: WindowAction?
+        var hasActiveWork: Bool { ingressPending || requests.values.contains { $0.phase.isActive }
+            || (windowAction != nil && windowAction?.result != .shown) }
         var hasEnvironment: Bool { environments.values.contains { $0.existence != .exited } }
         var keepStatusItem: Bool { phase == .active && (visibleUI || hasActiveWork || hasEnvironment) }
         var canAutoTerminate: Bool { phase == .active && !keepStatusItem }
@@ -118,6 +130,11 @@ enum CyderLifecycle {
         case processExited(Stamp, ProcessID)
         case windowObserved(Stamp, Window)
         case windowClosed(Stamp, WindowID)
+        case windowSnapshot(Stamp, ProcessID, source: String, windows: [Window]?, capability: Capability)
+        case activateWindow(WindowID, UUID)
+        case windowActionProgress(UUID)
+        case windowActionFinished(UUID, WindowResult)
+        case dismissWindowFeedback(UUID)
         case stopRequested(Stamp, UUID)
         case stopFinished(Stamp, UUID, success: Bool)
         case quit
@@ -128,6 +145,7 @@ enum CyderLifecycle {
         case stop(Stamp, UUID)
         case observationCompleted(String, Outcome)
         case windowConfirmed(String)
+        case activateWindow(Stamp, WindowID, UUID)
         case persistQuiescing
         case cancelOwnedObservers
     }
@@ -142,6 +160,7 @@ enum CyderLifecycle {
         private(set) var launches: [String: Launch] = [:]
         private(set) var processes: [ProcessID: ProcessRecord] = [:]
         private(set) var windows: [WindowID: Window] = [:]
+        private(set) var windowAction: WindowAction?
         // Tombstones prevent an older scan from resurrecting the same process instance.
         private struct ProcessKey: Hashable { let environment: EnvironmentID; let process: ProcessID }
         private var exitedProcesses: Set<ProcessKey> = []
@@ -150,7 +169,7 @@ enum CyderLifecycle {
         var snapshot: Snapshot {
             Snapshot(epoch: epoch, revision: revision, phase: phase, visibleUI: visibleUI,
                      ingressPending: ingressPending, environments: environments, requests: requests,
-                     launches: launches, processes: processes, windows: windows)
+                     launches: launches, processes: processes, windows: windows, windowAction: windowAction)
         }
         func stamp(for id: EnvironmentID) -> Stamp? {
             guard let environment = environments[id] else { return nil }
@@ -159,6 +178,17 @@ enum CyderLifecycle {
         private func accepts(_ stamp: Stamp, includingExited: Bool = false) -> Bool {
             phase == .active && stamp.epoch == epoch && environments[stamp.environment]?.generation == stamp.generation
                 && (includingExited || environments[stamp.environment]?.existence != .exited)
+        }
+        private func windowFailure(_ id: WindowID) -> WindowResult? {
+            if processes[id.process]?.existence == .exited { return .processEnded }
+            guard let window = windows[id], let process = processes[id.process], process.existence == .alive,
+                  let stamp = stamp(for: process.environment), accepts(stamp) else { return .windowGone }
+            switch window.capability {
+            case .available: return nil
+            case .permissionRequired: return .permissionRequired
+            case .unsupported: return .unsupported
+            case .checking, .temporarilyUnavailable: return .unconfirmed
+            }
         }
         private mutating func finish(_ id: String, _ outcome: Outcome) -> [Effect] {
             guard var launch = launches[id], launch.outcome == nil else { return [] }
@@ -288,6 +318,7 @@ enum CyderLifecycle {
                     process.launch = nil
                     process.ownership = nil
                 }
+                if process.windowCapability == nil { process.windowCapability = processes[process.id]?.windowCapability }
                 processes[process.id] = process
                 if let id = process.launch { launches[id]?.processes.insert(process.id) }
                 if process.existence == .exited {
@@ -310,6 +341,42 @@ enum CyderLifecycle {
             case .windowClosed(let stamp, let id):
                 guard accepts(stamp), processes[id.process]?.environment == stamp.environment else { return [] }
                 windows.removeValue(forKey: id)
+            case .windowSnapshot(let stamp, let process, let source, let observed, let capability):
+                guard accepts(stamp), processes[process]?.environment == stamp.environment,
+                      processes[process]?.existence == .alive else { return [] }
+                if let observed {
+                    guard observed.allSatisfy({ $0.id.process == process && $0.id.source == source }),
+                          Set(observed.map(\.id)).count == observed.count else { return [] }
+                }
+                processes[process]?.windowCapability = capability
+                if let observed {
+                    windows = windows.filter { $0.key.process != process || $0.key.source != source }
+                    for window in observed { windows[window.id] = window }
+                } else {
+                    for id in windows.keys where id.process == process && id.source == source {
+                        windows[id]?.capability = capability
+                        windows[id]?.focused = nil; windows[id]?.minimized = nil
+                    }
+                }
+            case .activateWindow(let id, let operation):
+                guard phase == .active else { return [] }
+                if windowAction?.window == id && windowAction?.result == nil { return [] }
+                var action = WindowAction(id: operation, window: id)
+                if let failure = windowFailure(id) { action.result = failure }
+                else if let process = processes[id.process], let stamp = stamp(for: process.environment) {
+                    effects = [.activateWindow(stamp, id, operation)]
+                }
+                windowAction = action
+            case .windowActionProgress(let operation):
+                guard phase == .active, windowAction?.id == operation, windowAction?.result == nil else { return [] }
+                windowAction?.showingProgress = true
+            case .windowActionFinished(let operation, let result):
+                guard phase == .active, windowAction?.id == operation, windowAction?.result == nil else { return [] }
+                let verified = result == .shown ? (windowFailure(windowAction!.window) ?? .shown) : result
+                windowAction?.result = verified
+            case .dismissWindowFeedback(let operation):
+                guard windowAction?.id == operation, windowAction?.result != nil else { return [] }
+                windowAction = nil
             case .stopRequested(let stamp, let token):
                 guard accepts(stamp), let environment = environments[stamp.environment],
                       environment.existence != .exited, environment.stop != .executing,
@@ -325,6 +392,7 @@ enum CyderLifecycle {
             case .quit:
                 guard phase == .active else { return [] }
                 phase = .quiescing
+                windowAction = nil
                 ingressPending = false
                 for (id, request) in requests where request.phase == .queued || request.phase == .submitted {
                     requests[id]?.phase = .awaitingUserResume
@@ -333,6 +401,11 @@ enum CyderLifecycle {
             case .terminated:
                 guard phase == .quiescing else { return [] }
                 phase = .terminated
+            }
+            // Revoke pending capabilities in the same state transaction as a
+            // close/exit/generation change, before a late OS success can arrive.
+            if let action = windowAction, action.result == nil, let failure = windowFailure(action.window) {
+                windowAction?.result = failure
             }
             revision &+= 1
             return effects

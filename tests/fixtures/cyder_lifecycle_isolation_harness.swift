@@ -129,5 +129,33 @@ check(batchSnapshot?.processes.count == 1024 && batchSnapshot?.phase == .quiesci
 check(batchEffects == [.persistQuiescing, .cancelOwnedObservers], "batch retains quit effects without stop")
 check(delivered.wait(timeout: .now()) == .timedOut, "one physical batch yields one snapshot")
 
+// Window snapshots are atomic across source/process identity validation.
+var actionState = fresh(); observe(&actionState)
+let actionStamp = actionState.stamp(for: a)!, operation = UUID()
+let invalidWindow = L.Window(id: .init(process: process, source: "wrong-source", token: "other"), title: "Same", capability: .available)
+let beforeInvalid = actionState.snapshot.revision
+_ = actionState.reduce(.windowSnapshot(actionStamp, process, source: "fixture", windows: [invalidWindow], capability: .permissionRequired))
+check(actionState.snapshot.revision == beforeInvalid && actionState.snapshot.processes[process]?.windowCapability == nil,
+      "invalid snapshot cannot partly mutate capability")
+_ = actionState.reduce(.windowSnapshot(actionStamp, process, source: "fixture", windows: [window, window], capability: .available))
+check(actionState.snapshot.revision == beforeInvalid, "duplicate window identities reject the entire snapshot")
+check(actionState.reduce(.activateWindow(window.id, operation)) == [.activateWindow(actionStamp, window.id, operation)], "exact valid target emits one effect")
+check(actionState.reduce(.activateWindow(window.id, UUID())).isEmpty, "same pending target coalesces")
+actionState.reduce(.windowClosed(actionStamp, window.id))
+actionState.reduce(.windowActionFinished(operation, .shown))
+check(actionState.snapshot.windowAction?.result == .windowGone, "late success cannot override closed-window revocation")
+actionState.reduce(.dismissWindowFeedback(UUID()))
+check(actionState.snapshot.windowAction != nil, "unrelated presentation cannot dismiss feedback")
+actionState.reduce(.dismissWindowFeedback(operation))
+check(actionState.snapshot.windowAction == nil, "exact presented failure can be dismissed")
+observe(&actionState)
+let nextOperation = UUID()
+actionState.reduce(.activateWindow(window.id, nextOperation))
+actionState.reduce(.manage(environment(a, 2)))
+actionState.reduce(.windowActionFinished(nextOperation, .shown))
+check(actionState.snapshot.windowAction?.result == .windowGone, "higher generation revokes pending target before late completion")
+actionState.reduce(.quit)
+check(actionState.snapshot.windowAction == nil, "explicit quit clears pending window feedback without stopping an environment")
+
 if !failures.isEmpty { failures.forEach { print("FAIL \($0)") }; exit(1) }
 print("PASS lifecycle environment isolation, generation replacement, drain and uncertain outcomes")

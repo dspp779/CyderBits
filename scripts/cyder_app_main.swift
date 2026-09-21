@@ -2133,11 +2133,13 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func wineWorkspaceDidActivate(_ notification: Notification) {
-        guard let application = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication,
-              isWineMacApplication(application) else { return }
+        guard let application = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication else { return }
         let pid = application.processIdentifier, name = application.localizedName
+        let isWine = isWineMacApplication(application)
         DispatchQueue.main.async { [weak self] in
             guard let self, !self.quitTransaction, pid > 0 else { return }
+            self.statusItemController.noteFrontmostApplication(pid)
+            guard isWine else { return }
             // No WINEPREFIX read or fallback to whichever request is waiting.
             // The actual root/descendant birth is the ownership evidence.
             self.statusItemController.adoptWindowedProcess(pid: pid, prefix: "", name: name)

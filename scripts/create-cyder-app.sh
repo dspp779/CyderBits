@@ -311,6 +311,7 @@ SWIFT_SOURCES=(
   "$SCRIPT_DIR/cyder_environment_probe.swift"
   "$SCRIPT_DIR/cyder_process_evidence.swift"
   "$SCRIPT_DIR/cyder_environment_monitor.swift"
+  "$SCRIPT_DIR/cyder_window_access.swift"
   "$SCRIPT_DIR/cyder_status_item.swift"
   "$SCRIPT_DIR/cyder_profiles.swift"
   "$SCRIPT_DIR/cyder_settings_ui.swift"

@@ -51,22 +51,25 @@ SIGN_IDENTITY=- CYDER_REQUIRE_NATIVE_SWIFT=1 CYDER_SWIFT_OPTIMIZATION=-Onone \
 
 ## 驗證矩陣（持續更新）
 
-| 項目 | 目前證據 | 剩餘 |
+以下為截至 C22 的證據摘要；各批次段落保留當時缺口與失敗，不以早期矩陣覆蓋後續結果。
+
+| 項目 | 目前證據 | 剩餘／限制 |
 |---|---|---|
-| V01 | 慢 OS 掃描替身驅動正式 controller；有界 in-flight | 完整 observer/runner，真實 status tracking 延遲 |
-| V02 | 正式 menu callback 的 mutation/removal 計數，快速重開及 stale revision 替身 | 真實 status menu tracking |
-| V03 | 尚未驗證 | 持久 ACK 遺失及同 ID 重送 |
-| V04 | reducer 全部 cancel/dispatch/quit 排列通過（L1） | journal/外部 executor 整合 |
-| V05 | 尚未驗證 | crash 邊界與晚到 supervisor |
-| V06 | reducer 固定期限、一次收尾（L1） | 真實 root/child 接力 |
-| V07 | 無視窗環境保留、未知不假退出（L1） | 監控接線；實際 NGS 未測 |
-| V08 | waiter 取消、重複、舊世代淘汰（L1） | 真實 waiter 校準 |
-| V09 | 同環境两 launch、第二 bottle、無證據不歸屬（L1） | 真實多 bottle |
-| V10 | reducer quit 無 stop effects，queued/晚到 accepted 保留（L1） | 所有 app 入口及父程序退出实測 |
-| V11 | reducer stop 保留 UI（L1） | 正式 stop adapter |
-| V12 | process tombstone/PID reuse（L1） | action capability、焦點競態 |
-| V13 | 歷史 uncertain 不維持 app（L1） | journal/恢復中退出 |
-| V14 | 狀態可局部分離（模型） | engine 缺失/失聯故障注入 |
+| V01 | 正式 runner／monitor／設定／視窗 adapter 的受阻故障注入與 physical 上限；C22 30 次 callback proxy | 其餘 main I/O 盤點及完整 app 端到端量測 |
+| V02 | 正式 menu callback mutation/removal 計數、快速重開、stale revision；C22 feedback 在 tracking 期間不改項目 | 真實 status menu tracking 仍受工具 target 限制 |
+| V03 | 真實 journal／Unix channel、ACK 遺失與同 ID 重送；C6/C7 outbox 核對及 retry 保留原 ID | 最終 app 整合回歸；不是網路／Wine 相容性結論 |
+| V04 | reducer 排列、journal cancel/dispatch、operation gate queued 取消及 C17 準備／spawn 邊界 | 最終全入口整合回歸 |
+| V05 | C9–C12 原生 owner／handoff 故障注入，spawn 前後 crash、late wrapper、same-boot uncertain 不重播 | 不等於實際 Windows／NGS 崩潰恢復實測 |
+| V06 | C16–C21 正式 root receipt／雙樣本 drain／generation／observer 固定期限；native child 與注入後繼證據 | Wine root 退出後失去 Unix ancestry 的後繼不可猜歸屬；真實接力未驗證 |
+| V07 | 正式環境 store／monitor 保留 alive 無視窗環境，觀察期限後不持續 starting；C19 drain 不被 request 擋住 | 實際 NGS 未測，無視窗替身只證明政策 |
+| V08 | E 真實 Wine 校準；C21 probe/identity/waiter spawn 受阻、新世代／舊事件／雙 empty 注入 | 單環境 waiter 分工仍須清理並做最後回歸 |
+| V09 | C18/C20 同 prefix 不共用視窗成功、完整 birth/scope；E 真實停止 CD2 未波及另一隔離 bottle | 未歸屬程序發現／呈現仍未完成；真實多遊戲視窗未測 |
+| V10 | D/E/C3 真實 Command-Q 保留 Wine births；C11 owner crash 保留 child；C17/C21/C22 quit fencing | 最新完整測試包及所有入口的最終回歸 |
+| V11 | E 真實設定明確停止後 UI 保留；正式 reducer／gate 區分 stop 與 quit | 最新 status stop 的實際 tracking 未測 |
+| V12 | C22 真實原生同名雙視窗／最小化有限通過；正式 action 注入替換、PID reuse、焦點變更、逾時、quit | Wine、其他 Space、VoiceOver 未驗；原生不穩定輪次保留 |
+| V13 | 真實 E 重開校準環境且無 replay；journal/registry 損壞、prior-boot、outbox 恢復與 quit 故障注入 | 完整歷史／queued／live model 恢復呈現仍須接線 |
+| V14 | E/C21 engine／prefix／probe/identity 失聯故障注入；一個 worker 受阻仍有另一環境前進，退出可用 | 最终 app 局部降級 UX 與主執行緒 I/O 回歸 |
+
 
 回應性工程目標：p95 ≤100ms、單次本功能 main block <250ms，至少 30 個原始樣本。callback cycle 是代理指標，**不是點擊至畫面呈現延遲**；真實端到端尚未量測。
 
@@ -496,3 +499,23 @@ C20 已讓本次正式 launch 的關聯事件及呈現走入 store，仍有需�
 - 最後 `build-C21-r4.log` universal macOS11 成功，編譯期間產品來源固定；r2 含身分讀取 worker，r3／r4 再加入 spawn-return 及 retired Entry 的資格檢查，以 r4 為最後產物。`/private/tmp/cyder-lifecycle-c21-build/Cyder.app` 配置 local.cyder.lifecycle-c21、CD2 support/runtime，ad-hoc／strict verify 及 lipo 的 arm64／x86_64 核對通過。`build-C21-source-sha256.json` 保存 41 個來源／產物 hash，三支包內 scripts bytes 與 repo 相同。本輪完整 app／Wine 未啟動，未覆蓋正式安裝或發布。
 
 C21 修復已重現的正常空環境接新 launch 路徑；校準後、實際 spawn 前若有另一個外部 server 更換，仍採世代失效而非猜測原 launch 的歸屬，沒有宣稱跨外部工具原子性。完整歷史／queued 接回、未歸屬程序發現、視窗狀態／精確操作、重複 waiter 及其餘 UX／I/O 與 V01–V14 全矩陣仍須完成，目標保持進行中。
+
+
+## C22：精確 Accessibility 視窗操作與一次性回饋
+
+- 新 `CyderWindowAccess` 以公開 AXUIElement 物件、完整原生程序出生身分及 environment stamp 保存目標。AX 視窗自己的 token 不與 CGWindowID／Windows HWND 混用，不以標題尋找視窗；每次動作前重新驗證該物件仍在原程序的視窗集合。背景只讀，未授權不自動提示；明確選用權限入口才要求一次，拒絕後保留基本功能與系統設定說明。
+- 正式 status menu → reducer → window adapter 已接通。單視窗直接操作、多視窗有子項，同名附可辨序號；文字寬度限制 360 point 並保留同名序號，目標不依截短後文字。available 才啟用；未知／暫時失聯／權限撤銷停用，永不支援時回到資訊列。重新檢查不啟動 Wine。所有 app 的 Workspace activation 都轉入撤銷判定，不能只監聽 Wine app。
+- 同目標 pending 合併，新目標取代舊意圖；程序退出、視窗關閉、環境換世代在 reducer 同一交易撤銷 pending 結果，晚到 shown 無法覆蓋。視窗快照先完整檢查 source／process／重複 ID，再更新 capability，不留半套修改。精確程序出生身分阻擋數值 PID 重用。
+- 兩個 physical scan 與兩個 action worker 各自有界；邏輯逾時不釋放仍受阻的實際占位。0.5 秒進度、3 秒操作觀察；AX IPC 在背景逐物件設 0.5 秒訊息上限，期限過後不再發新動作。成功不通知，失敗保留到下次選單真正呈現／關閉；tracking callback 不重建或移除選單。退出只取消本 app 觀察，未停止外部程式。
+- 核對 Apple [AXUIElementPerformAction](https://developer.apple.com/documentation/applicationservices/1462091-axuielementperformaction)、[kAXRaiseAction](https://developer.apple.com/documentation/applicationservices/kaxraiseaction)、[kAXMainAttribute](https://developer.apple.com/documentation/applicationservices/kaxmainattribute) 與本機公開 SDK 的 AXUIElementSetMessagingTimeout／AXIsProcessTrustedWithOptions 說明。cannotComplete 不保證動作沒發生；正式 adapter 因而只在原期限內查核前景、精確 focused window 及非最小化狀態，不自動重送 raise／activation。main 與鍵盤焦點不同，不能用 main 單獨宣稱 shown。以上秒數／寬度為工程選擇，非 Apple 門檻。
+- **真實原生 AX，有限通過**：`ax-permission-C22.log` 無提示查核為 true。`test-cyder-window-native.sh` 建立獨立原生 helper app、兩個同名 NSWindow，其中一個最小化；正式 controller 的 NSMenuItem selector 使用真實 AX 枚舉及動作。`window-native-C22-r8.log` 兩個指定目標均 shown，quiesce 後 helper 仍在；最後只終止自建 helper。process birth 是實讀，environment／launch attachment 明確注入。這不是完整 Cyder GUI 的 computer use tracking，也不是 Wine／NGS／Space 相容性證據。
+- 原生失敗完整保留：r1 fixture 的 pump 呼叫編譯錯誤；r2 父／子共用 bundle 身分且兩次 unconfirmed；r3 被模型新增 late-result guard 的 Swift exclusivity 編譯錯誤擋住。r4 記錄 result observation／initial focus 未確認；改為父工具與子 app 分開 bundle，前景轉換未知時只繼續讀取，r5 為 2/2。r6（同時建置）foreground request／enumeration 未確認，r7 為 1/2、main eligibility 未確認；不能只保留 r5 成功，也不能據此把原因全歸編譯負載。修正 cannotComplete 的僅觀察處理並將過度積極的 0.15 秒訊息上限改為 0.5 秒後，r8 為 2/2。仍可能局部 unconfirmed；沒有以重試搶焦點換取成功率。
+- **替身正式路徑**：`test-cyder-window-actions.sh` 以真實 AppKit controller／menu selector／store 加注入 AX driver，涵蓋兩個同名及最小化目標、refresh identity、合併／取代、焦點變更、0.5/3 秒、晚到回覆、視窗同名替換、PID 重用、permission 拒絕／明確請求、不自動重複、quit 中受阻動作，以及兩個永久 pending scan 不增加 physical calls。初輪 fixture 的閉包漏寫 owner，僅編譯失敗；r2–r5 runtime 輪次分別加入 quit、最終來源回歸及長同名標題截短後仍可區別的斷言。
+- `lifecycle-isolation-C22-r3.log` 通過新增快照原子性／重複 ID／舊 shown／跨世代／回饋 dismiss 與原有 scope 斷言；初輪 guard 的 Swift exclusivity 編譯錯誤保留於 `lifecycle-isolation-C22.log`，改先計算 verified 再賦值後通過。`lifecycle-C22.log`、`native-menu-C22.log`、`lifecycle-binding-C22.log`、`open-files-C22.log`、`status-item-C22.log` 通過相關回歸。bound fixture 窗口與 receipt 仍是注入資料，不能因 native child 真實而改標整段 Wine 實測。
+
+
+- C22 最後 r5 callback-cycle proxy 保留 30 筆於 `window-menu-C22.csv`：p95 0.209 ms、max 0.535083 ms。r4 的 p95 0.035875 ms、max 0.124125 ms 原樣留在 log，沒有為較小數字改挑樣本。既有 status callback harness 為 p95 0.037 ms、max 0.043166 ms。這些僅量 callback cycle，不含真實點擊／畫面呈現／tracking，也不宣稱全 app 無主執行緒停頓。
+- 最後 `build-C22-r3.log` universal macOS11 建置成功；第一次 build 不含後續 AX 修正，r2 尚未保留長同名標題的序號，均不作最後交付版本。37 個輸入檔在最終編譯前後 hash 相同；隔離包 `/private/tmp/cyder-lifecycle-c22-build/Cyder.app` 配置 local.cyder.lifecycle-c22、CD2 support/runtime，ad-hoc／strict verify 及 arm64／x86_64 核對通過。`build-C22-source-sha256.json` 保存 43 個來源／產物 hash，含本輪新增 AX source 及 build script；包內 common／launcher／MoltenVK script bytes 與來源相同。完整本輪 Cyder.app／Wine 未啟動；上述真實 AX 是獨立 native harness。未覆蓋正式安裝或發布。
+- 已送入 OS 的呼叫不能原子撤回；取消會封鎖後續指令與晚到結果，不能承諾回收已在途的系統訊息。native harness 為可選桌面測試，`bash tests/test-cyder-window-native.sh` 會建立／操作自己的兩個視窗並清理 helper；一般故障回歸使用 `bash tests/test-cyder-window-actions.sh`，不操作其他 app 視窗。
+
+本批只完成可用 AX 能力下的精確操作及降級；先前 Wine 不可綁定 computer use target 的限制仍在。完整歷史／queued 接回、未歸屬程序發現、重複 waiter、其餘 UX／I/O 與 V01–V14 最終矩陣仍需收斂，目標保持進行中。

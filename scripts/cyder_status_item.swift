@@ -59,11 +59,17 @@ final class CyderStatusItemController: NSObject, NSMenuDelegate {
     private var launchIngressPending = false
     private var latestLifecycle = CyderLifecycle.State().snapshot
     private var hasLifecycleSnapshot = false
+    private let windowDriver: CyderWindowAccess.Driver
+    private lazy var windowAccess = CyderWindowAccess(driver: windowDriver, event: { [weak self] in self?.lifecycleStore.send($0) })
+    init(windowDriver: CyderWindowAccess.Driver = .system) { self.windowDriver = windowDriver; super.init() }
     private lazy var lifecycleStore: CyderLifecycleStore = CyderLifecycleStore(epoch: lifecycleEpoch) { [weak self] snapshot, effects in
         guard let self else { return }
         self.applyLifecycleSnapshot(snapshot)
         guard !self.isQuiescing else { return }
         for effect in effects {
+            if case .activateWindow(let stamp, let window, let operation) = effect {
+                self.windowAccess.activate(stamp: stamp, window: window, operation: operation)
+            }
             if case .windowConfirmed(let launch) = effect { self.onWindowConfirmed?(launch) }
             if case .reconcile(let stamp) = effect { self.onReconcileEnvironment?(stamp) }
             if case .stop(let stamp, let operation) = effect,
@@ -87,6 +93,7 @@ final class CyderStatusItemController: NSObject, NSMenuDelegate {
         animationTimer?.invalidate()
         animationTimer = nil
         lifecycleStore.send(.quit)
+        windowAccess.stop()
         claimTokens.removeAll()
         let completions = Array(claimCompletions.values)
         claimCompletions.removeAll()
@@ -134,6 +141,7 @@ final class CyderStatusItemController: NSObject, NSMenuDelegate {
     }
 
     func receiveLifecycleEvent(_ event: CyderLifecycle.Event) { lifecycleStore.send(event) }
+    func noteFrontmostApplication(_ pid: Int32) { windowAccess.focusChanged(to: pid) }
 
     func monitorEnvironment(prefix: URL) {
         guard !isQuiescing, let onManageEnvironment else { return }
@@ -152,6 +160,7 @@ final class CyderStatusItemController: NSObject, NSMenuDelegate {
         guard !hasLifecycleSnapshot || (snapshot.epoch == latestLifecycle.epoch && snapshot.revision > latestLifecycle.revision) else { return }
         hasLifecycleSnapshot = true
         latestLifecycle = snapshot
+        windowAccess.update(snapshot)
         let endedScopes = Set(snapshot.environments.values.filter { $0.existence == .exited }.map {
             "\($0.id.uid):\(Int64(bitPattern: $0.id.device)):\($0.id.inode)"
         })
@@ -172,6 +181,10 @@ final class CyderStatusItemController: NSObject, NSMenuDelegate {
         DispatchQueue.main.async { [weak self] in
             guard let self, !self.isQuiescing, !self.menuIsOpen,
                   RunLoop.current.currentMode != .eventTracking else { return }
+            if let presented = self.presentedWindowFeedback {
+                self.presentedWindowFeedback = nil
+                self.lifecycleStore.send(.dismissWindowFeedback(presented))
+            }
             self.refresh()
             self.removeStatusItemIfUnused()
             if self.hasLifecycleSnapshot && self.latestLifecycle.canAutoTerminate
@@ -187,6 +200,9 @@ final class CyderStatusItemController: NSObject, NSMenuDelegate {
     private var animationFrame = 0
     private var uiVisible = false
     private var menuIsOpen = false
+    private var renderedWindowFeedback: UUID?
+    private var presentedWindowFeedback: UUID?
+    private var windowPermissionRequested = false
     private var processSources: [CyderLifecycle.ProcessID: DispatchSourceProcess] = [:]
     private var processQuiescing = false // processQueue only
     private let processQueue = DispatchQueue(label: "local.cyder.status-proc")
@@ -667,6 +683,7 @@ final class CyderStatusItemController: NSObject, NSMenuDelegate {
 
     func menuWillOpen(_ menu: NSMenu) {
         menuIsOpen = true
+        presentedWindowFeedback = renderedWindowFeedback
         animationTimer?.invalidate()
         animationTimer = nil
     }
@@ -699,9 +716,29 @@ final class CyderStatusItemController: NSObject, NSMenuDelegate {
 
     private func rebuild(_ menu: NSMenu) {
         menuMutationCount += 1
+        menu.autoenablesItems = false
         menu.removeAllItems()
         let ordered = programRows
         for row in ordered {
+            let windows = latestLifecycle.windows.values.filter {
+                $0.id.source == "accessibility" && latestLifecycle.processes[$0.id.process]?.launch == row.id && $0.capability != .unsupported
+            }.sorted { $0.title == $1.title ? $0.id.token < $1.id.token : $0.title.localizedStandardCompare($1.title) == .orderedAscending }
+            if windows.count == 1, let window = windows.first {
+                addWindowItem(menu, window: window, title: "\(row.name) — \(window.title.isEmpty ? "視窗" : window.title)")
+                continue
+            }
+            if windows.count > 1 {
+                let group = menu.addItem(withTitle: row.name, action: nil, keyEquivalent: "")
+                let submenu = NSMenu(title: row.name)
+                submenu.autoenablesItems = false
+                for (index, window) in windows.enumerated() {
+                    let duplicate = windows.filter { $0.title == window.title }.count > 1
+                    let title = window.title.isEmpty ? "視窗" : window.title
+                    addWindowItem(submenu, window: window, title: title, suffix: duplicate ? " (\(index + 1))" : "")
+                }
+                group.submenu = submenu
+                continue
+            }
             let item = NSMenuItem(title: "\(row.name) — \(row.state)", action: nil, keyEquivalent: "")
             item.isEnabled = false
             menu.addItem(item)
@@ -719,6 +756,36 @@ final class CyderStatusItemController: NSObject, NSMenuDelegate {
             item.isEnabled = false
         }
         if !ordered.isEmpty || latestLifecycle.hasEnvironment { menu.addItem(.separator()) }
+        renderedWindowFeedback = nil
+        if let operation = latestLifecycle.windowAction {
+            let message: String?
+            switch operation.result {
+            case .shown: message = nil
+            case .windowGone: message = "原視窗已關閉；請重新檢查"
+            case .processEnded: message = "程式已結束"
+            case .permissionRequired: message = "需要輔助使用權限才能操作視窗"
+            case .unsupported: message = "此程式未提供可用的視窗操作"
+            case .unconfirmed: message = "尚未確認視窗是否已顯示；可重新檢查"
+            case nil: message = operation.showingProgress ? "正在顯示視窗…" : nil
+            }
+            if let message {
+                menu.addItem(withTitle: message, action: nil, keyEquivalent: "").isEnabled = false
+                renderedWindowFeedback = operation.result == nil ? nil : operation.id
+            }
+        }
+        if latestLifecycle.processes.values.contains(where: { $0.existence == .alive && $0.windowCapability == .permissionRequired }) {
+            if windowPermissionRequested {
+                menu.addItem(withTitle: "視窗操作需在系統設定中允許輔助使用", action: nil, keyEquivalent: "").isEnabled = false
+            } else {
+                let permission = menu.addItem(withTitle: "允許操作已辨識的視窗…", action: #selector(requestWindowPermission), keyEquivalent: "")
+                permission.target = self
+                permission.toolTip = "要求輔助使用權限；授權不保證 Windows 程式支援此功能。"
+            }
+        }
+        if latestLifecycle.hasEnvironment {
+            let check = menu.addItem(withTitle: "重新檢查視窗", action: #selector(recheckWindows), keyEquivalent: "")
+            check.target = self
+        }
 
         let preferences = menu.addItem(withTitle: "偏好設定…", action: #selector(openPreferences), keyEquivalent: ",")
         preferences.target = self
@@ -752,6 +819,33 @@ final class CyderStatusItemController: NSObject, NSMenuDelegate {
         menu.addItem(.separator())
         let quit = menu.addItem(withTitle: "退出 Cyder", action: #selector(quitCyder), keyEquivalent: "q")
         quit.target = self
+    }
+    private final class WindowTarget: NSObject {
+        let id: CyderLifecycle.WindowID
+        init(_ id: CyderLifecycle.WindowID) { self.id = id }
+    }
+    private func addWindowItem(_ menu: NSMenu, window: CyderLifecycle.Window, title: String, suffix: String = "") {
+        let attributes: [NSAttributedString.Key: Any] = [.font: NSFont.menuFont(ofSize: 0)]
+        var label = title
+        if ((label + suffix) as NSString).size(withAttributes: attributes).width > 360 {
+            while !label.isEmpty && ((label + "…" + suffix) as NSString).size(withAttributes: attributes).width > 360 { label.removeLast() }
+            label += "…"
+        }
+        let item = menu.addItem(withTitle: label + suffix, action: #selector(activateWindow(_:)), keyEquivalent: "")
+        item.target = self; item.representedObject = WindowTarget(window.id)
+        item.isEnabled = window.capability == .available
+        item.toolTip = window.minimized == true ? "顯示這個已最小化的視窗" : "顯示這個視窗"
+    }
+    @objc private func activateWindow(_ item: NSMenuItem) {
+        guard !isQuiescing, let target = item.representedObject as? WindowTarget else { return }
+        lifecycleStore.send(.activateWindow(target.id, UUID()))
+    }
+    @objc private func recheckWindows() { windowAccess.refresh() }
+    @objc private func requestWindowPermission() {
+        guard !isQuiescing, !windowPermissionRequested else { return }
+        windowPermissionRequested = true
+        windowAccess.requestPermission()
+        scheduleLifecycleSettlement()
     }
 
     private var currentVisualState: VisualState {
