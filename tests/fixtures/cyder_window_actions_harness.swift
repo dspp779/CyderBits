@@ -51,6 +51,8 @@ let backend = Backend(), first = NSObject(), second = NSObject()
 let process = L.ProcessID(boot: "fixture-boot", pid: 40001, started: 100)
 backend.set(process, [first, second])
 let controller = CyderStatusItemController(windowDriver: backend.driver)
+var environmentRechecks = 0
+controller.onRecheckEnvironments = { environmentRechecks += 1 }
 controller.setUIVisible(true)
 let environment = L.EnvironmentID(uid: getuid(), device: 17, inode: 29, namespace: "window-fixture")
 let stamp = L.Stamp(epoch: controller.lifecycleEpoch, environment: environment, generation: 1)
@@ -76,14 +78,15 @@ precondition(backend.locked { backend.permissionRequests == 0 }, "background sca
 click(windowItems[0]); pump("first exact action") { controller.lifecycleSnapshot.windowAction?.result == .shown }
 click(windowItems[1]); pump("second exact action") { backend.locked { backend.performed.count == 2 } }
 precondition(Set(backend.locked { backend.performed }) == [ObjectIdentifier(first), ObjectIdentifier(second)], "same title routed to same object")
-controller.menuNeedsUpdate(menu); click(command("重新檢查視窗", in: menu))
+controller.menuNeedsUpdate(menu); click(command("重新檢查執行狀態", in: menu))
+precondition(environmentRechecks == 1, "explicit state recheck did not reach environment recovery")
 settle(); precondition(Set(controller.lifecycleSnapshot.windows.keys) == originalIDs, "unchanged AX handles lost identity")
 print("PASS two same-title/minimized windows: actual AppKit selectors reached different exact objects; refresh retained identity")
 
 // Width truncation must preserve the disambiguating suffix of same-title
 // windows. The original menu objects still bind exactly the same identities.
 backend.set(process, [first, second], title: String(repeating: "很長的相同視窗標題", count: 12))
-click(command("重新檢查視窗", in: menu))
+click(command("重新檢查執行狀態", in: menu))
 pump("long title scan") { controller.lifecycleSnapshot.windows.values.allSatisfy { $0.title.hasPrefix("很長") } }
 controller.menuNeedsUpdate(menu)
 let longItems = items(menu).filter { $0.title.hasPrefix("很長") }
@@ -91,7 +94,7 @@ let font: [NSAttributedString.Key: Any] = [.font: NSFont.menuFont(ofSize: 0)]
 precondition(longItems.count == 2 && longItems[0].title.hasSuffix("(1)") && longItems[1].title.hasSuffix("(2)"))
 precondition(longItems.allSatisfy { ($0.title as NSString).size(withAttributes: font).width <= 360 })
 precondition(Set(controller.lifecycleSnapshot.windows.keys) == originalIDs)
-backend.set(process, [first, second]); click(command("重新檢查視窗", in: menu))
+backend.set(process, [first, second]); click(command("重新檢查執行狀態", in: menu))
 pump("restore fixture title") { controller.lifecycleSnapshot.windows.values.allSatisfy { $0.title == "Same title" } }
 print("PASS long duplicate titles remain distinguishable within 360 points without retargeting")
 
@@ -137,7 +140,7 @@ print("PASS bounded progress/timeout; late response cannot reissue activation")
 // A replaced same-title object must get a new token. An old menu item is never
 // retargeted to it, even though it retains the same process and title.
 let replacement = NSObject(); backend.set(process, [replacement])
-controller.menuNeedsUpdate(menu); click(command("重新檢查視窗", in: menu))
+controller.menuNeedsUpdate(menu); click(command("重新檢查執行狀態", in: menu))
 pump("replacement window") { controller.lifecycleSnapshot.windows.count == 1 && originalIDs.isDisjoint(with: controller.lifecycleSnapshot.windows.keys) }
 let beforeGone = backend.locked { backend.entered.count }
 click(windowItems[0]); pump("closed old target") { controller.lifecycleSnapshot.windowAction?.result == .windowGone }
@@ -158,7 +161,7 @@ print("PASS closed/replaced same-title target and PID reuse never switch to repl
 // Permission denial never requests TCC by scanning or opening a menu. The
 // injected prompt callback is driven only by the formal explicit menu action.
 backend.locked { backend.unavailable = .permissionRequired }
-controller.menuNeedsUpdate(menu); click(command("重新檢查視窗", in: menu))
+controller.menuNeedsUpdate(menu); click(command("重新檢查執行狀態", in: menu))
 pump("permission capability") { controller.lifecycleSnapshot.processes[reused]?.windowCapability == .permissionRequired }
 controller.menuNeedsUpdate(menu)
 precondition(backend.locked { backend.permissionRequests == 0 })
@@ -170,7 +173,7 @@ controller.menuWillOpen(menu); controller.menuDidClose(menu); settle()
 precondition(backend.locked { backend.permissionRequests == 1 })
 // Quit revokes an action before a delayed physical worker may perform it.
 backend.locked { backend.unavailable = nil }
-controller.menuNeedsUpdate(menu); click(command("重新檢查視窗", in: menu))
+controller.menuNeedsUpdate(menu); click(command("重新檢查執行狀態", in: menu))
 pump("permission recovered") { controller.lifecycleSnapshot.windows.values.contains { $0.id.process == reused && $0.capability == .available } }
 controller.menuNeedsUpdate(menu)
 let finalItem = items(menu).first { $0.title == "Window fixture — Same title" }!
@@ -207,3 +210,14 @@ print("window callback-cycle proxy samples=30 p95_ms=\(samples.sorted()[28]) max
 print("window_sample,callback_cycle_ms")
 for (index, sample) in samples.enumerated() { print("\(index + 1),\(sample)") }
 print("PASS bounded stalled scans, responsive menu callbacks, quit rejects late scan; injected evidence only, not Wine/NGS compatibility")
+
+let empty = CyderStatusItemController(windowDriver: backend.driver)
+var emptyRechecked = false
+empty.onRecheckEnvironments = { emptyRechecked = true }
+empty.setUIVisible(true)
+pump("empty UI snapshot") { empty.lifecycleSnapshot.visibleUI }
+let emptyMenu = NSMenu(); empty.menuNeedsUpdate(emptyMenu)
+click(command("重新檢查執行狀態", in: emptyMenu))
+precondition(emptyRechecked && !empty.lifecycleSnapshot.hasEnvironment)
+empty.quiesce()
+print("PASS explicit state recheck reaches recovery even when no environment is registered")

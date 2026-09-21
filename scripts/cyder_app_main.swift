@@ -143,6 +143,10 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         }
         return controller
     }()
+    private lazy var bottleRecovery = CyderBottleRecovery(support: CyderPaths.support,
+        engine: CyderPaths.engine.appendingPathComponent("bin/wineserver")) { [weak self] identity, owner, observedAt in
+            self?.environmentMonitor.recoverVerified(identity, owner: owner, observedAt: observedAt)
+        }
     private lazy var environmentMonitor: CyderEnvironmentMonitor = CyderEnvironmentMonitor(
         epoch: statusItemController.lifecycleEpoch, directory: CyderPaths.support,
         expectedEngine: CyderPaths.engine.appendingPathComponent("bin/wineserver"),
@@ -166,6 +170,11 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         controller.onManageEnvironment = { [weak self] prefix, completion in
             guard let self else { completion(nil); return }
             self.environmentMonitor.track(prefix: prefix, engine: CyderPaths.engine.appendingPathComponent("bin/wineserver"), completion: completion)
+        }
+        controller.onRecheckEnvironments = { [weak self] in
+            guard let self, self.isPrimaryInstance, !self.quitTransaction else { return }
+            self.environmentMonitor.recheck()
+            self.bottleRecovery.refresh()
         }
         controller.onReconcileEnvironment = { [weak self] stamp in self?.environmentMonitor.reconcile(stamp) }
         controller.onQuit = { NSApp.terminate(nil) }
@@ -446,7 +455,15 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             switch role {
             case .primary:
                 self.isPrimaryInstance = true
-                self.environmentMonitor.restore { [weak self] in self?.statusItemController.receiveLifecycleEvent(.restoring(false)) }
+                self.environmentMonitor.restore { [weak self] in
+                    guard let self, !self.quitTransaction else { return }
+                    self.bottleRecovery.refresh { [weak self] in
+                        self?.environmentMonitor.finishRecovery { [weak self] in
+                            guard let self, !self.quitTransaction else { return }
+                            self.statusItemController.receiveLifecycleEvent(.restoring(false))
+                        }
+                    }
+                }
                 self.instanceCoordinator.sentinel.onLaunchEnded = { [weak self] id in
                     self?.statusItemController.noteHelperDisconnected(id: id)
                 }
@@ -871,6 +888,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         guard !quitTransaction else { return .terminateLater }
         quitTransaction = true
         statusItemController.quiesce()
+        bottleRecovery.stop()
         environmentMonitor.stop()
         processRunner.quiesce()
         operationGate.quiesce()

@@ -28,6 +28,7 @@ final class CyderEnvironmentMonitor {
         var emptySince: TimeInterval?
         var graceUntil: TimeInterval
         var exited = false
+        var retiredAt: TimeInterval?
         var executions: Set<UUID> = []
         var admissions: Set<UUID> = [] // registered, but not yet allowed to spawn
         var drains: [UUID: DrainObservation] = [:]
@@ -60,6 +61,8 @@ final class CyderEnvironmentMonitor {
     private var closed = false
     private var inFlight = 0
     private var registryWritable = true
+    private var registryReading = false
+    private var canonicalExpectedEngine: String?
     private var nextProbeIndex = 0
     var onIssue: ((String) -> Void)?
 
@@ -76,9 +79,11 @@ final class CyderEnvironmentMonitor {
         self.identify = identify
     }
     func restore(completion: @escaping () -> Void) {
+        queue.async { [self] in registryReading = true }
         persistence.async { [self] in
             var records: [Saved] = []
             let expected = expectedEngine.map { URL(fileURLWithPath: $0).resolvingSymlinksInPath().path }
+            queue.async { self.canonicalExpectedEngine = expected }
             var valid = true
             if FileManager.default.fileExists(atPath: file.path) {
                 do {
@@ -102,17 +107,46 @@ final class CyderEnvironmentMonitor {
                 } catch { valid = false; records.removeAll() }
             }
             queue.async {
+                self.registryReading = false
                 self.registryWritable = valid
                 guard !self.closed else { DispatchQueue.main.async(execute: completion); return }
-                for record in records {
+                for record in records where self.entries[record.identity.environment] == nil {
                     // A new app epoch rejects every observer from the old run.
                     // Persisted ownership is only permission to inspect this prefix.
                     self.install(Saved(identity: record.identity, generation: record.generation + 1), grace: 0)
                 }
                 if !valid { DispatchQueue.main.async { self.onIssue?("無法讀取先前的 Windows 環境紀錄；可從遊戲庫重新檢查。") } }
-                self.startTimer(); self.tick()
+                self.save(); self.startTimer(); self.tick()
                 DispatchQueue.main.async(execute: completion)
             }
+        }
+    }
+    /// Orders the caller's final recovery state after all already submitted
+    /// verified environments; the UI never waits for this queue synchronously.
+    func finishRecovery(_ completion: @escaping () -> Void) {
+        queue.async { DispatchQueue.main.async(execute: completion) }
+    }
+    /// Only the read-only bottle recovery adapter supplies this fresh server
+    /// proof. It cannot overwrite an execution or newer observation installed
+    /// while the directory inventory was in flight.
+    func recoverVerified(_ identity: CyderEnvironmentProbe.Identity, owner: L.ProcessID, observedAt: TimeInterval = ProcessInfo.processInfo.systemUptime) {
+        queue.async { [self] in
+            let previous = entries[identity.environment]
+            guard !closed, previous == nil || previous?.exited == true,
+                  previous == nil || (previous?.owner != owner && observedAt > (previous?.retiredAt ?? .infinity)),
+                  observedAt.isFinite, observedAt <= clock(),
+                  previous == nil || previous!.generation < UInt64.max,
+                  entries.count < 32 || previous != nil,
+                  identity.environment.uid == getuid(), identity.environment.namespace == "wine-user",
+                  owner.pid > 0, owner.started > 0, !owner.boot.isEmpty,
+                  expectedEngine == nil || canonicalExpectedEngine == identity.engine else { return }
+            install(.init(identity: identity, generation: (previous?.generation ?? 0) + 1), grace: 0)
+            guard let entry = entries[identity.environment] else { return }
+            entry.owner = owner
+            let token = UUID()
+            emit(.reconcileStarted(stamp(entry), token))
+            emit(.reconciled(stamp(entry), token, .alive, .healthy))
+            save(); startTimer(); startWaiter(entry)
         }
     }
     func track(prefix: URL, engine: URL, completion: @escaping (String?) -> Void = { _ in }) {
@@ -254,6 +288,7 @@ final class CyderEnvironmentMonitor {
         emit(.reconcileStarted(stamp(entry), reconciliation))
         save()
     }
+    func recheck() { queue.async { [self] in tick() } }
     func reconcile(_ stamp: L.Stamp) {
         queue.async { [self] in
             guard stamp.epoch == epoch, let entry = entries[stamp.environment], entry.generation == stamp.generation else { return }
@@ -345,7 +380,7 @@ final class CyderEnvironmentMonitor {
                         }
                     }
                     if entry.executions.isEmpty, now >= entry.graceUntil, now - entry.emptySince! >= 0.5 {
-                        entry.exited = true
+                        entry.exited = true; entry.retiredAt = now
                         self.emit(.reconciled(self.stamp(entry), token, .exited, .healthy))
                         let callbacks = entry.drains.values.filter { $0.generation == entry.generation && $0.rootExited }.map { $0.completed }
                         entry.drains.removeAll()
@@ -410,7 +445,7 @@ final class CyderEnvironmentMonitor {
         }
     }
     private func save() {
-        guard registryWritable else { return }
+        guard registryWritable, !registryReading else { return }
         let records = entries.values.filter { !$0.exited }.map { Saved(identity: $0.identity, generation: $0.generation) }
             .sorted { $0.identity.prefix < $1.identity.prefix }
         persistence.async { [self] in

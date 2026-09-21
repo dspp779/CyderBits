@@ -43,6 +43,7 @@ final class CyderStatusItemController: NSObject, NSMenuDelegate {
     var onSessionEnded: ((URL) -> Void)?
     var onManageEnvironment: ((URL, @escaping (String?) -> Void) -> Void)?
     private var environmentPrefixes: [String: String] = [:]
+    var onRecheckEnvironments: (() -> Void)?
     var onReconcileEnvironment: ((CyderLifecycle.Stamp) -> Void)?
     let lifecycleEpoch = UUID()
 
@@ -854,8 +855,8 @@ final class CyderStatusItemController: NSObject, NSMenuDelegate {
                 permission.toolTip = "要求輔助使用權限；授權不保證 Windows 程式支援此功能。"
             }
         }
-        if latestLifecycle.hasEnvironment {
-            let check = menu.addItem(withTitle: "重新檢查視窗", action: #selector(recheckWindows), keyEquivalent: "")
+        if latestLifecycle.hasEnvironment || uiVisible {
+            let check = menu.addItem(withTitle: "重新檢查執行狀態", action: #selector(recheckWindows), keyEquivalent: "")
             check.target = self
         }
 
@@ -928,7 +929,11 @@ final class CyderStatusItemController: NSObject, NSMenuDelegate {
         guard !isQuiescing, let target = item.representedObject as? WindowTarget else { return }
         lifecycleStore.send(.activateWindow(target.id, UUID()))
     }
-    @objc private func recheckWindows() { windowAccess.refresh(); recoveryObserver.refresh(); independentProcesses.refresh() }
+    @objc private func recheckWindows() {
+        guard !isQuiescing else { return }
+        onRecheckEnvironments?()
+        windowAccess.refresh(); recoveryObserver.refresh(); independentProcesses.refresh()
+    }
     @objc private func requestWindowPermission() {
         guard !isQuiescing, !windowPermissionRequested else { return }
         windowPermissionRequested = true
