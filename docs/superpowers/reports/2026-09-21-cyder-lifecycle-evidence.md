@@ -273,3 +273,15 @@ F3 不完成整體 F。接續須處理圖示／設定等主執行緒 I/O、prima
 F6 尚未清除所有既有 action I/O：GPTK 掛載掃描／安裝／移除、MoltenVK ensure、選 EXE 後 resolve，以及遊戲庫 Finder／mac launcher 檢查仍待遷移；詳細錯誤分類／衝突後的草稿解決流程也尚未完整。outbox、supervisor／跨崩潰 late-spawn、waiter、精確 process/window actions、V01–V14 整體交付仍未完成，不將本批當作目標完成。
 
 F6 fixture 清理追記：11:29 左右重新核對，前批 80423／81445 仍在 OS UE；未重複向它們送訊號。本批首次失敗 fixture 87784 的映像確認為 `/private/tmp/cy-settings-ui.NPuuk7/test` 後只對該 PID 嘗試 SIGKILL，不宣稱已成功排空。它們皆為原生測試，不是 Wine 或使用者遊戲。
+
+## F7：設定元件維護的背景所有權
+
+- GPTK 掛載掃描、安裝與移除移出 AppKit。非設定檔 I/O 使用同一個有界 `CyderSettingsAccess.performWork`，不必先讀取 settings.json；實際工作返回或 admission 拒絕時都執行 release。觀察逾時與 quit 不提早釋出實際工作占位。
+- 元件修改使用 app 共用的 all-environment operation gate。尚未取得 lease 時關窗會取消排隊；已開始工作則保留 lease 至真正返回，關窗／quiesce 不假稱取消。完成後另讀顯示資料，該讀取卡住只占讀取 owner，不繼續持有修改鎖。成功與未知用原位置文字回饋，沒有安裝成功彈窗。
+- MoltenVK 選項只保存偏好；正式 launcher 原有路徑會在啟動時套用接受的偏好，UI 不再直接更改共用 runtime symlink。舊 EXE resolver 也移到背景並核對 view generation／settings revision；此舊 picker 不在目前可見分頁中，不能宣稱已驗證其使用者操作。profile SHA-256 改用 CryptoKit，免除每個路徑產生 shasum 子程序；對照正式 canonical path 與 /usr/bin/shasum，保留持久 ID 格式。
+- 正式 owner fixture 驗證 auxiliary work 不依賴偏好檔，quiesce 後 physical release 仍一次、拒絕 admission 也釋出 lease（`settings-access-F7-r2.log`）。正式 AppKit controller＋operation gate 以受控 semaphore 與真實暫存寫入驗證：逾時後重複操作不執行、後續環境 lease 等實際返回；關窗與 quiesce 後工作仍完成並 release；未取得 lease 的關窗操作不執行；post-mutation 顯示讀取卡住時另一環境可前進（`settings-ui-F7-r4.log`／artifacts）。保留 F6 的儲存、忙碌重試、late UI fence 斷言。
+- GPTK fixture 補設專用 CYDER_RUNTIME_ROOT，避免 syncEngineLink 使用正式 runtime；以文字假 payload 驗證隔離檔案複製、移除、manifest 與連結（`gptk-F7.log`）。MoltenVK fake payload 回歸、settings shell 與 profiles Unicode／metadata／symlink 回歸通過（`moltenvk-F7.log`、`settings-shell-F7.log`、`profiles-F7-r2.log`）。沒有載入假 dylib 或啟動 Wine，不是圖形／NGS 相容性證據。
+- 保留測試失敗：`profiles-F7.log`／debug 首次 oracle 使用 pwd -P，在 macOS 得到與 Foundation 不同的 /private/var 表示；改用正式 canonical 輸出作為獨立 shasum 輸入後通過，未改正式 canonical 規則。`settings-ui-F7-r3.log`／artifacts 的額外 EXE 斷言等候已不在目前分頁中的舊 picker；移除此不代表可見介面的新增斷言，保留全部 maintenance 與 F6 斷言。未把它算作 EXE UI 通過。
+- 已檢視正式 contentView 渲染 `settings-F7-r4.png`；一般內容與 footer 可讀，Aqua tab header 離屏黑色限制仍在，並非桌面截圖。完整 universal macOS11 build `build-F7.log` 通過；隔離包 `/private/tmp/cyder-lifecycle-f7-build/Cyder.app` 設 local.cyder.lifecycle-f7、CD2 support/runtime、ad-hoc 簽章，manifest `build-F7-source-sha256.json`。本輪未啟動完整 app，以上為 L1–2 證據。
+
+仍待完成：遊戲庫 Finder／mac launcher 等 action 的主執行緒 I/O、詳細衝突處理與 feedback owner、outbox 原 ID 核對／恢復、supervisor／跨崩潰 late-spawn fencing、環境 waiter 整合、精確 process/window action，以及 V01–V14 最終矩陣。F7 只完成本節設定維護改動，整體目標繼續。

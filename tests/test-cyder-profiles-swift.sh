@@ -22,6 +22,13 @@ second="$($BIN "$TMP/store" "$TMP/games/另一個/遊戲.exe")"
 }
 first_id="${first#uncreated }"
 second_id="${second#uncreated }"
+# Preserve the persisted ID contract while replacing the native subprocess hash.
+canonical_input="$($BIN "$TMP/store" "$TMP/games/一號/遊戲.exe" --canonical)"
+expected_digest="$(printf '%s' "$canonical_input" | /usr/bin/shasum -a 256)"
+expected_digest="${expected_digest%% *}"
+[[ "$first_id" == "profile-${expected_digest:0:24}" ]] || {
+  echo "ASSERT failed: native SHA-256 changed the persisted profile ID" >&2; exit 1;
+}
 [[ "$first_id" != "$second_id" ]] || {
   echo "ASSERT failed: same basename paths must have different IDs" >&2; exit 1;
 }

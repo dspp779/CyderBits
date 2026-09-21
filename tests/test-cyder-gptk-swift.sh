@@ -7,6 +7,7 @@ trap 'rm -rf "$TMP"' EXIT
 CACHE="$TMP/module-cache"
 BIN="$TMP/cyder-gptk-harness"
 export CYDER_SUPPORT="$TMP/support"
+export CYDER_RUNTIME_ROOT="$TMP/runtime"
 export CYDER_TEST_VOLUMES_ROOT="$TMP/Volumes"
 
 VALID_VOLUME="$CYDER_TEST_VOLUMES_ROOT/Evaluation environment for Windows games 3.0"

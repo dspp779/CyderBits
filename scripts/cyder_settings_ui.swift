@@ -72,6 +72,11 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate,
     private var settingsLoadInFlight = false
     private var loadGeneration = UUID()
     private var settingsAccess = CyderSettingsAccess.shared
+    var maintenanceGate = CyderOperationGate()
+    var runtimePresentationReader: () -> CyderSettingsPresentation = CyderSettingsPresentation.load
+    private var maintenanceToken: UUID?
+    private var maintenanceAcquisition: UUID?
+    private var auxiliaryGeneration = UUID()
     private let applyButton = NSButton()
     private var wineIsRunning = false
     private let engineVersion = NSTextField(labelWithString: "")
@@ -115,7 +120,6 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate,
     private let executableEnvironment = NSTextField()
     private let executableArguments = NSTextField()
     private let removeExecutableButton = NSButton()
-    private let profileStore = CyderProfileStore(root: CyderPaths.support)
     private var profileRecords: [String: CyderProfileRecord] = [:]
     private var selectedProfileID: String?
     private var profileDrafts: [String: CyderExecutableSettings] = [:]
@@ -157,6 +161,9 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate,
     }
 
     func windowWillClose(_ notification: Notification) {
+        auxiliaryGeneration = UUID()
+        maintenanceToken = nil
+        if let id = maintenanceAcquisition { maintenanceGate.cancel(id); maintenanceAcquisition = nil }
         if NSApp.modalWindow === window {
             NSApp.stopModal()
         }
@@ -994,7 +1001,8 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate,
 
     @objc private func moltenvkVariantChanged() {
         saveImmediately()
-        _ = CyderMoltenvk.ensureVariant(preference: moltenvkVariantValue.rawValue)
+        // The launcher applies the accepted preference before launching Wine.
+        // Changing the UI must not mutate a shared runtime on the AppKit thread.
     }
 
     private var moltenvkVariantValue: CyderMoltenvkVariant {
@@ -1101,7 +1109,22 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate,
     )!
 
     @objc private func installGptk() {
-        let candidates = CyderGptk.scanEvaluationVolumes()
+        guard maintenanceToken == nil else { return }
+        let generation = UUID(); auxiliaryGeneration = generation
+        let revision = settingsRevision
+        setNormalStatus("正在尋找 GPTK…")
+        settingsAccess.performWork(CyderGptk.scanEvaluationVolumes) { [weak self] update in
+            guard let self, self.auxiliaryGeneration == generation, self.settingsRevision == revision else { return }
+            switch update {
+            case .ready(let candidates): self.presentGptkCandidates(candidates)
+            case .unconfirmed: self.setNormalStatus("尋找 GPTK 尚未確認；可關閉視窗。")
+            case .busy: self.setNormalStatus("另一項設定操作仍在進行；請稍後安裝。")
+            case .failed: self.setNormalStatus("無法讀取 GPTK 來源；請稍後再試。")
+            }
+        }
+    }
+
+    private func presentGptkCandidates(_ candidates: [CyderGptkVolumeCandidate]) {
         guard !candidates.isEmpty else {
             let alert = NSAlert()
             alert.messageText = "找不到可安裝的 GPTK"
@@ -1126,12 +1149,8 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate,
         confirm.addButton(withTitle: "安裝")
         confirm.addButton(withTitle: "取消")
         guard confirm.runModal() == .alertFirstButtonReturn else { return }
-        do {
+        performRuntimeMaintenance {
             try CyderGptk.install(from: chosen)
-            refreshGraphicsControls()
-            showGptkAlert(title: "已安裝 GPTK", message: "已安裝：\(chosen.displayName)")
-        } catch {
-            showGptkAlert(title: "無法安裝 GPTK", message: error.localizedDescription)
         }
     }
 
@@ -1169,11 +1188,57 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate,
     }
 
     @objc private func removeGptk() {
-        do {
-            try CyderGptk.removeRuntimeInstall()
-            refreshGraphicsControls()
-        } catch {
-            showGptkAlert(title: "無法移除已安裝 GPTK", message: error.localizedDescription)
+        performRuntimeMaintenance(CyderGptk.removeRuntimeInstall)
+    }
+
+    /// Holds the same all-environment lease used by launcher mutations until
+    /// the real filesystem work returns, even if its UI observation expires.
+    func performRuntimeMaintenance(_ work: @escaping () throws -> Void) {
+        guard maintenanceToken == nil else { return }
+        let token = UUID(); maintenanceToken = token
+        setNormalStatus("正在等待其他環境操作完成…")
+        let gate = maintenanceGate
+        maintenanceAcquisition = gate.acquire(.allEnvironments) { [weak self] lease in
+            guard let self, self.maintenanceToken == token else {
+                if let lease { gate.release(lease) }; return
+            }
+            self.maintenanceAcquisition = nil
+            guard let lease else {
+                self.maintenanceToken = nil
+                self.setNormalStatus("元件更新尚未開始；請稍後再試。")
+                return
+            }
+            self.setNormalStatus("正在更新圖形元件…")
+            self.settingsAccess.performWork(work, onRelease: { gate.release(lease) }) { [weak self] update in
+                guard let self, self.maintenanceToken == token else { return }
+                switch update {
+                case .ready:
+                    self.maintenanceToken = nil
+                    self.setNormalStatus("圖形元件已更新")
+                    self.refreshRuntimePresentation()
+                case .unconfirmed: self.setNormalStatus("元件更新尚未確認；關閉視窗不代表取消。")
+                case .busy:
+                    self.maintenanceToken = nil
+                    self.setNormalStatus("另一項設定操作仍在進行；請稍後再試。")
+                case .failed:
+                    self.maintenanceToken = nil
+                    self.setNormalStatus("圖形元件更新失敗；請檢查來源後再試。")
+                }
+            }
+        }
+    }
+
+    private func refreshRuntimePresentation() {
+        let generation = UUID(); auxiliaryGeneration = generation
+        settingsAccess.performWork(runtimePresentationReader) { [weak self] update in
+            guard let self, self.auxiliaryGeneration == generation else { return }
+            switch update {
+            case .ready(let presentation):
+                self.presentation = presentation; self.refreshGraphicsControls()
+                self.setNormalStatus("圖形元件已更新")
+            case .unconfirmed: self.setNormalStatus("元件已更新；顯示狀態仍在確認。")
+            case .busy, .failed: self.setNormalStatus("元件已更新；請重新開啟偏好設定以更新顯示。")
+            }
         }
     }
 
@@ -1192,47 +1257,47 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate,
         let smoothingValues = ["off", "grayscale", "cleartype-rgb"]
         var draft = settingsValue
 
-                let previousProfiles = draft.perProfile
-                let mode = CyderSyncMode.allCases[max(0, min(syncMode.indexOfSelectedItem, CyderSyncMode.allCases.count - 1))]
-                if persistDeferredSettings {
-                    draft.msync = mode == .msync
-                    draft.esync = mode == .esync
-                    draft.retinaMode = retina.state == .on
-                    draft.dpi = dpiValues[max(0, dpi.indexOfSelectedItem)]
-                    draft.fontMingLiuTarget = cyderFontTarget(at: fontMingLiu.indexOfSelectedItem)
-                    draft.fontSongtiTarget = cyderFontTarget(at: fontSongti.indexOfSelectedItem)
-                    draft.fontSmoothing = smoothingValues[max(0, smoothing.indexOfSelectedItem)]
-                }
-                draft.graphicsBackend = graphicsBackendValue
-                draft.moltenvkVariant = moltenvkVariantValue
-                draft.dxvkFrameRate = CyderDxvkFrameRate(menuIndex: dxvkFrameRate.indexOfSelectedItem)
-                draft.graphicsHud = graphicsHudValue
-                draft.dxvkHudFrametimes = dxvkHudFrametimes.state == .on
-                switch wineDiagnostics.indexOfSelectedItem {
-                case 1: draft.wineDiagnostics = .errors
-                case 2: draft.wineDiagnostics = .sync
-                case 3: draft.wineDiagnostics = .unwind
-                default: draft.wineDiagnostics = .quiet
-                }
-                draft.wineLocale = CyderWineLocale(menuIndex: wineLocale.indexOfSelectedItem)
-                draft.maplestoryWZCache = maplestoryWZCache.state == .on
-                for profileID in deletedProfiles {
-                    draft.perProfile.removeValue(forKey: profileID)
-                }
-                for (profileID, rule) in profileDrafts where !deletedProfiles.contains(profileID) {
-                    var next = rule
-                    if !persistDeferredSettings {
-                        let previous = previousProfiles[profileID]
-                        next.msync = previous?.msync
-                        next.esync = previous?.esync
-                        next.retinaMode = previous?.retinaMode
-                        next.dpi = previous?.dpi
-                        next.fontMingLiuTarget = previous?.fontMingLiuTarget
-                        next.fontSongtiTarget = previous?.fontSongtiTarget
-                        next.fontSmoothing = previous?.fontSmoothing
-                    }
-                    draft.perProfile[profileID] = next
-                }
+        let previousProfiles = draft.perProfile
+        let mode = CyderSyncMode.allCases[max(0, min(syncMode.indexOfSelectedItem, CyderSyncMode.allCases.count - 1))]
+        if persistDeferredSettings {
+            draft.msync = mode == .msync
+            draft.esync = mode == .esync
+            draft.retinaMode = retina.state == .on
+            draft.dpi = dpiValues[max(0, dpi.indexOfSelectedItem)]
+            draft.fontMingLiuTarget = cyderFontTarget(at: fontMingLiu.indexOfSelectedItem)
+            draft.fontSongtiTarget = cyderFontTarget(at: fontSongti.indexOfSelectedItem)
+            draft.fontSmoothing = smoothingValues[max(0, smoothing.indexOfSelectedItem)]
+        }
+        draft.graphicsBackend = graphicsBackendValue
+        draft.moltenvkVariant = moltenvkVariantValue
+        draft.dxvkFrameRate = CyderDxvkFrameRate(menuIndex: dxvkFrameRate.indexOfSelectedItem)
+        draft.graphicsHud = graphicsHudValue
+        draft.dxvkHudFrametimes = dxvkHudFrametimes.state == .on
+        switch wineDiagnostics.indexOfSelectedItem {
+        case 1: draft.wineDiagnostics = .errors
+        case 2: draft.wineDiagnostics = .sync
+        case 3: draft.wineDiagnostics = .unwind
+        default: draft.wineDiagnostics = .quiet
+        }
+        draft.wineLocale = CyderWineLocale(menuIndex: wineLocale.indexOfSelectedItem)
+        draft.maplestoryWZCache = maplestoryWZCache.state == .on
+        for profileID in deletedProfiles {
+            draft.perProfile.removeValue(forKey: profileID)
+        }
+        for (profileID, rule) in profileDrafts where !deletedProfiles.contains(profileID) {
+            var next = rule
+            if !persistDeferredSettings {
+                let previous = previousProfiles[profileID]
+                next.msync = previous?.msync
+                next.esync = previous?.esync
+                next.retinaMode = previous?.retinaMode
+                next.dpi = previous?.dpi
+                next.fontMingLiuTarget = previous?.fontMingLiuTarget
+                next.fontSongtiTarget = previous?.fontSongtiTarget
+                next.fontSmoothing = previous?.fontSmoothing
+            }
+            draft.perProfile[profileID] = next
+        }
         let patch = CyderSettingsPatch(before: settingsValue, after: draft)
         status.stringValue = "正在儲存…"
         return await withCheckedContinuation { continuation in
@@ -1459,7 +1524,26 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate,
         panel.canChooseFiles = true
         panel.canChooseDirectories = false
         guard panel.runModal() == .OK, let url = panel.url else { return }
-        switch profileStore.resolve(executable: url) {
+        resolveSelectedExecutable(url)
+    }
+
+    func resolveSelectedExecutable(_ url: URL) {
+        let generation = UUID(); auxiliaryGeneration = generation
+        let revision = settingsRevision
+        setNormalStatus("正在確認遊戲環境…")
+        settingsAccess.performWork({ CyderProfileStore(root: CyderPaths.support).resolve(executable: url) }) { [weak self] update in
+            guard let self, self.auxiliaryGeneration == generation, self.settingsRevision == revision else { return }
+            switch update {
+            case .ready(let state): self.presentSelectedExecutable(url, state: state)
+            case .unconfirmed: self.setNormalStatus("遊戲環境尚未確認；可關閉視窗。")
+            case .busy: self.setNormalStatus("另一項設定操作仍在進行；請稍後選取。")
+            case .failed: self.setNormalStatus("無法確認遊戲環境；請稍後再試。")
+            }
+        }
+    }
+
+    private func presentSelectedExecutable(_ url: URL, state: CyderProfileState) {
+        switch state {
         case .ready(let record):
             let profileID = record.profileId
             deletedProfiles.remove(profileID)

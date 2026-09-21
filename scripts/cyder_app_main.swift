@@ -172,6 +172,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
     }()
     private lazy var settingsController: CyderSettingsWindowController = {
         let controller = CyderSettingsWindowController()
+        controller.maintenanceGate = operationGate
         existingSettingsController = controller
         controller.onImmediateSave = { [weak self] registrySetting in
             await self?.applySettingsImmediately(registrySetting: registrySetting) ?? false

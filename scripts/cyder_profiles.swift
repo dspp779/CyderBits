@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 
 enum CyderProfileState {
     case uncreated(profileID: String)
@@ -167,27 +168,6 @@ final class CyderProfileStore {
     }
 
     private static func sha256(_ value: String) -> String? {
-        let process = Process()
-        let output = Pipe()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/shasum")
-        process.arguments = ["-a", "256"]
-        process.standardInput = Pipe()
-        process.standardOutput = output
-        process.standardError = FileHandle.nullDevice
-        do {
-            try process.run()
-            if let input = process.standardInput as? Pipe {
-                input.fileHandleForWriting.write(Data(value.utf8))
-                input.fileHandleForWriting.closeFile()
-            }
-            process.waitUntilExit()
-            guard process.terminationStatus == 0 else { return nil }
-            let text = String(data: output.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-            let digest = text.split(whereSeparator: { $0 == " " || $0 == "\t" }).first.map(String.init) ?? ""
-            guard digest.count == 64, digest.allSatisfy({ $0.isHexDigit }) else { return nil }
-            return digest.lowercased()
-        } catch {
-            return nil
-        }
+        SHA256.hash(data: Data(value.utf8)).map { String(format: "%02x", $0) }.joined()
     }
 }

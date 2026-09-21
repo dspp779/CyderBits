@@ -1245,18 +1245,26 @@ final class CyderSettingsAccess {
     /// is queued behind a busy physical transaction; the caller keeps its draft.
     func perform<Value>(_ work: @escaping (CyderSettingsStore) throws -> Value,
                         completion: @escaping (Update<Value>) -> Void) {
+        performWork({ [self] in try work(CyderSettingsStore(value: read(url), url: url)) }, completion: completion)
+    }
+
+    /// Non-preference I/O shares the same bounded owner without requiring a
+    /// readable settings file. Release runs even after observation/UI quiesces.
+    func performWork<Value>(_ work: @escaping () throws -> Value, onRelease: @escaping () -> Void = {},
+                            completion: @escaping (Update<Value>) -> Void) {
         precondition(Thread.isMainThread)
-        guard !closing, active == nil else { completion(.busy); return }
+        guard !closing, active == nil else { onRelease(); completion(.busy); return }
         let token = UUID(); active = token
         DispatchQueue.main.asyncAfter(deadline: .now() + max(0, deadline)) { [weak self] in
             guard let self, !self.closing, self.active == token else { return }
             completion(.unconfirmed)
         }
         queue.async { [self] in
-            let result = Result { try work(CyderSettingsStore(value: read(url), url: url)) }
+            let result = Result { try work() }
             DispatchQueue.main.async { [self] in
                 guard active == token else { return }
                 active = nil
+                onRelease()
                 guard !closing else { return }
                 switch result {
                 case .success(let value): completion(.ready(value))

@@ -4,8 +4,12 @@ import Foundation
 struct CyderProfilesHarness {
     static func main() throws {
         let args = CommandLine.arguments
-        guard args.count == 3 else { throw NSError(domain: "harness", code: 2) }
+        guard args.count == 3 || (args.count == 4 && args[3] == "--canonical") else { throw NSError(domain: "harness", code: 2) }
         let store = CyderProfileStore(root: URL(fileURLWithPath: args[1]))
+        if args.count == 4 {
+            print(try store.canonicalExecutablePath(URL(fileURLWithPath: args[2])))
+            return
+        }
         if args[2] == "--list" {
             for record in store.listRecords() { print("\(record.profileId) \(record.sourcePath)") }
             return

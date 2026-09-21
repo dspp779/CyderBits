@@ -78,3 +78,16 @@ var rejected = false
 quitting.perform({ _ in fatalError("work after quit") }) { event in if case .busy = event { rejected = true } }
 precondition(rejected)
 print("PASS settings owner: real disk merge/conflict/corruption, bounded stalled worker, deadline/late completion, quit fence, FIFO")
+
+let independentGate = DispatchSemaphore(value: 0)
+let independent = CyderSettingsAccess(url: url, deadline: 0.03, read: { _ in fatalError("auxiliary work read preferences") })
+var releases = 0, independentEvents = 0
+independent.performWork({ independentGate.wait() }, onRelease: { releases += 1 }) { _ in independentEvents += 1 }
+independent.quiesce(); independentGate.signal()
+pump { releases == 1 }
+precondition(independentEvents == 0 && !independent.isBusy)
+independent.performWork({ fatalError("auxiliary work after quit") }, onRelease: { releases += 1 }) { event in
+    if case .busy = event { independentEvents += 1 }
+}
+precondition(releases == 2 && independentEvents == 1)
+print("PASS auxiliary I/O owner: no preference dependency, physical release after quiesce, rejected admission releases ownership")

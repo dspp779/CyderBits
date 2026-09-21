@@ -121,6 +121,75 @@ var checked = false
 DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { checked = true }
 pump { checked }
 check(lateUI == 0, "closed settings view accepted a late write callback")
+// Runtime maintenance uses the real environment operation gate and retains
+// the lease past observation timeout and window close until actual completion.
+let maintenanceAccess = CyderSettingsAccess(url: settingsURL, deadline: 0.03)
+let maintenance = CyderSettingsWindowController(settingsAccess: maintenanceAccess)
+maintenance.hasRunningExes = { false }
+maintenance.showWindow(nil)
+let maintenanceViews = views(maintenance.window!.contentView!)
+let maintenanceRetina = maintenanceViews.first { $0.identifier?.rawValue == "settings-retina" } as! NSSwitch
+pump { maintenanceRetina.isEnabled }
+let operationGate = CyderOperationGate()
+maintenance.maintenanceGate = operationGate
+let mutationGate = DispatchSemaphore(value: 0), mutationLock = NSLock()
+var mutationStarted = false, duplicateMutation = false
+maintenance.performRuntimeMaintenance {
+    check(!Thread.isMainThread)
+    mutationLock.lock(); mutationStarted = true; mutationLock.unlock()
+    mutationGate.wait()
+    try Data("finished".utf8).write(to: root.appendingPathComponent("maintenance-result"))
+}
+pump { mutationLock.lock(); defer { mutationLock.unlock() }; return mutationStarted }
+maintenance.performRuntimeMaintenance { duplicateMutation = true }
+pump { maintenanceViews.contains { ($0 as? NSTextField)?.stringValue.contains("元件更新尚未確認") == true } }
+var followingLease: CyderOperationGate.Lease?
+operationGate.acquire(.environment("test-bottle")) { followingLease = $0 }
+RunLoop.main.run(until: Date().addingTimeInterval(0.04))
+check(followingLease == nil && !duplicateMutation)
+maintenance.close(); maintenanceAccess.quiesce()
+mutationGate.signal(); pump { followingLease != nil }
+let physicalResult = try Data(contentsOf: root.appendingPathComponent("maintenance-result"))
+check(physicalResult == Data("finished".utf8))
+operationGate.release(followingLease!)
+// Post-mutation presentation reads do not extend mutation ownership.
+let metadataAccess = CyderSettingsAccess(url: settingsURL, deadline: 0.03)
+let metadataUI = CyderSettingsWindowController(settingsAccess: metadataAccess)
+metadataUI.showWindow(nil)
+let metadataViews = views(metadataUI.window!.contentView!)
+let metadataRetina = metadataViews.first { $0.identifier?.rawValue == "settings-retina" } as! NSSwitch
+pump { metadataRetina.isEnabled }
+let metadataGate = DispatchSemaphore(value: 0), metadataLock = NSLock()
+var metadataStarted = false
+metadataUI.maintenanceGate = operationGate
+metadataUI.runtimePresentationReader = {
+    metadataLock.lock(); metadataStarted = true; metadataLock.unlock()
+    metadataGate.wait(); return CyderSettingsPresentation()
+}
+metadataUI.performRuntimeMaintenance { }
+pump { metadataLock.lock(); defer { metadataLock.unlock() }; return metadataStarted }
+var duringMetadata: CyderOperationGate.Lease?
+operationGate.acquire(.environment("other-bottle")) { duringMetadata = $0 }
+pump { duringMetadata != nil }
+pump { metadataViews.contains { ($0 as? NSTextField)?.stringValue.contains("顯示狀態仍在確認") == true } }
+operationGate.release(duringMetadata!); metadataUI.close(); metadataAccess.quiesce(); metadataGate.signal()
+// Closing before the gate grants authority cancels this unscheduled action.
+let queuedAccess = CyderSettingsAccess(url: settingsURL)
+let queuedUI = CyderSettingsWindowController(settingsAccess: queuedAccess)
+queuedUI.showWindow(nil)
+let queuedViews = views(queuedUI.window!.contentView!)
+let queuedRetina = queuedViews.first { $0.identifier?.rawValue == "settings-retina" } as! NSSwitch
+pump { queuedRetina.isEnabled }
+queuedUI.maintenanceGate = operationGate
+var blocker: CyderOperationGate.Lease?
+operationGate.acquire(.allEnvironments) { blocker = $0 }; pump { blocker != nil }
+var wronglyStarted = false
+queuedUI.performRuntimeMaintenance { wronglyStarted = true }
+queuedUI.close(); operationGate.release(blocker!)
+var afterCancel: CyderOperationGate.Lease?
+operationGate.acquire(.allEnvironments) { afterCancel = $0 }; pump { afterCancel != nil }
+check(!wronglyStarted)
+operationGate.release(afterCancel!); queuedAccess.quiesce(); operationGate.quiesce()
 if let path = ProcessInfo.processInfo.environment["CYDER_TEST_RENDER"] {
     let content = preferences.window!.contentView!
     content.layoutSubtreeIfNeeded()
