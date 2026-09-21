@@ -18,6 +18,7 @@ final class CyderEnvironmentMonitor {
         var emptySince: TimeInterval?
         var graceUntil: TimeInterval
         var exited = false
+        var executions: Set<UUID> = []
         init(_ saved: Saved, grace: TimeInterval) {
             identity = saved.identity; generation = saved.generation; graceUntil = grace
         }
@@ -89,6 +90,30 @@ final class CyderEnvironmentMonitor {
         }
     }
     func track(prefix: URL, engine: URL, completion: @escaping (String?) -> Void = { _ in }) {
+        manage(prefix: prefix, engine: engine, execution: nil, completion: completion)
+    }
+    /// Keep empty samples provisional while a native executor can still spawn
+    /// Wine. Observation deadlines never release this ownership.
+    func beginExecution(prefix: URL, engine: URL) async -> UUID? {
+        let token = UUID()
+        return await withCheckedContinuation { continuation in
+            manage(prefix: prefix, engine: engine, execution: token) { path in
+                continuation.resume(returning: path == nil ? nil : token)
+            }
+        }
+    }
+    func endExecution(_ token: UUID, completion: @escaping () -> Void = {}) {
+        queue.async { [self] in
+            defer { DispatchQueue.main.async(execute: completion) }
+            guard !closed else { return }
+            for entry in entries.values where entry.executions.remove(token) != nil {
+                entry.emptySince = nil
+                entry.graceUntil = clock() + 30
+                schedule(entry)
+            }
+        }
+    }
+    private func manage(prefix: URL, engine: URL, execution: UUID?, completion: @escaping (String?) -> Void) {
         // Identity resolution has its own bounded slot; it never shares AppKit
         // or the state queue. Per-launch calls coalesce after identity resolves.
         queue.async { [self] in
@@ -98,7 +123,8 @@ final class CyderEnvironmentMonitor {
             persistence.async {
                 let identity = CyderEnvironmentProbe.identify(prefix: prefix, engine: engine)
                 self.queue.async {
-                    defer { DispatchQueue.main.async { completion(identity?.prefix) } }
+                    var managedPrefix: String?
+                    defer { let path = managedPrefix; DispatchQueue.main.async { completion(path) } }
                     guard !self.closed, let identity else { return }
                     if let entry = self.entries[identity.environment], !entry.exited {
                         entry.graceUntil = self.clock() + 30
@@ -109,6 +135,8 @@ final class CyderEnvironmentMonitor {
                         let generation = (self.entries[identity.environment]?.generation ?? 0) + 1
                         self.install(Saved(identity: identity, generation: generation), grace: self.clock() + 30)
                     }
+                    if let execution { self.entries[identity.environment]?.executions.insert(execution) }
+                    managedPrefix = identity.prefix
                     self.save(); self.startTimer(); self.tick()
                 }
             }
@@ -192,7 +220,7 @@ final class CyderEnvironmentMonitor {
                 case .empty:
                     let now = self.clock()
                     if entry.emptySince == nil { entry.emptySince = now }
-                    if now >= entry.graceUntil, now - entry.emptySince! >= 0.5 {
+                    if entry.executions.isEmpty, now >= entry.graceUntil, now - entry.emptySince! >= 0.5 {
                         entry.exited = true
                         self.emit(.reconciled(observedStamp, token, .exited, .healthy))
                         self.save()

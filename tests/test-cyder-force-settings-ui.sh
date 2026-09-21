@@ -324,7 +324,9 @@ assert_contains "$app" "gameLibraryController.window?.isVisible != true" "prefer
 assert_contains "$app" "launchGameFromLibrary" "the library should launch through the monitored Bash relay"
 assert_contains "$app" "libraryLaunchInProgress" "the library should serialize the activation-monitoring window"
 assert_not_contains "$app" "createsNewApplicationInstance = true" "library launches should retain UI error reporting"
-assert_contains "$app" "gameLibraryController.window?.isVisible == true" "Finder opens should preserve an already visible library"
+document_ingress="$(sed -n '/private func receiveInstanceRequest/,/private func finishRequestPart/p' "$ROOT/scripts/cyder_app_main.swift")"
+assert_contains "$document_ingress" "enqueueOrLaunch(files" "Finder opens must enter the shared monitored queue"
+assert_not_contains "$document_ingress" "gameLibraryController.close()" "Finder opens should preserve an already visible library"
 assert_contains "$app" "if !self.documentLaunchRequested {" \
   "detached game launches should not show the parent application's active-session warning"
 assert_contains "$common" 'cyder_load_game_settings' "Bash should consume the game library's one-shot launch settings"

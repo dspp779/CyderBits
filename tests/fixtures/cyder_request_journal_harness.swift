@@ -71,6 +71,19 @@ precondition(value(wait { journal.submit(id: before, payload: payload, completio
 precondition(wait { journal.authorizeDispatch(id: before, completion: $0) } == .failure(.tooLate))
 let queued = J.makeID(namespace: namespace)
 _ = value(wait { journal.submit(id: queued, payload: payload, completion: $0) })
+// An observation deadline does not prove the executor stopped. Preserve the
+// payload and actual receipt layer, but never authorize another launch.
+let timedOut = J.makeID(namespace: namespace)
+_ = value(wait { journal.submit(id: timedOut, payload: payload, completion: $0) })
+let timedDispatch = value(wait { journal.authorizeDispatch(id: timedOut, completion: $0) })
+let nativeReceipt = value(wait { journal.receipt(id: timedOut, launchID: timedDispatch.launchID!, epoch: timedDispatch.executorEpoch!, supervisorPID: getpid(), layer: "native-launcher", boot: "test-boot", started: 1234, completion: $0) })
+precondition(nativeReceipt.phase == .observing && nativeReceipt.receiptLayer == "native-launcher")
+precondition(nativeReceipt.processBoot == "test-boot" && nativeReceipt.processStarted == 1234)
+let unknown = value(wait { journal.complete(id: timedOut, launchID: timedDispatch.launchID!, epoch: timedDispatch.executorEpoch!, outcome: "observation-deadline", failed: false, uncertain: true, completion: $0) })
+precondition(unknown.phase == .uncertain && unknown.payload == payload)
+precondition(wait { journal.authorizeDispatch(id: timedOut, completion: $0) } == .failure(.tooLate))
+precondition(wait { journal.resume(id: timedOut, completion: $0) } == .failure(.tooLate))
+precondition(wait { journal.complete(id: timedOut, launchID: timedDispatch.launchID!, epoch: timedDispatch.executorEpoch!, outcome: "late-success", failed: false, completion: $0) } == .failure(.tooLate))
 // Simulate process death by closing the owner without quiescing. A real disk
 // reopen must preserve the dispatch boundary; an old executor may still spawn.
 closeJournal(journal)
@@ -78,6 +91,7 @@ journal = J(directory: root, delivery: delivery)
 let recovered = value(wait { journal.open(completion: $0) })
 precondition(recovered.first { $0.id == id }?.phase == .uncertain)
 precondition(recovered.first { $0.id == queued }?.phase == .awaitingUserResume)
+precondition(recovered.first { $0.id == timedOut } == unknown, "uncertainty and native receipt must survive reopening")
 precondition(wait { journal.authorizeDispatch(id: id, completion: $0) } == .failure(.tooLate))
 precondition(wait { journal.resume(id: id, completion: $0) } == .failure(.tooLate))
 precondition(wait { journal.receipt(id: id, launchID: dispatch.launchID!, epoch: dispatch.executorEpoch!, supervisorPID: getpid(), completion: $0) } == .failure(.tooLate), "late executor cannot change recovered generation")

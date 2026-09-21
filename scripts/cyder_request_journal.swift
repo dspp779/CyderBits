@@ -38,6 +38,9 @@ final class CyderRequestJournal {
         var launchID: String?
         var executorEpoch: UUID?
         var supervisorPID: Int32?
+        var receiptLayer: String? = nil
+        var processBoot: String? = nil
+        var processStarted: UInt64? = nil
         var outcome: String?
         var children: [String]? = nil
     }
@@ -253,26 +256,29 @@ final class CyderRequestJournal {
         }
     }
 
-    func receipt(id: String, launchID: String, epoch: UUID, supervisorPID: Int32, completion: @escaping Reply) {
+    func receipt(id: String, launchID: String, epoch: UUID, supervisorPID: Int32, layer: String = "supervisor", boot: String? = nil, started: UInt64? = nil, completion: @escaping Reply) {
         transaction(completion) { current in
             guard var record = current.records[id], record.launchID == launchID,
                   record.executorEpoch == epoch else { throw Failure.wrongExecutor }
             guard record.phase == .dispatching, supervisorPID > 0 else { throw Failure.tooLate }
             record.phase = .observing
             record.supervisorPID = supervisorPID // shell evidence, never a Windows PID
+            record.receiptLayer = layer
+            record.processBoot = boot
+            record.processStarted = started
             record.version = current.version + 1
             current.records[id] = record
             return record
         }
     }
 
-    func complete(id: String, launchID: String, epoch: UUID, outcome: String, failed: Bool, completion: @escaping Reply) {
+    func complete(id: String, launchID: String, epoch: UUID, outcome: String, failed: Bool, uncertain: Bool = false, completion: @escaping Reply) {
         transaction(completion) { current in
             guard var record = current.records[id], record.launchID == launchID,
                   record.executorEpoch == epoch else { throw Failure.wrongExecutor }
             guard [.dispatching, .observing].contains(record.phase) else { throw Failure.tooLate }
-            record.phase = failed ? .failed : .completed
-            record.payload = nil // retain minimal tombstone, not potentially sensitive argv
+            record.phase = uncertain ? .uncertain : (failed ? .failed : .completed)
+            if !uncertain { record.payload = nil } // uncertain retains recovery context; never automatically replay
             record.outcome = String(outcome.prefix(128))
             record.version = current.version + 1
             current.records[id] = record

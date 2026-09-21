@@ -121,7 +121,7 @@ final class CyderStatusItemController: NSObject, NSMenuDelegate {
 
     func receiveLifecycleEvent(_ event: CyderLifecycle.Event) { lifecycleStore.send(event) }
 
-    private func registerManagedEnvironment(prefix: URL) {
+    func monitorEnvironment(prefix: URL) {
         guard !isQuiescing, let onManageEnvironment else { return }
         pendingEnvironmentAttachments += 1
         publishLegacyWork()
@@ -376,6 +376,7 @@ final class CyderStatusItemController: NSObject, NSMenuDelegate {
 
     func beginLaunch(id: String, prefix: URL, executableName: String, pid: Int32) {
         precondition(Thread.isMainThread)
+        guard !isQuiescing else { return }
         sessionVersions[id] = UUID()
         launchIngressPending = false
         let name = executableName.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -390,7 +391,7 @@ final class CyderStatusItemController: NSObject, NSMenuDelegate {
             helperConnected: false,
             adoptedPIDs: pid > 0 ? [pid] : []
         )
-        if pid > 0 { registerManagedEnvironment(prefix: prefix) }
+        if pid > 0 { monitorEnvironment(prefix: prefix) }
         installStatusItemIfNeeded()
         watchPID(pid)
         refresh()
@@ -439,7 +440,7 @@ final class CyderStatusItemController: NSObject, NSMenuDelegate {
         session.pid = pid
         session.adoptedPIDs.insert(pid)
         sessions[id] = session
-        registerManagedEnvironment(prefix: session.prefix)
+        monitorEnvironment(prefix: session.prefix)
         watchPID(pid)
         claimLiveWindows(id: id)
         refresh()
@@ -461,7 +462,7 @@ final class CyderStatusItemController: NSObject, NSMenuDelegate {
             helperConnected: false,
             adoptedPIDs: [pid]
         )
-        if pid > 0 { registerManagedEnvironment(prefix: prefix) }
+        if pid > 0 { monitorEnvironment(prefix: prefix) }
         installStatusItemIfNeeded()
         watchPID(pid)
         refresh()

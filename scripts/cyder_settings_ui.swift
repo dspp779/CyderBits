@@ -16,9 +16,9 @@ private let cyderWinetricksComponentGroups: [(String, [CyderWinetricksComponent]
 ]
 
 final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate, NSTableViewDataSource, NSTableViewDelegate {
-    var onImmediateSave: ((_ registrySetting: String) -> Bool)?
+    var onImmediateSave: ((_ registrySetting: String) async -> Bool)?
     /// Live Wine `reg add` with draft env; return true only after registry apply succeeds.
-    var onApplyWhileRunning: ((_ draftEnvironment: [String: String]) -> Bool)?
+    var onApplyWhileRunning: ((_ draftEnvironment: [String: String]) async -> Bool)?
     var onRebuild: (() -> Void)?
     var onCreateProfile: ((URL) -> Void)?
     var onOpenGameLibrary: (() -> Void)?
@@ -32,9 +32,9 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate,
     var onSaveStarted: (() -> Void)?
     var onSaveFailed: (() -> Void)?
     var onClose: (() -> Void)?
-    var hasRunningExes: (() -> Bool)?
+    var hasRunningExes: (() async -> Bool)?
     /// Stops all Cyder Wine processes (wineserver -k) and waits (-w). Returns true on success.
-    var onStopAllWine: (() -> Bool)?
+    var onStopAllWine: (() async -> Bool)?
     private let store = CyderSettingsStore.shared
     private let applyButton = NSButton()
     private var wineIsRunning = false
@@ -59,6 +59,9 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate,
     private let installGptkButton = NSButton()
     private let removeGptkButton = NSButton()
     private let stopAllWineButton = NSButton()
+    private var settingsRevision = 0
+    private var runningRefreshToken = UUID()
+    private var explicitApplyInProgress = false
     private let wineDiagnostics = NSPopUpButton()
     private let maplestoryWZCache = NSSwitch()
     private let diagnosticsWarning = NSTextField(wrappingLabelWithString: "")
@@ -722,7 +725,6 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate,
     }
 
     func prepareForDisplay() {
-        wineIsRunning = hasRunningExes?() ?? false
         reload()
         if #available(macOS 11.0, *) {
             beginURIHandlerScan()
@@ -730,16 +732,19 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate,
     }
 
     private func refreshRunningChrome(persistPendingWhenIdle: Bool = false) {
-        wineIsRunning = hasRunningExes?() ?? false
-        if !wineIsRunning && persistPendingWhenIdle && deferredSettingsChanged() {
-            saveImmediately(registrySetting: "all", deferredChange: true)
-            return
-        }
-        if wineIsRunning && deferredSettingsChanged() {
-            showDeferredSettingsNotice()
-        } else {
-            applyButton.isHidden = true
-            setNormalStatus()
+        let token = UUID()
+        runningRefreshToken = token
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            let running = await self.hasRunningExes?() ?? true
+            guard self.runningRefreshToken == token else { return }
+            self.wineIsRunning = running
+            if !running && persistPendingWhenIdle && self.deferredSettingsChanged() {
+                self.saveImmediately(registrySetting: "all", deferredChange: true)
+                return
+            }
+            if running && self.deferredSettingsChanged() { self.showDeferredSettingsNotice() }
+            else { self.applyButton.isHidden = true; self.setNormalStatus() }
         }
     }
 
@@ -756,11 +761,17 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate,
         status.font = .boldSystemFont(ofSize: 11)
     }
 
-    private func saveImmediately(
-        registrySetting: String? = nil,
-        deferredChange: Bool = false
-    ) {
-        let running = wineIsRunning || (hasRunningExes?() ?? false)
+    private func saveImmediately(registrySetting: String? = nil, deferredChange: Bool = false) {
+        settingsRevision += 1
+        let revision = settingsRevision
+        Task { @MainActor [weak self] in
+            await self?.saveImmediatelyAsync(registrySetting: registrySetting, deferredChange: deferredChange, revision: revision)
+        }
+    }
+
+    @MainActor private func saveImmediatelyAsync(registrySetting: String?, deferredChange: Bool, revision: Int) async {
+        let running = await hasRunningExes?() ?? true
+        guard settingsRevision == revision else { return }
         wineIsRunning = running
         if running && deferredChange && deferredSettingsChanged() {
             isDirty = true
@@ -771,12 +782,16 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate,
         let requiresPrefixApply = !running && prefixSettingsChanged()
         isDirty = true
         guard saveControls(persistDeferredSettings: !running) else { return }
-        if !running && requiresPrefixApply,
-           onImmediateSave?(registrySetting ?? "all") == false {
-            status.stringValue = "設定已儲存，但無法更新 Windows 環境"
-            status.textColor = .systemRed
-            status.font = .systemFont(ofSize: 11)
-            return
+        if !running && requiresPrefixApply {
+            status.stringValue = "正在套用設定…"
+            let ok = await onImmediateSave?(registrySetting ?? "all") ?? false
+            guard settingsRevision == revision else { return }
+            if !ok {
+                status.stringValue = "設定已儲存，但無法更新 Windows 環境"
+                status.textColor = .systemRed
+                status.font = .systemFont(ofSize: 11)
+                return
+            }
         }
         isDirty = deferredSettingsChanged()
         if running && isDirty {
@@ -787,7 +802,19 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate,
     }
 
     @objc private func applyRunningSettings() {
-        wineIsRunning = hasRunningExes?() ?? false
+        guard !explicitApplyInProgress else { return }
+        explicitApplyInProgress = true
+        settingsRevision += 1
+        let revision = settingsRevision
+        Task { @MainActor [weak self] in
+            await self?.applyRunningSettingsAsync(revision: revision)
+        }
+    }
+
+    @MainActor private func applyRunningSettingsAsync(revision: Int) async {
+        defer { explicitApplyInProgress = false }
+        wineIsRunning = await hasRunningExes?() ?? true
+        guard settingsRevision == revision else { return }
         guard wineIsRunning else {
             // Wine exited while the window was open — fall back to immediate save.
             saveImmediately(registrySetting: "all", deferredChange: true)
@@ -797,8 +824,9 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate,
         status.stringValue = "正在套用設定…"
         status.textColor = .secondaryLabelColor
         onSaveStarted?()
-        let ok = onApplyWhileRunning?(draft) ?? false
+        let ok = await onApplyWhileRunning?(draft) ?? false
         onSaveFailed?() // clears setup chrome; success path still continues below
+        guard settingsRevision == revision else { return }
         guard ok else {
             status.stringValue = "無法寫入 Windows 環境；設定尚未儲存"
             status.textColor = .systemRed
@@ -948,20 +976,13 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate,
         stopAllWineButton.isEnabled = false
         status.stringValue = "正在關閉 Wine 程序…"
         status.textColor = .secondaryLabelColor
-        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            let ok = self?.onStopAllWine?() ?? false
-            DispatchQueue.main.async {
-                guard let self else { return }
-                self.stopAllWineButton.isEnabled = true
-                    self.refreshRunningChrome(persistPendingWhenIdle: ok)
-                    if ok {
-                        self.status.stringValue = "已關閉所有 Wine 程序"
-                        self.status.textColor = .secondaryLabelColor
-                    } else {
-                        self.status.stringValue = "關閉 Wine 程序失敗或尚未就緒"
-                        self.status.textColor = .systemRed
-                    }
-            }
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            let ok = await self.onStopAllWine?() ?? false
+            self.stopAllWineButton.isEnabled = true
+            self.refreshRunningChrome(persistPendingWhenIdle: ok)
+            self.status.stringValue = ok ? "已送出環境停止操作" : "環境停止失敗或尚未確認"
+            self.status.textColor = ok ? .secondaryLabelColor : .systemRed
         }
     }
 

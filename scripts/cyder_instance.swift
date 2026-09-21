@@ -153,9 +153,15 @@ final class CyderInstanceCoordinator {
         }
     }
 
-    func finish(_ record: CyderRequestJournal.Record, outcome: String, failed: Bool = false) {
+    func recordSpawn(_ record: CyderRequestJournal.Record, pid: Int32, boot: String?, started: UInt64?) {
         guard let launch = record.launchID, let epoch = record.executorEpoch else { return }
-        journal.complete(id: record.id, launchID: launch, epoch: epoch, outcome: outcome, failed: failed) { _ in }
+        journal.receipt(id: record.id, launchID: launch, epoch: epoch, supervisorPID: pid,
+                        layer: "native-launcher", boot: boot, started: started) { _ in }
+    }
+
+    func finish(_ record: CyderRequestJournal.Record, outcome: String, failed: Bool = false, uncertain: Bool = false) {
+        guard let launch = record.launchID, let epoch = record.executorEpoch else { return }
+        journal.complete(id: record.id, launchID: launch, epoch: epoch, outcome: outcome, failed: failed, uncertain: uncertain) { _ in }
     }
 
     /// Same-ID automatic retries are confined to one monotonic five-second

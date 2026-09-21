@@ -140,3 +140,23 @@ Apple 補充核對：[fcntl F_GETLK](https://developer.apple.com/library/archive
 `CyderProcessRunner` 以 operation owner → Process.run → terminationHandler 順序保證立即退出／spawn error／deadline／cancel 恰好一次回覆。觀察完成與實際子程序資源釋放分開；launch/mutation 的 deadline 或 quit 回 unconfirmed，保留子程序、輸出 FD 與 mutation release callback 到實際退出，只有 observation policy 終止 runner 自有程序。quiescing 後拒絕新 spawn，有 32 個實際操作的容量上限。
 
 `tests/test-cyder-process-runner.sh` 使用真實原生子程序測 immediate exit、spawn error、deadline/cancel 重複、deadline 後仍寫入 output、quit 不殺 launch、observer 自身取消、晚到 run 不 spawn，通過。此為正式 runner 元件測試，**app runLauncher 尚未切換**；不能据此宣稱全部同步等待已移除。下一個實作單位是正式 caller、設定 UI callback 與 activation adapter 接線，並保留目前 Wine 真實證據作回歸比較。
+
+## C3：正式非同步執行與有界啟動觀察
+
+- 正式 `runLauncher` 已切換到 `CyderProcessRunner`；app caller、設定查詢／套用／停止 callback 改為 async，移除 app main 的 `waitUntilExit`、activation semaphore 與 sleep polling。設定查詢失敗／逾時保守視為尚不能修改閒置 prefix；UI revision 拒絕過期回覆。這不代表其他檔案的磁碟／程序掃描已全面移出 AppKit，F 仍需盤點。
+- 正式 `CyderLaunchObserver` 在獨立 queue 完成事件、固定原始 deadline；最多兩個實際 sidecar read，卡住不釋出占位，不阻止 deadline／quit。sidecar reader 限 schema、owner、regular file、2 KiB、NOFOLLOW／NONBLOCK。root 0 仍等 handoff，只有 root 0 + stopped 結束 launch observation；不推論整個環境已排空。
+- launch observation deadline 回 `unconfirmed`，journal 保留 uncertain payload，禁止再次 authorize／resume／晚到完成覆寫；測試設定與 transport 不在仍可能被 executor 使用時移除。程序回執明確標記 `native-launcher`，保存當下可取得的 boot/start-time；它不是 Windows PID 或完整 detached supervisor 回執，後者仍待整合。
+- monitor execution token 在 spawn 前取得、只在實際 native executor exit 釋放；有 executor 時 empty 探測不能宣告環境退出。runner 實際 operation 計數亦阻止背景工作尚未退出時自動結束 app。此 token 尚不等於同環境 mutation 序列化或 detached descendant fencing。
+- runtime 測試通過：`test-cyder-process-runner.sh`、`test-cyder-launch-observer.sh`、`test-cyder-request-journal.sh`、`test-cyder-instance-runtime.sh`、`test-cyder-environment-monitor.sh`、`test-cyder-lifecycle.sh`。observer 覆蓋早到 activation、root 0 handoff、windowless root 0/stopped、root 53、卡住讀取／deadline／晚到事件／symlink／FIFO。journal 覆蓋 native receipt 及同程序 uncertain 保存、重開不重播。monitor 追加 executor 跨 deadline 存續與重複 release。
+- source smoke `test-cyder-open-files-lifecycle.sh`、`test-cyder-force-settings-ui.sh` 通過。前者舊輪詢字串改為呼叫正式 observer runtime harness；後者舊的「visible library 分支」字串已不存在於前批共用入口，改檢查正式 enqueue 且不關 library，不將 source assertion 當 UI 實測。
+- 保留失敗：第一次 C3 build 漏了 `CyderFailure.technicalDetails`，修正後雙架構 macOS11 build 通過；第一次新增 monitor 測試在 async release 尚未執行即推進假時鐘，改為明確 release completion barrier 後通過。log 分別 `build-C3.log`、`build-C3-r2.log`、`monitor-C3.log`、`monitor-C3-r2.log`。不刪除失敗樣本。
+
+### C3 實機回歸（L3，可信既有 Wine 記事本）
+
+- 測試包 `/private/tmp/cyder-lifecycle-c3-build/Cyder.app`，ID `local.cyder.lifecycle-c3`，wrapper 固定本任務 CD2 support/runtime，ad-hoc 簽章。來源／binary SHA256：`.local/lifecycle-evidence/build-C3-source-sha256.json`。建置命令與前批一致，`CYDER_SWIFT_OPTIMIZATION=-Onone`。建置後僅移除一個重複的 quit guard；manifest 記錄受測來源，後續交付會重建最新版本。
+- CUA 首次 getApp 耗時 299.9 秒（超過指定 30 秒）；app log 01:32:37Z 才開始，後續已綁定操作約 0.02–3.7 秒。這是工具等待的未解噪音，不把它當端到端 app latency，也不因此宣稱效能達標。
+- 正式 secondary 啟動既有 prefix 的 notepad；native launcher 回執 PID 54012，journal completed 且 receiptLayer=native-launcher，實際 Wine notepad PID 54447（09:33:00），server 54498。app log 記錄 runner 852ms 返回及 activation notification；不是模擬。
+- CUA 在 Wine 執行時打開遊戲庫，AX 顯示加入遊戲／偏好設定／重新整理。Command-Q 後主程序 53280 消失，記事本 54447 啟動時間不變，server 54498 留存；證據 `c3-before-quit.txt`／`c3-after-quit.txt`。Wine 自身仍未出現在工具 app inventory，因此不宣稱已完成 Wine 視窗輸入／多視窗切換或 NGS 實测。
+- 額外發現：CD2/E 舊 shell launch supervisor 與 sentinel-connect helper 在先前 explicit stop 後仍留存（11384/11392、30313/30324）。Wine/server 的 E1 排空證據成立，但 helper 收尾不完整；下一批需移除每 launch 環境 waiter 的責任重疊並修復失聯 helper，不把 E1 作完整 E 驗收。
+
+仍待：同環境 mutation／stop／dispatch 序列化、不可變設定快照、完整 supervisor／程序／視窗身分與 action 能力、恢復／取消與非模態錯誤 UI、首屏／可及性及 V01–V14 整合驗收。A–F 目標保持進行中。

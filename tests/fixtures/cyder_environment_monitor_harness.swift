@@ -50,11 +50,29 @@ store.send(.reconcileStarted(.init(epoch: epoch, environment: second.id, generat
 let history = root.appendingPathComponent("history/managed-environments-v1.json")
 pump { FileManager.default.fileExists(atPath: history.path) }
 let retainedHistory = try Data(contentsOf: history)
+var execution: UUID?
+Task { execution = await monitor.beginExecution(prefix: two, engine: engine) }
+pump { execution != nil }
 input.change { $0.empty = true; $0.now = 100 }
 monitor.reconcile(.init(epoch: epoch, environment: current.id, generation: current.generation))
 pump { snapshot.environments[current.id]!.existence == .unconfirmed }
 precondition(snapshot.environments[current.id]!.existence != .exited, "single empty probe ended environment")
 input.change { $0.now = 101 }
+monitor.reconcile(.init(epoch: epoch, environment: current.id, generation: current.generation))
+var barrier = false
+DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { barrier = true }
+pump { barrier }
+precondition(snapshot.environments[current.id]!.existence == .unconfirmed, "live executor lost environment ownership at observation deadline")
+var released = false
+monitor.endExecution(execution!) { released = true }
+monitor.endExecution(execution!) // duplicate/late release cannot end a newer owner
+pump { released }
+input.change { $0.now = 132 }
+monitor.reconcile(.init(epoch: epoch, environment: current.id, generation: current.generation))
+var sampled = false
+DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { sampled = true }
+pump { sampled }
+input.change { $0.now = 133 }
 monitor.reconcile(.init(epoch: epoch, environment: current.id, generation: current.generation))
 pump { snapshot.environments[current.id]!.existence == .exited }
 store.send(.quit); monitor.stop()

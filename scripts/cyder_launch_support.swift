@@ -124,15 +124,6 @@ final class CyderSetupPanel {
     }
 }
 
-final class WineActivationWaiter {
-    let prefix: String
-    let semaphore = DispatchSemaphore(value: 0)
-
-    init(prefix: String) {
-        self.prefix = (prefix as NSString).standardizingPath
-    }
-}
-
 struct CyderOnscreenWindow {
     let pid: Int32
     let ownerName: String
@@ -378,23 +369,29 @@ struct CyderProcessResult {
     let logURL: URL
     let outputTail: String
     let machineResult: [String: String]
+    let isUnconfirmed: Bool
+    let didStart: Bool
 
     init(
         status: Int32,
         terminationReason: Process.TerminationReason,
         logURL: URL,
         outputTail: String,
-        machineResult: [String: String] = [:]
+        machineResult: [String: String] = [:],
+        isUnconfirmed: Bool = false,
+        didStart: Bool = true
     ) {
         self.status = status
         self.terminationReason = terminationReason
         self.logURL = logURL
         self.outputTail = outputTail
         self.machineResult = machineResult
+        self.isUnconfirmed = isUnconfirmed
+        self.didStart = didStart
     }
 
     var succeeded: Bool {
-        terminationReason == .exit && status == 0
+        !isUnconfirmed && terminationReason == .exit && status == 0
     }
 
     var terminationDescription: String {
