@@ -303,6 +303,7 @@ SWIFT_SOURCES=(
   "$SCRIPT_DIR/cyder_launch_support.swift"
   "$SCRIPT_DIR/cyder_process_runner.swift"
   "$SCRIPT_DIR/cyder_operation_gate.swift"
+  "$SCRIPT_DIR/cyder_launch_preparation.swift"
   "$SCRIPT_DIR/cyder_launch_observer.swift"
   "$SCRIPT_DIR/cyder_rosetta.swift"
   "$SCRIPT_DIR/cyder_lifecycle.swift"

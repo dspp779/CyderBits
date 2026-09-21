@@ -214,6 +214,16 @@ final class CyderInstanceCoordinator {
         }
     }
 
+    func deferRequest(id: String, reason: String, completion: @escaping (Bool) -> Void) {
+        precondition(Thread.isMainThread)
+        guard primary, !closing else { completion(false); return }
+        journal.deferDispatch(id: id, outcome: reason) { [weak self] result in
+            guard let self, case .success(let record) = result else { completion(false); return }
+            self.publish(record)
+            completion(true)
+        }
+    }
+
     func refreshRequests() {
         precondition(Thread.isMainThread)
         guard primary, !closing else { return }

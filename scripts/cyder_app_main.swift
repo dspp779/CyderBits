@@ -39,12 +39,13 @@ private enum CyderLaunchIntent: Equatable {
 
 final class CyderAppDelegate: NSObject, NSApplicationDelegate {
     private let operationGate = CyderOperationGate()
-    private let launchPreparation = DispatchQueue(label: "local.cyder.launch-preparation", qos: .userInitiated)
+    private let launchPreparation = CyderLaunchPreparation<CyderOperationGate.Scope?>()
     private var requestRecords: [CyderRequestJournal.Record] = []
     private weak var existingLibraryController: CyderGameLibraryWindowController?
     private weak var existingRequestController: CyderRequestWindowController?
     private var cancelledRequestIDs = Set<String>()
     private var pendingRequestAcquisitions: [String: UUID] = [:]
+    private var pendingPreparation: [String: UUID] = [:]
     private let processRunner = CyderProcessRunner(delivery: DispatchQueue(label: "local.cyder.process-delivery", qos: .utility))
     private var pendingFiles: [String] = []
     private var pendingURLs: [String] = []
@@ -809,6 +810,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         environmentMonitor.stop()
         processRunner.quiesce()
         operationGate.quiesce()
+        launchPreparation.quiesce()
         wineLaunchObserver?.cancel()
         var replied = false
         func finishQuit() {
@@ -893,6 +895,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
     private func cancelQueuedRequest(_ id: String) {
         cancelledRequestIDs.insert(id)
         pendingLaunchAcquisitions.remove(id)
+        if let preparation = pendingPreparation.removeValue(forKey: id) { launchPreparation.cancel(preparation) }
         if let acquisition = pendingRequestAcquisitions.removeValue(forKey: id) { operationGate.cancel(acquisition) }
         for launch in queuedLaunches where launch.authorization?.id == id {
             if let lease = launch.lease { operationGate.release(lease) }
@@ -900,6 +903,13 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         queuedLaunches.removeAll { $0.authorization?.id == id }
         requestRemaining.removeValue(forKey: id)
         launchNextQueuedExecutableIfReady()
+        settleLaunchIngressIfIdle()
+    }
+
+    private func settleLaunchIngressIfIdle() {
+        guard !libraryLaunchInProgress, pendingLaunchAcquisitions.isEmpty, queuedLaunches.isEmpty else { return }
+        statusItemController.finishLaunchIngress()
+        if !environmentPreparationInProgress && activeProcessOperations == 0 { hideSetup() }
     }
 
     private func exportLastGameLog() {
@@ -1104,31 +1114,43 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
     private func prepareQueuedLaunch(_ launch: QueuedLaunch) {
         guard let requestID = launch.authorization?.id else { return }
         pendingLaunchAcquisitions.insert(requestID)
-        launchPreparation.async { [weak self] in
-            guard let self else { return }
-            var scope: CyderOperationGate.Scope = .allEnvironments
+        pendingPreparation[requestID] = launchPreparation.resolve(work: { [weak self] in
+            guard let self else { return nil }
             let target = wineLaunchTarget(for: launch.executable)
             if launch.isURI || target == .msi || target == .reg {
-                scope = .prefix(CyderPaths.sharedBottle)
+                return .prefix(CyderPaths.sharedBottle)
             } else if case .success(let prefix) = self.prefixForExecutable(URL(fileURLWithPath: launch.executable)) {
-                scope = .prefix(prefix)
+                return .prefix(prefix)
+            }
+            return nil
+        }) { [weak self] outcome in
+            guard let self else { return }
+            self.pendingPreparation.removeValue(forKey: requestID)
+            guard !self.quitTransaction, !self.cancelledRequestIDs.contains(requestID) else {
+                self.pendingLaunchAcquisitions.remove(requestID); return
+            }
+            guard case .resolved(let optionalScope) = outcome, let scope = optionalScope else {
+                self.instanceCoordinator.deferRequest(id: requestID, reason: "scope-unavailable") { saved in
+                    self.pendingLaunchAcquisitions.remove(requestID)
+                    guard !self.quitTransaction else { return }
+                    if !self.libraryLaunchInProgress && self.pendingLaunchAcquisitions.isEmpty && self.queuedLaunches.isEmpty {
+                        self.settleLaunchIngressIfIdle()
+                        if self.existingLibraryController?.window?.isVisible != true { self.showRequests() }
+                    }
+                    if !saved { CyderDiagnostics.shared.warning("unable to persist launch preflight pause; accepted request retained") }
+                }
+                return
             }
             // Stay queued in the durable journal while a conflicting stop or
             // mutation owns this environment. Authorization follows the lease.
-            let resolvedScope = scope
-            DispatchQueue.main.async {
-                guard let id = launch.authorization?.id, !self.quitTransaction, !self.cancelledRequestIDs.contains(id) else {
-                    self.pendingLaunchAcquisitions.remove(requestID); return
-                }
-                self.pendingRequestAcquisitions[id] = self.operationGate.acquire(resolvedScope) { lease in
-                    self.pendingRequestAcquisitions.removeValue(forKey: id)
-                    self.pendingLaunchAcquisitions.remove(requestID)
-                    guard let lease else { return }
-                    guard !self.quitTransaction, !self.cancelledRequestIDs.contains(id) else { self.operationGate.release(lease); return }
-                    var ready = launch; ready.lease = lease
-                    self.queuedLaunches.append(ready)
-                    self.launchNextQueuedExecutableIfReady()
-                }
+            self.pendingRequestAcquisitions[requestID] = self.operationGate.acquire(scope) { lease in
+                self.pendingRequestAcquisitions.removeValue(forKey: requestID)
+                self.pendingLaunchAcquisitions.remove(requestID)
+                guard let lease else { return }
+                guard !self.quitTransaction, !self.cancelledRequestIDs.contains(requestID) else { self.operationGate.release(lease); return }
+                var ready = launch; ready.lease = lease
+                self.queuedLaunches.append(ready)
+                self.launchNextQueuedExecutableIfReady()
             }
         }
     }

@@ -75,11 +75,22 @@ var denied: Bool?; coordinator.resumeRequest(id: uncertain.id) { denied = $0 }; 
 precondition(denied == false)
 
 let authorized = result { coordinator.authorize(delivered[0].record, completion: $0) }!
+var pauseDenied: Bool?
+coordinator.deferRequest(id: authorized.id, reason: "scope-unavailable") { pauseDenied = $0 }
+pump { pauseDenied != nil }; precondition(pauseDenied == false)
 coordinator.finish(authorized, outcome: "observation-deadline", uncertain: true)
 pump { coordinator.recovered.first { $0.id == resume.id }?.phase == .uncertain }
 coordinator.refreshRequests()
 controller.update(coordinator.recovered)
 precondition(controller.rows.allSatisfy { !$0.canResume && !$0.canCancel })
+var pendingRequest: CyderInstanceRequest?
+coordinator.submit(.init(files: ["/trusted/暫停測試.exe"], arguments: nil, urls: [], showUI: false)) { precondition($0) }
+pump { delivered.count == 2 }; pendingRequest = delivered.last
+var didPause = false
+coordinator.deferRequest(id: pendingRequest!.record.id, reason: "scope-unavailable") { didPause = $0 }
+pump { didPause && controller.rows.contains { $0.id == pendingRequest!.record.id && $0.canResume } }
+precondition(!CyderRequestRow.summary(coordinator.recovered).contains("上次"), "current preflight pause mislabeled as a prior session")
+precondition(controller.rows.first { $0.id == pendingRequest!.record.id }!.detail.contains("尚未派送"))
 let _: Bool = result { coordinator.quiesce(completion: $0) }
 let _: Bool = result { done in coordinator.stop { done(true) } }
 let finalJournal = CyderRequestJournal(directory: CyderPaths.support.appendingPathComponent("request-journal"))

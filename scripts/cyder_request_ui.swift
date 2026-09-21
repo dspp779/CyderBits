@@ -12,7 +12,9 @@ struct CyderRequestRow: Equatable {
             let detail: String
             switch record.phase {
             case .queued: detail = "等待啟動；可取消"
-            case .awaitingUserResume: detail = "上次尚未啟動"
+            case .awaitingUserResume:
+                detail = record.outcome?.hasPrefix("scope-") == true
+                    ? "環境暫時無法確認；尚未派送，可稍後繼續" : "上次尚未啟動"
             case .dispatching, .observing: detail = "正在啟動；已無法取消派送"
             case .uncertain: detail = "啟動結果尚未確認；不會自動重試"
             case .failed: detail = "啟動未完成；可查看診斷記錄"
@@ -29,6 +31,9 @@ struct CyderRequestRow: Equatable {
         let rows = project(records)
         guard !rows.isEmpty else { return "" }
         let waiting = rows.filter(\.canResume).count
+        if records.contains(where: { $0.phase == .awaitingUserResume && $0.outcome?.hasPrefix("scope-") == true }) {
+            return "\(waiting) 個項目尚未啟動 · 查看要求"
+        }
         return waiting > 0 ? "上次有 \(waiting) 個項目尚未啟動 · 查看要求" : "\(rows.count) 個啟動要求 · 查看狀態"
     }
 }

@@ -305,6 +305,22 @@ final class CyderRequestJournal {
             guard var record = current.records[id], record.phase == .awaitingUserResume,
                   record.payload != nil else { throw Failure.tooLate }
             record.phase = .queued
+            record.outcome = nil
+            record.version = current.version + 1
+            current.records[id] = record
+            return record
+        }
+    }
+
+    /// Read-only preparation failed before dispatch. Persist a user-resumable
+    /// state; never use this to rewind an executor that may already have spawned.
+    func deferDispatch(id: String, outcome: String, completion: @escaping Reply) {
+        transaction(completion) { [self] current in
+            guard !closing else { throw Failure.closing }
+            guard var record = current.records[id], record.phase == .queued,
+                  record.payload != nil else { throw Failure.tooLate }
+            record.phase = .awaitingUserResume
+            record.outcome = String(outcome.prefix(128))
             record.version = current.version + 1
             current.records[id] = record
             return record

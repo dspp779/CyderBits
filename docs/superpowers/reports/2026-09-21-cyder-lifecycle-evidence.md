@@ -192,3 +192,13 @@ C3 程序盤點發現的舊 helper 殘留有一個明確競態：supervisor 先 
 - 全來源 typecheck 與 universal macOS11 build 通過：`build-F1.log`；隔離測試包 `/private/tmp/cyder-lifecycle-f1-build/Cyder.app` 已配置 ID `local.cyder.lifecycle-f1`、CD2 support/runtime wrapper 與 ad-hoc 簽章。來源／binary manifest `build-F1-source-sha256.json`。本輪尚未啟動此完整 app，不新增真實 Wine UI 通過宣稱。
 
 F 尚未完成：直接開啟仍是旧設定首屏，遊戲庫 prepare 的同步掃描須遷移；primary／journal unavailable 尚需唯讀 UI；scope preparation 的卡住隔離、outbox 恢復、不可變設定快照與 supervisor fencing；完整程序／視窗 action capability、全 V01–V14 及最終測試版交付仍待完成。
+
+## F2：啟動前讀取有界化與原 ID 手動繼續
+
+- 將單一 scope worker 換成正式 `CyderLaunchPreparation`：最多兩個實際讀取、512 個待交付觀察、五秒單調時鐘期限。依接受順序交付，但較早卡住的觀察只阻擋到其期限；逾時／取消不釋出仍卡住的實際 worker。worker 晚到只收尾，不派送過期結果；已到期的排隊工作不再開始讀取。
+- 無法確認環境時，要求仍未取得 launch ID／尚未派送，journal 原子保存為 `awaitingUserResume`，UI 原位置顯示「環境暫時無法確認；尚未派送，可稍後繼續」。明確繼續才將同一 ID 轉回 queued，清除舊原因並重新準備；已 dispatch 的要求拒絕倒退。最後一筆取消或暫停會清除 ingress 的 starting 標記；quit 後的保存回覆不重開視窗。
+- `test-cyder-launch-preparation.sh` 驅動正式解析器及 journal：零期限不執行、單一卡住時其他環境仍有界交付、兩個底層卡住時不增生 worker、排隊取消、晚到結果恰好一次、quit、新要求拒絕、持久暫停／手動繼續／dispatch fence。`preflight-F2-r2.log`、`journal-F2.log` 通過。
+- 正式 AppKit request adapter 測試追加 coordinator deferRequest→journal→原位置文字／能力、已派送拒絕暫停；`request-ui-F2-r2.log` 通過。instance、operation gate、open-files 回歸通過（`instance-F2.log`、`gate-F2.log`、`open-files-F2.log`）。這些是 L1–2 原生及故障注入證據，不是真實 Wine／NGS 實測。
+- universal macOS11 build 通過 `build-F2-r3.log`。包 `/private/tmp/cyder-lifecycle-f2-build/Cyder.app` 已配置獨立 ID `local.cyder.lifecycle-f2`、CD2 support/runtime 與 ad-hoc 簽章；manifest `build-F2-source-sha256.json`。之後僅增加 quit callback guard，另做全來源 typecheck；最終交付仍須重建最新版。此包尚未啟動，不新增 Wine 相容性結論。
+
+仍待：遊戲庫首屏與非同步資料載入、primary／journal unavailable 唯讀介面、outbox 恢復、不可變設定快照、detached supervisor 身分／跨崩潰 late-spawn fencing、單一環境 waiter、完整程序／視窗精確動作及 V01–V14 整合。目標保持進行中。
