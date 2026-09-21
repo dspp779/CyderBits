@@ -37,6 +37,10 @@ final class CyderStatusItemController: NSObject, NSMenuDelegate {
     var onExecuteStop: ((URL, CyderLifecycle.Stamp, UUID) -> Void)?
     var onLifecycleIdle: (() -> Void)?
     var onSessionEnded: ((URL) -> Void)?
+    var onManageEnvironment: ((URL, @escaping (String?) -> Void) -> Void)?
+    private var environmentPrefixes: [String: String] = [:]
+    var onReconcileEnvironment: ((CyderLifecycle.Stamp) -> Void)?
+    let lifecycleEpoch = UUID()
 
     private var sessions: [String: Session] = [:]
     private var isQuiescing = false
@@ -50,11 +54,12 @@ final class CyderStatusItemController: NSObject, NSMenuDelegate {
     private var launchIngressPending = false
     private var latestLifecycle = CyderLifecycle.State().snapshot
     private var hasLifecycleSnapshot = false
-    private lazy var lifecycleStore: CyderLifecycleStore = CyderLifecycleStore { [weak self] snapshot, effects in
+    private lazy var lifecycleStore: CyderLifecycleStore = CyderLifecycleStore(epoch: lifecycleEpoch) { [weak self] snapshot, effects in
         guard let self else { return }
         self.applyLifecycleSnapshot(snapshot)
         guard !self.isQuiescing else { return }
         for effect in effects {
+            if case .reconcile(let stamp) = effect { self.onReconcileEnvironment?(stamp) }
             if case .stop(let stamp, let operation) = effect,
                let environment = snapshot.environments[stamp.environment] {
                 self.onExecuteStop?(URL(fileURLWithPath: environment.prefix), stamp, operation)
@@ -114,25 +119,17 @@ final class CyderStatusItemController: NSObject, NSMenuDelegate {
         lifecycleStore.send(.ingressPending(pending))
     }
 
-    /// Migration producer only: a root receipt proves this prefix was managed,
-    /// not that its server is still alive. Batch E supplies calibrated evidence.
+    func receiveLifecycleEvent(_ event: CyderLifecycle.Event) { lifecycleStore.send(event) }
+
     private func registerManagedEnvironment(prefix: URL) {
+        guard !isQuiescing, let onManageEnvironment else { return }
         pendingEnvironmentAttachments += 1
         publishLegacyWork()
-        observationQueue.async { [weak self] in
-            let resolved = prefix.resolvingSymlinksInPath().standardizedFileURL
-            var info = stat()
-            let valid = stat(resolved.path, &info) == 0 && (info.st_mode & S_IFMT) == S_IFDIR
-            let environment: CyderLifecycle.Environment? = valid ? CyderLifecycle.Environment(
-                id: .init(uid: getuid(), device: UInt64(bitPattern: Int64(info.st_dev)),
-                          inode: UInt64(info.st_ino), namespace: "wine-user"),
-                prefix: resolved.path, engine: "", generation: 1) : nil
-            DispatchQueue.main.async {
-                guard let self else { return }
-                if let environment, !self.isQuiescing { self.lifecycleStore.send(.manage(environment)) }
-                self.pendingEnvironmentAttachments -= 1
-                self.publishLegacyWork()
-            }
+        onManageEnvironment(prefix) { [weak self] resolved in
+            guard let self else { return }
+            if let resolved { self.environmentPrefixes[prefix.path] = resolved }
+            self.pendingEnvironmentAttachments -= 1
+            self.publishLegacyWork()
         }
     }
 
@@ -141,6 +138,9 @@ final class CyderStatusItemController: NSObject, NSMenuDelegate {
         guard !hasLifecycleSnapshot || (snapshot.epoch == latestLifecycle.epoch && snapshot.revision > latestLifecycle.revision) else { return }
         hasLifecycleSnapshot = true
         latestLifecycle = snapshot
+        let endedPrefixes = Set(snapshot.environments.values.filter { $0.existence == .exited }.map(\.prefix))
+        let ended = sessions.values.filter { endedPrefixes.contains(environmentPrefixes[$0.prefix.path] ?? $0.prefix.path) }.map(\.id)
+        for id in ended { endLaunch(id: id) }
         if snapshot.keepStatusItem && !isQuiescing { installStatusItemIfNeeded() }
         refresh()
         scheduleLifecycleSettlement()
@@ -731,7 +731,7 @@ final class CyderStatusItemController: NSObject, NSMenuDelegate {
             menu.addItem(item)
         }
         for environment in latestLifecycle.environments.values.sorted(by: { $0.prefix < $1.prefix })
-            where environment.existence != .exited && !ordered.contains(where: { $0.prefix.path == environment.prefix }) {
+            where environment.existence != .exited && !ordered.contains(where: { (environmentPrefixes[$0.prefix.path] ?? $0.prefix.path) == environment.prefix }) {
             let state: String
             switch environment.stop {
             case .executing: state = "正在停止 Windows 環境"

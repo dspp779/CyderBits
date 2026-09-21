@@ -232,6 +232,15 @@ enum CyderLifecycle {
                 let pending = requests.values.contains { $0.environment == stamp.environment && $0.phase.isActive }
                 if existence != .exited || !pending { environments[stamp.environment]?.existence = existence }
                 environments[stamp.environment]?.health = health
+                if existence == .exited && !pending {
+                    if environments[stamp.environment]?.stop != .idle { environments[stamp.environment]?.stop = .finished }
+                    environments[stamp.environment]?.operation = nil
+                    for id in processes.keys where processes[id]?.environment == stamp.environment {
+                        exitedProcesses.insert(id)
+                        processes[id]?.existence = .exited
+                    }
+                    windows = windows.filter { processes[$0.key.process]?.existence != .exited }
+                }
             case .processObserved(let stamp, var process):
                 guard accepts(stamp), process.environment == stamp.environment, !exitedProcesses.contains(process.id) else { return [] }
                 if process.ownership == nil || process.launch.flatMap({ launches[$0]?.environment }) != stamp.environment {

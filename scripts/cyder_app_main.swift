@@ -73,6 +73,11 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         let coordinator = CyderInstanceCoordinator()
         return coordinator
     }()
+    private lazy var environmentMonitor: CyderEnvironmentMonitor = CyderEnvironmentMonitor(
+        epoch: statusItemController.lifecycleEpoch, directory: CyderPaths.support,
+        expectedEngine: CyderPaths.engine.appendingPathComponent("bin/wineserver"),
+        event: { [weak self] event in self?.statusItemController.receiveLifecycleEvent(event) }
+    )
     private lazy var statusItemController: CyderStatusItemController = {
         let controller = CyderStatusItemController()
         controller.onOpenPreferences = { [weak self] in self?.showSettings() }
@@ -83,6 +88,11 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         controller.onStopPrefixes = { [weak self] prefixes in
             self?.requestStopEnvironment(prefixes: prefixes)
         }
+        controller.onManageEnvironment = { [weak self] prefix, completion in
+            guard let self else { completion(nil); return }
+            self.environmentMonitor.track(prefix: prefix, engine: CyderPaths.engine.appendingPathComponent("bin/wineserver"), completion: completion)
+        }
+        controller.onReconcileEnvironment = { [weak self] stamp in self?.environmentMonitor.reconcile(stamp) }
         controller.onQuit = { NSApp.terminate(nil) }
         controller.onExecuteStop = { [weak self] prefix, stamp, operation in
             self?.runStopEnvironment(prefix: prefix, stamp: stamp, operation: operation)
@@ -340,6 +350,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             switch role {
             case .primary:
                 self.isPrimaryInstance = true
+                self.environmentMonitor.restore {}
                 self.instanceCoordinator.sentinel.onLaunchEnded = { [weak self] id in
                     self?.statusItemController.noteHelperDisconnected(id: id)
                 }
@@ -745,6 +756,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         guard !quitTransaction else { return .terminateLater }
         quitTransaction = true
         statusItemController.quiesce()
+        environmentMonitor.stop()
         var replied = false
         func finishQuit() {
             guard !replied else { return }
@@ -2061,6 +2073,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
 
     private func showSetup(_ message: String) {
         onMainThread {
+            guard !quitTransaction else { return }
             if setupPanel == nil {
                 setupPanel = CyderSetupPanel()
                 setupPanel?.show()

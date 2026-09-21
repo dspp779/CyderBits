@@ -109,3 +109,28 @@ Apple 官方查核（2026-09-21）：[menuWillOpen](https://developer.apple.com/
 已讀 engine redirect skill、engine repo AGENTS 及 incremental guide；未改 engine。固定 CX26 source `server/main.c` 的 -w 分支忽略 wait_for_lock 返回值並 exit(0)；`server/request.c` 用 prefix UID/device/inode 對應 `/tmp/.wine-UID/server-DEV-INO`，server lock 為 byte0 長度1 的 POSIX write lock。鎖失敗可退回 socket，因此單看 -w/lock 缺失不足以排空。後續 app-owned 校準必須核對 prefix 身分、鎖 owner 程序身分及 socket，失敗要局部降級。
 
 仍未完成：非同步 launch runner／executor 回執與晚到 spawn fencing、完整 observer identity／環境校準與重接、精確 window action、恢復／取消 UI、全 V01–V14。以上中間編譯或單一 Command-Q 成功不等於 A–F 全部驗收。
+
+## E1：正式環境探測、單環境 waiter 與重新校準
+
+- 新增 `CyderEnvironmentProbe`：背景核對 prefix UID/device/inode、受管理 engine 路徑、POSIX lock owner 的 boot UUID/PID/start-time/image、live Unix socket，讀取前後重新核對鎖與 prefix；不建立／取得 Wine lock、不刪 socket、不發 Wine protocol request。已存在 socket-only server、權限／engine／身分錯誤為 unknown，不從 -w 的 0 exit 推論 empty。
+- 鎖可能被剛結束等待的 -w helper 短暫持有，因此 alive 還必須有 live socket；native fixture 明確覆蓋該邊界。連續兩次 empty、相隔至少 0.5 秒且離開 launch 的 30 秒保護期限後才發出 exited。
+- 新增 `CyderEnvironmentMonitor`，正式接入 status lifecycle store：每環境合併校準、最多兩個實際 in-flight 工作、五秒逾時回報但不釋放仍卡住的底層占位；server birth 改變即新 generation。每個 app 監測環境／世代最多建立一次 `Process` -w，terminationHandler 回傳只觸發校準，早退不高速重建。quit 只終止自己建立的 -w。
+- `managed-environments-v1.json` 為帶 schema 的私有原子紀錄，只保存環境身分／engine／generation；有數量、大小、owner、NOFOLLOW 檢查。重開先由 reader 取得環境，再用當前 OS 身分校準；不同 app epoch 不接受舊 observer。損壞紀錄不覆寫、不變成 dispatch 權威。environment exited 清除對應程序／視窗存續及停止狀態。
+- `test-cyder-environment-probe.sh` 的 native POSIX lock/socket、程序 image/start-time、PID reuse、waiter lock、socket-only、stale socket、prefix 置換、engine 缺失通過（桌面 session）。沙箱 run 的 `kern.bootsessionuuid` 回傳 EPERM，不能形成完整程序身分；已查核原因，不算產品通過。另一輪編譯因同時修改 source 失敗，固定來源後重跑成功。
+- `test-cyder-environment-monitor.sh` 以正式 monitor/store 注入慢 probe 與時鐘：一個環境卡住時第二個仍校準、coalescing、新 server generation、舊事件拒絕、連續 empty、quit、恢復重新驗證及 corrupt registry 局部隔離通過。`test-cyder-lifecycle.sh`、正式 AppKit status/menu harness 及全來源 typecheck 通過。E/E2 universal macOS11 建置通過；E2 含追加的 live-socket hardening。
+
+### E 真實 Wine 與原生 UI（L3，有限範圍）
+
+- `/private/tmp/cyder-lifecycle-e-build/Cyder.app` 使用 `local.cyder.lifecycle-e`、相同本任務 CD2 support 及隔離 runtime。來源／binary SHA256 在 `.local/lifecycle-evidence/build-E-source-sha256.json`。E2 包在 `/private/tmp/cyder-lifecycle-e2-build/Cyder.app`，仍待後續完整整合後配置／交付。
+- 初次 CUA getApp 呼叫出現約 23562 秒工具等待；返回時 app session 才於 2026-09-21T00:54:35Z 開始，不能將整段工具等待當 app 啟動延遲。後續相同已綁定 app 操作回復秒級。保留這個失敗／噪音，不納入 callback p95，也不據此宣稱端到端達標。
+- 新版經正式 secondary/journal 啟動第二個記事本，保存一筆 managed environment，主程序 29100 建立一個自有 -w 30333。Command-Q 後兩者消失，記事本 11400/30331 與 server 11402 的 PID／啟動時間保留。重開主程序 30841 只建立一個新 waiter 30843；journal 仍兩筆 completed，無新 launch/replay。紀錄檔及程序關係佐證正式 reader/probe 接回；不等於 Wine 視窗精確動作驗證。
+- 使用設定 UI 的明確「關閉所有 Wine 程序」確認，scope 只含此 support 的本任務 bottle（已檢查 shell 範圍）。停止後只剩主程序 30841，正式 probe=empty，registry records=[]；原生設定視窗仍開啟、按鈕重新可用。此實測走設定的既有 explicit-stop action，不冒稱 status menu stop tracking 已實測。
+- 加強 socket 驗證後再用同一正式 probe 只讀對照：`/private/tmp/cy-lifecycle/support/bottles/shared` alive（server 98441），`/private/tmp/cy-cd2/support/bottles/shared` empty。兩者不同 inode，停止 CD2 未波及另一個測試環境。
+- log/程序證據：`.local/lifecycle-evidence/probe-real-Wine-live-E2.log`、`probe-real-Wine-empty-E2.log`、`e-managed-processes.txt`、`e-quit-processes.txt`、`e-reattach-processes.txt`、`e-stopped-processes.txt`。原始實機 argv 日誌不提交。
+- CUA screenshot 僅提供 app 視窗，AX tree 未提供 status item。實際 status tracking、Wine 視窗 input、多視窗指定切換仍未驗證；無 NGS 相容性結論。
+
+### 仍需完成的整合（不以 E1 作完整 E 驗收）
+
+舊 shell 每 launch 的 supervisor 仍有自身 session guard -w，尚需與 app 的環境觀測分工／錯誤通道整理；launch runner/activation semaphore、完整程序與視窗 identity、同環境 stop/dispatch 序列化、supervisor receipt、恢復／取消 UI 及精確 action 均待 C3/E2/F。monitored environment 的正常排空已取得真實證據，但 A–F 目標仍未完成。
+
+Apple 補充核對：[fcntl F_GETLK](https://developer.apple.com/library/archive/documentation/System/Conceptual/ManPages_iPhoneOS/man2/fcntl.2.html) 為衝突鎖查詢；[terminate](https://developer.apple.com/documentation/appkit/nsapplication/terminate(_:)) 與 [reply(toApplicationShouldTerminate:)](https://developer.apple.com/documentation/appkit/nsapplication/reply(toapplicationshouldterminate:)) 支持目前非同步退出接線。三秒退出與五秒 probe 期限是本任務工程選擇。
