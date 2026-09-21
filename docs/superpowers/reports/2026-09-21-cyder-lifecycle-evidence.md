@@ -51,7 +51,7 @@ SIGN_IDENTITY=- CYDER_REQUIRE_NATIVE_SWIFT=1 CYDER_SWIFT_OPTIMIZATION=-Onone \
 
 ## 驗證矩陣（持續更新）
 
-以下為截至 C27 的證據摘要；各批次段落保留當時缺口與失敗，不以早期矩陣覆蓋後續結果。
+以下為截至 C28 的證據摘要；各批次段落保留當時缺口與失敗，不以早期矩陣覆蓋後續結果。
 
 | 項目 | 目前證據 | 剩餘／限制 |
 |---|---|---|
@@ -62,7 +62,7 @@ SIGN_IDENTITY=- CYDER_REQUIRE_NATIVE_SWIFT=1 CYDER_SWIFT_OPTIMIZATION=-Onone \
 | V05 | C9–C12 原生 owner／handoff 故障注入，spawn 前後 crash、late wrapper、same-boot uncertain 不重播 | 不等於實際 Windows／NGS 崩潰恢復實測 |
 | V06 | C16–C21 正式 root receipt／雙樣本 drain／generation／observer 固定期限；native child 與注入後繼證據 | Wine root 退出後失去 Unix ancestry 的後繼不可猜歸屬；真實接力未驗證 |
 | V07 | 正式環境 store／monitor 保留 alive 無視窗環境，觀察期限後不持續 starting；C19 drain 不被 request 擋住 | 實際 NGS 未測，無視窗替身只證明政策 |
-| V08 | E 真實 Wine 校準；C21 probe/identity/waiter spawn 受阻、新世代／舊事件／雙 empty 注入 | 單環境 waiter 分工仍須清理並做最後回歸 |
+| V08 | E 真實 Wine 校準；C21 probe/identity/waiter spawn 受阻、新世代／舊事件／雙 empty 注入 | C28 原生 app supervisor 已移除 per-launch waiter，兩個原生 x86 root／包內整合通過；最新版完整 Wine GUI 仍未重測 |
 | V09 | C18/C20 同 prefix 不共用視窗成功、完整 birth/scope；E 真實停止 CD2 未波及另一隔離 bottle | C24 原生孤兒程序獨立發現／呈現、C25 可信 bottle 目錄補查通過；真實多遊戲視窗未測 |
 | V10 | D/E/C3 真實 Command-Q 保留 Wine births；C11 owner crash 保留 child；C17/C21/C22 quit fencing | 最新完整測試包及所有入口的最終回歸 |
 | V11 | E 真實設定明確停止後 UI 保留；正式 reducer／gate 區分 stop 與 quit | 最新 status stop 的實際 tracking 未測 |
@@ -595,3 +595,20 @@ C23 接通有完整 native root 證據的重新觀察及 queued/history 共用�
 - 最終 `build-C27-r2.log` universal macOS11 建置通過，41 個輸入編譯前後 hash 相同；第一輪 log／hash 留存，後續為輪詢排除 admission 的修正重新建置，舊 app 產物已由新建置取代；隔離包 `/private/tmp/cyder-lifecycle-c27-build/Cyder.app` 設 local.cyder.lifecycle-c27、CD2 support/runtime，ad-hoc／strict verify 和雙架構核對通過。`build-C27-source-sha256.json` 有 47 項，包內三支 shell bytes 與 repo 相同。本輪未啟動完整 Cyder.app／Wine GUI，未發布或覆蓋正式安裝。
 
 C26 留下的首次恢復合併容量及 admission 排序問題已有正式路徑證據。下一步仍是 shell detached supervisor 的 per-launch -w 與原生 monitor 的分工：不能只刪等待而提早釋放 session guard，亦不能用 socket 存在當成精確存活證據。其餘 UX／I/O 與 V01–V14 最終驗收、可重現整包交付持續進行，目標未完成。
+
+
+## C28：原生環境等待交給 monitor，保留 session 設定互斥
+
+- 原生 app 的正式 launch 環境新增內部 CYDER_ENVIRONMENT_MONITOR=1，優先於 per-game 值。detached supervisor 同時確認 native execution ticket 後，root 結束只發布精確 result／background lifecycle，不再每個 launch 執行 wineserver -w 或自行發布環境 stopped。環境生命週期與每世代的一個 waiter 由既有 EnvironmentMonitor 負責；明確停止的 -k／-w 及未採用原生 monitor 的 CLI fallback 沒有混入這個改動。
+- session guard 仍保護共同 wineserver 的同步／電源設定。native session 在取得時標示 observer=native；root reaped 後以原子替換保留 background、把 PID 清為 0，避免數值 PID 重用冒充仍活的 root。park 前先撤掉本 supervisor 的 EXIT release，寫入失敗也不刪掉保護檔。若只剩較早的 running 狀態，observer=native 仍要求環境證據才能清除，不因 dead root PID 直接放行。
+- 提交前另修正 native park 與下一次 acquire 的競態：兩者共用 session 鎖，取得鎖後重新檢查 session；已被新接納清掉的舊 guard 不可重建。native 分支直接在鎖內完成 background／PID 0／退出時間更新，避免先走未上鎖的 legacy mark_background。Bash 3 背景 subshell 的 $$ 仍是舊 parent，鎖的 pid 改由前景 /bin/sh child 的 PPID 寫入實際持鎖 shell；舊 parent 退出不會讓別人誤拆 native park 的鎖。新測試在鎖被占用時證明 park 沒有完成，再移除舊 session、建立新 reservation、釋放鎖，確認晚到 park 不重建／覆寫；r5 通過後重建並重跑包內整合。
+- 新唯讀 `CyderEnvironmentCommand` 經正式 CyderSwift --environment-state 入口執行，不建立 NSApplication／UI、不啟動 Wine、不發訊號。使用原 EnvironmentProbe 的 prefix 身分、server lock／socket／完整 birth 核對；兩次 empty 間隔至少半秒且重查 prefix identity，才回固定 empty 協定及 status 10。alive 回 status 0，unknown／替換／restart 保留未知；Bash 同時比對協定文字及 status，缺 helper／錯誤／不符格式不能解除 session。
+- helper／server 路徑由 runLauncher 以 app bundle 與目前 engine 內部覆寫，不能由 per-game environment 替代。只把新校準用在 session 接納，沒有改動一般 bootstrap 的 engine 尚未安装判斷。session lock 內同一 prefix 只讀一次環境，12 個舊 session 不會變成 12 個 helper／半秒等待；明確排空後才清掉該 prefix 的舊保護，別的 prefix 不受影響。PID 0 另改為非有效 PID，避免 kill -0 0 查到 shell process group 而永久占用。
+- `native-session-C28-r5.log` 通過：正式命令的 alive、unknown、兩次 empty、樣本間新 server、prefix inode 替換及錯誤參數；真實暫存 prefix／實際空 namespace 與可執行檔 stand-in 清除舊 session；注入 alive／unknown／錯誤文字／status 不符均拒絕不相容設定；失敗 park 留下 running 狀態仍受保護；12 個背景 session 共用一次校準且另一 prefix 保留。這些不是 Wine 執行結果。
+- `native-handoff-C28-bundle-r2.log` 使用本次 **包內 CyderSwift 與 ogom-scripts**，透過真正 native owner、bridge、Bash supervisor 及自建 x86_64 Mach-O 程序驗證：同 prefix 兩個 root，PID／birth／退出 53 正確；兩個 per-launch wineserver 呼叫計數皆為零；兩份 session 保留、observer=native 且 pid=0；真正空 namespace 的正式命令允許後續不同 sync 設定並清掉舊 guard。原有 dispatch 先後 crash、晚到 bridge、獨立 prefix、global runtime barrier、taskmgr、十次 fast exit 全部通過。輸出及 fixture 證據保存 native-handoff-C28-bundle-r2-artifacts；前兩輪 source harness 輸出亦保留。這是原生 x86 程序與正式路徑整合，沒有把它稱為 Wine／NGS 相容性實測。
+- **真實隔離環境的唯讀校準**：包內新命令讀取 /private/tmp/cy-cd2/support/bottles/shared 及既有 runtime wineserver，回 `cyder-environment-v1 alive`、status 0（5.791 ms，單次命令時間，不是 UI latency）。當前 version 檔為 CX26.3.0-W11-Cyder012，server SHA256 和回覆保存在 environment-command-C28-real-prefix.log。沒有 Wine spawn、停止訊號或 prefix 寫入；未測該 Wine 視窗與 NGS。
+- `session-C28-r3.log`、`launcher-C28-r3.log`、`open-files-C28.log`、`environment-monitor-C28.log` 回歸通過。launcher 首輪已有 PASS，但假 wineserver 在非停止案例未設定 CYDER_TEST_STOP_LOG，對空檔名重導產生兩行 stderr；查明為 fixture 後把未指定的日誌導向 /dev/null，停止記錄／失敗斷言仍保留，r2 無該錯誤。沒有刪除斷言、跳過原 CLI waiter 行為或將 mock 當 Wine。
+- 已依 repo 規則重讀 engine AGENTS／incremental guide，沒有改 engine repo、make 或 engine pack。核對 Apple [Thread.sleep(forTimeInterval:)](https://developer.apple.com/documentation/foundation/thread/sleep%28fortimeinterval%3A%29?language=objc)：sleep 會阻塞目前 thread 且不處理該 thread 的 run loop；本處只在独立命令的 utility worker 進行，未加在 app UI thread。半秒雙樣本是 Cyder 工程政策，不是 Apple UX 門檻。
+- 最終 `build-C28-r2.log` universal macOS11 建置成功，42 個來源輸入在編譯前後 hash 相同；第一輪 build／hash 與包內測試輸出保留，新建置取代舊 app 產物；隔離包 `/private/tmp/cyder-lifecycle-c28-build/Cyder.app` 設 local.cyder.lifecycle-c28、CD2 support/runtime，ad-hoc／strict verify 和 arm64／x86_64 核對通過。`build-C28-source-sha256.json` 保存 48 項，三支包內 shell bytes 與 repo 完全相同。正式完整 app GUI 未啟動，只有其無 UI 命令入口及 executor 入口被上述測試執行；未覆蓋正式安裝或發布。
+
+本批接通原生 monitor 與 session guard 的責任分工。舊 CLI 的相容觀察仍保守保留，未知校準不允許任意更換同步設定；實機完整 Wine／多視窗／NGS 體驗沒有因本批替代測試而升級為通過。session 鎖首次 mkdir 到 pid 發布之間仍沿用歷史 stale-owner 協定，尚需用初始化停頓注入檢查；其餘 UX／I/O 盤點、V01–V14 最終整合驗收及可重現交付仍繼續，目標保持進行中。

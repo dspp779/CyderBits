@@ -96,7 +96,7 @@ exec "$@"
 SH
 cat >"$TMP/runtime/Engines/wine-x86_64/bin/wineserver" <<'SH'
 #!/usr/bin/env bash
-printf '%s|%s\n' "${WINEPREFIX:-}" "$*" >>"$CYDER_TEST_STOP_LOG"
+printf '%s|%s\n' "${WINEPREFIX:-}" "$*" >>"${CYDER_TEST_STOP_LOG:-/dev/null}"
 if [[ "${CYDER_TEST_STOP_FAIL:-0}" == 1 ]]; then
   exit 1
 fi

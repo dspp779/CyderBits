@@ -1866,6 +1866,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             "CYDER_WINE_ACTIVATED_FILE": activatedURL.path,
             "CYDER_WINE_LIFECYCLE_FILE": lifecycleURL.path,
             "CYDER_SESSION_GUARD": "1",
+            "CYDER_ENVIRONMENT_MONITOR": "1",
             // Always retain the quiet startup stream for optional manual
             // diagnosis. UI classification uses the per-launch wait result
             // below and does not depend on Wine log text.
@@ -2513,6 +2514,9 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         for (key, value) in extraEnvironment {
             environment[key] = value
         }
+        // These helper paths are internal transport, never per-game overrides.
+        environment["CYDER_ENVIRONMENT_HELPER"] = Bundle.main.bundleURL.appendingPathComponent("Contents/MacOS/CyderSwift").path
+        environment["CYDER_ENVIRONMENT_SERVER"] = CyderPaths.engine.appendingPathComponent("bin/wineserver").path
         // Observation and explicit stop must remain usable with broken settings.
         environment["CYDER_WINE_SETTINGS_INDEPENDENT"] = settingsIndependent ? "1" : "0"
         let resultURL = operationLog
@@ -2845,6 +2849,12 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
 @main
 struct CyderMain {
     static func main() {
+        if CommandLine.arguments.dropFirst().first == "--environment-state" {
+            DispatchQueue.global(qos: .utility).async {
+                exit(CyderEnvironmentCommand.run(arguments: CommandLine.arguments))
+            }
+            dispatchMain()
+        }
         if ["--execution-owner", "--execution-wine"].contains(CommandLine.arguments.dropFirst().first ?? "") {
             exit(CyderExecutionOwner.run(arguments: CommandLine.arguments))
         }

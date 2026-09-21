@@ -45,12 +45,13 @@ def receipt(ticket):
     return json.loads((ledger / (ticket + '.json')).read_text())
 
 
-def start(directory, ticket, command):
+def start(directory, ticket, command, extra_environment=None):
     env = os.environ | dict(SOURCE_SCRIPTS=str(scripts), CYDER_SCRIPTS=str(scripts), TEST_ROOT=str(directory),
         CYDER_SUPPORT=str(directory / 'support'), CYDER_RUNTIME_ROOT=str(directory / 'runtime'),
         CYDER_WINE_DETACH='1', CYDER_WINE_PID_FILE=str(directory / 'pid'),
         CYDER_WINE_RESULT_FILE=str(directory / 'result'), CYDER_SESSION_GUARD='0',
         CYDER_CAPTURE_WINE_LOG='1', CYDER_POWER_MODE='normal')
+    env.update(extra_environment or {})
     with (directory / ('owner-' + ticket + '.log')).open('w') as output:
         process = subprocess.Popen([str(executor), '--execution-owner', str(ledger), ticket, '--'] + command,
                                    env=env, stdout=output, stderr=subprocess.STDOUT)
@@ -123,6 +124,50 @@ cyder_run_wine_exe "$TEST_ROOT/runtime/bin/wine" "$TEST_ROOT/inert.exe" "$TEST_R
     result = (delayed / 'result').read_text()
     assert 'exit_status=53' in result and f'pid={native_pid}' in result
     print('PASS native handoff: formal log wrapper stall retains scope, no early PID, recovery and independent prefix progress, actual x86_64 child birth, one-use bridge, next same-prefix operation before game exit, exact root result', flush=True)
+
+    # Two actual x86 native roots share one prefix; the shell supervisor must
+    # park both session guards without launching a per-root wineserver waiter.
+    monitored = case('native-monitor')
+    peer = case('native-monitor-peer')
+    (peer / 'prefix').rmdir()
+    (peer / 'prefix').symlink_to(monitored / 'prefix')
+    monitor_processes = []
+    for directory in [monitored, peer]:
+        (directory / 'log.release').touch()
+        server = directory / 'runtime/bin/wineserver'
+        server.write_text('#!/bin/bash\nprintf "%s\\n" "$*" >> "$TEST_ROOT/waiter.calls"\nexit 0\n')
+        server.chmod(0o755)
+        monitored_script = directory / 'launch.sh'
+        monitored_script.write_text(script.read_text())
+        monitored_ticket = reserve(directory)
+        process = start(directory, monitored_ticket, ['/bin/bash', str(monitored_script)], {
+            'CYDER_SESSION_GUARD': '1', 'CYDER_ENVIRONMENT_MONITOR': '1',
+            'CYDER_ENVIRONMENT_HELPER': str(executor), 'CYDER_ENVIRONMENT_SERVER': str(server),
+            'CYDER_WINE_LIFECYCLE_FILE': str(directory / 'lifecycle')})
+        monitor_processes.append((directory, monitored_ticket, process))
+        wait(lambda: process.poll() is not None and (directory / 'native.entered').exists(), 'monitored root failed handoff')
+        assert process.returncode == 0
+    sessions = monitored / 'prefix/.cyder-runtime/sessions'
+    wait(lambda: len(list(sessions.glob('*.session'))) == 2, 'same-prefix session guard missing')
+    for directory, monitored_ticket, process in monitor_processes:
+        (directory / 'native.release').touch()
+        wait(lambda: receipt(monitored_ticket).get('nativeSpawn', {}).get('phase') == 'exited', 'monitored root result missing')
+        wait(lambda: (directory / 'lifecycle').exists(), 'monitored lifecycle absent')
+        assert receipt(monitored_ticket)['nativeSpawn']['status'] == 53
+        assert 'state=background' in (directory / 'lifecycle').read_text()
+        assert not (directory / 'waiter.calls').exists(), 'per-launch wineserver -w survived native monitor handoff'
+    wait(lambda: len(list(sessions.glob('*.session'))) == 2 and all('pid=0\n' in p.read_text() for p in sessions.glob('*.session')), 'native sessions were released or retained old PIDs')
+    assert all('observer=native' in p.read_text() for p in sessions.glob('*.session'))
+    # With both native roots gone, the real read-only empty-namespace helper
+    # allows an incompatible new sync setting and lazily removes parked guards.
+    cleanup_script = monitored / 'session-cleanup.sh'
+    cleanup_script.write_text('#!/bin/bash\nset -e\nsource "$SOURCE_SCRIPTS/cyder-common.sh"\ncyder_session_acquire "$TEST_ROOT/prefix" 1 0 normal "$TEST_ROOT/runtime/bin/wineserver"\ncyder_session_release "$TEST_ROOT/prefix" "$CYDER_SESSION_FILE"\n')
+    cleanup_owner = start(monitored, reserve(monitored, False), ['/bin/bash', str(cleanup_script)], {
+        'CYDER_ENVIRONMENT_HELPER': str(executor), 'CYDER_ENVIRONMENT_SERVER': str(monitored / 'runtime/bin/wineserver')})
+    wait(lambda: cleanup_owner.poll() is not None, 'native empty guard cleanup did not finish')
+    assert cleanup_owner.returncode == 0 and not list(sessions.glob('*.session'))
+    assert all(not (directory / 'waiter.calls').exists() for directory in [monitored, peer])
+    print('PASS native monitor handoff: two actual x86 roots share prefix, zero per-launch waiters, exact root results, parked PID-free session guards, real empty calibration permits later setting change', flush=True)
 
     refused = case('runtime-refused')
     refused_link = refused / 'runtime/lib64/apple_gptk'

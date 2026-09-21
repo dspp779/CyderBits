@@ -3628,7 +3628,7 @@ cyder_run_wine_exe() {
     export PATH="${wine_bin%/wine}:$PATH"
     cd "$(dirname "$exe")"
     if [[ "${CYDER_SESSION_GUARD:-0}" != 0 ]]; then
-      cyder_session_acquire "$prefix" "${CYDER_MSYNC:-0}" "${CYDER_ESYNC:-0}" "${CYDER_POWER_MODE:-normal}" || return $?
+      cyder_session_acquire "$prefix" "${CYDER_MSYNC:-0}" "${CYDER_ESYNC:-0}" "${CYDER_POWER_MODE:-normal}" "$wineserver" || return $?
       session_id="$CYDER_SESSION_FILE"
     fi
     cyder_session_release_on_exit() {
@@ -3697,6 +3697,21 @@ cyder_run_wine_exe() {
               sleep 0.1
             done
           fi
+        fi
+        if [[ "${CYDER_ENVIRONMENT_MONITOR:-0}" == 1 && -n "${CYDER_EXECUTION_OWNER_TICKET:-}" ]]; then
+          # The native monitor owns one waiter per verified environment. Root
+          # exit only parks the sync/power reservation; it never proves drain.
+          # Drop the old numeric PID so reuse cannot impersonate this session.
+          session_id="" # A failed park must not release the reservation via EXIT.
+          if [[ -n "$detached_session_id" ]]; then
+            cyder_session_park_native "$detached_session_id" || exit 75
+          fi
+          detached_session_id=""
+          session_id=""
+          if [[ -n "${CYDER_SENTINEL_WATCH_FILE:-}" ]]; then
+            rm -rf "$(dirname "$CYDER_SENTINEL_WATCH_FILE")"
+          fi
+          exit "$wine_status"
         fi
         if [[ -n "$detached_session_id" ]]; then
           # The primary client returning does not imply that the bottle is
@@ -3812,17 +3827,32 @@ cyder_session_dir() {
   printf '%s\n' "${1%/}/.cyder-runtime/sessions"
 }
 
-cyder_session_acquire() {
-  local prefix="$1" msync="${2:-0}" esync="${3:-0}" power="${4:-normal}"
-  local dir lock file pid existing mode state attempts=0 max_attempts="${CYDER_SESSION_LOCK_ATTEMPTS:-250}" owner
+# Native session reservations require the same read-only calibration as the
+# environment monitor. Legacy CLI callers retain their existing observation.
+cyder_session_environment_live() {
+  local prefix="$1"
+  if [[ -n "${CYDER_ENVIRONMENT_HELPER:-}" ]]; then
+    # Active launch reservations remain authoritative before Wine can start.
+    cyder_prefix_has_live_session_pids "$prefix" && return 0
+    local server="${2:-${CYDER_ENVIRONMENT_SERVER:-}}" observation status=0
+    [[ -x "$CYDER_ENVIRONMENT_HELPER" && "$server" == /* ]] || return 0
+    observation="$("$CYDER_ENVIRONMENT_HELPER" --environment-state "$prefix" "$server" 2>/dev/null)" || status=$?
+    # A missing helper, changed prefix, unreadable namespace or invalid reply
+    # must retain the guard. Only the paired protocol/status proves emptiness.
+    [[ "$status" == 10 && "$observation" == 'cyder-environment-v1 empty' ]] && return 1
+    return 0
+  fi
+  cyder_has_running_prefix "$prefix"
+}
+
+cyder_session_lock() {
+  local dir="$1" lock="${1}/.lock" owner attempts=0 missing_pid_attempts=0
+  local max_attempts="${CYDER_SESSION_LOCK_ATTEMPTS:-250}"
   [[ "$max_attempts" =~ ^[1-9][0-9]*$ ]] || {
     echo "invalid CYDER_SESSION_LOCK_ATTEMPTS: $max_attempts" >&2
     return 2
   }
-  local missing_pid_attempts=0
-  dir="$(cyder_session_dir "$prefix")"
   mkdir -p "$dir"
-  lock="${dir}/.lock"
   while ! mkdir "$lock" 2>/dev/null; do
     owner="$(cat "$lock/pid" 2>/dev/null || true)"
     if [[ ! "$owner" =~ ^[0-9]+$ ]]; then
@@ -3844,19 +3874,38 @@ cyder_session_acquire() {
     }
     sleep 0.02
   done
-  if ! printf '%s\n' "$$" >"$lock/pid"; then
+  # This foreground child observes the actual caller, including Bash 3
+  # background subshells where $$ still denotes an exited launcher parent.
+  if ! /bin/sh -c 'printf "%s\n" "$PPID" > "$1"' _ "$lock/pid"; then
     rm -rf "$lock"
     echo "failed to initialize Cyder session lock" >&2
     return 1
   fi
+}
+
+cyder_session_acquire() {
+  local prefix="$1" msync="${2:-0}" esync="${3:-0}" power="${4:-normal}"
+  local dir lock file pid existing mode state observer environment_live=""
+  dir="$(cyder_session_dir "$prefix")"
+  lock="${dir}/.lock"
+  cyder_session_lock "$dir" || return $?
   for file in "$dir"/*.session; do
     [[ -f "$file" ]] || continue
     pid="$(sed -n 's/^pid=//p' "$file" | head -1)"
     state="$(sed -n 's/^state=//p' "$file" | head -1)"
-    if { [[ -z "$pid" ]] || ! kill -0 "$pid" 2>/dev/null; } \
-       && { [[ "$state" != background ]] || ! cyder_has_running_prefix "$prefix"; }; then
-      rm -f "$file"
-      continue
+    observer="$(sed -n 's/^observer=//p' "$file" | head -1)"
+    if [[ ! "$pid" =~ ^[1-9][0-9]*$ ]] || ! kill -0 "$pid" 2>/dev/null; then
+      if [[ "$state" == background || "$observer" == native ]]; then
+        # One calibration for the shared prefix while this session lock is
+        # held, rather than one helper / half-second pair per old launch.
+        if [[ -z "$environment_live" ]]; then
+          if cyder_session_environment_live "$prefix" "${5:-}"; then environment_live=1; else environment_live=0; fi
+        fi
+        if [[ "$environment_live" == 0 ]]; then rm -f "$file"; continue; fi
+      else
+        rm -f "$file"
+        continue
+      fi
     fi
     mode="$(sed -n 's/^mode=//p' "$file" | head -1)"
     existing="$(sed -n 's/^sync=//p' "$file" | head -1)"
@@ -3875,6 +3924,12 @@ cyder_session_acquire() {
     echo "failed to write Cyder session state" >&2
     return 1
   fi
+  if [[ "${CYDER_ENVIRONMENT_MONITOR:-0}" == 1 && -n "${CYDER_EXECUTION_OWNER_TICKET:-}" ]]; then
+    if ! printf 'observer=native\n' >>"$file"; then
+      rm -f "$file"; rm -rf "$lock"
+      return 1
+    fi
+  fi
   rm -rf "$lock"
   CYDER_SESSION_FILE="$file"
   export CYDER_SESSION_FILE
@@ -3891,6 +3946,25 @@ cyder_session_mark_background() {
   fi
   printf 'primary_exited_at=%s\n' "$(date +%s)" >>"$tmp"
   mv -f "$tmp" "$session"
+}
+
+# Keep the background guard after its native root has been reaped. The next
+# guarded launch may remove it only after read-only environment calibration.
+cyder_session_park_native() {
+  local session="$1" tmp="${1}.tmp.$$" dir="${1%/*}" status=0
+  cyder_session_lock "$dir" || return $?
+  # A newer acquisition can already have retired this reservation. Never
+  # recreate it after its old generation was proved empty under the same lock.
+  if [[ ! -e "$session" && ! -L "$session" ]]; then rm -rf "$dir/.lock"; return 0; fi
+  if [[ ! -f "$session" || -L "$session" ]]; then rm -rf "$dir/.lock"; return 1; fi
+  {
+    sed 's/^pid=.*/pid=0/; s/^state=.*/state=background/' "$session" &&
+      printf 'primary_exited_at=%s\n' "$(date +%s)"
+  } >"$tmp" || status=$?
+  if [[ "$status" == 0 ]]; then mv -f "$tmp" "$session" || status=$?; fi
+  rm -f "$tmp"
+  rm -rf "$dir/.lock"
+  return "$status"
 }
 
 # Publish all active Cyder bottles as an XML property list. A bottle remains

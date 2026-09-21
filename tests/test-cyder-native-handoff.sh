@@ -23,6 +23,10 @@ trap cleanup EXIT
 cat > "$TEST_DIR/main.swift" <<'SWIFT'
 import Foundation
 import Darwin
+if CommandLine.arguments.dropFirst().first == "--environment-state" {
+    DispatchQueue.global().async { exit(CyderEnvironmentCommand.run(arguments: CommandLine.arguments)) }
+    dispatchMain()
+}
 if [4, 6].contains(CommandLine.arguments.count), ["--prepare", "--prepare-global"].contains(CommandLine.arguments[1]) {
     DispatchQueue.global().async {
         do {
@@ -45,6 +49,6 @@ if CommandLine.arguments.count == 3, CommandLine.arguments[1] == "--recover" {
 }
 exit(CyderExecutionOwner.run(arguments: CommandLine.arguments))
 SWIFT
-swiftc -module-cache-path "$TEST_DIR/cache" "$ROOT/scripts/cyder_execution_owner.swift" "$TEST_DIR/main.swift" -o "$TEST_DIR/helper"
+swiftc -module-cache-path "$TEST_DIR/cache" "$ROOT/scripts/cyder_execution_owner.swift" "$ROOT/scripts/cyder_lifecycle.swift" "$ROOT/scripts/cyder_environment_probe.swift" "$ROOT/scripts/cyder_environment_command.swift" "$TEST_DIR/main.swift" -o "$TEST_DIR/helper"
 clang -arch x86_64 "$ROOT/tests/fixtures/cyder_native_handoff.c" -o "$TEST_DIR/native"
 python3 "$ROOT/tests/fixtures/cyder_native_handoff.py" "$TEST_DIR/state" "$TEST_DIR/helper" "${CYDER_TEST_SOURCE_SCRIPTS:-$ROOT/scripts}" "$TEST_DIR/native"
