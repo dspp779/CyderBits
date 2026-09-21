@@ -1153,13 +1153,28 @@ final class CyderGameLibraryWindowController: NSWindowController, NSWindowDelega
     var onRemoveProfile: ((URL, @escaping (Bool) -> Void) -> Void)?
     var onOpenPreferences: (() -> Void)?
     var onOpenRequests: (() -> Void)?
+    var onPrepareEnvironment: (() -> Void)?
     var onClose: (() -> Void)?
 
     var isGameSettingsVisible: Bool { gameSettingsController?.window?.isVisible == true }
 
-    private let libraryStore = CyderGameLibraryStore.shared
-    private let profileStore = CyderProfileStore(root: CyderPaths.support)
-    private let settingsStore = CyderSettingsStore.shared
+    private var loader = CyderLibraryLoader()
+    private var hasSnapshot = false
+    private let loadStatus = NSTextField(labelWithString: "")
+    private let environmentStatus = NSTextField(labelWithString: "首次遊玩可先準備 Windows 環境")
+    private let environmentButton = NSButton()
+    private let recoveryNotice = NSStackView()
+    private var recoveryHeight: NSLayoutConstraint?
+
+    func updateEnvironmentStatus(_ text: String, busy: Bool) {
+        environmentStatus.stringValue = text
+        environmentButton.isEnabled = !busy
+    }
+    func showRecoveryNotice() { recoveryNotice.isHidden = false; recoveryHeight?.constant = 28 }
+    @objc private func dismissRecoveryNotice() { recoveryNotice.isHidden = true; recoveryHeight?.constant = 0 }
+    @objc private func openRecoveryLogs() { NSWorkspace.shared.open(CyderPaths.support.appendingPathComponent("Logs")) }
+    @objc private func prepareEnvironment() { onPrepareEnvironment?() }
+
     private let iconStore = CyderGameIconStore.shared
     private let collectionView = NSCollectionView()
     private let emptyState = NSStackView()
@@ -1182,7 +1197,7 @@ final class CyderGameLibraryWindowController: NSWindowController, NSWindowDelega
     }
     @objc private func openRequests() { onOpenRequests?() }
 
-    convenience init() {
+    convenience init(loader: CyderLibraryLoader = CyderLibraryLoader()) {
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 500, height: 420),
             styleMask: [.titled, .closable, .fullSizeContentView],
@@ -1190,6 +1205,8 @@ final class CyderGameLibraryWindowController: NSWindowController, NSWindowDelega
             defer: false
         )
         self.init(window: window)
+        self.loader = loader
+        loader.onUpdate = { [weak self] update in self?.apply(update) }
         window.collectionBehavior.insert(.fullScreenNone)
         window.standardWindowButton(.zoomButton)?.isHidden = true
         window.isReleasedWhenClosed = false
@@ -1199,24 +1216,31 @@ final class CyderGameLibraryWindowController: NSWindowController, NSWindowDelega
         appearanceRoot.autoresizingMask = [.width, .height]
         window.contentView = appearanceRoot
         buildUI()
-        prepareForDisplay()
     }
 
     func windowWillClose(_ notification: Notification) { onClose?() }
 
-    func prepareForDisplay() {
-        libraryStore.reload()
-        let profiles = profileStore.listRecords()
-        try? libraryStore.merge(profileRecords: profiles)
-        importBottleShortcuts()
-        _ = try? libraryStore.removeMissingExecutables()
-        games = libraryStore.games
-        independentIDs = Set(profiles.map(\.profileId))
-        if let selectedGameID, !games.contains(where: { $0.id == selectedGameID }) {
-            self.selectedGameID = nil
+    func prepareForDisplay() { loader.request() }
+
+    func quiesce() { loader.quiesce() }
+
+    private func apply(_ update: CyderLibraryLoader.Update) {
+        precondition(Thread.isMainThread)
+        switch update {
+        case .loading: loadStatus.stringValue = "正在讀取遊戲庫…"
+        case .unconfirmed: loadStatus.stringValue = "讀取時間較長；仍可開啟設定或退出"
+        case .failed: loadStatus.stringValue = "暫時無法讀取或儲存遊戲庫；請重新整理"
+        case .ready(let snapshot):
+            hasSnapshot = true
+            games = snapshot.games; independentIDs = snapshot.independentIDs
+            if let id = snapshot.selectedID { selectedGameID = id }
+            if let id = selectedGameID, !games.contains(where: { $0.id == id }) { selectedGameID = nil }
+            loadStatus.stringValue = ""
+            ensureGameIcons()
         }
+        toolbarRefreshButton.isEnabled = !loader.isBusy
+        toolbarAddButton.isEnabled = !loader.isBusy
         reloadGrid()
-        ensureGameIcons()
     }
 
     /// Re-run extract after Wine bootstrap so tiles that opened during first-run
@@ -1224,16 +1248,6 @@ final class CyderGameLibraryWindowController: NSWindowController, NSWindowDelega
     func retryMissingIcons() {
         guard window?.isVisible == true else { return }
         ensureGameIcons()
-    }
-
-    private func importBottleShortcuts() {
-        do {
-            _ = try libraryStore.importShortcuts()
-        } catch {
-            CyderDiagnostics.shared.warning(
-                "game-library shortcut-import-failed error=\(error.localizedDescription)"
-            )
-        }
     }
 
     private func ensureGameIcons() {
@@ -1304,6 +1318,29 @@ final class CyderGameLibraryWindowController: NSWindowController, NSWindowDelega
         emptyState.isHidden = true
         emptyState.translatesAutoresizingMaskIntoConstraints = false
 
+        loadStatus.font = .systemFont(ofSize: 11)
+        loadStatus.textColor = .secondaryLabelColor
+        loadStatus.translatesAutoresizingMaskIntoConstraints = false
+        content.addSubview(loadStatus)
+        environmentStatus.font = .systemFont(ofSize: 11)
+        environmentStatus.textColor = .secondaryLabelColor
+        environmentStatus.lineBreakMode = .byTruncatingTail
+        environmentButton.title = "準備 Windows 環境"
+        environmentButton.target = self; environmentButton.action = #selector(prepareEnvironment)
+        environmentButton.bezelStyle = .rounded
+        let environmentRow = NSStackView(views: [environmentStatus, environmentButton])
+        environmentRow.orientation = .horizontal; environmentRow.spacing = 8
+        environmentRow.translatesAutoresizingMaskIntoConstraints = false
+        content.addSubview(environmentRow)
+        let recoveryLogs = NSButton(title: "上次未正常結束 · 查看記錄", target: self, action: #selector(openRecoveryLogs))
+        recoveryLogs.bezelStyle = .rounded
+        let dismissRecovery = NSButton(title: "關閉提示", target: self, action: #selector(dismissRecoveryNotice))
+        dismissRecovery.bezelStyle = .rounded
+        recoveryNotice.setViews([recoveryLogs, dismissRecovery], in: .leading)
+        recoveryNotice.orientation = .horizontal; recoveryNotice.spacing = 8
+        recoveryNotice.isHidden = true; recoveryNotice.translatesAutoresizingMaskIntoConstraints = false
+        recoveryHeight = recoveryNotice.heightAnchor.constraint(equalToConstant: 0)
+        content.addSubview(recoveryNotice)
         content.addSubview(scroll)
         content.addSubview(emptyState)
         requestSummary.target = self; requestSummary.action = #selector(openRequests)
@@ -1317,8 +1354,18 @@ final class CyderGameLibraryWindowController: NSWindowController, NSWindowDelega
             requestSummaryHeight!,
             scroll.leadingAnchor.constraint(equalTo: content.leadingAnchor),
             scroll.trailingAnchor.constraint(equalTo: content.trailingAnchor),
-            scroll.topAnchor.constraint(equalTo: requestSummary.bottomAnchor),
-            scroll.bottomAnchor.constraint(equalTo: content.bottomAnchor, constant: -8),
+            recoveryNotice.topAnchor.constraint(equalTo: requestSummary.bottomAnchor),
+            recoveryNotice.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 12),
+            recoveryNotice.trailingAnchor.constraint(lessThanOrEqualTo: content.trailingAnchor, constant: -12),
+            recoveryHeight!,
+            scroll.topAnchor.constraint(equalTo: recoveryNotice.bottomAnchor),
+            scroll.bottomAnchor.constraint(equalTo: loadStatus.topAnchor, constant: -4),
+            loadStatus.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 12),
+            loadStatus.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -12),
+            loadStatus.bottomAnchor.constraint(equalTo: environmentRow.topAnchor, constant: -4),
+            environmentRow.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 12),
+            environmentRow.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -12),
+            environmentRow.bottomAnchor.constraint(equalTo: content.bottomAnchor, constant: -8),
             emptyState.centerXAnchor.constraint(equalTo: scroll.centerXAnchor),
             emptyState.centerYAnchor.constraint(equalTo: scroll.centerYAnchor),
             emptyState.leadingAnchor.constraint(greaterThanOrEqualTo: scroll.leadingAnchor, constant: 20),
@@ -1337,9 +1384,9 @@ final class CyderGameLibraryWindowController: NSWindowController, NSWindowDelega
     private func reloadGrid() {
         collectionView.reloadData()
         let isEmpty = games.isEmpty
-        emptyState.isHidden = !isEmpty
+        emptyState.isHidden = !isEmpty || !hasSnapshot
         collectionView.isHidden = isEmpty
-        toolbarAddButton.isHidden = isEmpty
+        toolbarAddButton.isHidden = isEmpty && hasSnapshot
         DispatchQueue.main.async { [weak self] in
             self?.collectionView.collectionViewLayout?.invalidateLayout()
         }
@@ -1383,7 +1430,7 @@ final class CyderGameLibraryWindowController: NSWindowController, NSWindowDelega
     private func contextMenu(for game: CyderGameRecord) -> NSMenu {
         selectGame(game)
         let menu = NSMenu()
-        let macAppTitle = CyderMacLauncherInstaller.isInstalled(for: game)
+        let macAppTitle = game.macAppPath != nil
             ? "更新 macOS 應用程式"
             : "加入 macOS 應用程式"
         let macApp = menu.addItem(withTitle: macAppTitle, action: #selector(installMacAppForSelectedGame), keyEquivalent: "")
@@ -1416,19 +1463,10 @@ final class CyderGameLibraryWindowController: NSWindowController, NSWindowDelega
         onOpenPreferences?()
     }
 
-    @objc private func refreshLibrary() {
-        libraryStore.reload()
-        let profiles = profileStore.listRecords()
-        try? libraryStore.merge(profileRecords: profiles)
-        importBottleShortcuts()
-        _ = try? libraryStore.removeMissingExecutables()
-        games = libraryStore.games
-        independentIDs = Set(profiles.map(\.profileId))
-        reloadGrid()
-        ensureGameIcons()
-    }
+    @objc private func refreshLibrary() { prepareForDisplay() }
 
     @objc private func addGame() {
+        guard !loader.isBusy else { return }
         let panel = NSOpenPanel()
         panel.title = "加入遊戲"
         panel.message = "選擇 Windows 遊戲執行檔 (.exe)"
@@ -1440,23 +1478,11 @@ final class CyderGameLibraryWindowController: NSWindowController, NSWindowDelega
             panel.allowedContentTypes = [exeType, .data]
         }
         guard panel.runModal() == .OK, let url = panel.url else { return }
-        do {
-            let record = try libraryStore.add(executable: url)
-            games = libraryStore.games
-            selectedGameID = record.id
-            independentIDs = Set(profileStore.listRecords().map(\.profileId))
-            reloadGrid()
-            iconStore.extractSelectedGame(record) { [weak self] in self?.collectionView.reloadData() }
-        } catch {
-            showAlert(title: "無法加入遊戲", message: error.localizedDescription)
-        }
+        loader.request(.add(url))
     }
 
     private func launch(_ game: CyderGameRecord) {
-        guard FileManager.default.fileExists(atPath: game.executablePath) else {
-            showAlert(title: "找不到遊戲", message: "這個 EXE 已不在原本的位置。")
-            return
-        }
+        // The accepted launch path performs file validation off AppKit.
         onLaunch?(game.executableURL, nil)
     }
 
@@ -1518,32 +1544,26 @@ final class CyderGameLibraryWindowController: NSWindowController, NSWindowDelega
             self.macLauncherInstallInProgress = false
             switch result {
             case .success(let appURL):
-                var persistFailed = false
-                do {
-                    try self.libraryStore.setMacAppPath(appURL.path, forGameID: game.id)
-                    self.games = self.libraryStore.games
-                } catch {
-                    persistFailed = true
-                    CyderDiagnostics.shared.warning(
-                        "mac-launcher save-failed id=\(game.id) error=\(error.localizedDescription)"
-                    )
-                }
-                let alert = NSAlert()
-                if persistFailed {
-                    alert.messageText = updating ? "已更新應用程式，但未寫入遊戲庫" : "已建立應用程式，但未寫入遊戲庫"
-                    alert.informativeText =
-                        "\(appURL.path)\n\n可在 Finder 使用此捷徑，但遊戲庫可能仍顯示「加入 macOS 應用程式」。"
-                    alert.alertStyle = .warning
-                } else {
-                    alert.messageText = updating ? "已更新 macOS 應用程式" : "已加入 macOS 應用程式"
-                    alert.informativeText =
-                        "可在 Launchpad 或「\(CyderMacLauncherInstaller.outputDirectory().path)」找到 \(game.displayName)。"
-                    alert.alertStyle = .informational
-                }
-                alert.addButton(withTitle: "在 Finder 中顯示")
-                alert.addButton(withTitle: "知道了")
-                if alert.runModal() == .alertFirstButtonReturn {
-                    NSWorkspace.shared.activateFileViewerSelecting([appURL])
+                self.loader.request(.setMacApp(game.id, appURL.path)) { [weak self] saved in
+                    guard self != nil else { return }
+                    let persistFailed = !saved
+                    let alert = NSAlert()
+                    if persistFailed {
+                        alert.messageText = updating ? "已更新應用程式，但未寫入遊戲庫" : "已建立應用程式，但未寫入遊戲庫"
+                        alert.informativeText =
+                            "\(appURL.path)\n\n可在 Finder 使用此捷徑，但遊戲庫可能仍顯示「加入 macOS 應用程式」。"
+                        alert.alertStyle = .warning
+                    } else {
+                        alert.messageText = updating ? "已更新 macOS 應用程式" : "已加入 macOS 應用程式"
+                        alert.informativeText =
+                            "可在 Launchpad 或「\(CyderMacLauncherInstaller.outputDirectory().path)」找到 \(game.displayName)。"
+                        alert.alertStyle = .informational
+                    }
+                    alert.addButton(withTitle: "在 Finder 中顯示")
+                    alert.addButton(withTitle: "知道了")
+                    if alert.runModal() == .alertFirstButtonReturn {
+                        NSWorkspace.shared.activateFileViewerSelecting([appURL])
+                    }
                 }
             case .failure(let error):
                 self.showAlert(title: "無法建立 macOS 應用程式", message: error.localizedDescription)

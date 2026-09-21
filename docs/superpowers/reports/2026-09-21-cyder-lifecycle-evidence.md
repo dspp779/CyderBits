@@ -202,3 +202,16 @@ F 尚未完成：直接開啟仍是旧設定首屏，遊戲庫 prepare 的同步
 - universal macOS11 build 通過 `build-F2-r3.log`。包 `/private/tmp/cyder-lifecycle-f2-build/Cyder.app` 已配置獨立 ID `local.cyder.lifecycle-f2`、CD2 support/runtime 與 ad-hoc 簽章；manifest `build-F2-source-sha256.json`。之後僅增加 quit callback guard，另做全來源 typecheck；最終交付仍須重建最新版。此包尚未啟動，不新增 Wine 相容性結論。
 
 仍待：遊戲庫首屏與非同步資料載入、primary／journal unavailable 唯讀介面、outbox 恢復、不可變設定快照、detached supervisor 身分／跨崩潰 late-spawn fencing、單一環境 waiter、完整程序／視窗精確動作及 V01–V14 整合。目標保持進行中。
+
+## F3：遊戲庫首屏與背景資料所有權
+
+- 直接開啟、Finder/Dock reopen 與空 showUI 要求都先呈現遊戲庫，不等 Wine 環境準備。開視窗前不再初始化隱藏的設定視窗；遊戲庫 constructor 僅建立 AppKit 元件，showWindow 後才提交背景載入。既有程式／要求恢復沿先前管線，不在此新增重播。
+- 產品決策：瀏覽遊戲庫不隱含 Wine bootstrap／修復；保留可見的「準備 Windows 環境」入口，明確操作後走原正式 ensureEnvironment／runner／operation gate。進度留在遊戲庫，失敗不強制退出、不連續彈窗；首次啟動尚未準備的提示指向此入口。此決策符合 §19 首屏與 §23 原位置回饋，取代舊「先準備再顯示設定」路徑。
+- `CyderLibraryLoader` 在單一背景 queue 擁有 library read／merge／shortcut import／add／macApp path save；只允許一個實際操作，五秒後回報尚未確認但不釋出卡住 worker。重複刷新不累積工作；實際返回後才更新快照與按鈕。退出移除 observer 並拒絕新工作，晚到結果不重開 UI。短暫遺失 EXE 不自動刪項；malformed／unreadable history 不變成空庫、不覆寫，UI 保留上次快照。
+- 遊戲庫 footer 顯示載入／錯誤／準備進度；上次異常結束改為可關閉的記錄入口。context menu 標题使用快照，不為判定 mac launcher 是否存在同步探磁碟。這還不是全 AppKit I/O 清零：圖示 freshness／EXE open、設定初始化／per-game options、其他既有 action 的同步路徑仍待 F4。
+- `test-cyder-library-loader.sh` 使用正式資料 backend 在隔離 support 寫入並重新讀取 game-library，驗證 missing EXE 保留、corrupt bytes 不被修改；再以正式 AppKit controller 注入卡住 reader，真實 NSButton.performClick 驗證設定／準備 callback 可用，50 次 refresh 只啟動一個 worker，inline deadline、late completion、quit fence 與恢復提示關閉通過。須有 `ui-completed` 才算通過。`library-F3-r2.log` 為 L1–2 證據，不是 computer-use 或 Wine／NGS 驗收。
+- 已檢視 `.local/lifecycle-evidence/library-F3.png` 正式 contentView 離屏渲染：待處理與恢復提示、空庫、環境準備入口未裁切。真實桌面 menu／Wine AX 限制仍如前文，未以此圖替代實機截圖。
+- 保留失敗：`library-F3.log` 首輪 fixture 在 precondition 的非 throwing autoclosure 直接 try，改為先讀取再斷言後通過；settings/open-files 舊靜態測試固定 Preferences 首屏／旧 graphics warning 字串，`settings-F3.log`、`open-files-F3.log` 保留失敗。改為檢查 library-first、collapsible recovery 與正式準備失敗不 terminate；`settings-F3-r3.log`、`open-files-F3-r2.log` 通過。原 library store harness 通過 `library-store-F3.log`。
+- 全來源 typecheck 與 universal macOS11 build 通過，`build-F3.log`。隔離包 `/private/tmp/cyder-lifecycle-f3-build/Cyder.app` 已配置 `local.cyder.lifecycle-f3`、CD2 support/runtime wrapper、ad-hoc 簽章；`build-F3-source-sha256.json` 對應本批來源。此包本輪未啟動，不新增 Wine 實測宣稱。
+
+F3 不完成整體 F。接續須處理圖示／設定等主執行緒 I/O、primary unavailable 唯讀 UI、outbox、不可變設定、supervisor ownership／單一環境 waiter、精確程序／視窗 action 與 V01–V14 最終矩陣。

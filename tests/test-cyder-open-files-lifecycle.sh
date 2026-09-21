@@ -40,7 +40,7 @@ assert_contains "$source_text" "currentAppleEvent" \
 assert_contains "$source_text" "if launchIntent == .appOnly" \
   "open-application launches must enter UI without waiting"
 assert_not_contains "$source_text" "shouldOpenGameLibraryOnLaunch" \
-  "direct Cyder.app opens must always prefer Preferences over the game library"
+  "direct Cyder.app opens must not infer the first screen from library contents"
 assert_contains "$source_text" "DispatchQueue.main.async { [weak self] in" \
   "document launches should use one main-queue turn instead of a fixed delay"
 assert_not_contains "$source_text" "asyncAfter(deadline: .now() + 0.2)" \
@@ -152,7 +152,10 @@ assert_contains "$source_text" "圖形元件尚未準備完成" \
   "Finder EXE launches must hint the user to open Cyder.app for graphics prep"
 assert_contains "$source_text" 'CYD-GFX-001' \
   "settings-mode graphics ensure failures remain identifiable"
-assert_contains "$source_text" 'graphics-ensure-soft-failed' \
-  "settings-mode graphics ensure failures must not terminate Cyder"
+preparation="$(sed -n '/private func prepareEnvironmentFromLibrary/,/private func runDocumentLaunch/p' "$ROOT/scripts/cyder_app_main.swift")"
+assert_contains "$preparation" 'updateEnvironmentStatus' \
+  "environment preparation errors must remain in the library"
+assert_not_contains "$preparation" 'NSApp.terminate' \
+  "environment preparation errors must not terminate Cyder"
 
 echo "PASS test-cyder-open-files-lifecycle"

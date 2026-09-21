@@ -41,6 +41,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
     private let operationGate = CyderOperationGate()
     private let launchPreparation = CyderLaunchPreparation<CyderOperationGate.Scope?>()
     private var requestRecords: [CyderRequestJournal.Record] = []
+    private weak var existingSettingsController: CyderSettingsWindowController?
     private weak var existingLibraryController: CyderGameLibraryWindowController?
     private weak var existingRequestController: CyderRequestWindowController?
     private var cancelledRequestIDs = Set<String>()
@@ -75,7 +76,6 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         didSet { statusItemController.setIngressPending(libraryLaunchInProgress || !queuedLaunches.isEmpty || activeProcessOperations > 0 || !pendingLaunchAcquisitions.isEmpty) }
     }
     private var documentLaunchRequested = false
-    private var openLibraryOnLaunch = false
     private var setupPanel: CyderSetupPanel?
     private var terminateWhenSettingsClose = false
     private var openingGameLibrary = false
@@ -111,7 +111,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         controller.onRefresh = { [weak self] in self?.instanceCoordinator.refreshRequests() }
         controller.onOpenDiagnostics = { NSWorkspace.shared.open(CyderPaths.support.appendingPathComponent("Logs")) }
         controller.onClose = { [weak self] in
-            guard let self, self.settingsController.window?.isVisible != true,
+            guard let self, self.existingSettingsController?.window?.isVisible != true,
                   self.existingLibraryController?.window?.isVisible != true else { return }
             self.statusItemController.setUIVisible(false)
         }
@@ -144,9 +144,9 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         controller.onLifecycleIdle = { [weak self] in
             guard let self, !self.libraryLaunchInProgress, self.queuedLaunches.isEmpty, self.activeProcessOperations == 0, self.pendingLaunchAcquisitions.isEmpty,
                   !self.environmentPreparationInProgress,
-                  self.settingsController.window?.isVisible != true,
+                  self.existingSettingsController?.window?.isVisible != true,
                   self.existingRequestController?.window?.isVisible != true,
-                  self.gameLibraryController.window?.isVisible != true else { return }
+                  self.existingLibraryController?.window?.isVisible != true else { return }
             NSApp.terminate(nil)
         }
         if #available(macOS 11.0, *) {
@@ -158,6 +158,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
     }()
     private lazy var settingsController: CyderSettingsWindowController = {
         let controller = CyderSettingsWindowController()
+        existingSettingsController = controller
         controller.onImmediateSave = { [weak self] registrySetting in
             await self?.applySettingsImmediately(registrySetting: registrySetting) ?? false
         }
@@ -211,7 +212,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
                   !self.environmentPreparationInProgress,
                   !self.openingGameLibrary,
                   self.existingRequestController?.window?.isVisible != true,
-                  self.gameLibraryController.window?.isVisible != true else { return }
+                  self.existingLibraryController?.window?.isVisible != true else { return }
             self.statusItemController.setUIVisible(false)
             NSApp.setActivationPolicy(.accessory)
             // The lifecycle snapshot settles after pending entry events; closing
@@ -224,6 +225,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         let controller = CyderGameLibraryWindowController()
         existingLibraryController = controller
         controller.onOpenRequests = { [weak self] in self?.showRequests() }
+        controller.onPrepareEnvironment = { [weak self] in self?.prepareEnvironmentFromLibrary() }
         controller.updateRequestSummary(CyderRequestRow.summary(requestRecords))
         controller.onLaunch = { [weak self] executable, settings in
             self?.launchGameFromLibrary(executable, settings: settings)
@@ -238,7 +240,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         controller.onClose = { [weak self] in
             guard let self,
                   !self.environmentPreparationInProgress,
-                  self.settingsController.window?.isVisible != true,
+                  self.existingSettingsController?.window?.isVisible != true,
                   self.existingRequestController?.window?.isVisible != true,
                   !self.gameLibraryController.isGameSettingsVisible else { return }
             self.statusItemController.setUIVisible(false)
@@ -443,7 +445,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             scheduleSecondaryForward()
             return
         }
-        if settingsController.window?.isVisible == true {
+        if existingSettingsController?.window?.isVisible == true {
             settingsController.close()
         }
         enqueueOrLaunchURIs(uriStrings)
@@ -539,7 +541,6 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             return
         }
         let environment = ProcessInfo.processInfo.environment
-        openLibraryOnLaunch = environment["CYDER_OPEN_GAME_LIBRARY"] == "1"
         // A test launch request is consumed by cyder_launcher.sh. Keeping the
         // file intact here makes Bash the sole owner of effective launch
         // settings and Wine environment construction.
@@ -703,10 +704,8 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             return
         }
         terminateWhenSettingsClose = true
-        // Direct Cyder.app opens always land on Preferences. The game library
-        // remains available from the menu / Dock menu.
-        activateCyderUI(dockVisible: true)
-        prepareEnvironmentAndShowSettings()
+        // Browsing the library never waits for or starts Wine preparation.
+        showGameLibrary()
     }
 
     private func scheduleSecondaryForward() {
@@ -783,17 +782,11 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         return false
     }
 
-    /// Bring Preferences forward. Shared by Finder reopen and a secondary
+    /// Bring the game library forward. Shared by Finder reopen and a secondary
     /// process that forwarded an empty `showUI` request.
     private func presentResidentCyderUI() {
         terminateWhenSettingsClose = true
-        statusItemController.setUIVisible(true)
-        activateCyderUI(dockVisible: true)
-        if environmentPreparationInProgress {
-            setupPanel?.show()
-            return
-        }
-        showSettings()
+        showGameLibrary()
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -811,6 +804,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         processRunner.quiesce()
         operationGate.quiesce()
         launchPreparation.quiesce()
+        existingLibraryController?.quiesce()
         wineLaunchObserver?.cancel()
         var replied = false
         func finishQuit() {
@@ -990,12 +984,12 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         guard !quitTransaction else { return }
         statusItemController.setUIVisible(true)
         openingGameLibrary = true
-        let settingsWasVisible = settingsController.window?.isVisible == true
+        let settingsWasVisible = existingSettingsController?.window?.isVisible == true
         activateCyderUI(dockVisible: true)
-        gameLibraryController.prepareForDisplay()
         gameLibraryController.showWindow(nil)
         gameLibraryController.window?.makeKeyAndOrderFront(nil)
         gameLibraryController.window?.orderFrontRegardless()
+        gameLibraryController.prepareForDisplay()
         // Keep a visible key window throughout the transition. In particular,
         // accessibility clients can briefly collapse a hidden scroll view to
         // zero width when the settings window is ordered out first.
@@ -1082,7 +1076,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
                 case .environmentNotReady:
                     self.showAlert(
                         "遊戲尚未準備完成",
-                        "請先完成 Cyder 的環境準備，再重新啟動遊戲。"
+                        "請在遊戲庫按「準備 Windows 環境」，完成後再重新啟動遊戲。"
                     )
                 case .graphicsNotReady:
                     self.showAlert(
@@ -1432,66 +1426,28 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         return nil
     }
 
-    private func prepareEnvironmentAndShowSettings() {
-        statusItemController.setUIVisible(true)
+    private func prepareEnvironmentFromLibrary() {
+        guard !quitTransaction, !environmentPreparationInProgress else { return }
         guard let resourcePath = Bundle.main.resourcePath else {
-            showAlert("無法準備遊戲環境", "Cyder 缺少必要的 Resources 目錄。仍可開啟偏好設定，但無法啟動遊戲。")
-            showSettings()
+            existingLibraryController?.updateEnvironmentStatus("缺少必要元件；請查看診斷記錄", busy: false)
             return
         }
+        environmentPreparationInProgress = true
+        existingLibraryController?.updateEnvironmentStatus("正在檢查 Windows 環境…", busy: true)
         let context = CyderLaunchContext(resourcePath: resourcePath)
-        let state = environmentState(context: context)
-        // Already-initialized installs skip engine extract and wine cmd probe;
-        // still refresh graphics payloads and confirm markers.
-        if state.needsEngine || state.needsBootstrap {
-            showSetup("正在準備遊戲環境…")
-        } else {
-            showSetup("正在檢查遊戲環境…")
-        }
         Task.detached(priority: .userInitiated) { [weak self] in
             guard let self else { return }
-            let preparationFailure = await self.ensureEnvironment(context: context)
+            let failure = await self.ensureEnvironment(context: context)
             DispatchQueue.main.async {
-                if self.documentLaunchRequested {
-                    self.hideSetup()
-                    return
-                }
+                self.environmentPreparationInProgress = false
+                guard !self.quitTransaction else { return }
                 self.hideSetup()
-                if !self.documentLaunchRequested {
-                    try? CyderSettingsStore.shared.reconcileGraphicsPreferences()
-                }
-                if let preparationFailure {
-                    if preparationFailure.code == "CYD-GFX-001" {
-                        // Graphics payload install must not block settings / Cyder residency.
-                        self.showAlert(
-                            "圖形元件尚未準備完成",
-                            "仍可開啟設定。請確認 Cyder.app 已打包 Resources/graphics，或稍後重新開啟 Cyder 再試一次。"
-                        )
-                        CyderDiagnostics.shared.finish(outcome: "graphics-ensure-soft-failed")
-                    } else {
-                        let action = self.presentFailure(
-                            preparationFailure,
-                            allowsRebuild: preparationFailure.code == "CYD-HLT-001"
-                                || preparationFailure.code == "CYD-BTS-001"
-                        )
-                        if action == .rebuild {
-                            self.rebuildEnvironment {
-                                self.showSettings()
-                            }
-                        } else {
-                            CyderDiagnostics.shared.finish(outcome: "environment-check-failed")
-                            NSApp.terminate(nil)
-                        }
-                        return
-                    }
-                }
-                self.gameLibraryController.retryMissingIcons()
-                // Prefer Preferences for direct app opens. CYDER_OPEN_GAME_LIBRARY=1
-                // remains a test/dev override.
-                if self.openLibraryOnLaunch {
-                    self.showGameLibrary()
+                if let failure {
+                    CyderDiagnostics.shared.record(failure)
+                    self.existingLibraryController?.updateEnvironmentStatus("準備未完成；可重試或開啟設定查看記錄", busy: false)
                 } else {
-                    self.showSettings()
+                    self.existingLibraryController?.updateEnvironmentStatus("Windows 環境已準備好", busy: false)
+                    self.existingLibraryController?.retryMissingIcons()
                 }
             }
         }
@@ -2207,6 +2163,10 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
     private func showSetup(_ message: String) {
         onMainThread {
             guard !quitTransaction else { return }
+            if environmentPreparationInProgress, let library = existingLibraryController, library.window?.isVisible == true {
+                library.updateEnvironmentStatus(message, busy: true)
+                return
+            }
             if setupPanel == nil {
                 setupPanel = CyderSetupPanel()
                 setupPanel?.show()
@@ -2275,19 +2235,9 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func showPreviousCrashIfNeeded() {
-        guard let previous = CyderDiagnostics.shared.previousUnexpectedSession else { return }
-        onMainThread {
-            let alert = NSAlert()
-            alert.messageText = "Cyder 上次未正常結束"
-            alert.informativeText = "上次執行在「\(previous.stage)」階段中斷。已保留診斷記錄，您可以繼續使用 Cyder。"
-            alert.alertStyle = .warning
-            alert.addButton(withTitle: "繼續")
-            alert.addButton(withTitle: "開啟上次記錄")
-            let response = runFrontmostAlert(alert, dockVisible: true)
-            if response == .alertSecondButtonReturn, !previous.logPath.isEmpty {
-                NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: previous.logPath)])
-            }
-        }
+        guard CyderDiagnostics.shared.previousUnexpectedSession != nil else { return }
+        // No startup modal; the library keeps a dismissible diagnostics entry.
+        gameLibraryController.showRecoveryNotice()
     }
 
     @discardableResult
@@ -2669,7 +2619,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         NSApp.setActivationPolicy(.accessory)
         statusItemController.markLaunchStarted()
         showSetup("正在啟動程式…")
-        if settingsController.window?.isVisible == true {
+        if existingSettingsController?.window?.isVisible == true {
             settingsController.close()
         }
     }

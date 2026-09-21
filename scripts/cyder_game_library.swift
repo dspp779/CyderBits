@@ -66,11 +66,12 @@ final class CyderGameLibraryStore {
 
     init(
         url: URL = CyderPaths.support.appendingPathComponent("game-library.json"),
-        profileStore: CyderProfileStore = CyderProfileStore(root: CyderPaths.support)
+        profileStore: CyderProfileStore = CyderProfileStore(root: CyderPaths.support),
+        loadImmediately: Bool = true
     ) {
         self.url = url
         self.profileStore = profileStore
-        load()
+        if loadImmediately { load() }
     }
 
     func add(executable: URL, title: String? = nil) throws -> CyderGameRecord {
@@ -164,13 +165,18 @@ final class CyderGameLibraryStore {
         return added
     }
 
-    private func load() {
-        guard let data = try? Data(contentsOf: url),
-              let file = try? JSONDecoder().decode(CyderGameLibraryFile.self, from: data),
-              file.schemaVersion == 1 else {
-            games = []
-            return
+    private func load() { try? reloadValidated() }
+
+    /// Preserve the last good snapshot on malformed or unreadable history.
+    /// Only a missing file is an empty library; never overwrite corruption.
+    func reloadValidated() throws {
+        let data: Data
+        do { data = try Data(contentsOf: url) }
+        catch let error as NSError where error.domain == NSCocoaErrorDomain && error.code == NSFileReadNoSuchFileError {
+            games = []; return
         }
+        let file = try JSONDecoder().decode(CyderGameLibraryFile.self, from: data)
+        guard file.schemaVersion == 1 else { throw CyderGameLibraryError.unableToSave("不支援的遊戲庫格式") }
         games = file.games.filter { game in
             game.id.range(of: "^profile-[0-9a-f]{24}$", options: .regularExpression) != nil
                 && !game.executablePath.isEmpty
@@ -198,5 +204,79 @@ final class CyderGameLibraryStore {
         } catch {
             throw CyderGameLibraryError.unableToSave(error.localizedDescription)
         }
+    }
+}
+
+struct CyderLibrarySnapshot {
+    var games: [CyderGameRecord]
+    var independentIDs: Set<String>
+    var selectedID: String? = nil
+}
+
+/// Owns library I/O off AppKit. One physical operation is retained across the
+/// observation deadline; repeated refreshes cannot grow a blocked work queue.
+final class CyderLibraryLoader {
+    enum Operation { case refresh, add(URL), setMacApp(String, String) }
+    enum Update { case loading, ready(CyderLibrarySnapshot), unconfirmed, failed }
+    typealias Read = (Operation) throws -> CyderLibrarySnapshot
+    private let worker = DispatchQueue(label: "local.cyder.library-io", qos: .userInitiated)
+    private let read: Read
+    private let deadline: TimeInterval
+    private var active: UUID?
+    private var closed = false
+    var onUpdate: ((Update) -> Void)?
+    var isBusy: Bool { active != nil }
+
+    init(deadline: TimeInterval = 5, read: Read? = nil) {
+        self.deadline = deadline
+        self.read = read ?? Self.readLibrary
+    }
+
+    @discardableResult
+    func request(_ operation: Operation = .refresh, completion: ((Bool) -> Void)? = nil) -> Bool {
+        precondition(Thread.isMainThread)
+        guard !closed, active == nil else { completion?(false); return false }
+        let id = UUID(); active = id
+        onUpdate?(.loading)
+        DispatchQueue.main.asyncAfter(deadline: .now() + deadline) { [weak self] in
+            guard let self, !self.closed, self.active == id else { return }
+            self.onUpdate?(.unconfirmed)
+        }
+        worker.async { [self] in
+            let result = Result { try read(operation) }
+            DispatchQueue.main.async {
+                guard !self.closed, self.active == id else { return }
+                self.active = nil
+                switch result {
+                case .success(let snapshot): self.onUpdate?(.ready(snapshot)); completion?(true)
+                case .failure: self.onUpdate?(.failed); completion?(false)
+                }
+            }
+        }
+        return true
+    }
+
+    func quiesce() {
+        precondition(Thread.isMainThread)
+        closed = true; onUpdate = nil
+    }
+
+    private static func readLibrary(_ operation: Operation) throws -> CyderLibrarySnapshot {
+        precondition(!Thread.isMainThread)
+        let profiles = CyderProfileStore(root: CyderPaths.support)
+        let library = CyderGameLibraryStore(profileStore: profiles, loadImmediately: false)
+        try library.reloadValidated()
+        var selected: String?
+        switch operation {
+        case .refresh:
+            // A temporarily unavailable EXE is not evidence of user removal.
+            // Keep its entry; launch validation reports availability separately.
+            try library.merge(profileRecords: profiles.listRecords())
+            _ = try library.importShortcuts()
+        case .add(let url): selected = try library.add(executable: url).id
+        case .setMacApp(let id, let path): try library.setMacAppPath(path, forGameID: id)
+        }
+        return CyderLibrarySnapshot(games: library.games,
+                                    independentIDs: Set(profiles.listRecords().map(\.profileId)), selectedID: selected)
     }
 }

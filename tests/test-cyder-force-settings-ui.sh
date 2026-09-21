@@ -253,7 +253,7 @@ assert_contains "$library_ui" "styleMask: [.titled, .closable, .fullSizeContentV
 assert_contains "$library_ui" "window.collectionBehavior.insert(.fullScreenNone)" "game library should not enter full screen"
 assert_contains "$library_ui" 'requestSummary.topAnchor.constraint(equalTo: content.topAnchor, constant: 32)' "request status should begin below the title bar"
 assert_contains "$library_ui" 'requestSummaryHeight?.constant = text.isEmpty ? 0 : 32' "normal launches must not reserve space for an empty recovery notice"
-assert_contains "$library_ui" 'scroll.topAnchor.constraint(equalTo: requestSummary.bottomAnchor)' "game content should follow the collapsible request status"
+assert_contains "$library_ui" 'scroll.topAnchor.constraint(equalTo: recoveryNotice.bottomAnchor)' "game content should follow collapsible request and recovery status"
 if [[ "$library_ui" == *'addCyderTitlebarBrand(to: window, title: "遊戲庫"'* || "$library_ui" == *'let divider = NSBox()'* ]]; then
   echo "ASSERT failed: game library should not show a title-bar brand or content divider" >&2
   exit 1
@@ -309,10 +309,10 @@ resident_ui="$(awk '
   found { print }
   found && /^    func applicationWillTerminate/ { exit }
 ' "$ROOT/scripts/cyder_app_main.swift")"
-assert_contains "$resident_ui" "showSettings()" \
-  "reopen must open Preferences instead of the game library"
-assert_not_contains "$resident_ui" "showGameLibrary()" \
-  "reopen must not auto-open the game library"
+assert_contains "$resident_ui" "showGameLibrary()" \
+  "reopen must restore the game library"
+assert_not_contains "$resident_ui" "showSettings()" \
+  "reopen must not wait for Preferences initialization"
 finalize_mode="$(awk '
   /private func finalizePostLaunchModeDecision\(\)/ { found = 1 }
   found { print }
@@ -320,17 +320,19 @@ finalize_mode="$(awk '
 ' "$ROOT/scripts/cyder_app_main.swift")"
 assert_not_contains "$finalize_mode" "shouldOpenGameLibraryOnLaunch" \
   "cold app-only launches must not auto-open the game library from library contents"
-assert_contains "$finalize_mode" "prepareEnvironmentAndShowSettings" \
-  "cold app-only launches still prepare the environment then show Preferences"
-assert_contains "$app" "gameLibraryController.window?.isVisible != true" "preferences should not terminate while the library remains open"
+assert_contains "$finalize_mode" "showGameLibrary()" \
+  "cold app-only launches show the library without waiting for Wine"
+assert_not_contains "$finalize_mode" "ensureEnvironment" \
+  "cold app-only browsing must not start Wine preparation"
+assert_contains "$app" "existingLibraryController?.window?.isVisible != true" "preferences should not terminate while the library remains open"
 assert_contains "$app" "launchGameFromLibrary" "the library should launch through the monitored Bash relay"
 assert_contains "$app" "libraryLaunchInProgress" "the library should serialize the activation-monitoring window"
 assert_not_contains "$app" "createsNewApplicationInstance = true" "library launches should retain UI error reporting"
 document_ingress="$(sed -n '/private func receiveInstanceRequest/,/private func finishRequestPart/p' "$ROOT/scripts/cyder_app_main.swift")"
 assert_contains "$document_ingress" "enqueueOrLaunch(files" "Finder opens must enter the shared monitored queue"
 assert_not_contains "$document_ingress" "gameLibraryController.close()" "Finder opens should preserve an already visible library"
-assert_contains "$app" "if !self.documentLaunchRequested {" \
-  "detached game launches should not show the parent application's active-session warning"
+assert_contains "$app" "gameLibraryController.showRecoveryNotice()" \
+  "previous crash feedback must use the nonmodal library notice"
 assert_contains "$common" 'cyder_load_game_settings' "Bash should consume the game library's one-shot launch settings"
 assert_contains "$app" "開啟相關記錄" "failure dialog should use the specific related-log label"
 assert_contains "$app" "exportLastGameLog" "app should handle last-game log export"
