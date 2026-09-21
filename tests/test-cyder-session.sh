@@ -83,27 +83,22 @@ if CYDER_SESSION_LOCK_ATTEMPTS=2 cyder_session_acquire "$prefix" 0 0 normal >/de
 fi
 rm -rf "$stale_dir/.lock"
 
-mkdir -p "$stale_dir/.lock"
-if ! CYDER_SESSION_LOCK_ATTEMPTS=10 cyder_session_acquire "$prefix" 0 0 normal >/dev/null 2>&1; then
-  echo "missing-pid stale lock was not recovered" >&2
-  exit 1
-fi
-[[ ! -d "$stale_dir/.lock" ]]
-missing_pid_session="$CYDER_SESSION_FILE"
-cyder_session_release "$prefix" "$missing_pid_session"
+# Legacy directory locks without reliable publication cannot be automatically
+# reclaimed: a stopped initializer is indistinguishable from a crashed one.
+for owner in missing corrupt 99999999; do
+  mkdir -p "$stale_dir/.lock"
+  [[ "$owner" == missing ]] || printf '%s\n' "$owner" > "$stale_dir/.lock/pid"
+  status=0
+  CYDER_SESSION_LOCK_ATTEMPTS=10 cyder_session_acquire "$prefix" 0 0 normal >/dev/null 2>&1 || status=$?
+  [[ "$status" == 75 && -d "$stale_dir/.lock" ]]
+  if [[ "$owner" != missing ]]; then [[ "$(cat "$stale_dir/.lock/pid")" == "$owner" ]]; fi
+  rm -rf "$stale_dir/.lock" # Only this deliberately-created test fixture.
+done
 
-mkdir -p "$stale_dir/.lock"
-printf 'corrupt\n' >"$stale_dir/.lock/pid"
-if ! CYDER_SESSION_LOCK_ATTEMPTS=10 cyder_session_acquire "$prefix" 0 0 normal >/dev/null 2>&1; then
-  echo "invalid-pid stale lock was not recovered" >&2
-  exit 1
-fi
-invalid_pid_session="$CYDER_SESSION_FILE"
-cyder_session_release "$prefix" "$invalid_pid_session"
-
-if CYDER_SESSION_LOCK_ATTEMPTS=invalid cyder_session_acquire "$prefix" 0 0 normal >/dev/null 2>&1; then
-  echo "invalid lock attempt count was unexpectedly accepted" >&2
-  exit 1
-fi
+for attempts in invalid 0 251 999999999999999999999999; do
+  status=0
+  CYDER_SESSION_LOCK_ATTEMPTS="$attempts" cyder_session_acquire "$prefix" 0 0 normal >/dev/null 2>&1 || status=$?
+  [[ "$status" == 2 ]]
+done
 
 echo "PASS test-cyder-session"

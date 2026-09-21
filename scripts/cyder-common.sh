@@ -3846,48 +3846,69 @@ cyder_session_environment_live() {
 }
 
 cyder_session_lock() {
-  local dir="$1" lock="${1}/.lock" owner attempts=0 missing_pid_attempts=0
-  local max_attempts="${CYDER_SESSION_LOCK_ATTEMPTS:-250}"
-  [[ "$max_attempts" =~ ^[1-9][0-9]*$ ]] || {
+  local dir="$1" lock="${1}/.session.lock" legacy="${1}/.lock"
+  local max_attempts="${CYDER_SESSION_LOCK_ATTEMPTS:-250}" saved_umask status=0
+  [[ "$max_attempts" =~ ^[1-9][0-9]{0,2}$ && "$max_attempts" -le 250 ]] || {
     echo "invalid CYDER_SESSION_LOCK_ATTEMPTS: $max_attempts" >&2
     return 2
   }
-  mkdir -p "$dir"
-  while ! mkdir "$lock" 2>/dev/null; do
-    owner="$(cat "$lock/pid" 2>/dev/null || true)"
-    if [[ ! "$owner" =~ ^[0-9]+$ ]]; then
-      missing_pid_attempts=$((missing_pid_attempts + 1))
-      if (( missing_pid_attempts >= 5 )); then
-        rm -rf "$lock"
-        continue
-      fi
-    else
-      missing_pid_attempts=0
-      if ! kill -0 "$owner" 2>/dev/null; then
-        rm -rf "$lock"
-        continue
-      fi
-    fi
-    (( attempts++ >= max_attempts )) && {
-      echo "timed out acquiring Cyder session lock" >&2
-      return 75
+  # FD 9 is reserved only for this short critical section. Never overwrite a
+  # descriptor supplied by a caller, or silently reenter an inherited lock.
+  if { : >&9; } 2>/dev/null; then
+    echo "Cyder session lock descriptor is already in use" >&2
+    return 75
+  fi
+  mkdir -p "$dir" || return 1
+  if [[ -e "$legacy" || -L "$legacy" ]]; then
+    # Old mkdir/PID locks cannot prove that an initializer is gone. Preserve
+    # them for explicit recovery rather than unlinking another caller's lock.
+    echo "A previous Cyder session operation is not confirmed finished: $legacy" >&2
+    return 75
+  fi
+  [[ ! -L "$lock" && ( ! -e "$lock" || -f "$lock" ) ]] || return 75
+  saved_umask="$(umask)"; umask 077
+  if ! exec 9>>"$lock"; then umask "$saved_umask"; return 1; fi
+  umask "$saved_umask"
+  # flock is attached to this open file description. The helper inherits it
+  # on stdin; its exit leaves Bash's FD 9 holding the lock until unlock/exit.
+  # Never unlink this file: a replacement inode could admit another holder.
+  /usr/bin/perl -MFcntl=:flock,S_ISREG -MErrno=EAGAIN,EWOULDBLOCK -MTime::HiRes=sleep -e '
+    use strict;
+    my ($path, $attempts) = @ARGV;
+    my @fd = stat(STDIN);
+    sub matches {
+      my @path = lstat($path);
+      return @fd && @path && S_ISREG($fd[2]) && S_ISREG($path[2]) &&
+        $fd[4] == $< && ($fd[2] & 0022) == 0 &&
+        $fd[0] == $path[0] && $fd[1] == $path[1];
     }
-    sleep 0.02
-  done
-  # This foreground child observes the actual caller, including Bash 3
-  # background subshells where $$ still denotes an exited launcher parent.
-  if ! /bin/sh -c 'printf "%s\n" "$PPID" > "$1"' _ "$lock/pid"; then
-    rm -rf "$lock"
-    echo "failed to initialize Cyder session lock" >&2
-    return 1
+    exit 75 unless matches();
+    for (my $i = 0; $i < $attempts; $i++) {
+      if (flock(STDIN, LOCK_EX | LOCK_NB)) { exit(matches() ? 0 : 75); }
+      exit 75 unless $! == EAGAIN || $! == EWOULDBLOCK;
+      sleep(0.02);
+    }
+    exit 75;
+  ' "$lock" "$max_attempts" <&9 || status=$?
+  if [[ "$status" != 0 ]]; then
+    exec 9>&-
+    echo "Unable to acquire Cyder session lock" >&2
+    return "$status"
+  fi
+  CYDER_SESSION_LOCK_HELD=1
+}
+
+cyder_session_unlock() {
+  if [[ "${CYDER_SESSION_LOCK_HELD:-0}" == 1 ]]; then
+    exec 9>&-
+    unset CYDER_SESSION_LOCK_HELD
   fi
 }
 
 cyder_session_acquire() {
   local prefix="$1" msync="${2:-0}" esync="${3:-0}" power="${4:-normal}"
-  local dir lock file pid existing mode state observer environment_live=""
+  local dir file pid existing mode state observer environment_live=""
   dir="$(cyder_session_dir "$prefix")"
-  lock="${dir}/.lock"
   cyder_session_lock "$dir" || return $?
   for file in "$dir"/*.session; do
     [[ -f "$file" ]] || continue
@@ -3910,7 +3931,7 @@ cyder_session_acquire() {
     mode="$(sed -n 's/^mode=//p' "$file" | head -1)"
     existing="$(sed -n 's/^sync=//p' "$file" | head -1)"
     if [[ "$existing" != "msync=${msync};esync=${esync};power=${power}" ]]; then
-      rm -rf "$lock"
+      cyder_session_unlock
       echo "incompatible Cyder bottle session (pid=$pid mode=$mode)" >&2
       return 75
     fi
@@ -3920,17 +3941,17 @@ cyder_session_acquire() {
   # BASHPID. The launcher process remains alive for the whole Wine session.
   if ! printf 'schema=2\npid=%s\nsync=msync=%s;esync=%s;power=%s\nmode=%s\nstate=running\nstarted_at=%s\n' \
       "$$" "$msync" "$esync" "$power" "$power" "$(date +%s)" >"$file"; then
-    rm -rf "$lock"
+    cyder_session_unlock
     echo "failed to write Cyder session state" >&2
     return 1
   fi
   if [[ "${CYDER_ENVIRONMENT_MONITOR:-0}" == 1 && -n "${CYDER_EXECUTION_OWNER_TICKET:-}" ]]; then
     if ! printf 'observer=native\n' >>"$file"; then
-      rm -f "$file"; rm -rf "$lock"
+      rm -f "$file"; cyder_session_unlock
       return 1
     fi
   fi
-  rm -rf "$lock"
+  cyder_session_unlock
   CYDER_SESSION_FILE="$file"
   export CYDER_SESSION_FILE
 }
@@ -3955,15 +3976,15 @@ cyder_session_park_native() {
   cyder_session_lock "$dir" || return $?
   # A newer acquisition can already have retired this reservation. Never
   # recreate it after its old generation was proved empty under the same lock.
-  if [[ ! -e "$session" && ! -L "$session" ]]; then rm -rf "$dir/.lock"; return 0; fi
-  if [[ ! -f "$session" || -L "$session" ]]; then rm -rf "$dir/.lock"; return 1; fi
+  if [[ ! -e "$session" && ! -L "$session" ]]; then cyder_session_unlock; return 0; fi
+  if [[ ! -f "$session" || -L "$session" ]]; then cyder_session_unlock; return 1; fi
   {
     sed 's/^pid=.*/pid=0/; s/^state=.*/state=background/' "$session" &&
       printf 'primary_exited_at=%s\n' "$(date +%s)"
   } >"$tmp" || status=$?
   if [[ "$status" == 0 ]]; then mv -f "$tmp" "$session" || status=$?; fi
   rm -f "$tmp"
-  rm -rf "$dir/.lock"
+  cyder_session_unlock
   return "$status"
 }
 

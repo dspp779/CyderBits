@@ -79,6 +79,7 @@ late="$(cyder_session_dir "$prefix")/late.session"
 printf 'schema=2\npid=0\nsync=msync=1;esync=0;power=normal\nmode=normal\nstate=running\nobserver=native\n' > "$late"
 cyder_session_lock "$(cyder_session_dir "$prefix")"
 (
+  cyder_session_unlock
   touch "$TEST_DIR/park.entered"
   cyder_session_park_native "$late"
   touch "$TEST_DIR/park.finished"
@@ -90,7 +91,7 @@ sleep 0.15
 [[ ! -e "$TEST_DIR/park.finished" ]]
 rm -f "$late"
 printf 'new generation reservation\n' > "$(cyder_session_dir "$prefix")/new.session"
-rm -rf "$(cyder_session_dir "$prefix")/.lock"
+cyder_session_unlock
 wait "$park_pid"
 [[ ! -e "$late" && -e "$TEST_DIR/park.finished" ]]
 [[ "$(cat "$(cyder_session_dir "$prefix")/new.session")" == 'new generation reservation' ]]

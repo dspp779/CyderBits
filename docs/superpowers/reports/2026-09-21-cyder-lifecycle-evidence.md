@@ -51,7 +51,7 @@ SIGN_IDENTITY=- CYDER_REQUIRE_NATIVE_SWIFT=1 CYDER_SWIFT_OPTIMIZATION=-Onone \
 
 ## 驗證矩陣（持續更新）
 
-以下為截至 C28 的證據摘要；各批次段落保留當時缺口與失敗，不以早期矩陣覆蓋後續結果。
+以下為截至 C29 的證據摘要；各批次段落保留當時缺口與失敗，不以早期矩陣覆蓋後續結果。
 
 | 項目 | 目前證據 | 剩餘／限制 |
 |---|---|---|
@@ -612,3 +612,18 @@ C26 留下的首次恢復合併容量及 admission 排序問題已有正式路�
 - 最終 `build-C28-r2.log` universal macOS11 建置成功，42 個來源輸入在編譯前後 hash 相同；第一輪 build／hash 與包內測試輸出保留，新建置取代舊 app 產物；隔離包 `/private/tmp/cyder-lifecycle-c28-build/Cyder.app` 設 local.cyder.lifecycle-c28、CD2 support/runtime，ad-hoc／strict verify 和 arm64／x86_64 核對通過。`build-C28-source-sha256.json` 保存 48 項，三支包內 shell bytes 與 repo 完全相同。正式完整 app GUI 未啟動，只有其無 UI 命令入口及 executor 入口被上述測試執行；未覆蓋正式安裝或發布。
 
 本批接通原生 monitor 與 session guard 的責任分工。舊 CLI 的相容觀察仍保守保留，未知校準不允許任意更換同步設定；實機完整 Wine／多視窗／NGS 體驗沒有因本批替代測試而升級為通過。session 鎖首次 mkdir 到 pid 發布之間仍沿用歷史 stale-owner 協定，尚需用初始化停頓注入檢查；其餘 UX／I/O 盤點、V01–V14 最終整合驗收及可重現交付仍繼續，目標保持進行中。
+
+
+## C29：以核心檔案鎖取代 session PID 目錄鎖
+
+- 真正重現 C28 留下的初始化空窗：第一個正式 cyder_session_lock 在 mkdir .lock 後、寫 PID 前被注入停頓；第二個 caller 把缺 PID 當 stale 而刪除／重建，第一個恢復後也成功取得鎖。session-init-baseline-C29.log 記錄兩個仍活的 shell 同時 claimed；基線為 54bc326，腳本 bytes／SHA256 另存 cyder-common-before-C29.sh，reproduce-session-init-C29.py 固定讀此基線，不把修正後來源當舊版重現。
+- 改用不刪除的 .session.lock regular file 與 Darwin flock；Bash 在短暫 critical section 持有 FD 9，系統 Perl helper 以繼承的 stdin 對同一 open file description 取得非阻塞 exclusive lock。helper 返回後 Bash 仍持有，unlock 只關閉自己的 descriptor，最後一個引用關閉或程序退出才釋放；不寫 PID、不猜失效、不 unlink lock inode。檔案持續存在不是仍有人持鎖的證據。
+- 非阻塞重試最多 250 次、間隔 20 ms，CYDER_SESSION_LOCK_ATTEMPTS 只允許 1–250，非法／過大數字直接拒絕；底層 metadata 呼叫仍可能受 OS I/O 影響，不把次數上限宣稱為硬即時期限。鎖要求 regular file、本 UID、不可由 group/other 寫入，取得前後核對 path／descriptor device+inode；既有 symlink、FIFO 和已占用的 caller FD 9 均拒絕。原 caller descriptor 不被覆寫。
+- acquire／native park 的所有正常與失敗收尾改呼叫 unlock。新 native-session 測試中，fork 的競爭者先關閉自己繼承的引用，再嘗試獨立鎖；parent 的 lock 繼續有效，關閉 child 引用不會把 parent 解鎖。遊戲只在 session critical section 結束後執行，x86 fixture 新增實際 fcntl(9) 檢查，確認鎖 descriptor 沒有進入被啟動程序。
+- `session-lock-C29-r2.log` 通過正式 cyder_session_lock／unlock：open 後初始化停頓不能搶走後來的 holder；取得前／取得後對精確 unreaped Popen child 注入 SIGKILL，下一個 caller 可取得；parent 退出、child 仍繼承 descriptor 時繼續互斥，最後 close 才放行；持續使用同一 inode；FD 保留、symlink／FIFO 拒絕；四個真實 shell caller 的 40 次 counter 更新沒有遺失。沒有殺 Wine 或搜尋／操作任意 PID。harness 要求完成檔；失敗時保留 fixture，cleanup 只處理本次 Popen children。
+- **舊鎖相容限制**：舊版 .lock 目錄（包含缺 PID、損壞、數字看似已死）不再自動刪除。舊協定無法證明是否仍有停頓中的 initializer 或晚到舊 writer；回報該 prefix 的上一個操作未確認結束並保留資料，需先確認舊操作已結束後明確處理。這不是新鎖的正常收尾途徑：新格式崩潰的自動釋放已由上述實測證明。舊測試原本要求「缺／壞 PID 即刪除」正是重現缺陷的政策，因此改驗拒絕且 bytes／目錄保留；另加真正 kernel ownership 的 crash／contention 測試，沒有以放寬斷言冒充通過。
+- `native-session-C29-r2.log`、`session-C29-r2.log`、`launcher-C29.log` 回歸通過。`native-handoff-C29-bundle.log` 使用本次包內 Swift helper／shell，正式 owner、bridge、同 prefix 兩個 root、session 停放／校準、runtime barrier、dispatch 前後 crash、late bridge、taskmgr 及十次 fast exit 均通過；所有自建 x86 child 也通過 FD 9 未繼承檢查。這是原生程序／核心鎖與正式路徑驗證，不是 Windows／Wine／NGS 相容性測試。
+- Apple [flock(2)](https://developer.apple.com/library/archive/documentation/System/Conceptual/ManPages_iPhoneOS/man2/flock.2.html) 與 [close(2)](https://developer.apple.com/library/archive/documentation/System/Conceptual/ManPages_iPhoneOS/man2/close.2.html) 說明 duplicated／fork descriptor 共用同一鎖及 last-close 釋放語意；本機亦先以獨立 Perl caller 實測 helper exit 後鎖保留、最後 close 後可重新取得。這裡使用 flock，不把 fcntl 的 per-process lock 語意混用。
+- `build-C29.log` universal macOS11 建置成功；42 個輸入檔編譯前後 hash 一致。`/private/tmp/cyder-lifecycle-c29-build/Cyder.app` 設 local.cyder.lifecycle-c29、CD2 support/runtime，ad-hoc／strict verify 和雙架構核對通過；三支包內 shell bytes 與 repo 相同，build-C29-source-sha256.json 保存 48 項。未啟動完整 GUI 或操作 Wine；只執行包內無 UI executor 入口與自建程序整合，未發布／覆蓋正式安裝。
+
+已修正並驗證新 session 鎖的初始化／崩潰互斥；舊版無法驗身分的鎖保留為明確局部錯誤，不把它當成 Wine 已結束。本批沒有新的 UI 延遲數字。接下來繼續目前 app 的 UX／主執行緒 I/O、V01–V14 最終整合驗收與可重現交付；目標尚未完成。

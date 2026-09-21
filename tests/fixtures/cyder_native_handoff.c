@@ -2,8 +2,12 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <limits.h>
+#include <fcntl.h>
+#include <errno.h>
 
 int main(void) {
+    /* Session critical-section locks must never survive into a game. */
+    if (fcntl(9, F_GETFD) != -1 || errno != EBADF) return 94;
     const char *root = getenv("TEST_ROOT");
     if (!root) return 90;
     char path[PATH_MAX];
