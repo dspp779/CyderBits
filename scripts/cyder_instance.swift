@@ -531,7 +531,7 @@ final class CyderInstanceCoordinator {
                         phase: ticket.phase, ownerPID: ticket.owner?.pid, ownerBoot: ticket.owner?.boot,
                         ownerStarted: ticket.owner?.started, childPID: ticket.child?.pid,
                         childBoot: ticket.child?.boot, childStarted: ticket.child?.started, status: ticket.status,
-                        signalled: ticket.signalled, nativeSpawn: spawn)
+                        signalled: ticket.signalled, nativeSpawn: spawn, prefixScope: ticket.scope)
                 }
                 journal.reconcileExecutions(receipts) { [self] result in
                     guard !closing, case .success(let confirmed) = result else { finishExecutionReceiptRead(); return }

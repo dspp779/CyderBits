@@ -244,24 +244,29 @@ let spawnID = J.makeID(namespace: receiptNamespace)
 _ = value(wait { receiptJournal.submit(id: spawnID, payload: payload, completion: $0) })
 let spawnDispatch = value(wait { receiptJournal.authorizeDispatch(id: spawnID, completion: $0) })
 let spawnTicketID = UUID()
-func wineReceipt(_ phase: String, process: Int32 = 24002, bridge: Int32 = 24001) -> J.ExecutionReceipt {
+func wineReceipt(_ phase: String, process: Int32 = 24002, bridge: Int32 = 24001, scope: String? = "501:1:2") -> J.ExecutionReceipt {
     .init(ticketID: spawnTicketID, requestID: spawnID, launchID: spawnDispatch.launchID!,
           epoch: spawnDispatch.executorEpoch!, digest: payload.digest, phase: "handedOff",
           ownerPID: 23001, ownerBoot: "injected-boot", ownerStarted: 20,
           childPID: 23002, childBoot: "injected-boot", childStarted: 21, status: 0, signalled: false,
           nativeSpawn: .init(phase: phase, bridgePID: bridge, bridgeBoot: "injected-boot", bridgeStarted: 22,
               processPID: process, processBoot: "injected-boot", processStarted: 23,
-              status: phase == "exited" ? 53 : nil, signalled: phase == "exited" ? false : nil))
+              status: phase == "exited" ? 53 : nil, signalled: phase == "exited" ? false : nil), prefixScope: scope)
 }
 precondition(value(wait { receiptJournal.reconcileExecutions([wineReceipt("spawned")], completion: $0) }) == [spawnTicketID])
 precondition(value(wait { receiptJournal.reconcileExecutions([wineReceipt("exited")], completion: $0) }) == [spawnTicketID])
-precondition(value(wait { receiptJournal.reconcileExecutions([wineReceipt("spawned"), wineReceipt("exited", process: 24003), wineReceipt("exited", bridge: 24004)], completion: $0) }).isEmpty)
+precondition(value(wait { receiptJournal.reconcileExecutions([wineReceipt("spawned"), wineReceipt("exited", process: 24003), wineReceipt("exited", bridge: 24004), wineReceipt("exited", scope: nil), wineReceipt("exited", scope: "501:1:3")], completion: $0) }).isEmpty)
 precondition(value(wait { receiptJournal.query(id: spawnID, completion: $0) }).executionReceipt == wineReceipt("exited"))
+// Legacy terminal receipts can gain only the omitted native prefix proof.
+var upgradedLegacy = nativeReceipt()
+upgradedLegacy.prefixScope = "501:10:20"
+precondition(value(wait { receiptJournal.reconcileExecutions([upgradedLegacy], completion: $0) }) == [ticketID])
+precondition(value(wait { receiptJournal.query(id: receiptID, completion: $0) }).executionReceipt == upgradedLegacy)
 print("PASS native Wine receipt: exact bridge/child birth retained, late spawn and replaced identities cannot regress a persisted root outcome")
 closeJournal(receiptJournal)
 let receiptRecovery = J(directory: receiptRoot, delivery: delivery)
 let reopenedReceipts = value(wait { receiptRecovery.open(completion: $0) })
-precondition(reopenedReceipts.count == 2 && reopenedReceipts.first { $0.id == receiptID }?.phase == .uncertain && reopenedReceipts.first { $0.id == receiptID }?.executionReceipt == nativeReceipt())
+precondition(reopenedReceipts.count == 2 && reopenedReceipts.first { $0.id == receiptID }?.phase == .uncertain && reopenedReceipts.first { $0.id == receiptID }?.executionReceipt == upgradedLegacy)
 precondition(wait { receiptRecovery.authorizeDispatch(id: receiptID, completion: $0) } == .failure(.tooLate))
 precondition(wait { receiptRecovery.resume(id: receiptID, completion: $0) } == .failure(.tooLate))
 closeJournal(receiptRecovery)

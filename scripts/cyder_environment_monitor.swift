@@ -7,6 +7,11 @@ final class CyderEnvironmentMonitor {
     typealias L = CyderLifecycle
     struct Saved: Codable { let identity: CyderEnvironmentProbe.Identity; let generation: UInt64 }
     private struct Registry: Codable { let schema: Int; let records: [Saved] }
+    private struct DrainObservation {
+        let generation: UInt64
+        let completed: (String) -> Void
+        var rootExited = false
+    }
     private final class Entry {
         let identity: CyderEnvironmentProbe.Identity
         var generation: UInt64
@@ -19,6 +24,8 @@ final class CyderEnvironmentMonitor {
         var graceUntil: TimeInterval
         var exited = false
         var executions: Set<UUID> = []
+        var drains: [UUID: DrainObservation] = [:]
+        var calibration = UUID()
         init(_ saved: Saved, grace: TimeInterval) {
             identity = saved.identity; generation = saved.generation; graceUntil = grace
         }
@@ -56,7 +63,7 @@ final class CyderEnvironmentMonitor {
             var valid = true
             if FileManager.default.fileExists(atPath: file.path) {
                 do {
-                    let fd = Darwin.open(file.path, O_RDONLY | O_NOFOLLOW | O_CLOEXEC)
+                    let fd = Darwin.open(file.path, O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC)
                     guard fd >= 0 else { throw CocoaError(.fileReadCorruptFile) }
                     defer { Darwin.close(fd) }
                     var info = stat()
@@ -90,14 +97,14 @@ final class CyderEnvironmentMonitor {
         }
     }
     func track(prefix: URL, engine: URL, completion: @escaping (String?) -> Void = { _ in }) {
-        manage(prefix: prefix, engine: engine, execution: nil, completion: completion)
+        manage(prefix: prefix, engine: engine, execution: nil, drained: nil, completion: completion)
     }
     /// Keep empty samples provisional while a native executor can still spawn
     /// Wine. Observation deadlines never release this ownership.
-    func beginExecution(prefix: URL, engine: URL) async -> UUID? {
+    func beginExecution(prefix: URL, engine: URL, drained: ((String) -> Void)? = nil) async -> UUID? {
         let token = UUID()
         return await withCheckedContinuation { continuation in
-            manage(prefix: prefix, engine: engine, execution: token) { path in
+            manage(prefix: prefix, engine: engine, execution: token, drained: drained) { path in
                 continuation.resume(returning: path == nil ? nil : token)
             }
         }
@@ -107,13 +114,36 @@ final class CyderEnvironmentMonitor {
             defer { DispatchQueue.main.async(execute: completion) }
             guard !closed else { return }
             for entry in entries.values where entry.executions.remove(token) != nil {
-                entry.emptySince = nil
-                entry.graceUntil = clock() + 30
+                entry.emptySince = nil; entry.calibration = UUID()
+                entry.graceUntil = entry.drains.values.contains { $0.generation == entry.generation && $0.rootExited }
+                    ? clock() : clock() + 30
                 schedule(entry)
             }
         }
     }
-    private func manage(prefix: URL, engine: URL, execution: UUID?, completion: @escaping (String?) -> Void) {
+    /// Native root proof shortens the launch grace only for the registration
+    /// whose actual prefix identity matches the native spawn ticket. Two probes
+    /// begun after both proof and executor release are still required.
+    func confirmRootExit(_ token: UUID, prefixScope: String) {
+        queue.async { [self] in
+            guard !closed else { return }
+            for entry in entries.values {
+                guard var observation = entry.drains[token], !observation.rootExited,
+                      observation.generation == entry.generation,
+                      entry.identity.executionScope == prefixScope, !entry.exited else { continue }
+                observation.rootExited = true; entry.drains[token] = observation
+                entry.emptySince = nil; entry.calibration = UUID()
+                if entry.executions.isEmpty { entry.graceUntil = clock() }
+                schedule(entry)
+            }
+        }
+    }
+    func cancelDrainObservation(_ token: UUID) {
+        queue.async { [self] in
+            for entry in entries.values { entry.drains.removeValue(forKey: token) }
+        }
+    }
+    private func manage(prefix: URL, engine: URL, execution: UUID?, drained: ((String) -> Void)?, completion: @escaping (String?) -> Void) {
         // Identity resolution has its own bounded slot; it never shares AppKit
         // or the state queue. Per-launch calls coalesce after identity resolves.
         queue.async { [self] in
@@ -126,16 +156,19 @@ final class CyderEnvironmentMonitor {
                     var managedPrefix: String?
                     defer { let path = managedPrefix; DispatchQueue.main.async { completion(path) } }
                     guard !self.closed, let identity else { return }
-                    if let entry = self.entries[identity.environment], !entry.exited {
-                        entry.graceUntil = self.clock() + 30
-                    } else {
+                    if self.entries[identity.environment]?.exited != false {
                         guard self.entries.count < 32 || self.entries[identity.environment] != nil else {
                             DispatchQueue.main.async { self.onIssue?("監測環境已達上限，請關閉不使用的環境後重新檢查。") }; return
                         }
                         let generation = (self.entries[identity.environment]?.generation ?? 0) + 1
                         self.install(Saved(identity: identity, generation: generation), grace: self.clock() + 30)
                     }
-                    if let execution { self.entries[identity.environment]?.executions.insert(execution) }
+                    if let execution, let entry = self.entries[identity.environment] {
+                        entry.executions.insert(execution)
+                        entry.emptySince = nil; entry.calibration = UUID()
+                        entry.graceUntil = self.clock() + 30
+                        if let drained { entry.drains[execution] = .init(generation: entry.generation, completed: drained) }
+                    }
                     managedPrefix = identity.prefix
                     self.save(); self.startTimer(); self.tick()
                 }
@@ -153,7 +186,7 @@ final class CyderEnvironmentMonitor {
             guard !closed else { return }; closed = true
             timer?.cancel(); timer = nil
             for entry in entries.values {
-                entry.pending = nil
+                entry.pending = nil; entry.drains.removeAll()
                 // Only the Process object created here with '-w' may be stopped.
                 // The lock owner and the Wine client are never signalled.
                 if let waiter = entry.waiter, waiter.isRunning { waiter.terminate() }
@@ -184,11 +217,11 @@ final class CyderEnvironmentMonitor {
     }
     private func schedule(_ entry: Entry) {
         guard !closed, !entry.exited, entry.pending == nil, inFlight < 2 else { return }
-        let token = UUID(), observedStamp = stamp(entry)
+        let token = UUID(), observedStamp = stamp(entry), calibration = entry.calibration
         entry.pending = token; inFlight += 1
         emit(.reconcileStarted(observedStamp, token))
         queue.asyncAfter(deadline: .now() + 5) { [weak self, weak entry] in
-            guard let self, !self.closed, let entry, entry.pending == token else { return }
+            guard let self, !self.closed, let entry, entry.pending == token, entry.calibration == calibration else { return }
             self.emit(.reconciled(observedStamp, token, .unconfirmed, .degraded))
             // Retain the underlying in-flight slot. A timed-out syscall does
             // not authorize a second copy of that syscall for this environment.
@@ -200,6 +233,7 @@ final class CyderEnvironmentMonitor {
                 guard !self.closed, self.entries[entry.identity.environment] === entry,
                       entry.pending == token else { return }
                 entry.pending = nil
+                guard entry.calibration == calibration else { self.schedule(entry); return }
                 // Timeout may have consumed this token; start a fresh revision
                 // before applying a late but identity-checked calibration.
                 self.emit(.reconcileStarted(observedStamp, token))
@@ -208,6 +242,7 @@ final class CyderEnvironmentMonitor {
                     entry.emptySince = nil
                     if let previous = entry.owner, previous != owner {
                         if let waiter = entry.waiter, waiter.isRunning { waiter.terminate() }
+                        entry.drains.removeAll() // Old-generation launch observations cannot finish a new server.
                         entry.generation += 1; entry.waiter = nil; entry.waiterToken = nil; entry.waiterAttempted = false
                         self.emit(.manage(.init(id: entry.identity.environment, prefix: entry.identity.prefix,
                             engine: entry.identity.engine, generation: entry.generation)))
@@ -223,6 +258,10 @@ final class CyderEnvironmentMonitor {
                     if entry.executions.isEmpty, now >= entry.graceUntil, now - entry.emptySince! >= 0.5 {
                         entry.exited = true
                         self.emit(.reconciled(observedStamp, token, .exited, .healthy))
+                        let callbacks = entry.drains.values.filter { $0.generation == entry.generation && $0.rootExited }.map { $0.completed }
+                        entry.drains.removeAll()
+                        let scope = entry.identity.executionScope
+                        DispatchQueue.main.async { callbacks.forEach { $0(scope) } }
                         self.save()
                     } else { self.emit(.reconciled(observedStamp, token, .unconfirmed, .attaching)) }
                 case .unknown:

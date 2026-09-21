@@ -101,6 +101,7 @@ final class CyderRequestJournal {
         let status: Int32?
         var signalled: Bool? = nil
         var nativeSpawn: NativeSpawnReceipt? = nil
+        var prefixScope: String? = nil
     }
     enum Phase: String, Codable {
         case queued, dispatching, observing, completed, failed, cancelled, uncertain, awaitingUserResume
@@ -386,9 +387,16 @@ final class CyderRequestJournal {
                           record.digest == receipt.digest, record.launchID == receipt.launchID,
                           record.executorEpoch == receipt.epoch else { continue }
                     if let old = record.executionReceipt {
+                        // Older journals did not retain the native prefix key.
+                        // Permit only that additive proof on a terminal receipt.
+                        var comparable = old
+                        if comparable.prefixScope == nil { comparable.prefixScope = receipt.prefixScope }
                         guard old.ticketID == receipt.ticketID,
                               rank >= (ranks[old.phase] ?? 4),
-                              !(rank == 3 && ranks[old.phase] == 3 && old != receipt) else { continue }
+                              !(rank == 3 && ranks[old.phase] == 3 && comparable != receipt) else { continue }
+                        if let scope = old.prefixScope {
+                            guard receipt.prefixScope == scope else { continue }
+                        }
                         if old.ownerPID != nil {
                             guard old.ownerPID == receipt.ownerPID, old.ownerBoot == receipt.ownerBoot,
                                   old.ownerStarted == receipt.ownerStarted else { continue }

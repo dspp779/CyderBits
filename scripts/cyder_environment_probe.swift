@@ -9,6 +9,9 @@ struct CyderEnvironmentProbe {
         let environment: CyderLifecycle.EnvironmentID
         let prefix: String
         let engine: String
+        var executionScope: String {
+            "\(environment.uid):\(Int64(bitPattern: environment.device)):\(environment.inode)"
+        }
     }
     enum Result: Equatable {
         case alive(CyderLifecycle.ProcessID)
@@ -52,21 +55,25 @@ struct CyderEnvironmentProbe {
         guard let current = identify(prefix: URL(fileURLWithPath: identity.prefix), engine: URL(fileURLWithPath: identity.engine)),
               current == identity else { return .unknown("prefix-identity-changed") }
         guard FileManager.default.isExecutableFile(atPath: identity.engine) else { return .unknown("engine-unavailable") }
+        func emptyIfUnchanged() -> Result {
+            identify(prefix: URL(fileURLWithPath: identity.prefix), engine: URL(fileURLWithPath: identity.engine)) == identity
+                ? .empty : .unknown("prefix-identity-changed")
+        }
         let directory = serverDirectory(identity)
         var info = stat()
         for path in [directory.deletingLastPathComponent().path, directory.path] {
             if lstat(path, &info) != 0 {
-                return errno == ENOENT ? .empty : .unknown("namespace-unreadable")
+                return errno == ENOENT ? emptyIfUnchanged() : .unknown("namespace-unreadable")
             }
             guard info.st_mode & S_IFMT == S_IFDIR, info.st_uid == identity.environment.uid,
                   info.st_mode & 0o077 == 0 else { return .unknown("namespace-invalid") }
         }
         let lockPath = directory.appendingPathComponent("lock").path
-        let fd = Darwin.open(lockPath, O_RDONLY | O_NOFOLLOW | O_CLOEXEC)
+        let fd = Darwin.open(lockPath, O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC)
         if fd < 0 {
             // A socket-only server is possible when POSIX locks are unavailable.
             guard errno == ENOENT else { return .unknown("lock-unreadable") }
-            return socketAbsent(directory.appendingPathComponent("socket").path) ? .empty : .unknown("socket-without-lock")
+            return socketAbsent(directory.appendingPathComponent("socket").path) ? emptyIfUnchanged() : .unknown("socket-without-lock")
         }
         defer { Darwin.close(fd) }
         guard fstat(fd, &info) == 0, info.st_mode & S_IFMT == S_IFREG,

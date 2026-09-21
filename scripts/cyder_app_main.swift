@@ -118,7 +118,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
                           let pid = root.processPID, let boot = root.processBoot, let started = root.processStarted else { continue }
                     observer.receive(.init(authority: .init(request: receipt.requestID, launch: receipt.launchID,
                         digest: receipt.digest, epoch: receipt.epoch), ticket: receipt.ticketID, phase: root.phase,
-                        pid: pid, boot: boot, started: started, status: root.status, signalled: root.signalled))
+                        pid: pid, boot: boot, started: started, status: root.status, signalled: root.signalled, prefixScope: receipt.prefixScope))
                 }
             }
             self.existingLibraryController?.updateRequestSummary(CyderRequestRow.summary(records, outbox: self.outboxNotices))
@@ -1869,11 +1869,14 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             }
         }()
         let monitor = onMainThread { environmentMonitor }
-        guard let execution = await monitor.beginExecution(prefix: prefix, engine: CyderPaths.engine.appendingPathComponent("bin/wineserver")) else {
+        guard let execution = await monitor.beginExecution(prefix: prefix, engine: CyderPaths.engine.appendingPathComponent("bin/wineserver"),
+            drained: { [weak observer] scope in observer?.receiveEnvironmentEnded(prefixScope: scope) }) else {
             return .failure(CyderFailure(code: "CYD-WIN-001", stage: .wineSpawn,
                 summary: "無法確認 Windows 環境；請重新檢查後再啟動。",
                 technicalDetails: "Environment identity unavailable or monitor quiescing"))
         }
+        observer.observeDrain { scope in monitor.confirmRootExit(execution, prefixScope: scope) }
+        defer { monitor.cancelDrainObservation(execution) }
         let result = await runLauncher(
             context: context,
             args: args,

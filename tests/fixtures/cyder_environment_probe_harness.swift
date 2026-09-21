@@ -62,6 +62,12 @@ DispatchQueue.global().async {
     precondition(CyderEnvironmentProbe.inspect(identity) == .unknown("socket-may-be-live"))
     close(sock)
     precondition(CyderEnvironmentProbe.inspect(identity) == .empty, "stale refused socket must calibrate empty")
+    // Nonblocking open must reject a FIFO before it occupies a probe slot.
+    let lockURL = directory.appendingPathComponent("lock")
+    try! FileManager.default.removeItem(at: lockURL)
+    precondition(mkfifo(lockURL.path, 0o600) == 0)
+    precondition(CyderEnvironmentProbe.inspect(identity) == .unknown("lock-invalid"))
+    try! FileManager.default.removeItem(at: lockURL)
     let changed = CyderEnvironmentProbe.Identity(environment: .init(uid: getuid(), device: identity.environment.device, inode: identity.environment.inode + 1, namespace: "wine-user"), prefix: identity.prefix, engine: identity.engine)
     precondition(CyderEnvironmentProbe.inspect(changed) == .unknown("prefix-identity-changed"))
     let missing = CyderEnvironmentProbe.Identity(environment: identity.environment, prefix: identity.prefix, engine: "/nonexistent/wineserver")

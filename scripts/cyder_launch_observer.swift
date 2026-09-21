@@ -35,6 +35,7 @@ final class CyderLaunchObserver {
         let started: UInt64
         let status: Int32?
         let signalled: Bool?
+        var prefixScope: String? = nil
     }
     struct Sample { let rootStatus: Int32?; let lifecycle: String? }
     enum Result: Equatable { case activated, finishedWithoutWindow, rootFailed(Int32), unconfirmed }
@@ -55,6 +56,9 @@ final class CyderLaunchObserver {
     private let authority: Authority?
     private var nativeRoot: NativeRoot?
     private var observationDeadline: TimeInterval?
+    private var drainRequest: ((String) -> Void)?
+    private var drainRequested = false
+    private var environmentEnded = false
 
     init(authority: Authority? = nil) { self.authority = authority }
 
@@ -68,20 +72,47 @@ final class CyderLaunchObserver {
                       !signalled || (1...127).contains(status) else { return }
             }
             if let previous = nativeRoot {
+                var comparable = previous
+                if comparable.prefixScope == nil { comparable.prefixScope = root.prefixScope }
                 guard previous.ticket == root.ticket, previous.pid == root.pid, previous.boot == root.boot,
-                      previous.started == root.started, previous.phase != "exited" || previous == root else { return }
+                      previous.started == root.started,
+                      previous.prefixScope == nil || previous.prefixScope == root.prefixScope, previous.phase != "exited" || comparable == root else { return }
             }
             nativeRoot = root
             evaluateNativeRoot()
         }
     }
 
+    /// The monitor binds this request to the exact execution registration; a
+    /// prefix path or a waiter returning zero cannot call the completion path.
+    func observeDrain(using request: @escaping (String) -> Void) {
+        queue.async { [self] in
+            guard !finished else { return }
+            drainRequest = request
+            evaluateNativeRoot()
+        }
+    }
+    func receiveEnvironmentEnded(prefixScope: String) {
+        queue.async { [self] in
+            guard !finished, nativeRoot?.prefixScope == prefixScope,
+                  nativeRoot?.phase == "exited", nativeRoot?.status == 0,
+                  nativeRoot?.signalled == false, drainRequested else { return }
+            environmentEnded = true
+            evaluateNativeRoot()
+        }
+    }
     private func evaluateNativeRoot() {
-        guard completion != nil, let root = nativeRoot, root.phase == "exited", let status = root.status else { return }
+        guard !finished, let root = nativeRoot, root.phase == "exited", let status = root.status else { return }
+        if status == 0, root.signalled == false, let scope = root.prefixScope,
+           let request = drainRequest, !drainRequested {
+            drainRequested = true
+            request(scope)
+        }
+        guard completion != nil else { return }
         if root.signalled == true { finish(.rootFailed(128 + status)) }
         else if status != 0 { finish(.rootFailed(status)) }
-        // Clean root exit is not proof that a successor or its environment
-        // ended. Keep the original deadline while activation may still arrive.
+        else if environmentEnded { finish(.finishedWithoutWindow) }
+        // Root zero alone keeps the original deadline for a late successor.
     }
 
     func wait(until deadline: TimeInterval, signal: WineActivationWaiter,
@@ -128,6 +159,7 @@ final class CyderLaunchObserver {
         guard !finished else { return }
         finished = true
         timer?.cancel(); timer = nil
+        drainRequest = nil
         signal?.observe(nil); signal = nil
         let callback = completion; completion = nil
         let expired = observationDeadline.map { ProcessInfo.processInfo.systemUptime >= $0 } ?? false

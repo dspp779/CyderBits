@@ -85,13 +85,14 @@ pump { stopped }
 // A completed native executor receipt arriving while no primary exists must
 // join its original request on re-election, then be safely pruned only after
 // the journal has saved it. This is explicitly injected native-layer evidence.
+let fixtureBoot = CyderExecutionOwner.Birth.current()!.boot
 let correlatedTicket = CyderExecutionOwner.Ticket(schema: 1, id: UUID(), issuer: dispatched!.executorEpoch!,
-    scope: "injected-prefix-scope", prefix: CyderPaths.support.path, phase: "handedOff", owner: .init(boot: "injected-native-boot", pid: 12345, started: 10),
-    child: .init(boot: "injected-native-boot", pid: 12346, started: 11), status: 0, signalled: false,
+    scope: "injected-prefix-scope", prefix: CyderPaths.support.path, phase: "handedOff", owner: .init(boot: fixtureBoot, pid: 12345, started: 10),
+    child: .init(boot: fixtureBoot, pid: 12346, started: 11), status: 0, signalled: false,
     correlation: .init(requestID: dispatched!.id, launchID: dispatched!.launchID!, digest: dispatched!.digest),
     handoff: .init(executable: "/injected/wine", pidFile: CyderPaths.support.appendingPathComponent("injected.pid").path),
-    nativeSpawn: .init(phase: "spawned", bridge: .init(boot: "injected-native-boot", pid: 12347, started: 12),
-        process: .init(boot: "injected-native-boot", pid: 12348, started: 13)))
+    nativeSpawn: .init(phase: "spawned", bridge: .init(boot: fixtureBoot, pid: 12347, started: 12),
+        process: .init(boot: fixtureBoot, pid: 12348, started: 13)))
 let correlatedURL = ownerDirectory.appendingPathComponent(correlatedTicket.id.uuidString + ".json")
 try JSONEncoder().encode(correlatedTicket).write(to: correlatedURL)
 chmod(correlatedURL.path, 0o600)
@@ -119,7 +120,7 @@ replacement.onRecoveryChanged = { records in
               let pid = root.processPID, let boot = root.processBoot, let started = root.processStarted else { continue }
         rootObserver.receive(.init(authority: .init(request: receipt.requestID, launch: receipt.launchID,
             digest: receipt.digest, epoch: receipt.epoch), ticket: receipt.ticketID, phase: root.phase,
-            pid: pid, boot: boot, started: started, status: root.status, signalled: root.signalled))
+            pid: pid, boot: boot, started: started, status: root.status, signalled: root.signalled, prefixScope: receipt.prefixScope))
     }
 }
 var nextRole: CyderInstanceCoordinator.Role?
@@ -132,6 +133,7 @@ precondition(replacement.recovered.filter { $0.phase == .awaitingUserResume }.co
 precondition(replacement.recovered.contains { $0.id == dispatched!.id && $0.phase == .uncertain })
 pump { replacement.recovered.first { $0.id == dispatched!.id }?.executionReceipt?.ticketID == correlatedTicket.id }
 precondition(FileManager.default.fileExists(atPath: correlatedURL.path), "live root ticket was pruned")
+precondition(replacement.recovered.first { $0.id == dispatched!.id }?.executionReceipt?.prefixScope == correlatedTicket.scope)
 pump { nativeReadCount == 2 } // Automatic polling, no manual refresh.
 var livePollTick = false
 DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { livePollTick = true }
