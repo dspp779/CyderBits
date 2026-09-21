@@ -136,7 +136,7 @@ final class CyderEnvironmentMonitor {
                   previous == nil || (previous?.owner != owner && observedAt > (previous?.retiredAt ?? .infinity)),
                   observedAt.isFinite, observedAt <= clock(),
                   previous == nil || previous!.generation < UInt64.max,
-                  entries.count < 32 || previous != nil,
+                  hasActiveCapacity,
                   identity.environment.uid == getuid(), identity.environment.namespace == "wine-user",
                   owner.pid > 0, owner.started > 0, !owner.boot.isEmpty,
                   expectedEngine == nil || canonicalExpectedEngine == identity.engine else { return }
@@ -242,9 +242,10 @@ final class CyderEnvironmentMonitor {
                     if let execution, self.admissions[execution] == nil { return }
                     guard !self.closed, let identity else { return }
                     if self.entries[identity.environment]?.exited != false {
-                        guard self.entries.count < 32 || self.entries[identity.environment] != nil else {
+                        guard self.hasActiveCapacity else {
                             DispatchQueue.main.async { self.onIssue?("監測環境已達上限，請關閉不使用的環境後重新檢查。") }; return
                         }
+                        guard (self.entries[identity.environment]?.generation ?? 0) < UInt64.max else { return }
                         let generation = (self.entries[identity.environment]?.generation ?? 0) + 1
                         self.install(Saved(identity: identity, generation: generation), grace: self.clock() + 30)
                     }
@@ -311,6 +312,9 @@ final class CyderEnvironmentMonitor {
     }
     private func emit(_ value: L.Event) { event(value) }
     private func stamp(_ entry: Entry) -> L.Stamp { .init(epoch: epoch, environment: entry.identity.environment, generation: entry.generation) }
+    // Retired entries retain their generation fence, but own no active slot.
+    // Reactivating one consumes the same capacity as a previously unseen prefix.
+    private var hasActiveCapacity: Bool { entries.values.lazy.filter { !$0.exited }.prefix(32).count < 32 }
     private func install(_ saved: Saved, grace: TimeInterval) {
         if let previous = entries[saved.identity.environment] {
             if !previous.waiterStarting, let waiter = previous.waiter, waiter.isRunning { waiter.terminate() }

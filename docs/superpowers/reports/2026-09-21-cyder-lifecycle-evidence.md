@@ -51,7 +51,7 @@ SIGN_IDENTITY=- CYDER_REQUIRE_NATIVE_SWIFT=1 CYDER_SWIFT_OPTIMIZATION=-Onone \
 
 ## 驗證矩陣（持續更新）
 
-以下為截至 C25 的證據摘要；各批次段落保留當時缺口與失敗，不以早期矩陣覆蓋後續結果。
+以下為截至 C26 的證據摘要；各批次段落保留當時缺口與失敗，不以早期矩陣覆蓋後續結果。
 
 | 項目 | 目前證據 | 剩餘／限制 |
 |---|---|---|
@@ -569,3 +569,14 @@ C23 接通有完整 native root 證據的重新觀察及 queued/history 共用�
 - 最後 `build-C25-r3.log` universal macOS11 建置成功，41 個輸入檔在編譯前後 SHA256 相同；前兩次建置 log／輸入 hash 保留，後續分別加入退休時間檢查與超過 32 候選的補查修正。`/private/tmp/cyder-lifecycle-c25-build/Cyder.app` 設定 local.cyder.lifecycle-c25、CD2 support/runtime，ad-hoc／strict verify 與 arm64／x86_64 核對通過；`build-C25-source-sha256.json` 保存 47 個來源／產物 hash，三支包內 Bash scripts 與 repo bytes 相同。本輪完整 Cyder.app／Wine GUI 未啟動，未覆蓋正式安裝或發布。
 
 本批完成可信 support/bottles 的補查及手動刷新接線；自訂外部 prefix 仍依既有環境登錄或新明確啟動接回。目錄／metadata 持續不可讀時保留有限降級，不推定 Wine 結束。重複 waiter 與 runtime session 分工、長時間多環境容量、其餘 UX／主執行緒 I/O、最終 V01–V14 及整包交付仍須收斂，目標保持進行中。
+
+
+## C26：已排空環境不占用活動監控容量
+
+- 修正 manage／recoverVerified 的容量計算：32 個上限只計尚未 exited 的 entry。歷史 entry 保留世代與退休證據，但不占活動位置；重新啟用歷史 prefix 也必須取得位置，不能利用「字典已有此 key」繞過上限。當前活動 prefix 的重複 track 繼續共用 entry，不多占位置。manage 另拒絕已達 UInt64.max 的歷史世代，避免重新接納時整數溢位。
+- 新 `bash tests/test-cyder-environment-capacity.sh` 驅動正式 monitor → store，以注入的 prefix identity／server birth／時鐘逐一建立並排空 33 個環境。驗證新 prefix 仍可接納、32 個活動環境時新／歷史 track 與 verified recovery 均不能增加活動數、既有活動 track 可共用、排空後 track 與 verified recovery 各可重新使用位置且世代遞增；真實暫存 registry 最終仍為 32 筆。這是容量與世代的替代證據，未執行 Wine。
+- 最終 `environment-capacity-C26-r4.log` 通過且產生必要完成檔。首輪 precondition deadline 失敗，原日誌保留；診斷版 r2 定位於滿载後等待被重新接納環境變成 alive 的十秒斷言。32 環境共用兩個實體 probe，該斷言把後續校準排程與容量接納混為一談；改為檢查正式 store 的新世代及活動數，沒有放寬產品期限或宣稱立即完成校準。測試同步標記亦改為 monitor barrier 後單次 store UI marker，避免原雙重 toggle 的競態。r3 通過後，r4 加上 verified recovery 在釋放位置後成功的情境。首輪 harness 5222（17:29:49，/private/tmp/cy-capacity.3GdNRz/test）成為 UE；以完整路徑／出生時間核對後只發一次 SIGKILL，未對 Wine 發訊號，未重複清理。
+- `environment-monitor-C26.log`、`bottle-recovery-C26.log`、`launch-generation-C26.log` 回歸全部通過，分別涵蓋排空證據、恢復／過期證據及世代 admission／晚到 helper。容量 harness 的後續校準延遲不是選單回應性量測，本批未產生新的 menu latency 數字。
+- `build-C26.log` universal macOS11 建置成功；41 個來源輸入在編譯前後 hash 相同。隔離包 `/private/tmp/cyder-lifecycle-c26-build/Cyder.app` 使用 local.cyder.lifecycle-c26 與既有 CD2 support/runtime，ad-hoc／strict verify 和 arm64／x86_64 核對通過，三支包內 shell bytes 與 repo 相同；`build-C26-source-sha256.json` 保存 47 項。完整 app／Wine GUI 未啟動，沒有正式安裝覆蓋或發布。
+
+本批修正正常 track 及可信補查的活動容量，不宣稱所有啟動交錯已收斂：restore 的磁碟紀錄與先建立的新 entry 合併仍需檢查總容量，不能直接截斷而遺失外部 prefix 的恢復資格。滿載時新 admission 的校準優先序、重複 waiter／runtime session 分工、其餘 UX／I/O 及 V01–V14 最終交付繼續處理；目標保持進行中。
