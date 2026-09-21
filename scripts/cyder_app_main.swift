@@ -1185,7 +1185,10 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             } else if case .success(let prefix) = self.prefixForExecutable(URL(fileURLWithPath: launch.executable)) {
                 scope = .prefix(prefix)
             } else { return nil }
-            return CyderGptk.launchNeedsGlobalScope() ? .allEnvironments : scope
+            guard let snapshot = launch.authorization?.settingsSnapshot,
+                  let acceptedSettings = try? JSONDecoder().decode(CyderSettings.self, from: snapshot) else { return nil }
+            return CyderGptk.launchNeedsGlobalScope() || acceptedSettings.moltenvkVariant.launchNeedsGlobalScope()
+                ? .allEnvironments : scope
         }) { [weak self] outcome in
             guard let self else { return }
             self.pendingPreparation.removeValue(forKey: requestID)
@@ -2489,8 +2492,12 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
            let index = args.firstIndex(where: { $0 == "--stop-prefix" || $0 == "--taskmgr-prefix" }),
            args.indices.contains(index + 1) { scope = .prefix(URL(fileURLWithPath: args[index + 1])) }
         let prefixScope = scope
-        if isLaunch, lease?.scope == .allEnvironments || (lease == nil && CyderGptk.launchNeedsGlobalScope()) {
-            scope = .allEnvironments
+        if isLaunch {
+            let accepted = authorization?.settingsSnapshot.flatMap { try? JSONDecoder().decode(CyderSettings.self, from: $0) }
+            if lease?.scope == .allEnvironments || (lease == nil &&
+                (CyderGptk.launchNeedsGlobalScope() || (accepted?.moltenvkVariant.launchNeedsGlobalScope() ?? false))) {
+                scope = .allEnvironments
+            }
         }
         let acquired: CyderOperationGate.Lease?
         if isObservation { acquired = nil }

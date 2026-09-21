@@ -230,6 +230,17 @@ enum CyderMoltenvkVariant: String, Codable, CaseIterable {
         return value
     }
 
+    func launchNeedsGlobalScope(engineRoot: URL = CyderPaths.engine) -> Bool {
+        precondition(!Thread.isMainThread)
+        let directory = engineRoot.appendingPathComponent("lib/wine/x86_64-unix")
+        let manager = FileManager.default
+        guard ["libMoltenVK-1.4.2.dylib", "libMoltenVK-1.2.10.dylib", "libMoltenVK.dylib"]
+            .allSatisfy({ manager.fileExists(atPath: directory.appendingPathComponent($0).path) }) else { return false }
+        let selected = Self.sanitized(rawValue)
+        return (try? manager.destinationOfSymbolicLink(atPath: directory.appendingPathComponent("libMoltenVK.real.dylib").path))
+            != "libMoltenVK-\(selected.rawValue).dylib"
+    }
+
     var menuTitle: String { rawValue }
 
     var menuIndex: Int {
@@ -885,7 +896,7 @@ struct CyderSettings: Codable {
             "CX_ROOT", "CX_BOTTLE", "CX_APPLEGPTK_LIBD3DSHARED_PATH", "CYDER_SUPPORT",
             "CYDER_RUNTIME_ROOT", "CYDER_ENGINES", "CYDER_ENGINE_NAME", "CYDER_ENGINE_SRC",
             "CYDER_SCRIPTS", "CYDER_APP", "CYDER_RESULT_FILE", "CYDER_PROGRESS_FILE",
-            "CYDER_GPTK_ROOT", "CYDER_GRAPHICS_BACKENDS_ROOT", "CYDER_GAME_ARGUMENTS",
+            "CYDER_GPTK_ROOT", "CYDER_GRAPHICS_BACKENDS_ROOT", "CYDER_GAME_ARGUMENTS", "CYDER_MOLTENVK_VARIANT_PREFERENCE",
         ]
         // Explicit advanced override: cxcompatdb canonicalizes and validates
         // the directory, PE machine, builtin signature and dependencies.

@@ -17,14 +17,16 @@ for path, dpi, argument in [(snapshot, 144, '--accepted'), (live, 192, '--later'
                    ['CYDER_EXECUTION_OWNER_ROOT', 'CYDER_EXECUTION_OWNER_TICKET',
                     'CYDER_EXECUTION_OWNER_HELPER', 'CYDER_EXECUTION_FINAL']}
     environment['GAME_CUSTOM_VALUE'] = 'normal-value'
+    environment['CYDER_MOLTENVK_VARIANT_PREFERENCE'] = '1.4.2'
     with open(path, 'w') as f:
         json.dump({'schemaVersion': 13, 'dpi': dpi, 'retinaMode': False, 'graphicsBackend': 'default',
+                   'moltenvkVariant': '1.2.10' if argument == '--accepted' else '1.4.2',
                    'perProfile': {profile: {'arguments': [argument, 'two words'], 'dpi': dpi,
                                            'environment': environment}}}, f)
 PY
 (
   source "$ROOT/scripts/cyder-common.sh"
-  unset CYDER_DPI CYDER_RETINA_MODE || true
+  unset CYDER_DPI CYDER_RETINA_MODE CYDER_MOLTENVK_VARIANT_PREFERENCE || true
   cyder_load_saved_settings
   [[ "$CYDER_DPI" == 144 && "$CYDER_RETINA_MODE" == 0 ]]
   export CYDER_EXECUTION_OWNER_ROOT=authorized-root CYDER_EXECUTION_OWNER_TICKET=authorized-ticket
@@ -33,6 +35,7 @@ PY
   [[ "$CYDER_EXECUTION_OWNER_ROOT" == authorized-root && "$CYDER_EXECUTION_OWNER_TICKET" == authorized-ticket ]]
   [[ "$CYDER_EXECUTION_OWNER_HELPER" == authorized-helper && "$CYDER_EXECUTION_FINAL" == 1 ]]
   [[ "$GAME_CUSTOM_VALUE" == normal-value ]]
+  [[ "$CYDER_MOLTENVK_VARIANT_PREFERENCE" == 1.2.10 ]]
   [[ "$CYDER_DPI" == 144 && "${#CYDER_GAME_ARGUMENTS[@]}" == 2 ]]
   [[ "${CYDER_GAME_ARGUMENTS[0]}" == --accepted && "${CYDER_GAME_ARGUMENTS[1]}" == 'two words' ]]
   # Explicit test-launch overrides still win, without changing the saved copy.

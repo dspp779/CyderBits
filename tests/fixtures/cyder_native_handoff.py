@@ -141,6 +141,29 @@ printf 'changed\\n' > "$TEST_ROOT/runtime.changed"
     runtime = case('runtime-global')
     runtime_link = runtime / 'runtime/lib64/apple_gptk'
     runtime_link.unlink()
+    molten = runtime / 'runtime/lib/wine/x86_64-unix'
+    molten.mkdir(parents=True)
+    for version in ['1.4.2', '1.2.10']:
+        (molten / f'libMoltenVK-{version}.dylib').touch()
+    (molten / 'libMoltenVK.dylib').write_text('cyder-moltenvk-timeline-wait-poll\n')
+    molten_link = molten / 'libMoltenVK.real.dylib'
+    molten_link.symlink_to('libMoltenVK-1.2.10.dylib')
+    molten_script = runtime / 'launch.sh'
+    # Inert dylib headers use a validation-tool substitute; actual settings,
+    # symlink mutation, authority and final native executor remain formal.
+    preamble = '''
+export CYDER_MOLTENVK_VARIANT_PREFERENCE=1.4.2 CYDER_MOCK_MACOS=13.0
+otool() { printf '%s\\n' '@loader_path/libMoltenVK.real.dylib'; }
+'''
+    prefix_script = runtime / 'prefix-attempt.sh'
+    prefix_script.write_text(script.read_text().split('cyder_sentinel_attach()')[0] + preamble + '''
+cyder_apply_moltenvk_variant_from_preference "$TEST_ROOT/runtime"
+''')
+    prefix_owner = start(runtime, reserve(runtime, False), ['/bin/bash', str(prefix_script)])
+    wait(lambda: prefix_owner.poll() is not None, 'prefix-only MoltenVK owner did not return')
+    assert prefix_owner.returncode == 75 and os.readlink(molten_link) == 'libMoltenVK-1.2.10.dylib'
+    print('PASS MoltenVK native scope: non-handoff prefix owner cannot switch the shared runtime', flush=True)
+    molten_script.write_text(preamble + script.read_text())
     runtime_ticket = reserve(runtime, global_scope=True)
     assert receipt(runtime_ticket)['schema'] == 2
     old_executor = os.environ.get('CYDER_TEST_OLD_EXECUTOR')
@@ -150,9 +173,10 @@ printf 'changed\\n' > "$TEST_ROOT/runtime.changed"
         assert old_attempt.returncode == 75 and not (runtime / 'old-helper-spawned').exists()
         assert receipt(runtime_ticket)['phase'] == 'prepared'
         print('PASS legacy helper: schema 2 global authority refused without starting a child or altering the ticket', flush=True)
-    runtime_owner = start(runtime, runtime_ticket, ['/bin/bash', str(script)])
+    runtime_owner = start(runtime, runtime_ticket, ['/bin/bash', str(molten_script)])
     wait(lambda: (runtime / 'wrapper.entered').exists(), 'global runtime preparation did not reach formal launch')
     assert runtime_link.resolve() == (runtime / 'support/runtime/apple_gptk').resolve()
+    assert os.readlink(molten_link) == 'libMoltenVK-1.4.2.dylib'
     assert receipt(runtime_ticket)['requiresGlobalScope'] is True and receipt(runtime_ticket)['scope'] is not None
     runtime_conflict = start(independent, reserve(independent, False), ['/usr/bin/true'])
     wait(lambda: runtime_conflict.poll() is not None, 'global runtime conflict did not return')
@@ -168,7 +192,7 @@ printf 'changed\\n' > "$TEST_ROOT/runtime.changed"
     (runtime / 'native.release').touch()
     wait(lambda: (runtime / 'result').exists(), 'global runtime native result lost')
     assert receipt(runtime_ticket)['nativeSpawn']['status'] == 53
-    print('PASS shared runtime: global native owner repairs isolated GPTK, blocks other prefixes through spawn, preserves prefix identity, releases after Bash return while child survives', flush=True)
+    print('PASS shared runtime: global native owner prepares isolated GPTK and MoltenVK, blocks other prefixes through spawn, preserves prefix identity, releases after Bash return while child survives', flush=True)
 
     late = case('late')
     late_script = late / 'launch.sh'

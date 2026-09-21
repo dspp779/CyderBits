@@ -73,7 +73,7 @@ assert_contains "$common" 'cyder_apply_moltenvk_variant' \
   "common.sh must call MoltenVK variant apply"
 assert_contains "$(cat "$ROOT/scripts/cyder-common.sh")" 'cyder-moltenvk-variant.sh' \
   "common.sh must source moltenvk variant helper"
-# Launcher loads settings which apply; also assert explicit hook if present.
+# Settings reads are side-effect free; explicit launch/maintenance hooks apply.
 if ! grep -Fq 'cyder_apply_moltenvk' <<<"$launcher$common"; then
   echo "ASSERT failed: launcher path must apply MoltenVK variant" >&2
   exit 1

@@ -103,7 +103,34 @@ struct CyderSettingsHarness {
             precondition(!CyderSettings.isValidEnvironmentKey(key))
         }
         precondition(!CyderSettings.isValidEnvironmentKey("CYDER_GRAPHICS_HUD_PREFERENCE"))
+        precondition(!CyderSettings.isValidEnvironmentKey("CYDER_MOLTENVK_VARIANT_PREFERENCE"))
         precondition(CyderSettings.isValidEnvironmentKey("CYDER_GRAPHICS_BACKEND_PATH"))
+
+        let moltenEngine = path.deletingLastPathComponent().appendingPathComponent("molten-engine")
+        let moltenDirectory = moltenEngine.appendingPathComponent("lib/wine/x86_64-unix")
+        try FileManager.default.createDirectory(at: moltenDirectory, withIntermediateDirectories: true)
+        func moltenNeedsGlobal() -> Bool {
+            let completed = DispatchSemaphore(value: 0)
+            var result = false
+            DispatchQueue.global().async {
+                result = CyderMoltenvkVariant.hostDefault.launchNeedsGlobalScope(engineRoot: moltenEngine)
+                completed.signal()
+            }
+            completed.wait()
+            return result
+        }
+        precondition(!moltenNeedsGlobal()) // Legacy single-dylib engines need no switch.
+        for name in ["libMoltenVK-1.4.2.dylib", "libMoltenVK-1.2.10.dylib", "libMoltenVK.dylib"] {
+            try Data().write(to: moltenDirectory.appendingPathComponent(name))
+        }
+        precondition(moltenNeedsGlobal())
+        let moltenLink = moltenDirectory.appendingPathComponent("libMoltenVK.real.dylib")
+        try FileManager.default.createSymbolicLink(atPath: moltenLink.path,
+            withDestinationPath: "libMoltenVK-\(CyderMoltenvkVariant.hostDefault.rawValue).dylib")
+        precondition(!moltenNeedsGlobal())
+        try FileManager.default.removeItem(at: moltenLink)
+        try FileManager.default.createSymbolicLink(atPath: moltenLink.path, withDestinationPath: "missing-library")
+        precondition(moltenNeedsGlobal())
 
         try store.update { settings in
             settings.wineDiagnostics = .sync

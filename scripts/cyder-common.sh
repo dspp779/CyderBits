@@ -842,7 +842,6 @@ cyder_load_saved_settings() {
     false|0) export CYDER_DXVK_HUD_FRAMETIMES=0 ;;
   esac
   cyder_apply_graphics_runtime_preferences
-  cyder_apply_moltenvk_variant_from_preference "${CYDER_ENGINES:-}/${CYDER_ENGINE_NAME:-}"
 }
 
 cyder_apply_moltenvk_variant_from_preference() {
@@ -858,8 +857,9 @@ cyder_apply_moltenvk_variant_from_preference() {
   fi
   if declare -F cyder_apply_moltenvk_variant_if_present >/dev/null 2>&1; then
     cyder_apply_moltenvk_variant_if_present "$engine" "$pref" || {
+      local status=$?
       echo "MoltenVK variant apply failed (engine=$engine pref=$pref)" >&2
-      return 1
+      return "$status"
     }
   fi
   return 0
@@ -1118,7 +1118,7 @@ cyder_link_gptk_into_engine() {
     cyder_gptk_root_is_valid "$link"
     return $?
   fi
-  if [[ -n "${CYDER_EXECUTION_OWNER_TICKET:-}" && "${CYDER_EXECUTION_RUNTIME_MUTATION:-0}" != 1 ]]; then
+  if [[ -n "${CYDER_EXECUTION_RUNTIME_MUTATION:-}${CYDER_EXECUTION_OWNER_TICKET:-}" && "${CYDER_EXECUTION_RUNTIME_MUTATION:-0}" != 1 ]]; then
     echo "Shared GPTK configuration changed; retry the launch to acquire its global operation scope." >&2
     return 75
   fi
@@ -2444,7 +2444,7 @@ cyder_game_environment_key_is_allowed() {
     WINEPREFIX|WINESERVER|WINEARCH|WINEDEBUG|CX_ROOT|CX_BOTTLE|CX_APPLEGPTK_LIBD3DSHARED_PATH) return 1 ;;
     CYDER_SUPPORT|CYDER_RUNTIME_ROOT|CYDER_ENGINES|CYDER_ENGINE_NAME|CYDER_ENGINE_SRC|CYDER_SCRIPTS|CYDER_APP|CYDER_MAPLESTORY_FILE_CACHE|CYDER_MAPLESTORY_FILE_CACHE_PREFERENCE) return 1 ;;
     CYDER_WINE_*|CYDER_SESSION_*|CYDER_DIAGNOSTIC_*|CYDER_TEST_*|CYDER_EXECUTION_*|CYDER_RESULT_FILE|CYDER_PROGRESS_FILE) return 1 ;;
-    CYDER_GPTK_ROOT|CYDER_GRAPHICS_*|CYDER_GAME_ARGUMENTS) return 1 ;;
+    CYDER_GPTK_ROOT|CYDER_GRAPHICS_*|CYDER_GAME_ARGUMENTS|CYDER_MOLTENVK_VARIANT_PREFERENCE) return 1 ;;
   esac
   return 0
 }
@@ -3402,6 +3402,7 @@ cyder_run_wine_exe() {
   local engine_root canonical_prefix engine_version ntdll_sha256="unavailable"
   engine_root="$(cd "$(dirname "$wine_bin")/.." && pwd -P)"
   canonical_prefix="$(cd "$prefix" 2>/dev/null && pwd -P || printf '%s' "$prefix")"
+  cyder_apply_moltenvk_variant_from_preference "$engine_root" || return $?
   cyder_apply_gptk_launch_environment "$engine_root" || return $?
   if [[ -f "$prefix/cxbottle.conf" ]] || cyder_wine_is_crossover_frontend "$wine_bin"; then
     export CX_BOTTLE="$prefix" CX_ROOT="$engine_root" WINEARCH=win64

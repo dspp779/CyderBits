@@ -394,3 +394,15 @@ C12 完成 taskmgr 的 late-spawn 修復。後續 GPTK 共享 runtime symlink �
 C13 修復 GPTK 連結路徑的 scope；回歸盤點確認 MoltenVK preference reader 仍會修改另一個共用 engine symlink，須接續加上相同權限約束並避免唯讀讀取產生副作用。不能把 C13 稱為所有 shared runtime mutation 已解決。native lifecycle 事件、環境 waiter、精確 process/window action、其餘 UX／I/O 與完整 V01–V14 驗證仍持續。
 
 C13 提交前追加：全域 scope ticket 使用 schema 2，普通票據繼續讀取 schema 1；避免舊 helper 忽略 requiresGlobalScope 後以 prefix lock 執行。最新 `build-C13-r2.log`、`execution-owner-C13-r2.log`、完整包 `runtime-C13-app-r2.log` 全通過，manifest／ad-hoc 簽章已更新。後者另外真正呼叫保留的 C12 helper：它拒絕 schema 2、未建立 child marker、原票據仍 prepared，隨後 C13 helper 正常取得並完成同張票據。此輪沒有新增 Windows／NGS 實测。
+
+## C14：MoltenVK 設定讀取與共用 runtime 修改分離
+
+- 新 `test-cyder-runtime-mutations.sh` 在隔離 engine 放置 inert dual-variant files，使用正式 settings reader。保留的 C13 包於讀取偏好時改寫 libMoltenVK.real.dylib，`runtime-reader-C14-baseline.log` 重現 FAIL reading saved settings modified shared runtime；未載入 dylib 或執行 Wine。
+- 正式 cyder_load_saved_settings 不再變更 engine。所有 game target 共用的 cyder_run_wine_exe 在真正啟動前明確套用 MoltenVK；安裝／維護既有明確 apply 路徑保留。連結已符合時只驗證，不再 ln -sfn，避免每次讀取或 launch 都替換 shared link。需要更動時依 native scope 拒絕 prefix-only 操作，保留 75，不將其改為一般 1 或逕行重試。
+- 背景 launch preflight 從原 accepted settings snapshot 取得 MoltenVK 偏好，檢查 dual layout 與所需 target，與 C13 GPTK 條件共同決定全域 lease；settings snapshot 缺失／不合法時暫停於派送之前。原生 owner 現對所有操作重建單一 CYDER_EXECUTION_RUNTIME_MUTATION 能力值，不限有 Wine handoff 的操作；root／ticket／helper／FINAL 仍只在需要時重建，不繼承舊憑證。GPTK guard 也識別這個值，非 handoff 的 prefix 子工作不再是可繞過的路徑。最終 Wine child 仍清除整個 CYDER_EXECUTION_ namespace。
+- MoltenVK 為全域偏好，Swift／Bash 遊戲環境設定不再允許覆寫 CYDER_MOLTENVK_VARIANT_PREFERENCE。`settings-C14.log` 以正式 preflight 驗 legacy layout、缺 link、正確 link、dangling link；`settings-snapshot-C14.log` 驗原 accepted 1.2.10 不被後來的 1.4.2 或遊戲環境覆寫。`execution-owner-C14.log` 驗 inherited transport 清除且 runtime capability 由票據重建，保留所有既有 native/crash/recovery 斷言。
+- `runtime-reader-C14.log` 與包內 scripts 的 `runtime-reader-C14-app.log` 通過：讀設定不改連結、prefix-only 更動返回 75、matching link inode 不變、global explicit apply 成功。MoltenVK Mach-O validation 的 otool 是明確替身，檔案為不可載入的 inert fixture；這不是實際 dylib／圖形相容性測試。
+- `native-handoff-C14.log`、完整包 `native-handoff-C14-app.log`／artifacts 全通過。正式 native non-handoff prefix owner 無法改 MoltenVK；global owner 真正準備隔離 GPTK／MoltenVK、保持其他 prefix 排他直到原生 handoff 與 Bash 返回，子程序繼續，最後保存 53。既有 spawn 前後 crash、late bridge、taskmgr、快退出與 C12 舊 helper 拒絕 schema 2 仍通過。
+- `moltenvk-C14.log`、`game-settings-C14.log` 回歸通過；後者仍保留先前已記錄的 plutil 缺 key／fallback warnings。Bash syntax、diff 檢查通過。universal macOS11 `build-C14.log` 成功；`/private/tmp/cyder-lifecycle-c14-build/Cyder.app` 配置 local.cyder.lifecycle-c14、CD2 support/runtime，ad-hoc 簽章驗證通過。`build-C14-source-sha256.json` 也新增核對包內 moltenvk-variant script 與來源一致。未啟動完整 GUI，未覆盖正式安裝或發布。
+
+本批為 L1–2 權限／原生程序／故障注入證據，不是 Wine／NGS／圖形驗收。共用 runtime scope 只保護 Cyder 原生 owner 管理的操作，不替手動 CLI 或外部安裝器建立全系統互斥。接續仍須將原生出生回執接入 lifecycle 事件、整合每環境 waiter 與可靠收尾、精確 process/window action、其餘 UX／I/O 及 V01–V14 矩陣；目標不標完成。

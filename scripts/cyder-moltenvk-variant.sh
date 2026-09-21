@@ -68,6 +68,13 @@ cyder_apply_moltenvk_variant() {
       return 1
     fi
   fi
+  if [[ -L "$unix/libMoltenVK.real.dylib" && "$(readlink "$unix/libMoltenVK.real.dylib")" == "$target" ]]; then
+    return 0
+  fi
+  if [[ -n "${CYDER_EXECUTION_RUNTIME_MUTATION:-}${CYDER_EXECUTION_OWNER_TICKET:-}" && "${CYDER_EXECUTION_RUNTIME_MUTATION:-0}" != 1 ]]; then
+    echo "Shared MoltenVK configuration changed; retry the launch to acquire its global operation scope." >&2
+    return 75
+  fi
   ln -sfn "$target" "$unix/libMoltenVK.real.dylib"
 }
 

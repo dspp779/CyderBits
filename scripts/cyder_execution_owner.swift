@@ -308,11 +308,11 @@ enum CyderExecutionOwner {
             // Authority is reconstructed from this ticket, never inherited
             // from a parent launch or user-provided game environment.
             var environment = ProcessInfo.processInfo.environment.filter { !$0.key.hasPrefix("CYDER_EXECUTION_") }
+            environment["CYDER_EXECUTION_RUNTIME_MUTATION"] = ticket.effectiveScope == nil ? "1" : "0"
             if ticket.handoff != nil {
                 environment["CYDER_EXECUTION_OWNER_ROOT"] = root.path
                 environment["CYDER_EXECUTION_OWNER_TICKET"] = id.uuidString
                 environment["CYDER_EXECUTION_OWNER_HELPER"] = CommandLine.arguments[0]
-                environment["CYDER_EXECUTION_RUNTIME_MUTATION"] = ticket.effectiveScope == nil ? "1" : "0"
             }
             child.environment = environment
             child.standardInput = FileHandle.nullDevice
