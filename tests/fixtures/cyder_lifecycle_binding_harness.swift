@@ -44,7 +44,7 @@ pump { birth != nil }
 let prefix = directory.appendingPathComponent("prefix")
 try FileManager.default.createDirectory(at: prefix, withIntermediateDirectories: true)
 let monitor = CyderEnvironmentMonitor(epoch: controller.lifecycleEpoch, directory: directory.appendingPathComponent("monitor"),
-    waitersEnabled: false, probe: { _ in .unknown("injected") }, event: controller.receiveLifecycleEvent)
+    waitersEnabled: false, probe: { _ in .empty }, event: controller.receiveLifecycleEvent)
 var execution: UUID?, stamp: CyderLifecycle.Stamp?
 Task {
     execution = await monitor.beginExecution(prefix: prefix, engine: child.executableURL!)

@@ -12,18 +12,24 @@ final class CyderEnvironmentMonitor {
         let completed: (String) -> Void
         var rootExited = false
     }
+    private struct Admission {
+        let drained: ((String) -> Void)?
+        let completion: (String?) -> Void
+    }
     private final class Entry {
         let identity: CyderEnvironmentProbe.Identity
         var generation: UInt64
         var owner: L.ProcessID?
         var pending: UUID?
         var waiter: Process?
+        var waiterStarting = false
         var waiterToken: UUID?
         var waiterAttempted = false
         var emptySince: TimeInterval?
         var graceUntil: TimeInterval
         var exited = false
         var executions: Set<UUID> = []
+        var admissions: Set<UUID> = [] // registered, but not yet allowed to spawn
         var drains: [UUID: DrainObservation] = [:]
         var calibration = UUID()
         init(_ saved: Saved, grace: TimeInterval) {
@@ -33,13 +39,22 @@ final class CyderEnvironmentMonitor {
     private let queue = DispatchQueue(label: "local.cyder.environment-monitor")
     private let workers = DispatchQueue(label: "local.cyder.environment-probe", qos: .utility, attributes: .concurrent)
     private let persistence = DispatchQueue(label: "local.cyder.environment-history", qos: .utility)
+    private let identityWorkers: OperationQueue = {
+        let queue = OperationQueue(); queue.maxConcurrentOperationCount = 2
+        queue.name = "local.cyder.environment-identity"; return queue
+    }()
+    private var identityJobs = 0
     private let epoch: UUID
     private let file: URL
     private let event: (L.Event) -> Void
     private let probe: (CyderEnvironmentProbe.Identity) -> CyderEnvironmentProbe.Result
+    private let identify: (URL, URL) -> CyderEnvironmentProbe.Identity?
     private let clock: () -> TimeInterval
     private let waitersEnabled: Bool
     private let expectedEngine: String?
+    private let launchWaiter: (Process) throws -> Void
+    private var waiterSpawns = 0
+    private var admissions: [UUID: Admission] = [:]
     private var entries: [L.EnvironmentID: Entry] = [:]
     private var timer: DispatchSourceTimer?
     private var closed = false
@@ -50,11 +65,15 @@ final class CyderEnvironmentMonitor {
 
     init(epoch: UUID, directory: URL, expectedEngine: URL? = nil, waitersEnabled: Bool = true,
          clock: @escaping () -> TimeInterval = { ProcessInfo.processInfo.systemUptime },
+         identify: @escaping (URL, URL) -> CyderEnvironmentProbe.Identity? = { CyderEnvironmentProbe.identify(prefix: $0, engine: $1) },
          probe: @escaping (CyderEnvironmentProbe.Identity) -> CyderEnvironmentProbe.Result = { CyderEnvironmentProbe.inspect($0) },
+         launchWaiter: @escaping (Process) throws -> Void = { try $0.run() },
          event: @escaping (L.Event) -> Void) {
         self.epoch = epoch; self.file = directory.appendingPathComponent("managed-environments-v1.json")
         self.expectedEngine = expectedEngine?.path
         self.waitersEnabled = waitersEnabled; self.clock = clock; self.probe = probe; self.event = event
+        self.launchWaiter = launchWaiter
+        self.identify = identify
     }
     func restore(completion: @escaping () -> Void) {
         persistence.async { [self] in
@@ -114,6 +133,7 @@ final class CyderEnvironmentMonitor {
             defer { DispatchQueue.main.async(execute: completion) }
             guard !closed else { return }
             for entry in entries.values where entry.executions.remove(token) != nil {
+                finishAdmission(token, prefix: nil)
                 entry.emptySince = nil; entry.calibration = UUID()
                 entry.graceUntil = entry.drains.values.contains { $0.generation == entry.generation && $0.rootExited }
                     ? clock() : clock() + 30
@@ -126,7 +146,8 @@ final class CyderEnvironmentMonitor {
     func executionStamp(_ token: UUID) async -> L.Stamp? {
         await withCheckedContinuation { continuation in
             queue.async { [self] in
-                guard !closed, let entry = entries.values.first(where: { $0.executions.contains(token) && !$0.exited }) else {
+                guard !closed, admissions[token] == nil,
+                      let entry = entries.values.first(where: { $0.executions.contains(token) && !$0.exited }) else {
                     continuation.resume(returning: nil); return
                 }
                 continuation.resume(returning: stamp(entry))
@@ -160,13 +181,31 @@ final class CyderEnvironmentMonitor {
         // or the state queue. Per-launch calls coalesce after identity resolves.
         queue.async { [self] in
             guard !closed else { DispatchQueue.main.async { completion(nil) }; return }
-            // Resolve on the persistence worker so a slow prefix does not block
-            // cancellation, menu delivery, or other environment probes.
-            persistence.async {
-                let identity = CyderEnvironmentProbe.identify(prefix: prefix, engine: engine)
+            guard identityJobs < 32 else { DispatchQueue.main.async { completion(nil) }; return }
+            if let execution {
+                guard admissions.count < 32 else { DispatchQueue.main.async { completion(nil) }; return }
+                admissions[execution] = Admission(drained: drained, completion: completion)
+                // Includes identity resolution and slot contention. A timed-out
+                // caller never receives an executor token later.
+                queue.asyncAfter(deadline: .now() + 5) { self.finishAdmission(execution, prefix: nil) }
+            }
+            // Keep physical identity slots until the work returns, even after
+            // caller timeout. Two workers prevent one slow prefix from holding
+            // unrelated admissions or persistence behind it.
+            identityJobs += 1
+            identityWorkers.addOperation {
+                let needed = self.queue.sync { !self.closed && (execution == nil || self.admissions[execution!] != nil) }
+                let identity = needed ? self.identify(prefix, engine) : nil
                 self.queue.async {
+                    self.identityJobs -= 1
                     var managedPrefix: String?
-                    defer { let path = managedPrefix; DispatchQueue.main.async { completion(path) } }
+                    var awaitingProbe = false
+                    defer {
+                        if let execution {
+                            if !awaitingProbe { self.finishAdmission(execution, prefix: nil) }
+                        } else { let path = managedPrefix; DispatchQueue.main.async { completion(path) } }
+                    }
+                    if let execution, self.admissions[execution] == nil { return }
                     guard !self.closed, let identity else { return }
                     if self.entries[identity.environment]?.exited != false {
                         guard self.entries.count < 32 || self.entries[identity.environment] != nil else {
@@ -177,15 +216,43 @@ final class CyderEnvironmentMonitor {
                     }
                     if let execution, let entry = self.entries[identity.environment] {
                         entry.executions.insert(execution)
+                        entry.admissions.insert(execution)
+                        awaitingProbe = true
                         entry.emptySince = nil; entry.calibration = UUID()
                         entry.graceUntil = self.clock() + 30
-                        if let drained { entry.drains[execution] = .init(generation: entry.generation, completed: drained) }
                     }
                     managedPrefix = identity.prefix
                     self.save(); self.startTimer(); self.tick()
                 }
             }
         }
+    }
+    private func finishAdmission(_ token: UUID, prefix: String?) {
+        guard let admission = admissions.removeValue(forKey: token) else { return }
+        for entry in entries.values where entry.admissions.remove(token) != nil {
+            if let prefix, prefix == entry.identity.prefix {
+                if let drained = admission.drained {
+                    entry.drains[token] = .init(generation: entry.generation, completed: drained)
+                }
+            } else {
+                entry.executions.remove(token)
+                entry.emptySince = nil; entry.calibration = UUID()
+            }
+        }
+        DispatchQueue.main.async { admission.completion(prefix) }
+    }
+    private func admit(_ entry: Entry) {
+        for token in Array(entry.admissions) { finishAdmission(token, prefix: entry.identity.prefix) }
+    }
+    private func advanceGeneration(_ entry: Entry, reconciliation: UUID) {
+        if !entry.waiterStarting, let waiter = entry.waiter, waiter.isRunning { waiter.terminate() }
+        entry.drains.removeAll()
+        entry.generation += 1; entry.owner = nil
+        entry.waiter = nil; entry.waiterStarting = false; entry.waiterToken = nil; entry.waiterAttempted = false
+        emit(.manage(.init(id: entry.identity.environment, prefix: entry.identity.prefix,
+            engine: entry.identity.engine, generation: entry.generation)))
+        emit(.reconcileStarted(stamp(entry), reconciliation))
+        save()
     }
     func reconcile(_ stamp: L.Stamp) {
         queue.async { [self] in
@@ -197,18 +264,23 @@ final class CyderEnvironmentMonitor {
         queue.async { [self] in
             guard !closed else { return }; closed = true
             timer?.cancel(); timer = nil
+            for token in Array(admissions.keys) { finishAdmission(token, prefix: nil) }
             for entry in entries.values {
                 entry.pending = nil; entry.drains.removeAll()
                 // Only the Process object created here with '-w' may be stopped.
                 // The lock owner and the Wine client are never signalled.
-                if let waiter = entry.waiter, waiter.isRunning { waiter.terminate() }
-                entry.waiter = nil
+                if !entry.waiterStarting, let waiter = entry.waiter, waiter.isRunning { waiter.terminate() }
+                entry.waiter = nil; entry.waiterStarting = false
             }
         }
     }
     private func emit(_ value: L.Event) { event(value) }
     private func stamp(_ entry: Entry) -> L.Stamp { .init(epoch: epoch, environment: entry.identity.environment, generation: entry.generation) }
     private func install(_ saved: Saved, grace: TimeInterval) {
+        if let previous = entries[saved.identity.environment] {
+            if !previous.waiterStarting, let waiter = previous.waiter, waiter.isRunning { waiter.terminate() }
+            previous.waiter = nil; previous.waiterToken = nil
+        }
         let entry = Entry(saved, grace: grace)
         entries[saved.identity.environment] = entry
         emit(.manage(.init(id: saved.identity.environment, prefix: saved.identity.prefix, engine: saved.identity.engine, generation: saved.generation)))
@@ -253,29 +325,34 @@ final class CyderEnvironmentMonitor {
                 case .alive(let owner):
                     entry.emptySince = nil
                     if let previous = entry.owner, previous != owner {
-                        if let waiter = entry.waiter, waiter.isRunning { waiter.terminate() }
-                        entry.drains.removeAll() // Old-generation launch observations cannot finish a new server.
-                        entry.generation += 1; entry.waiter = nil; entry.waiterToken = nil; entry.waiterAttempted = false
-                        self.emit(.manage(.init(id: entry.identity.environment, prefix: entry.identity.prefix,
-                            engine: entry.identity.engine, generation: entry.generation)))
-                        self.emit(.reconcileStarted(self.stamp(entry), token))
-                        self.save()
+                        self.advanceGeneration(entry, reconciliation: token)
                     }
                     entry.owner = owner
                     self.emit(.reconciled(self.stamp(entry), token, .alive, .healthy))
+                    self.admit(entry)
                     self.startWaiter(entry)
                 case .empty:
                     let now = self.clock()
                     if entry.emptySince == nil { entry.emptySince = now }
+                    if !entry.admissions.isEmpty {
+                        if entry.owner == nil { self.admit(entry) }
+                        else if now - entry.emptySince! >= 0.5 {
+                            // Retire the old server before returning a new
+                            // executor token. Its first server discovery then
+                            // belongs to this prepared generation.
+                            self.advanceGeneration(entry, reconciliation: token)
+                            self.admit(entry)
+                        }
+                    }
                     if entry.executions.isEmpty, now >= entry.graceUntil, now - entry.emptySince! >= 0.5 {
                         entry.exited = true
-                        self.emit(.reconciled(observedStamp, token, .exited, .healthy))
+                        self.emit(.reconciled(self.stamp(entry), token, .exited, .healthy))
                         let callbacks = entry.drains.values.filter { $0.generation == entry.generation && $0.rootExited }.map { $0.completed }
                         entry.drains.removeAll()
                         let scope = entry.identity.executionScope
                         DispatchQueue.main.async { callbacks.forEach { $0(scope) } }
                         self.save()
-                    } else { self.emit(.reconciled(observedStamp, token, .unconfirmed, .attaching)) }
+                    } else { self.emit(.reconciled(self.stamp(entry), token, .unconfirmed, .attaching)) }
                 case .unknown:
                     entry.emptySince = nil
                     self.emit(.reconciled(observedStamp, token, .unconfirmed, .degraded))
@@ -284,7 +361,7 @@ final class CyderEnvironmentMonitor {
         }
     }
     private func startWaiter(_ entry: Entry) {
-        guard waitersEnabled, !entry.waiterAttempted, !closed else { return }
+        guard waitersEnabled, !entry.waiterAttempted, !closed, waiterSpawns < 2 else { return }
         entry.waiterAttempted = true
         let process = Process(), token = UUID(), observedStamp = stamp(entry)
         process.executableURL = URL(fileURLWithPath: "/usr/bin/arch")
@@ -294,21 +371,42 @@ final class CyderEnvironmentMonitor {
         process.environment = environment
         process.standardInput = FileHandle.nullDevice
         process.standardOutput = FileHandle.nullDevice; process.standardError = FileHandle.nullDevice
-        entry.waiter = process; entry.waiterToken = token
+        entry.waiter = process; entry.waiterStarting = true; entry.waiterToken = token
         emit(.waiterStarted(observedStamp, token))
         process.terminationHandler = { [weak self, weak entry] process in
             guard let self else { return }
+            let cancelled = process.terminationReason != .exit || process.terminationStatus != 0
             self.queue.async {
-                guard !self.closed, let entry, entry.waiterToken == token else { return }
+                guard !self.closed, let entry, self.entries[entry.identity.environment] === entry,
+                      entry.waiterToken == token else { return }
                 entry.waiter = nil
-                self.emit(.waiterFinished(observedStamp, token, cancelled: process.terminationReason != .exit || process.terminationStatus != 0))
+                self.emit(.waiterFinished(observedStamp, token, cancelled: cancelled))
                 self.schedule(entry)
             }
         }
-        do { try process.run() }
-        catch {
-            entry.waiter = nil
-            emit(.waiterFinished(observedStamp, token, cancelled: true))
+        waiterSpawns += 1
+        workers.async { [self] in
+            let current = queue.sync { !closed && entries[entry.identity.environment] === entry && !entry.exited
+                && entry.waiter === process && entry.waiterToken == token }
+            var failed = !current
+            if current {
+                do { try launchWaiter(process) } catch { failed = true }
+            }
+            let didFail = failed
+            queue.async {
+                self.waiterSpawns -= 1
+                if entry.waiterToken == token { entry.waiterStarting = false }
+                guard !self.closed, self.entries[entry.identity.environment] === entry, !entry.exited,
+                      entry.waiter === process, entry.waiterToken == token else {
+                    // A late spawn belongs to Cyder's own '-w' helper only.
+                    if process.isRunning { process.terminate() }
+                    return
+                }
+                if didFail {
+                    entry.waiter = nil
+                    self.emit(.waiterFinished(observedStamp, token, cancelled: true))
+                }
+            }
         }
     }
     private func save() {
