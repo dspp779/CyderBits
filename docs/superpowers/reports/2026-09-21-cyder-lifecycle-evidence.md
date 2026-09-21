@@ -134,3 +134,9 @@ Apple 官方查核（2026-09-21）：[menuWillOpen](https://developer.apple.com/
 舊 shell 每 launch 的 supervisor 仍有自身 session guard -w，尚需與 app 的環境觀測分工／錯誤通道整理；launch runner/activation semaphore、完整程序與視窗 identity、同環境 stop/dispatch 序列化、supervisor receipt、恢復／取消 UI 及精確 action 均待 C3/E2/F。monitored environment 的正常排空已取得真實證據，但 A–F 目標仍未完成。
 
 Apple 補充核對：[fcntl F_GETLK](https://developer.apple.com/library/archive/documentation/System/Conceptual/ManPages_iPhoneOS/man2/fcntl.2.html) 為衝突鎖查詢；[terminate](https://developer.apple.com/documentation/appkit/nsapplication/terminate(_:)) 與 [reply(toApplicationShouldTerminate:)](https://developer.apple.com/documentation/appkit/nsapplication/reply(toapplicationshouldterminate:)) 支持目前非同步退出接線。三秒退出與五秒 probe 期限是本任務工程選擇。
+
+## C3 起始：非同步程序執行器
+
+`CyderProcessRunner` 以 operation owner → Process.run → terminationHandler 順序保證立即退出／spawn error／deadline／cancel 恰好一次回覆。觀察完成與實際子程序資源釋放分開；launch/mutation 的 deadline 或 quit 回 unconfirmed，保留子程序、輸出 FD 與 mutation release callback 到實際退出，只有 observation policy 終止 runner 自有程序。quiescing 後拒絕新 spawn，有 32 個實際操作的容量上限。
+
+`tests/test-cyder-process-runner.sh` 使用真實原生子程序測 immediate exit、spawn error、deadline/cancel 重複、deadline 後仍寫入 output、quit 不殺 launch、observer 自身取消、晚到 run 不 spawn，通過。此為正式 runner 元件測試，**app runLauncher 尚未切換**；不能据此宣稱全部同步等待已移除。下一個實作單位是正式 caller、設定 UI callback 與 activation adapter 接線，並保留目前 Wine 真實證據作回歸比較。
