@@ -355,7 +355,16 @@ enum CyderSentinelConnect {
         let id = UUID().uuidString
         var fifoFD: Int32 = -1
         if !fifo.isEmpty {
-            fifoFD = open(fifo, O_RDONLY)
+            // The supervisor may publish the PID and close its writer before
+            // dyld starts this helper. A blocking read-open then waits forever
+            // for a writer that will never return.
+            fifoFD = open(fifo, O_RDONLY | O_NONBLOCK | O_NOFOLLOW | O_CLOEXEC)
+            if fifoFD >= 0 {
+                var info = stat()
+                if fstat(fifoFD, &info) != 0 || info.st_mode & S_IFMT != S_IFIFO || info.st_uid != getuid() {
+                    close(fifoFD); fifoFD = -1
+                }
+            }
         }
         let socketFD = connectSocket()
         guard socketFD >= 0 else {
@@ -380,6 +389,16 @@ enum CyderSentinelConnect {
 
         var processSource: DispatchSourceProcess?
         var fifoClosed = false
+        let socketSource = DispatchSource.makeReadSource(fileDescriptor: socketFD, queue: queue)
+        socketSource.setEventHandler {
+            var byte: UInt8 = 0
+            let count = recv(socketFD, &byte, 1, MSG_DONTWAIT)
+            if count == 0 || (count < 0 && errno != EAGAIN && errno != EWOULDBLOCK && errno != EINTR) {
+                finished.signal() // primary disappeared; never signal Wine
+            }
+        }
+        socketSource.setCancelHandler { close(socketFD) }
+        socketSource.resume()
 
         func publishPID(_ pid: Int32) {
             guard pid > 0 else { return }
@@ -432,69 +451,81 @@ enum CyderSentinelConnect {
             return pid
         }
 
-        if watchPID <= 0 {
-            watchPID = readPIDFile()
-        }
-        if watchPID > 0 {
-            publishPID(watchPID)
-        } else if !pidFile.isEmpty {
-            let directory = (pidFile as NSString).deletingLastPathComponent
-            let directoryFD = open(directory, O_EVTONLY)
-            if directoryFD >= 0 {
-                let source = DispatchSource.makeFileSystemObjectSource(
-                    fileDescriptor: directoryFD,
-                    eventMask: [.write, .extend, .attrib, .link, .rename],
-                    queue: queue
-                )
-                source.setEventHandler {
-                    let pid = readPIDFile()
-                    guard pid > 0 else { return }
-                    publishPID(pid)
-                    source.cancel()
-                }
-                source.setCancelHandler { close(directoryFD) }
-                pidSource = source
-                source.resume()
+        queue.sync {
+            if watchPID <= 0 {
+                watchPID = readPIDFile()
             }
-        }
+            if watchPID > 0 {
+                publishPID(watchPID)
+            } else if !pidFile.isEmpty {
+                let directory = (pidFile as NSString).deletingLastPathComponent
+                let directoryFD = open(directory, O_EVTONLY)
+                if directoryFD >= 0 {
+                    let source = DispatchSource.makeFileSystemObjectSource(
+                        fileDescriptor: directoryFD,
+                        eventMask: [.write, .extend, .attrib, .link, .rename],
+                        queue: queue
+                    )
+                    source.setEventHandler {
+                        let pid = readPIDFile()
+                        guard pid > 0 else { return }
+                        publishPID(pid)
+                        source.cancel()
+                    }
+                    source.setCancelHandler { close(directoryFD) }
+                    pidSource = source
+                    source.resume()
+                }
+            }
 
-        if fifoFD >= 0 {
-            let flags = fcntl(fifoFD, F_GETFL)
-            if flags >= 0 {
-                _ = fcntl(fifoFD, F_SETFL, flags | O_NONBLOCK)
-            }
-            let source = DispatchSource.makeReadSource(fileDescriptor: fifoFD, queue: queue)
-            source.setEventHandler {
-                var buffer = [UInt8](repeating: 0, count: 64)
-                while true {
-                    let count = read(fifoFD, &buffer, buffer.count)
-                    if count == 0 {
-                        fifoClosed = true
-                        source.cancel()
-                        finishIfIdle()
-                        return
-                    }
-                    if count < 0 {
-                        if errno == EAGAIN || errno == EWOULDBLOCK { return }
-                        fifoClosed = true
-                        source.cancel()
-                        finishIfIdle()
-                        return
+            if fifoFD >= 0 {
+                let flags = fcntl(fifoFD, F_GETFL)
+                if flags >= 0 {
+                    _ = fcntl(fifoFD, F_SETFL, flags | O_NONBLOCK)
+                }
+                let source = DispatchSource.makeReadSource(fileDescriptor: fifoFD, queue: queue)
+                func readFIFO() {
+                    guard !fifoClosed else { return }
+                    var buffer = [UInt8](repeating: 0, count: 64)
+                    while true {
+                        let count = read(fifoFD, &buffer, buffer.count)
+                        if count == 0 {
+                            fifoClosed = true
+                            source.cancel()
+                            finishIfIdle()
+                            return
+                        }
+                        if count < 0 {
+                            if errno == EAGAIN || errno == EWOULDBLOCK { return }
+                            fifoClosed = true
+                            source.cancel()
+                            finishIfIdle()
+                            return
+                        }
                     }
                 }
+                source.setEventHandler(handler: readFIFO)
+                source.setCancelHandler { close(fifoFD) }
+                fifoSource = source
+                source.resume()
+                // EOF already present when the source was registered may not
+                // generate a new edge. Inspect once on the same serialized queue.
+                queue.async(execute: readFIFO)
+            } else {
+                finished.signal()
             }
-            source.setCancelHandler { close(fifoFD) }
-            fifoSource = source
-            source.resume()
-        } else {
-            finished.signal()
+            queue.asyncAfter(deadline: .now() + 3) {
+                if watchPID <= 0 { finished.signal() } // missing publication is not Wine exit proof
+            }
         }
 
         finished.wait()
-        pidSource?.cancel()
-        fifoSource?.cancel()
-        processSource?.cancel()
-        close(socketFD)
+        queue.sync {
+            pidSource?.cancel()
+            fifoSource?.cancel()
+            processSource?.cancel()
+            socketSource.cancel()
+        }
         return 0
     }
 
@@ -535,6 +566,8 @@ enum CyderSentinelConnect {
         for _ in 0..<40 {
             let fd = socket(AF_UNIX, SOCK_STREAM, 0)
             guard fd >= 0 else { return -1 }
+            var noSignal: Int32 = 1
+            setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &noSignal, socklen_t(MemoryLayout<Int32>.size))
             guard var addr = unixSocketAddress(socketURL.path) else {
                 close(fd)
                 return -1

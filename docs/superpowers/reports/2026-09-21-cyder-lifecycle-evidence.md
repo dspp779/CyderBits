@@ -160,3 +160,11 @@ Apple 補充核對：[fcntl F_GETLK](https://developer.apple.com/library/archive
 - 額外發現：CD2/E 舊 shell launch supervisor 與 sentinel-connect helper 在先前 explicit stop 後仍留存（11384/11392、30313/30324）。Wine/server 的 E1 排空證據成立，但 helper 收尾不完整；下一批需移除每 launch 環境 waiter 的責任重疊並修復失聯 helper，不把 E1 作完整 E 驗收。
 
 仍待：同環境 mutation／stop／dispatch 序列化、不可變設定快照、完整 supervisor／程序／視窗身分與 action 能力、恢復／取消與非模態錯誤 UI、首屏／可及性及 V01–V14 整合驗收。A–F 目標保持進行中。
+
+## E2a：失聯 sentinel helper 收尾
+
+C3 程序盤點發現的舊 helper 殘留有一個明確競態：supervisor 先 publish PID 並關閉 FIFO writer，較晚啟動的 helper 用 blocking `open(O_RDONLY)` 就永遠等不到新的 writer。改成 NOFOLLOW／NONBLOCK／CLOEXEC 開啟且驗證同 UID FIFO；在事件 queue 初始化後主動讀一次既有 EOF，避免漏掉註冊前的關閉。缺 PID publication 三秒後只放棄 helper；primary socket EOF 亦結束 helper，沒有對 Wine 發 signal。source 初始化／取消在相同 queue，socket 由 cancel handler 關閉，send 使用 SO_NOSIGPIPE。
+
+新增 `test-cyder-sentinel-helper.sh`：真正建立 Unix sentinel server、FIFO、helper 子程序與原生 sleep root，固定 writer 先關再啟 helper，確認連接與 PID update、root exit 後 helper exit；缺 PID 有界退出；primary stop 後 helper exit 而 root 留存。正式 sentinel／instance runtime tests 與全來源 typecheck 通過（只剩既有 activation API deprecated warning）。原始 logs：`helper-E2.log`、`helper-E2-r2.log`、`helper-E2-r3.log`、`sentinel-E2.log`、`instance-E2.log`、`typecheck-E2.log`。
+
+這是正式 helper 的原生整合測試，尚未重建 Wine 測試包，不把它寫成真實 Wine 收尾已通過；舊版已啟動的 helper 不會被此 source 修正自動替換。每 launch 的 shell -w 與 supervisor descendant ownership 仍待下一單位完成。
