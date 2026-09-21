@@ -64,11 +64,29 @@ enum CyderGptkHarness {
         precondition(info?.statusLine == "目前套用：GPTK 3.0（Cyder 已安裝）")
 
         let engineRoot = URL(fileURLWithPath: CommandLine.arguments[1], isDirectory: true)
+        func needsGlobal() -> Bool {
+            let finished = DispatchSemaphore(value: 0)
+            var value = false
+            DispatchQueue.global().async { value = CyderGptk.launchNeedsGlobalScope(engineRoot: engineRoot); finished.signal() }
+            finished.wait()
+            return value
+        }
+        precondition(needsGlobal())
         CyderGptk.syncEngineLink(engineRoot: engineRoot)
         let link = engineRoot.appendingPathComponent("lib64/apple_gptk")
         precondition(FileManager.default.fileExists(atPath: link.path))
         let destination = try FileManager.default.destinationOfSymbolicLink(atPath: link.path)
         precondition(URL(fileURLWithPath: destination).standardizedFileURL.path == runtime.standardizedFileURL.path)
+        precondition(!needsGlobal())
+        try FileManager.default.removeItem(at: link)
+        try FileManager.default.createSymbolicLink(atPath: link.path, withDestinationPath: "../missing-gptk")
+        precondition(needsGlobal())
+        try FileManager.default.removeItem(at: link)
+        try FileManager.default.createSymbolicLink(atPath: link.path, withDestinationPath: candidate.libRoot.path)
+        precondition(needsGlobal())
+        try FileManager.default.removeItem(at: link)
+        try FileManager.default.copyItem(at: runtime, to: link)
+        precondition(!needsGlobal()) // Valid bundled GPTK is retained by the formal shell.
 
         try CyderGptk.removeRuntimeInstall()
         precondition(!FileManager.default.fileExists(atPath: runtime.path))

@@ -1114,11 +1114,15 @@ cyder_link_gptk_into_engine() {
     local resolved
     resolved="$(cd "$(dirname "$link")" && cd "$(readlink "$link")" 2>/dev/null && pwd -P || true)"
     [[ "$resolved" == "$(cd "$gptk_root" && pwd -P)" ]] && return 0
-    rm -f "$link"
   elif [[ -e "$link" ]]; then
     cyder_gptk_root_is_valid "$link"
     return $?
   fi
+  if [[ -n "${CYDER_EXECUTION_OWNER_TICKET:-}" && "${CYDER_EXECUTION_RUNTIME_MUTATION:-0}" != 1 ]]; then
+    echo "Shared GPTK configuration changed; retry the launch to acquire its global operation scope." >&2
+    return 75
+  fi
+  [[ ! -L "$link" ]] || rm -f "$link" || return $?
   mkdir -p "$lib64"
   ln -s "$gptk_root" "$link"
   cyder_gptk_root_is_valid "$link"
@@ -1139,8 +1143,9 @@ cyder_apply_gptk_launch_environment() {
     export DYLD_FRAMEWORK_PATH="$gptk_root/external"
   fi
   cyder_link_gptk_into_engine "$engine_root" "$gptk_root" || {
+    local status=$?
     echo "Unable to link the selected GPTK into the Wine engine." >&2
-    return 1
+    return "$status"
   }
 }
 

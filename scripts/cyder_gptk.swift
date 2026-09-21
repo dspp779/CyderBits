@@ -118,6 +118,20 @@ enum CyderGptk {
             && isFrameworkDirectory.boolValue
     }
 
+    /// Read-only preflight. Shared-engine changes require a global lease before
+    /// authorization. Bash rechecks under that lease and never widens it.
+    static func launchNeedsGlobalScope(engineRoot: URL = CyderPaths.engine) -> Bool {
+        precondition(!Thread.isMainThread)
+        guard let source = preferredSource() else { return false }
+        let root: URL
+        switch source { case .crossOver(let url), .runtime(let url): root = url }
+        let link = engineRoot.appendingPathComponent("lib64/apple_gptk")
+        if (try? FileManager.default.destinationOfSymbolicLink(atPath: link.path)) != nil {
+            return link.resolvingSymlinksInPath().standardizedFileURL != root.resolvingSymlinksInPath().standardizedFileURL
+        }
+        return !isValidGptkRoot(link)
+    }
+
     /// Applies GPTK discovery paths to a Wine launch environment.
     /// Returns the GPTK source label used for diagnostics (`crossOver`, `runtime`, or `none`).
     ///

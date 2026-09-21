@@ -24,13 +24,19 @@ def case(name):
         (directory / child).mkdir(parents=True, exist_ok=True)
     directory.chmod(0o700)
     (directory / 'runtime/bin/wine').symlink_to(native)
+    # Inert GPTK files avoid discovering the host's CrossOver installation.
+    gptk = directory / 'support/runtime/apple_gptk'
+    (gptk / 'external/D3DMetal.framework').mkdir(parents=True)
+    (gptk / 'external/libd3dshared.dylib').write_text('inert fixture, never loaded')
+    (directory / 'runtime/lib64').mkdir()
+    (directory / 'runtime/lib64/apple_gptk').symlink_to(gptk)
     (directory / 'inert.exe').touch()
     return directory
 
 
-def reserve(directory, handoff=True, prefix=None, executable=native):
+def reserve(directory, handoff=True, prefix=None, executable=native, global_scope=False):
     prefix = prefix or directory / 'prefix'
-    command = [str(helper), '--prepare', str(ledger), str(prefix)]
+    command = [str(helper), '--prepare-global' if global_scope else '--prepare', str(ledger), str(prefix)]
     if handoff: command += [str(executable), str(directory / 'pid')]
     return subprocess.check_output(command, text=True, timeout=10).strip()
 
@@ -117,6 +123,52 @@ cyder_run_wine_exe "$TEST_ROOT/runtime/bin/wine" "$TEST_ROOT/inert.exe" "$TEST_R
     result = (delayed / 'result').read_text()
     assert 'exit_status=53' in result and f'pid={native_pid}' in result
     print('PASS native handoff: formal log wrapper stall retains scope, no early PID, recovery and independent prefix progress, actual x86_64 child birth, one-use bridge, next same-prefix operation before game exit, exact root result', flush=True)
+
+    refused = case('runtime-refused')
+    refused_link = refused / 'runtime/lib64/apple_gptk'
+    refused_link.unlink()
+    refused_script = refused / 'launch.sh'
+    refused_script.write_text(script.read_text().split('cyder_sentinel_attach()')[0] + '''
+cyder_apply_gptk_launch_environment "$TEST_ROOT/runtime"
+printf 'changed\\n' > "$TEST_ROOT/runtime.changed"
+''')
+    refused_owner = start(refused, reserve(refused), ['/bin/bash', str(refused_script)])
+    wait(lambda: refused_owner.poll() is not None, 'prefix-only runtime attempt did not settle')
+    assert not refused_link.is_symlink() and not (refused / 'runtime.changed').exists(), 'prefix-only launch modified shared GPTK runtime'
+    assert refused_owner.returncode == 75
+    print('PASS shared runtime: prefix-only owner refuses changed GPTK discovery without modifying shared tree', flush=True)
+
+    runtime = case('runtime-global')
+    runtime_link = runtime / 'runtime/lib64/apple_gptk'
+    runtime_link.unlink()
+    runtime_ticket = reserve(runtime, global_scope=True)
+    assert receipt(runtime_ticket)['schema'] == 2
+    old_executor = os.environ.get('CYDER_TEST_OLD_EXECUTOR')
+    if old_executor:
+        old_attempt = subprocess.run([old_executor, '--execution-owner', str(ledger), runtime_ticket,
+                                      '--', '/usr/bin/touch', str(runtime / 'old-helper-spawned')], timeout=10)
+        assert old_attempt.returncode == 75 and not (runtime / 'old-helper-spawned').exists()
+        assert receipt(runtime_ticket)['phase'] == 'prepared'
+        print('PASS legacy helper: schema 2 global authority refused without starting a child or altering the ticket', flush=True)
+    runtime_owner = start(runtime, runtime_ticket, ['/bin/bash', str(script)])
+    wait(lambda: (runtime / 'wrapper.entered').exists(), 'global runtime preparation did not reach formal launch')
+    assert runtime_link.resolve() == (runtime / 'support/runtime/apple_gptk').resolve()
+    assert receipt(runtime_ticket)['requiresGlobalScope'] is True and receipt(runtime_ticket)['scope'] is not None
+    runtime_conflict = start(independent, reserve(independent, False), ['/usr/bin/true'])
+    wait(lambda: runtime_conflict.poll() is not None, 'global runtime conflict did not return')
+    assert runtime_conflict.returncode == 75
+    recover()
+    assert receipt(runtime_ticket)['phase'] == 'active'
+    (runtime / 'log.release').touch()
+    wait(lambda: runtime_owner.poll() is not None and (runtime / 'native.entered').exists(), 'global runtime launch did not hand off')
+    assert runtime_owner.returncode == 0 and receipt(runtime_ticket)['phase'] == 'handedOff'
+    following_runtime = start(independent, reserve(independent, False), ['/usr/bin/true'])
+    wait(lambda: following_runtime.poll() is not None, 'global runtime barrier survived actual owner return')
+    assert following_runtime.returncode == 0
+    (runtime / 'native.release').touch()
+    wait(lambda: (runtime / 'result').exists(), 'global runtime native result lost')
+    assert receipt(runtime_ticket)['nativeSpawn']['status'] == 53
+    print('PASS shared runtime: global native owner repairs isolated GPTK, blocks other prefixes through spawn, preserves prefix identity, releases after Bash return while child survives', flush=True)
 
     late = case('late')
     late_script = late / 'launch.sh'

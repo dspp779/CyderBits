@@ -32,10 +32,11 @@ fi
 printf 'finished\n' > "$1.finished"
 exit "$3"
 """#.utf8).write(to: script)
-func reserve(_ scope: String?, correlation: CyderExecutionOwner.Correlation? = nil) throws -> UUID {
+func reserve(_ scope: String?, correlation: CyderExecutionOwner.Correlation? = nil, requiresGlobalScope: Bool = false) throws -> UUID {
     let path = scope.map { root.appendingPathComponent("prefixes/" + $0).path }
     if let path { try FileManager.default.createDirectory(atPath: path, withIntermediateDirectories: true) }
-    return try io { try CyderExecutionOwner.prepare(root: ledger, issuer: issuer, scope: path, correlation: correlation) }
+    return try io { try CyderExecutionOwner.prepare(root: ledger, issuer: issuer, scope: path, correlation: correlation,
+                                                   requiresGlobalScope: requiresGlobalScope) }
 }
 func start(_ id: UUID, name: String, wait: Bool = false, status: Int = 0) throws -> Process {
     let p = Process(); p.executableURL = helper
@@ -135,6 +136,34 @@ try io { try CyderExecutionOwner.recover(root: ledger) }
 let bootRecovered = try receipt(crashTicket)
 check(bootRecovered.phase == "revoked", "old-boot executor permanently blocked recovery")
 print("PASS injected boot boundary: old uncertain executor revoked without replay")
+
+// Model a recovered runtime mutation whose outcome is unknown. Its concrete
+// prefix still matters for Wine identity, but its uncertainty blocks all
+// environments, including native filesystem maintenance.
+let globalUnknownID = try reserve("global-unknown", requiresGlobalScope: true)
+var globalUnknown = try receipt(globalUnknownID)
+globalUnknown.phase = "uncertain"
+globalUnknown.owner = CyderExecutionOwner.Birth.current()
+let globalUnknownURL = ledger.appendingPathComponent(globalUnknownID.uuidString + ".json")
+try JSONEncoder().encode(globalUnknown).write(to: globalUnknownURL)
+let globallyBlocked = try start(try reserve("unrelated-global"), name: "unrelated-global")
+pump { !globallyBlocked.isRunning }
+check(globallyBlocked.terminationStatus == 75 && !exists("unrelated-global", "entered"), "global uncertainty narrowed to its launch prefix")
+var globalMaintenanceRefused = false
+do {
+    try io {
+        try CyderExecutionOwner.withScope(root: ledger, scope: root.appendingPathComponent("prefixes/unrelated-global").path) {
+            try Data().write(to: root.appendingPathComponent("unsafe-global-maintenance"))
+        }
+    }
+} catch { globalMaintenanceRefused = true }
+check(globalMaintenanceRefused, "filesystem maintenance bypassed global uncertainty")
+globalUnknown.owner = .init(boot: "injected-prior-boot", pid: globalUnknown.owner!.pid, started: globalUnknown.owner!.started)
+try JSONEncoder().encode(globalUnknown).write(to: globalUnknownURL)
+try io { try CyderExecutionOwner.recover(root: ledger) }
+let globalRecovered = try receipt(globalUnknownID)
+check(globalRecovered.phase == "revoked", "prior-boot global uncertainty remained")
+print("PASS injected runtime uncertainty: actual prefix retained, native launches and maintenance in every scope refuse until valid recovery")
 
 // Retention data below is explicitly injected. Physical executor and crash
 // behavior above still uses real native children; never prune active/uncertain.

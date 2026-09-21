@@ -5,6 +5,10 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "$ROOT/tests/assert.sh"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
+# Some settings readers also resolve shared engine assets. Never let those
+# secondary paths fall back to the user's installed runtime during this test.
+export CYDER_SUPPORT="$TMP/support" CYDER_RUNTIME_ROOT="$TMP/runtime"
+export CYDER_ENGINES="$TMP/runtime/Engines" CYDER_ENGINE_NAME=fixture
 
 mkdir -p "$TMP/support/bottles/shared" "$TMP/game" "$TMP/engine/bin" "$TMP/scripts"
 exe="$TMP/game/測試.exe"

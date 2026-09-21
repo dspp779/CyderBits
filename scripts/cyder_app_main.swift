@@ -1179,12 +1179,13 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         pendingPreparation[requestID] = launchPreparation.resolve(work: { [weak self] in
             guard let self else { return nil }
             let target = wineLaunchTarget(for: launch.executable)
+            let scope: CyderOperationGate.Scope
             if launch.isURI || target == .msi || target == .reg {
-                return .prefix(CyderPaths.sharedBottle)
+                scope = .prefix(CyderPaths.sharedBottle)
             } else if case .success(let prefix) = self.prefixForExecutable(URL(fileURLWithPath: launch.executable)) {
-                return .prefix(prefix)
-            }
-            return nil
+                scope = .prefix(prefix)
+            } else { return nil }
+            return CyderGptk.launchNeedsGlobalScope() ? .allEnvironments : scope
         }) { [weak self] outcome in
             guard let self else { return }
             self.pendingPreparation.removeValue(forKey: requestID)
@@ -2487,6 +2488,10 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         if operationScope == nil,
            let index = args.firstIndex(where: { $0 == "--stop-prefix" || $0 == "--taskmgr-prefix" }),
            args.indices.contains(index + 1) { scope = .prefix(URL(fileURLWithPath: args[index + 1])) }
+        let prefixScope = scope
+        if isLaunch, lease?.scope == .allEnvironments || (lease == nil && CyderGptk.launchNeedsGlobalScope()) {
+            scope = .allEnvironments
+        }
         let acquired: CyderOperationGate.Lease?
         if isObservation { acquired = nil }
         else if let lease { acquired = lease }
@@ -2564,7 +2569,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         if !isObservation {
             let ownerRoot = CyderPaths.support.appendingPathComponent("execution-owners")
             let prefix: String?
-            switch scope { case .allEnvironments: prefix = nil; case .environment(let path): prefix = path }
+            switch prefixScope { case .allEnvironments: prefix = nil; case .environment(let path): prefix = path }
             do {
                 let helper = Bundle.main.bundleURL.appendingPathComponent("Contents/MacOS/CyderSwift")
                 guard FileManager.default.isExecutableFile(atPath: helper.path) else { throw CyderExecutionOwner.Failure.unavailable }
@@ -2590,7 +2595,8 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
                                     pidFile: pidURL.path)
                 } else { handoff = nil }
                 let ticket = try CyderExecutionOwner.prepare(root: ownerRoot, issuer: issuer, scope: prefix,
-                                                            correlation: correlation, handoff: handoff)
+                                                            correlation: correlation, handoff: handoff,
+                                                            requiresGlobalScope: scope == .allEnvironments)
                 process.executableURL = helper
                 process.arguments = ["--execution-owner", ownerRoot.path, ticket.uuidString, "--", "/bin/bash"] + args
                 process.environment = environment

@@ -23,13 +23,14 @@ trap cleanup EXIT
 cat > "$TEST_DIR/main.swift" <<'SWIFT'
 import Foundation
 import Darwin
-if [4, 6].contains(CommandLine.arguments.count), CommandLine.arguments[1] == "--prepare" {
+if [4, 6].contains(CommandLine.arguments.count), ["--prepare", "--prepare-global"].contains(CommandLine.arguments[1]) {
     DispatchQueue.global().async {
         do {
             let handoff: CyderExecutionOwner.Handoff? = CommandLine.arguments.count == 6
                 ? .init(executable: CommandLine.arguments[4], pidFile: CommandLine.arguments[5]) : nil
             let id = try CyderExecutionOwner.prepare(root: URL(fileURLWithPath: CommandLine.arguments[2]),
-                issuer: UUID(), scope: CommandLine.arguments[3], handoff: handoff)
+                issuer: UUID(), scope: CommandLine.arguments[3], handoff: handoff,
+                requiresGlobalScope: CommandLine.arguments[1] == "--prepare-global")
             print(id.uuidString); exit(0)
         } catch { fputs("Prepare failed: \(error)\n", stderr); exit(1) }
     }

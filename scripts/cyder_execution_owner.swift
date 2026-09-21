@@ -68,6 +68,10 @@ enum CyderExecutionOwner {
         var correlation: Correlation? = nil
         var handoff: Handoff? = nil
         var nativeSpawn: NativeSpawn? = nil
+        // Keep the actual prefix identity for the final handoff even when
+        // shared-runtime preparation requires a global mutation barrier.
+        var requiresGlobalScope: Bool? = nil
+        var effectiveScope: String? { requiresGlobalScope == true ? nil : scope }
     }
     private final class Directory {
         let fd: Int32
@@ -130,7 +134,8 @@ enum CyderExecutionOwner {
                   before.st_size == after.st_size,
                   before.st_mtimespec.tv_sec == after.st_mtimespec.tv_sec,
                   before.st_mtimespec.tv_nsec == after.st_mtimespec.tv_nsec,
-                  let ticket = try? JSONDecoder().decode(Ticket.self, from: data), ticket.schema == 1,
+                  let ticket = try? JSONDecoder().decode(Ticket.self, from: data), [1, 2].contains(ticket.schema),
+                  (ticket.schema == 2) == (ticket.requiresGlobalScope == true),
                   name == ticket.id.uuidString + ".json",
                   ["prepared", "active", "handedOff", "finished", "revoked", "uncertain"].contains(ticket.phase),
                   ticket.correlation?.isValid != false, ticket.handoff?.isValid != false,
@@ -161,7 +166,8 @@ enum CyderExecutionOwner {
               info.st_uid == getuid() else { throw Failure.invalid }
         return ("\(info.st_uid):\(info.st_dev):\(info.st_ino)", canonical)
     }
-    static func prepare(root: URL, issuer: UUID, scope: String?, correlation: Correlation? = nil, handoff: Handoff? = nil) throws -> UUID {
+    static func prepare(root: URL, issuer: UUID, scope: String?, correlation: Correlation? = nil, handoff: Handoff? = nil,
+                        requiresGlobalScope: Bool = false) throws -> UUID {
         precondition(!Thread.isMainThread)
         guard correlation?.isValid != false else { throw Failure.invalid }
         let directory = try Directory(root)
@@ -175,8 +181,11 @@ enum CyderExecutionOwner {
         let canonicalHandoff = handoff.map {
             Handoff(executable: URL(fileURLWithPath: $0.executable).resolvingSymlinksInPath().path, pidFile: $0.pidFile)
         }
-        let ticket = Ticket(schema: 1, id: UUID(), issuer: issuer, scope: identity.key, prefix: identity.path,
-                            phase: "prepared", correlation: correlation, handoff: canonicalHandoff)
+        // Older helpers reject schema 2 instead of silently ignoring the new
+        // global barrier and executing a shared mutation under a prefix lock.
+        let ticket = Ticket(schema: requiresGlobalScope ? 2 : 1, id: UUID(), issuer: issuer, scope: identity.key, prefix: identity.path,
+                            phase: "prepared", correlation: correlation, handoff: canonicalHandoff,
+                            requiresGlobalScope: requiresGlobalScope ? true : nil)
         try directory.write(ticket)
         return ticket.id
     }
@@ -263,7 +272,7 @@ enum CyderExecutionOwner {
         defer { if prefix >= 0 { Darwin.close(prefix) } }
         for name in try directory.names() {
             let previous = try directory.read(name)
-            guard !overlaps(scope, previous.scope) || !["active", "uncertain"].contains(previous.phase) else { throw Failure.uncertain }
+            guard !overlaps(scope, previous.effectiveScope) || !["active", "uncertain"].contains(previous.phase) else { throw Failure.uncertain }
         }
         guard try identify(identity.path).key == scope else { throw Failure.invalid }
         return try work()
@@ -276,7 +285,7 @@ enum CyderExecutionOwner {
             let directory = try Directory(root)
             let name = id.uuidString + ".json"
             var ticket = try directory.read(name)
-            let global = try directory.lock("all-environments.lock", exclusive: ticket.scope == nil)
+            let global = try directory.lock("all-environments.lock", exclusive: ticket.effectiveScope == nil)
             defer { Darwin.close(global) }
             var scopeLock: Int32 = -1
             if let scope = ticket.scope {
@@ -292,7 +301,7 @@ enum CyderExecutionOwner {
             // lock is not permission to bypass an unresolved prior operation.
             for otherName in try directory.names() where otherName != name {
                 let other = try directory.read(otherName)
-                if overlaps(ticket.scope, other.scope), ["active", "uncertain"].contains(other.phase) { throw Failure.uncertain }
+                if overlaps(ticket.effectiveScope, other.effectiveScope), ["active", "uncertain"].contains(other.phase) { throw Failure.uncertain }
             }
             ticket.phase = "active"; ticket.owner = owner; try directory.write(ticket)
             let child = Process(); child.executableURL = URL(fileURLWithPath: command[0]); child.arguments = Array(command.dropFirst())
@@ -303,6 +312,7 @@ enum CyderExecutionOwner {
                 environment["CYDER_EXECUTION_OWNER_ROOT"] = root.path
                 environment["CYDER_EXECUTION_OWNER_TICKET"] = id.uuidString
                 environment["CYDER_EXECUTION_OWNER_HELPER"] = CommandLine.arguments[0]
+                environment["CYDER_EXECUTION_RUNTIME_MUTATION"] = ticket.effectiveScope == nil ? "1" : "0"
             }
             child.environment = environment
             child.standardInput = FileHandle.nullDevice

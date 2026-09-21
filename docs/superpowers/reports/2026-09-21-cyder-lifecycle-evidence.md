@@ -380,3 +380,17 @@ C10 補齊 executor 與原要求的可核對關聯及安全終態回收；它仍
 - universal macOS11 最新 `build-C12-r2.log` 通過；隔離包 `/private/tmp/cyder-lifecycle-c12-build/Cyder.app` 配置 local.cyder.lifecycle-c12、CD2 support/runtime、ad-hoc 簽章並驗證。`build-C12-source-sha256.json` 保存來源及包內程式 hash，核對 common／launcher 與 repo bytes 相同。完整包測試在建置完成後執行，未覆蓋正式安裝。
 
 C12 完成 taskmgr 的 late-spawn 修復。後續 GPTK 共享 runtime symlink 的變更仍需全域互斥；native receipts 與 lifecycle 事件、環境 waiter、精確 process/window action、剩餘 UX／I/O 及 V01–V14 全矩陣繼續處理，整體目標保持進行中。
+
+## C13：GPTK 共用連結的全域操作權
+
+- `runtime-C13-baseline.log` 用保留的完整 C12 helper／scripts 重現 prefix-only launch 仍修改共用 GPTK tree。自建 x86 替身及 inert GPTK files 位於 fixture，沒有載入 GPTK dylib。舊包執行 cyder_apply_gptk_launch_environment 後建立連結並產生 runtime.changed，斷言失敗；原始 logs／artifacts 保留。
+- 正式 launch preflight 背景檢查目前 GPTK 來源及 engine 連結。缺少、失效或指向其他來源者先排入既有 all-environments operation gate，取得 lease 後才 authorize 原要求；已吻合或引擎自帶有效 GPTK 者維持個別環境 scope。native ticket 增加 requiresGlobalScope，保留真正 prefix UID／device／inode 供 Wine handoff 核對，同時以全域 lock 持有共享修改權。原生 owner 結果不明時，全域 barrier 不能退化成只阻擋原 prefix。
+- Bash 在原生 scope 下再次檢查：不需變更直接返回；若 discovery 在排程後改變、但未取得全域權限，返回 75，保留原 link，不自行升級或重播啟動。需要修改時只有原生 owner 從票據重建的 CYDER_EXECUTION_RUNTIME_MUTATION=1 才允許。此 namespace 已由 C12 在兩種設定讀取端封鎖，child 不繼承偽造值。獨立 CLI 維持既有行為，沒有宣稱不經 owner 的手動 CLI 已加入跨程序 lock。
+- `gptk-C13.log` 驅動正式 Swift preflight：缺少連結／dangling／其他來源需要全域權限，正確連結／有效實體 tree 不需要。`runtime-C13-r2.log` 與完整 C13 包的 `runtime-C13-app.log` 通過：prefix-only 拒絕且沒有修改；global owner 實際修復隔離連結、阻擋其他 prefix，真實原生 spawn 後保留 prefix identity，在 Bash 返回後釋放全域權限，子程序仍存活，最後保留 53。C11／C12 全部原生交接案例同套回歸。
+- 首輪新 global case 放在「owner crash 後保持 uncertain」案例之後，被正式全域安全 barrier 拒絕；`runtime-C13.log` 及 owner log 保存原因。將案例移至 crash injection 之前，未放寬產品 uncertain 防護。`execution-owner-C13.log` 另注入全域 uncertain ticket，確認不同 prefix 的真正 native operation 與 withScope filesystem work 都被拒絕，只有明確注入的 prior-boot recovery 才撤回。該 boot 證據不是實際重開機。
+- `operation-gate-C13.log` 驗證現有 global FIFO barrier、取消前派送、quit freeze、真實 owner 返回後 release。`game-settings-C13-r2.log` 回歸通過；首輪該舊 fixture 缺少 runtime/engines namespace，試圖對正式 engine 的 MoltenVK symlink 執行 ln -sfn，被 sandbox 拒絕。修正測試為所有次要 engine paths 明確落在 TMP 後重跑，沒有提權重試正式路徑。原失敗 `game-settings-C13.log` 保留。測試仍有既有 plutil 缺 key 訊息被當成 graphicsBackend 值後 fallback 的 warning，未刪除或當成實際 Wine 證據。
+- universal macOS11 `build-C13.log` 通過；隔離包 `/private/tmp/cyder-lifecycle-c13-build/Cyder.app` 使用 local.cyder.lifecycle-c13、CD2 support/runtime、ad-hoc 簽章並驗證，manifest `build-C13-source-sha256.json` 核對完整來源與包內腳本。包內 helper／scripts 已實際測試，完整 AppKit 啟動選單接線本輪只有編譯證據，沒有新增 GUI／Windows／NGS 相容性結論。
+
+C13 修復 GPTK 連結路徑的 scope；回歸盤點確認 MoltenVK preference reader 仍會修改另一個共用 engine symlink，須接續加上相同權限約束並避免唯讀讀取產生副作用。不能把 C13 稱為所有 shared runtime mutation 已解決。native lifecycle 事件、環境 waiter、精確 process/window action、其餘 UX／I/O 與完整 V01–V14 驗證仍持續。
+
+C13 提交前追加：全域 scope ticket 使用 schema 2，普通票據繼續讀取 schema 1；避免舊 helper 忽略 requiresGlobalScope 後以 prefix lock 執行。最新 `build-C13-r2.log`、`execution-owner-C13-r2.log`、完整包 `runtime-C13-app-r2.log` 全通過，manifest／ad-hoc 簽章已更新。後者另外真正呼叫保留的 C12 helper：它拒絕 schema 2、未建立 child marker、原票據仍 prepared，隨後 C13 helper 正常取得並完成同張票據。此輪沒有新增 Windows／NGS 實测。
