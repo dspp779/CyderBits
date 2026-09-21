@@ -115,11 +115,20 @@ final class CyderLaunchObserver {
         // Root zero alone keeps the original deadline for a late successor.
     }
 
+    /// Start this budget only when preparation/handoff has completed. Queue
+    /// time and native preparation have their own observation owner and budget.
+    func wait(duration: TimeInterval, signal: WineActivationWaiter) async -> Result {
+        await wait(signal: signal, read: nil, deadline: { ProcessInfo.processInfo.systemUptime + max(0, duration) })
+    }
     func wait(until deadline: TimeInterval, signal: WineActivationWaiter,
               read: (() -> Sample)? = nil) async -> Result {
+        await wait(signal: signal, read: read, deadline: { deadline })
+    }
+    private func wait(signal: WineActivationWaiter, read: (() -> Sample)?, deadline: @escaping () -> TimeInterval) async -> Result {
         await withCheckedContinuation { continuation in
             queue.async { [self] in
-                guard !finished else { continuation.resume(returning: .unconfirmed); return }
+                guard !finished, completion == nil else { continuation.resume(returning: .unconfirmed); return }
+                let deadline = deadline()
                 completion = { continuation.resume(returning: $0) }
                 observationDeadline = deadline
                 self.signal = signal

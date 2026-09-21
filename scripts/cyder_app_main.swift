@@ -1728,7 +1728,6 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         lease: CyderOperationGate.Lease? = nil,
         launchTarget: CyderWineLaunchTarget = .exe
     ) async -> CyderLaunchOutcome {
-        let observationDeadline = ProcessInfo.processInfo.systemUptime + 30
         let activationWaiter = WineActivationWaiter(prefix: prefix.path)
         let observer = CyderLaunchObserver(authority: authorization.flatMap { record in
             guard let launch = record.launchID, let epoch = record.executorEpoch else { return nil }
@@ -1961,7 +1960,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
                 }
             }
         }
-        let observation = await observer.wait(until: observationDeadline, signal: activationWaiter)
+        let observation = await observer.wait(duration: 30, signal: activationWaiter)
         switch observation {
         case .activated:
             launchActivated = true

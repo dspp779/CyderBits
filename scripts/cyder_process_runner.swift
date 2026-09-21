@@ -20,29 +20,41 @@ final class CyderProcessRunner {
         let output: FileHandle?
         let completion: (Outcome) -> Void
         let released: () -> Void
+        let expiresAt: TimeInterval?
+        var starting = false
+        var runReturned = false
+        var exitOutcome: Outcome?
         var delivered = false
         var spawned = false
         var finished = false
         init(id: UUID, process: Process, policy: Policy, output: FileHandle?,
-             completion: @escaping (Outcome) -> Void, released: @escaping () -> Void) {
+             completion: @escaping (Outcome) -> Void, released: @escaping () -> Void, expiresAt: TimeInterval?) {
             self.id = id; self.process = process; self.policy = policy; self.output = output
-            self.completion = completion; self.released = released
+            self.completion = completion; self.released = released; self.expiresAt = expiresAt
         }
     }
     private let queue = DispatchQueue(label: "local.cyder.process-runner")
     private let delivery: DispatchQueue
+    private let spawnWorkers: OperationQueue
+    private let beforeSpawn: () -> Void
     private var operations: [UUID: Operation] = [:]
     private var quiescing = false
-    init(delivery: DispatchQueue = .main) { self.delivery = delivery }
+    init(delivery: DispatchQueue = .main, beforeSpawn: @escaping () -> Void = {}) {
+        self.delivery = delivery; self.beforeSpawn = beforeSpawn
+        spawnWorkers = OperationQueue()
+        spawnWorkers.name = "local.cyder.process-spawn"
+        spawnWorkers.maxConcurrentOperationCount = 2
+        spawnWorkers.qualityOfService = .userInitiated
+    }
 
     @discardableResult
     func run(process: Process, policy: Policy, deadline: TimeInterval? = nil,
              output: FileHandle? = nil, onSpawn: @escaping (Receipt) -> Void = { _ in },
              onRelease: @escaping () -> Void = {}, completion: @escaping (Outcome) -> Void) -> UUID {
-        let id = UUID()
+        let id = UUID(), expiresAt = deadline.map { ProcessInfo.processInfo.systemUptime + max(0, $0) }
         queue.async { [self] in
             let operation = Operation(id: id, process: process, policy: policy, output: output,
-                                      completion: completion, released: onRelease)
+                                      completion: completion, released: onRelease, expiresAt: expiresAt)
             guard !quiescing else {
                 try? output?.close()
                 delivery.async { completion(.cancelledBeforeSpawn); onRelease() }
@@ -56,24 +68,45 @@ final class CyderProcessRunner {
             operations[id] = operation // register owner before Process.run can exit
             process.terminationHandler = { [weak self, weak operation] process in
                 guard let self, let operation else { return }
+                let outcome = Outcome.exited(process.terminationStatus, signalled: process.terminationReason == .uncaughtSignal)
                 self.queue.async {
-                    self.finish(operation, outcome: .exited(process.terminationStatus,
-                        signalled: process.terminationReason == .uncaughtSignal))
+                    operation.exitOutcome = outcome
+                    // A fast child can exit before Process.run returns. Keep
+                    // its output and owner until the spawn call also returns.
+                    if operation.runReturned { self.finish(operation, outcome: outcome) }
                 }
             }
-            do {
-                try process.run()
-                operation.spawned = true
-                let receipt = Receipt(operation: id, supervisorPID: process.processIdentifier)
-                delivery.async { onSpawn(receipt) }
-            } catch {
-                finish(operation, outcome: .failedToStart(error.localizedDescription))
-                return
-            }
-            if let deadline {
-                queue.asyncAfter(deadline: .now() + max(0, deadline)) { [weak self, weak operation] in
+            if let expiresAt {
+                queue.asyncAfter(deadline: .now() + max(0, expiresAt - ProcessInfo.processInfo.systemUptime)) { [weak self, weak operation] in
                     guard let self, let operation, !operation.finished else { return }
                     self.abandonObservation(operation)
+                }
+            }
+            // An OS spawn call may stall. It never occupies the state queue,
+            // and only two physical calls may be in flight, even after timeout.
+            spawnWorkers.addOperation { [self] in
+                let claimed = queue.sync { () -> Bool in
+                    guard !operation.finished, !quiescing else { return false }
+                    operation.starting = true
+                    return true
+                }
+                guard claimed else { return }
+                beforeSpawn()
+                do {
+                    try process.run()
+                    let receipt = Receipt(operation: id, supervisorPID: process.processIdentifier)
+                    queue.async {
+                        operation.runReturned = true; operation.spawned = true
+                        self.delivery.async { onSpawn(receipt) }
+                        if let outcome = operation.exitOutcome { self.finish(operation, outcome: outcome) }
+                        else if operation.delivered { self.stopOwnedObserver(operation) }
+                    }
+                } catch {
+                    let message = error.localizedDescription
+                    queue.async {
+                        operation.runReturned = true
+                        self.finish(operation, outcome: .failedToStart(message))
+                    }
                 }
             }
         }
@@ -95,7 +128,10 @@ final class CyderProcessRunner {
     func quiesce() {
         queue.async { [self] in
             quiescing = true
-            for operation in operations.values { abandonObservation(operation) }
+            for operation in Array(operations.values) {
+                if operation.starting { abandonObservation(operation) }
+                else { finish(operation, outcome: .cancelledBeforeSpawn) }
+            }
         }
     }
     func inspect(completion: @escaping (Int) -> Void) {
@@ -104,11 +140,14 @@ final class CyderProcessRunner {
     private func abandonObservation(_ operation: Operation) {
         guard !operation.finished else { return }
         deliver(operation, .unconfirmed)
-        if operation.policy == .observation, operation.process.isRunning {
-            operation.process.terminate() // exclusively this runner's observer
-        }
+        stopOwnedObserver(operation)
         // Launch/mutation processes, their output descriptors and onRelease
         // remain owned here until terminationHandler confirms actual exit.
+    }
+    private func stopOwnedObserver(_ operation: Operation) {
+        if operation.policy == .observation, operation.spawned, operation.process.isRunning {
+            operation.process.terminate() // exclusively this runner's observer
+        }
     }
     private func deliver(_ operation: Operation, _ outcome: Outcome) {
         guard !operation.delivered else { return }
@@ -120,7 +159,10 @@ final class CyderProcessRunner {
         operation.finished = true
         try? operation.output?.close()
         operation.process.terminationHandler = nil
-        deliver(operation, outcome)
+        // A delayed timer is not an extension of the observation budget.
+        // The actual exit still releases ownership exactly once.
+        let expired = operation.expiresAt.map { ProcessInfo.processInfo.systemUptime >= $0 } ?? false
+        deliver(operation, expired && outcome != .cancelledBeforeSpawn ? .unconfirmed : outcome)
         operations.removeValue(forKey: operation.id)
         delivery.async { operation.released() }
     }

@@ -431,3 +431,14 @@ C15 尚未接通 native root 0 加環境排空的完成證據；目前 native �
 - `build-C16.log` universal macOS11 建置成功。來源在編譯期間固定；隔離包 `/private/tmp/cyder-lifecycle-c16-build/Cyder.app` 配置 local.cyder.lifecycle-c16、CD2 support/runtime，ad-hoc 簽章及 strict verify 成功，`build-C16-source-sha256.json` 保存 40 個來源／產物 hash，包內三支腳本 bytes 與 repo 相同。未啟動本輪完整 GUI／Wine，未改正式安裝、未發布。
 
 C16 接通正常 root 加排空的正式完成路徑，但仍未將所有 native launch／process 寫入 lifecycle store 的單一模型；status item 的 legacy 數值 PID、精確 window／successor action、重複 waiter，以及 preparation 與 30 秒 observation deadline 分離等仍須完成。回歸使用的新 monitor 排空橋接不等於 A–F／V01–V14 全矩陣已驗收，整體目標持續。
+
+## C17：準備與交棒觀察的期限分離、spawn 不阻塞狀態 queue
+
+- 正式 runWineThroughLauncher 不再於函式進入就扣除 30 秒；native launcher 準備／handoff 返回後，CyderLaunchObserver.wait(duration: 30) 才在自己的序列 queue 建立單一 monotonic deadline。root 退出、晚到事件不重設它；取消後不可重開，第二個 wait 亦不能覆蓋第一個 continuation／期限。保留顯式 wait(until:) 供有既定期限的 caller／回歸使用。
+- CyderProcessRunner 的準備工作仍有獨立期限（目前 launch native executor 30 秒）。期限現於操作登記前取得、登記後即排程，不再等 Process.run 返回才開始。Process.run 移到每 runner 最多兩個 physical spawn workers；狀態 queue 仍可交付逾時、inspect、quit，操作容量 32 保持不變，不因 timeout 再開同一底層工作。
+- 已 claim 的 spawn 呼叫可能仍在 OS 內，因此 timeout／quit 只交付 unconfirmed，保留 output、operation 與 onRelease 到真正 spawn return／process exit；launch／mutation 不被 kill。尚未 claim 的 queued work 在 quit 時確認 cancelledBeforeSpawn，撤除 owner、關其 output，worker 隨後不能啟動它。Cyder 自有 observation helper 若在 timeout 後才真正 spawn，返回後才停止該 Process。快速 child 提早觸發 terminationHandler 時，必須等 Process.run 也返回才釋放，onSpawn 仍先於正常完成交付。實際 finish 直接核對 monotonic deadline，晚送的 timer 不延長觀察。
+- `process-runner-C17-r4.log` 通過正式 runner 原生測試：立即退出／spawn error／output 保留／observer-only termination／quit，以及注入兩個受阻 spawn path 時五筆操作全數有界回 unconfirmed、physical count 仍為 2、inspect 保留 5 owners；quit 後只撤未 claim 的 3 筆，放行 gate 後原生 fixture 實際建立恰好 2 個 marker，五筆各只交付／release 一次。另加一筆尚未逾時的 queued launch，quit 明確回 cancelledBeforeSpawn，沒有建立 marker；立即退出案例也核對 onSpawn 在正常 completion 前交付。受阻 hook 位於正式 spawn worker 內，明確模擬 syscall 停滯；並非聲稱本輪真實 OS spawn 卡住或 Wine 通過。
+- 同一 runner harness 另真正執行 0.5 秒的 native preparation，再透過正式 observer 開始 0.2 秒觀察並於 0.08 秒後注入啟動事件，成功完成，證明 preparation 沒有耗用 observation budget。`launch-observer-C17.log`／`open-files-C17.log` 通過重複 wait／cancel-before-wait 與既有 root／期限案例；Finder 接線檢查改為現行 duration API，未把文字檢查當 GUI 實測。`operation-gate-C17.log` 驗實際 runner release 前互斥不釋放及不同 bottle 前進；`launch-drain-C17.log` 保留 C16 正常 root／排空／舊世代回歸。首輪新增 fixture 的 throwing call 放在 precondition autoclosure 內無法編譯，`process-runner-C17-r2.log` 保留；改為先讀資料再斷言，r3／r4 通過，產品未因此放寬。
+- `build-C17.log` universal macOS11 成功，編譯期间產品來源固定。隔離 `/private/tmp/cyder-lifecycle-c17-build/Cyder.app` 使用 local.cyder.lifecycle-c17、CD2 support/runtime；ad-hoc／strict verify 成功，`build-C17-source-sha256.json` 保存 40 個來源／產物 hash 並核對包內 scripts。未啟動完整 GUI／Wine，未覆蓋正式安裝、未發布。
+
+本批修正 native Process.run 邊界及交棒觀察的期限；runLauncher 之前的檔案準備／身分解析、返回後 legacy PID transport 與 log tail 仍有需整理的 I/O，不能宣稱全部前置工作皆有界。native lifecycle store 完整接線、精確 process／window authority、重複 waiter、其他 UX／I/O 與 V01–V14 全矩陣仍在範圍內，目標不標完成。

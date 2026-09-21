@@ -55,8 +55,10 @@ assert_contains "$source_text" '"CYDER_WINE_RESULT_FILE": exitResultURL.path' \
   "Finder launches must request a per-launch Wine result sidecar"
 assert_contains "$source_text" 'if exitStatus == 53' \
   "protected-folder guidance must use Wine's captured wait status"
-assert_contains "$source_text" 'await observer.wait(until: observationDeadline' \
-  "launches must use the bounded asynchronous observation adapter"
+assert_contains "$source_text" 'await observer.wait(duration: 30' \
+  "launch observation budget must begin after native preparation returns"
+assert_not_contains "$source_text" 'let observationDeadline = ProcessInfo.processInfo.systemUptime + 30' \
+  "launch preparation must not consume the later observation budget"
 # Root-zero handoff, windowless completion, stuck reads and late events are
 # exercised against the same adapter used above, rather than old polling text.
 bash "$ROOT/tests/test-cyder-launch-observer.sh"

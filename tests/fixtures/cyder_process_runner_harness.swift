@@ -9,6 +9,9 @@ if CommandLine.arguments.count > 2 {
         FileHandle.standardOutput.write(Data("after-deadline\n".utf8))
         exit(0)
     case "observer": alarm(10); while true { pause() }
+    case "marker":
+        try! Data("spawned".utf8).write(to: root.appendingPathComponent(CommandLine.arguments[3]))
+        exit(0)
     default: exit(1)
     }
 }
@@ -24,8 +27,9 @@ func pump(_ condition: () -> Bool) {
     precondition(condition(), "runner callback did not arrive")
 }
 let runner = CyderProcessRunner()
-var immediate: CyderProcessRunner.Outcome?, count = 0, released = 0
-runner.run(process: process("immediate"), policy: .launch, onRelease: { released += 1 }) { immediate = $0; count += 1 }
+var immediate: CyderProcessRunner.Outcome?, count = 0, released = 0, immediateSpawned = false
+runner.run(process: process("immediate"), policy: .launch, onSpawn: { _ in immediateSpawned = true },
+    onRelease: { released += 1 }) { precondition(immediateSpawned); immediate = $0; count += 1 }
 pump { immediate != nil && released == 1 }
 precondition(immediate == .exited(7, signalled: false) && count == 1)
 let missing = Process(); missing.executableURL = URL(fileURLWithPath: "/nonexistent/cyder-test")
@@ -67,3 +71,61 @@ runner.inspect { remaining = $0 }
 pump { remaining != nil }
 precondition(remaining == 0)
 print("PASS native async runner: immediate exit, failed spawn, once-only deadline/cancel/quit, retained output and mutation lifetime, observer-only termination, frozen dispatch")
+
+// Hold two real spawn paths inside the formal runner. Deadline, inspect and
+// quit must remain responsive, without opening extra workers for queued work.
+final class SpawnGate {
+    let lock = NSLock(), gate = DispatchSemaphore(value: 0)
+    var entries = 0
+    func block() {
+        precondition(!Thread.isMainThread)
+        lock.lock(); entries += 1; lock.unlock()
+        precondition(gate.wait(timeout: .now() + 8) == .success)
+    }
+    func count() -> Int { lock.lock(); defer { lock.unlock() }; return entries }
+}
+let spawnGate = SpawnGate()
+let stalled = CyderProcessRunner(beforeSpawn: spawnGate.block)
+var stalledResults = 0, stalledReleases = 0, stalledSpawns = 0
+for index in 0..<5 {
+    let p = process("marker"); p.arguments!.append("marker-\(index)")
+    stalled.run(process: p, policy: .mutation, deadline: 0.08,
+        onSpawn: { _ in stalledSpawns += 1 }, onRelease: { stalledReleases += 1 }) { outcome in
+        precondition(outcome == .unconfirmed); stalledResults += 1
+    }
+}
+pump { stalledResults == 5 && spawnGate.count() == 2 }
+precondition(spawnGate.count() == 2 && stalledReleases == 0 && stalledSpawns == 0)
+var retained: Int?
+stalled.inspect { retained = $0 }; pump { retained != nil }
+precondition(retained == 5, "timed-out spawn lost physical ownership")
+var queuedOutcome: CyderProcessRunner.Outcome?, queuedReleased = false
+let neverStarted = process("marker"); neverStarted.arguments!.append("marker-forbidden")
+stalled.run(process: neverStarted, policy: .launch, onSpawn: { _ in fatalError("queued operation crossed quit") },
+    onRelease: { queuedReleased = true }) { queuedOutcome = $0 }
+stalled.quiesce()
+pump { stalledReleases == 3 && queuedReleased && queuedOutcome != nil }
+precondition(queuedOutcome == .cancelledBeforeSpawn)
+precondition(spawnGate.count() == 2 && stalledSpawns == 0, "quit spawned queued work")
+spawnGate.gate.signal(); spawnGate.gate.signal()
+pump { stalledReleases == 5 }
+precondition(stalledResults == 5 && stalledSpawns == 2)
+let markerFiles = try FileManager.default.contentsOfDirectory(atPath: root.path)
+precondition(markerFiles.filter { $0.hasPrefix("marker-") }.count == 2)
+var stalledRemaining: Int?
+stalled.inspect { stalledRemaining = $0 }; pump { stalledRemaining != nil }; precondition(stalledRemaining == 0)
+print("PASS bounded spawn workers: deadlines/inspect/quit during stalled spawn, two physical calls, queued quit prevents spawn, claimed owners retained through actual return, exactly one delivery/release")
+
+// Drive the two formal owners in sequence. A real 0.5-second native preparation
+// must not spend the subsequent 0.2-second launch observation budget.
+let preparation = CyderProcessRunner()
+let preparedObserver = CyderLaunchObserver(), preparedSignal = WineActivationWaiter(prefix: root.path)
+var prepared: CyderProcessRunner.Outcome?, preparedResult: CyderLaunchObserver.Result?
+let preparationStarted = ProcessInfo.processInfo.systemUptime
+preparation.run(process: process("slow"), policy: .launch, deadline: 2) { prepared = $0 }
+pump { prepared != nil }
+precondition(prepared == .exited(0, signalled: false) && ProcessInfo.processInfo.systemUptime - preparationStarted >= 0.4)
+Task { preparedResult = await preparedObserver.wait(duration: 0.2, signal: preparedSignal) }
+DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) { preparedSignal.signal() }
+pump { preparedResult != nil }; precondition(preparedResult == .activated, "preparation consumed launch observation")
+print("PASS independent preparation/launch budgets: real delayed native preparation followed by complete fresh observation interval")

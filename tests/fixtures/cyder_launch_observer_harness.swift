@@ -110,3 +110,21 @@ start(expiredNative, expiredSignal, duration: -1, read: { fatalError() }) { expi
 pump { expiredResult != nil }; precondition(expiredResult == .unconfirmed, "queued activation/receipt bypassed original monotonic deadline")
 print("PASS native receipt observation: exact request/launch/digest/epoch, immutable process birth, pre-wait result, no sidecar read, clean root awaits successor, signal status preserved")
 print("PASS formal launch observer: early activation, root-to-child handoff, captured root failure, fixed deadline under stuck reads, global in-flight bound, late events, safe sidecars")
+
+// Duplicate observation registration cannot replace the first continuation or
+// extend its budget. A cancelled observer likewise cannot be restarted.
+let single = CyderLaunchObserver(), singleSignal = WineActivationWaiter(prefix: root.path)
+var firstWait: CyderLaunchObserver.Result?, duplicateWait: CyderLaunchObserver.Result?
+Task { firstWait = await single.wait(duration: 0.3, signal: singleSignal) }
+var firstRegistered = false
+DispatchQueue.main.asyncAfter(deadline: .now() + 0.03) { firstRegistered = true }
+pump { firstRegistered }
+Task { duplicateWait = await single.wait(duration: 5, signal: WineActivationWaiter(prefix: root.path)) }
+pump { duplicateWait != nil }; precondition(duplicateWait == .unconfirmed && firstWait == nil)
+singleSignal.signal(); pump { firstWait != nil }; precondition(firstWait == .activated)
+let noRestart = CyderLaunchObserver()
+noRestart.cancel()
+var noRestartResult: CyderLaunchObserver.Result?
+Task { noRestartResult = await noRestart.wait(duration: 5, signal: WineActivationWaiter(prefix: root.path)) }
+pump { noRestartResult != nil }; precondition(noRestartResult == .unconfirmed)
+print("PASS observation ownership: duplicate wait cannot replace continuation/deadline; cancellation prevents restart")
