@@ -9,12 +9,22 @@ func pump(_ condition: () -> Bool, timeout: TimeInterval = 10) {
     }
     precondition(condition(), "completion not delivered")
 }
+// A new primary must revoke an unclaimed native executor before dispatch
+// authority becomes visible, not in a later best-effort background pass.
+let ownerDirectory = CyderPaths.support.appendingPathComponent("execution-owners")
+try FileManager.default.createDirectory(at: ownerDirectory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+let staleExecution = CyderExecutionOwner.Ticket(schema: 1, id: UUID(), issuer: UUID(), scope: nil, phase: "prepared")
+let staleExecutionURL = ownerDirectory.appendingPathComponent(staleExecution.id.uuidString + ".json")
+try JSONEncoder().encode(staleExecution).write(to: staleExecutionURL)
+chmod(staleExecutionURL.path, 0o600)
 let primary = CyderInstanceCoordinator(support: CyderPaths.support, bundleID: "test")
 var role: CyderInstanceCoordinator.Role?
 var received: [CyderInstanceRequest] = []
 primary.start(onRequest: { received.append($0) }) { role = $0 }
 pump { role != nil }
 precondition(role == .primary)
+let recoveredExecution = try JSONDecoder().decode(CyderExecutionOwner.Ticket.self, from: Data(contentsOf: staleExecutionURL))
+precondition(recoveredExecution.phase == "revoked", "primary admitted requests before revoking an unclaimed old executor")
 let acceptedPreferences = Data(#"{"schemaVersion":13,"dpi":144}"#.utf8)
 try acceptedPreferences.write(to: CyderPaths.support.appendingPathComponent("settings.json"))
 let secondary = CyderInstanceCoordinator(support: CyderPaths.support, bundleID: "test")

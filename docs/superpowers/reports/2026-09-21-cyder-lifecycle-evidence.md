@@ -321,3 +321,15 @@ C7 提交前追加：恢復核對返回時也直接比較同一 monotonic expire
 - universal macOS11 build `build-C8.log` 通過。隔離包 `/private/tmp/cyder-lifecycle-c8-build/Cyder.app` 配置 local.cyder.lifecycle-c8、CD2 support/runtime 與 ad-hoc 簽章，manifest `build-C8-source-sha256.json`。完整包本輪未啟動；以上為 L1–2，不是真實 Wine／NGS 或完整退出 computer-use 證據。
 
 C8 只修復「握手前父程序自行逾時退出」造成的實際所有權破口。PID 目前仍可能代表 log/Wine wrapper，而非已完成 Wine exec 的證據；PID 發布後的 wrapper lifetime、持久關聯回執、跨 primary crash 的操作鎖接管仍未完成。既有每 launch shell waiter 也尚未與每環境 monitor waiter 整合。後續須繼續解決這些核心門檻，以及精確 process/window action、剩餘 UX／I/O 與 V01–V14 全矩陣，不能標目標完成。
+
+## C9：跨 primary 的原生 executor 票據與操作鎖
+
+- 正式 CyderSwift 增加 AppKit 初始化之前的 execution-owner helper。非觀察 launcher 先保存 private prepared 票據，再由 helper 取得跨程序 scope／owner locks，原子保存 active 與 boot UUID／PID／微秒出生時間，才建立真正 Bash 子程序；等待 actual child outcome 後保存 finished。argv／environment 不寫入 ledger。UI 的觀察期限不終止 helper 或提前釋放鎖。
+- 票據及鎖採同 UID、0700 目錄／0600 regular file、NOFOLLOW／NONBLOCK、FD-based 讀寫與 fsync／rename；512 筆／逐檔 8 KiB 有界。環境 scope 使用 UID／device／inode，symlink 別名共享操作鎖，票據保存的 prefix 被替換時拒絕執行。全環境鎖與個別環境鎖共同覆蓋 launcher 及正式 GPTK filesystem maintenance。
+- 新 primary 在啟用 request channel 前核對舊票據：未認領 prepared 撤回，活躍 owner lock 保留；owner 不在但 active 尚未確認者轉 uncertain，禁止重播或同 scope 新副作用，其他 prefix 可繼續。已確認不同 boot 的舊票據可撤回。原始資料損壞即拒絕取得派送權，不清空修復。
+- 新 test-cyder-execution-owner.sh 實際啟動原生 helper／受控 shell：prepared 撤回後晚到拒絕、一次認領、同 prefix／symlink／global 衝突、另一 prefix 並行、child 真正退出碼 23、原生出生身分、GPTK 共用 scope barrier、prefix 替換拒絕、argv 不落盤。核對出生身分後只終止本 fixture 的 helper，確認存活子程序未遭停止；重開轉 uncertain、同 scope 拒絕而其他 scope 正常。boot boundary 使用明確注入的 metadata，不是真實重開機。
+- 最新 standalone `execution-owner-C9-r5.log` 通過；使用完整建置中 CyderSwift 的實際 helper 入口重跑同套，`execution-owner-C9-app.log`／artifacts 通過。coordinator harness 新增 prepared 票據，在 primary 回呼時已撤回的順序斷言；`instance-C9-r2.log` 通過。`request-ui-C9.log`、`outbox-C9.log`、`settings-ui-C9-r2.log` 回歸通過。
+- 保留失敗：首輪 typecheck 的 default module cache 權限拒絕，指定隔離 cache 後通過；r1 新 fixture 的 throwing autoclosure 編譯錯誤已修正。r2 在 sandbox 無法讀取 BSD／boot 身分，頂層 throw 令 fixture 31392 停在 OS UE；確認該 fixture 的完整執行身分後僅嘗試一次 SIGKILL，未把停滯當成功。改為明確 do/catch exit 並以 desktop 權限執行同原生測試，r3–r5 通過；原 r2 資料保存在 artifacts。
+- universal macOS11 `build-C9-r2.log` 通過。隔離包 `/private/tmp/cyder-lifecycle-c9-build/Cyder.app` 配置 local.cyder.lifecycle-c9、CD2 support/runtime、ad-hoc 簽章並驗證；manifest `build-C9-source-sha256.json`。本輪啟動的是該包原生 helper，未啟動完整 GUI 或 Wine，以上是 L1–2 證據，不能宣稱 Wine／NGS 相容性。
+
+C9 尚未解決 detached Bash 返回後的 wrapper late-spawn 交接；helper 崩潰但子程序存活時安全保留 uncertain，尚無完整結果接回。票據也尚未直接攜帶 request／launch correlation，finished／revoked 安全回收尚待加入（目前滿 512 筆會拒絕新工作，不能無界成長）。這些限制、環境 waiter、精確 process/window action、其餘 UX／I/O 與 V01–V14 仍繼續實作，目標不標完成。

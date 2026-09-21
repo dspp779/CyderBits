@@ -1209,7 +1209,9 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate,
                 return
             }
             self.setNormalStatus("正在更新圖形元件…")
-            self.settingsAccess.performWork(work, onRelease: { gate.release(lease) }) { [weak self] update in
+            self.settingsAccess.performWork({
+                try CyderExecutionOwner.withScope(root: CyderPaths.support.appendingPathComponent("execution-owners"), scope: nil, work)
+            }, onRelease: { gate.release(lease) }) { [weak self] update in
                 guard let self, self.maintenanceToken == token else { return }
                 switch update {
                 case .ready:

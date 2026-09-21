@@ -2558,6 +2558,23 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         environment["CYDER_DIAGNOSTIC_STAGE"] = stage.rawValue
         environment["CYDER_DIAGNOSTIC_LOG"] = operationLog.path
         process.environment = environment
+        if !isObservation {
+            let ownerRoot = CyderPaths.support.appendingPathComponent("execution-owners")
+            let prefix: String?
+            switch scope { case .allEnvironments: prefix = nil; case .environment(let path): prefix = path }
+            do {
+                let helper = Bundle.main.bundleURL.appendingPathComponent("Contents/MacOS/CyderSwift")
+                guard FileManager.default.isExecutableFile(atPath: helper.path) else { throw CyderExecutionOwner.Failure.unavailable }
+                let issuer = onMainThread { instanceCoordinator.executionEpoch }
+                let ticket = try CyderExecutionOwner.prepare(root: ownerRoot, issuer: issuer, scope: prefix)
+                process.executableURL = helper
+                process.arguments = ["--execution-owner", ownerRoot.path, ticket.uuidString, "--", "/bin/bash"] + args
+            } catch {
+                try? handle.close()
+                return CyderProcessResult(status: 75, terminationReason: .exit, logURL: operationLog,
+                    outputTail: "Unable to reserve native executor ownership: \(error)", didStart: false)
+            }
+        }
         let command = CyderDiagnostics.shared.redact(
             "cmd=/bin/bash \(args.joined(separator: " "))\nstage=\(stage.rawValue)\n\n"
         )
@@ -2821,6 +2838,9 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
 @main
 struct CyderMain {
     static func main() {
+        if CommandLine.arguments.dropFirst().first == "--execution-owner" {
+            exit(CyderExecutionOwner.run(arguments: CommandLine.arguments))
+        }
         if CommandLine.arguments.dropFirst().contains("--sentinel-connect") {
             exit(CyderSentinelConnect.run(arguments: CommandLine.arguments))
         }

@@ -228,6 +228,7 @@ final class CyderInstanceCoordinator {
     private(set) var recovered: [CyderRequestJournal.Record] = []
     var onRecoveryChanged: (([CyderRequestJournal.Record]) -> Void)?
     var onRequestCancelled: ((String) -> Void)?
+    var executionEpoch: UUID { journal.executorEpoch }
     let sentinel: CyderSentinelServer
 
     init(support: URL = CyderPaths.support,
@@ -292,7 +293,8 @@ final class CyderInstanceCoordinator {
                             guard mayContinue() else { self.releaseStartupResources(); return }
                             self.namespace = namespace
                             self.startup.async {
-                                let started = self.channel.start { [weak self] message, reply in
+                                let recoveredExecutors = (try? CyderExecutionOwner.recover(root: self.support.appendingPathComponent("execution-owners"))) != nil
+                                let started = recoveredExecutors && self.channel.start { [weak self] message, reply in
                                     DispatchQueue.main.async { self?.receive(message, reply: reply) }
                                 }
                                 DispatchQueue.main.async {
