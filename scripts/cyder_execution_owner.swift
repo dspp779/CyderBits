@@ -20,7 +20,18 @@ enum CyderExecutionOwner {
             return .init(boot: String(cString: boot), pid: pid, started: info.pbi_start_tvsec * 1_000_000 + info.pbi_start_tvusec)
         }
     }
-    struct Ticket: Codable {
+    struct Correlation: Codable, Equatable {
+        let requestID: String
+        let launchID: String
+        let digest: String
+        var isValid: Bool {
+            requestID.utf8.count <= 100 && requestID.split(separator: ":", omittingEmptySubsequences: false).count == 2
+                && requestID.split(separator: ":", omittingEmptySubsequences: false).allSatisfy { UUID(uuidString: String($0)) != nil }
+                && UUID(uuidString: launchID) != nil && digest.count == 64
+                && digest.allSatisfy { "0123456789abcdef".contains($0) }
+        }
+    }
+    struct Ticket: Codable, Equatable {
         let schema: Int
         let id: UUID
         let issuer: UUID
@@ -30,6 +41,8 @@ enum CyderExecutionOwner {
         var owner: Birth?
         var child: Birth?
         var status: Int32?
+        var signalled: Bool? = nil
+        var correlation: Correlation? = nil
     }
     private final class Directory {
         let fd: Int32
@@ -86,7 +99,8 @@ enum CyderExecutionOwner {
                   before.st_mtimespec.tv_nsec == after.st_mtimespec.tv_nsec,
                   let ticket = try? JSONDecoder().decode(Ticket.self, from: data), ticket.schema == 1,
                   name == ticket.id.uuidString + ".json",
-                  ["prepared", "active", "finished", "revoked", "uncertain"].contains(ticket.phase) else { throw Failure.invalid }
+                  ["prepared", "active", "finished", "revoked", "uncertain"].contains(ticket.phase),
+                  ticket.correlation?.isValid != false else { throw Failure.invalid }
             return ticket
         }
         func write(_ ticket: Ticket) throws {
@@ -110,15 +124,49 @@ enum CyderExecutionOwner {
               info.st_uid == getuid() else { throw Failure.invalid }
         return ("\(info.st_uid):\(info.st_dev):\(info.st_ino)", canonical)
     }
-    static func prepare(root: URL, issuer: UUID, scope: String?) throws -> UUID {
+    static func prepare(root: URL, issuer: UUID, scope: String?, correlation: Correlation? = nil) throws -> UUID {
+        precondition(!Thread.isMainThread)
+        guard correlation?.isValid != false else { throw Failure.invalid }
+        let directory = try Directory(root)
+        let serial = try directory.lock("catalog.lock"); defer { Darwin.close(serial) }
+        if try directory.names().count >= 128 { try prune(directory, confirmed: []) }
+        guard try directory.names().count < 512 else { throw Failure.full }
+        let identity = try identify(scope)
+        let ticket = Ticket(schema: 1, id: UUID(), issuer: issuer, scope: identity.key, prefix: identity.path, phase: "prepared", correlation: correlation)
+        try directory.write(ticket)
+        return ticket.id
+    }
+    static func snapshot(root: URL) throws -> [Ticket] {
         precondition(!Thread.isMainThread)
         let directory = try Directory(root)
         let serial = try directory.lock("catalog.lock"); defer { Darwin.close(serial) }
-        guard try directory.names().count < 512 else { throw Failure.full }
-        let identity = try identify(scope)
-        let ticket = Ticket(schema: 1, id: UUID(), issuer: issuer, scope: identity.key, prefix: identity.path, phase: "prepared")
-        try directory.write(ticket)
-        return ticket.id
+        return try directory.names().map { try directory.read($0) }
+    }
+    /// Correlated results are eligible only after the exact snapshot has been
+    /// durably copied into the request journal. Missing tickets cannot execute.
+    static func prune(root: URL, confirmed: [Ticket]) throws {
+        precondition(!Thread.isMainThread)
+        let directory = try Directory(root)
+        let serial = try directory.lock("catalog.lock"); defer { Darwin.close(serial) }
+        try prune(directory, confirmed: confirmed)
+    }
+    private static func prune(_ directory: Directory, confirmed: [Ticket]) throws {
+        let tickets = try directory.names().map { try directory.read($0) }
+        let disposable = tickets.filter { $0.correlation == nil && ["finished", "revoked"].contains($0.phase) }
+        let disposableIDs = Set(disposable.dropFirst(32).map(\.id))
+        for ticket in tickets where ["finished", "revoked"].contains(ticket.phase) {
+            guard disposableIDs.contains(ticket.id) || confirmed.contains(ticket) else { continue }
+            let lock: Int32
+            do { lock = try directory.lock(ticket.id.uuidString + ".lock") }
+            catch Failure.busy { continue }
+            defer { Darwin.close(lock) }
+            guard try directory.read(ticket.id.uuidString + ".json") == ticket else { continue }
+            guard unlinkat(directory.fd, ticket.id.uuidString + ".json", 0) == 0,
+                  fsync(directory.fd) == 0 else { throw Failure.unavailable }
+            // No ticket may be recreated with an old UUID. A late helper must
+            // reread it under its lock and therefore refuses after deletion.
+            _ = unlinkat(directory.fd, ticket.id.uuidString + ".lock", 0)
+        }
     }
     /// Called before the new primary can issue effects. A helper takes its
     /// scope locks before claiming a ticket, so waiting old helpers are revoked.
@@ -201,6 +249,7 @@ enum CyderExecutionOwner {
             try? directory.write(ticket)
             child.waitUntilExit()
             ticket.phase = "finished"; ticket.status = child.terminationStatus
+            ticket.signalled = child.terminationReason == .uncaughtSignal
             try directory.write(ticket)
             return child.terminationReason == .uncaughtSignal ? 128 + child.terminationStatus : child.terminationStatus
         } catch {

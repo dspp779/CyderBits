@@ -82,6 +82,16 @@ precondition(saved == true && late == nil)
 var stopped = false
 primary.stop { stopped = true }
 pump { stopped }
+// A completed native executor receipt arriving while no primary exists must
+// join its original request on re-election, then be safely pruned only after
+// the journal has saved it. This is explicitly injected native-layer evidence.
+let correlatedTicket = CyderExecutionOwner.Ticket(schema: 1, id: UUID(), issuer: dispatched!.executorEpoch!,
+    scope: nil, phase: "finished", owner: .init(boot: "injected-native-boot", pid: 12345, started: 10),
+    child: .init(boot: "injected-native-boot", pid: 12346, started: 11), status: 0, signalled: false,
+    correlation: .init(requestID: dispatched!.id, launchID: dispatched!.launchID!, digest: dispatched!.digest))
+let correlatedURL = ownerDirectory.appendingPathComponent(correlatedTicket.id.uuidString + ".json")
+try JSONEncoder().encode(correlatedTicket).write(to: correlatedURL)
+chmod(correlatedURL.path, 0o600)
 let replacement = CyderInstanceCoordinator(support: CyderPaths.support, bundleID: "test")
 var nextRole: CyderInstanceCoordinator.Role?
 var replayCount = 0
@@ -91,6 +101,11 @@ precondition(nextRole == .primary, "primary lock was not released")
 precondition(replayCount == 0, "reopening replayed an accepted request")
 precondition(replacement.recovered.filter { $0.phase == .awaitingUserResume }.count >= 1)
 precondition(replacement.recovered.contains { $0.id == dispatched!.id && $0.phase == .uncertain })
+pump { replacement.recovered.first { $0.id == dispatched!.id }?.executionReceipt?.ticketID == correlatedTicket.id }
+pump { !FileManager.default.fileExists(atPath: correlatedURL.path) }
+precondition(replacement.recovered.first { $0.id == dispatched!.id }?.phase == .uncertain,
+             "native exit was incorrectly promoted to a confirmed Windows launch")
+precondition(replayCount == 0)
 var replacementSaved: Bool?
 replacement.quiesce { replacementSaved = $0 }
 pump { replacementSaved != nil }
@@ -138,3 +153,34 @@ var corruptStopped = false; corruptOwner.stop { corruptStopped = true }; pump { 
 let remainingBytes = try Data(contentsOf: corruptPath)
 precondition(remainingBytes == corruptBytes, "unavailable startup overwrote corrupt journal")
 print("PASS startup corruption: read-only outcome, no dispatch, original history preserved")
+
+// Receipt refresh owns one physical reader. Repeated invalidations coalesce
+// into one additional scan; no second worker bypasses a blocked filesystem.
+let scanRoot = CyderPaths.support.appendingPathComponent("receipt-scan")
+let receiptScanGate = DispatchSemaphore(value: 0)
+var receiptReadCount = 0, readsOnWorker = 0
+let scanner = CyderInstanceCoordinator(support: scanRoot, bundleID: "receipt-scan", beforeExecutionRead: {
+    readsOnWorker += 1
+    let count = readsOnWorker
+    DispatchQueue.main.async { receiptReadCount = count }
+    if count == 1 { receiptScanGate.wait() }
+})
+var scannerRole: CyderInstanceCoordinator.Role?
+scanner.start(onRequest: { _ in fatalError("receipt scan dispatched") }) { scannerRole = $0 }
+pump { scannerRole != nil && receiptReadCount == 1 }
+precondition(scannerRole == .primary)
+for _ in 0..<60 { scanner.refreshExecutionReceipts() }
+var scanTick = false
+DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { scanTick = true }
+pump { scanTick }
+precondition(receiptReadCount == 1, "receipt refresh created more physical workers while blocked")
+receiptScanGate.signal()
+pump { receiptReadCount == 2 }
+var scannerSaved: Bool?
+scanner.quiesce { scannerSaved = $0 }
+pump { scannerSaved != nil }
+var scannerStopped = false
+scanner.stop { scannerStopped = true }
+pump { scannerStopped }
+precondition(receiptReadCount == 2, "coalesced receipt refresh created unbounded rescans")
+print("PASS native receipt reader: one actual worker during stall, responsive main loop, 60 invalidations coalesce to one follow-up, orderly quit")

@@ -229,6 +229,9 @@ final class CyderInstanceCoordinator {
     var onRecoveryChanged: (([CyderRequestJournal.Record]) -> Void)?
     var onRequestCancelled: ((String) -> Void)?
     var executionEpoch: UUID { journal.executorEpoch }
+    private var executionReceiptInFlight = false
+    private var executionReceiptRefreshPending = false
+    private let beforeExecutionRead: () -> Void
     let sentinel: CyderSentinelServer
 
     init(support: URL = CyderPaths.support,
@@ -237,6 +240,7 @@ final class CyderInstanceCoordinator {
          startupDeadline: TimeInterval = 5, beforeElection: @escaping () -> Void = {},
          outboxDeadline: TimeInterval = 5, beforeOutboxRead: @escaping () -> Void = {},
          forwardDeadline: TimeInterval = 5, beforeForwardSave: @escaping () -> Void = {},
+         beforeExecutionRead: @escaping () -> Void = {},
          normalizeSettings: @escaping (Data) throws -> Data = { $0 }) {
         self.support = support
         self.startupDeadline = startupDeadline
@@ -245,6 +249,7 @@ final class CyderInstanceCoordinator {
         self.beforeOutboxRead = beforeOutboxRead
         self.forwardDeadline = forwardDeadline
         self.beforeForwardSave = beforeForwardSave
+        self.beforeExecutionRead = beforeExecutionRead
         path = support.appendingPathComponent(".requests-v1.sock").path
         journal = CyderRequestJournal(directory: support.appendingPathComponent("request-journal"),
             captureSettings: { try normalizeSettings(CyderAcceptedSettings.capture(at: support.appendingPathComponent("settings.json"))) })
@@ -305,6 +310,7 @@ final class CyderInstanceCoordinator {
                                         self.onRecoveryChanged?(records)
                                         finish(.primary)
                                         self.refreshOutbox(records: records)
+                                        self.refreshExecutionReceipts()
                                     } else {
                                         finish(.unavailable); self.releaseStartupResources()
                                     }
@@ -482,6 +488,7 @@ final class CyderInstanceCoordinator {
     func refreshRequests() {
         precondition(Thread.isMainThread)
         guard primary, !closing else { return }
+        refreshExecutionReceipts()
         journal.snapshot { [weak self] result in
             guard let self, case .success(let records) = result else { return }
             var latest = Dictionary(uniqueKeysWithValues: self.recovered.map { ($0.id, $0) })
@@ -490,6 +497,56 @@ final class CyderInstanceCoordinator {
             self.onRecoveryChanged?(self.recovered)
             self.refreshOutbox(records: records)
         }
+    }
+
+    /// One physical reader persists correlated native evidence before pruning.
+    /// It never resumes or completes a launch based on a Bash/native exit.
+    func refreshExecutionReceipts() {
+        precondition(Thread.isMainThread)
+        guard primary, !closing else { return }
+        guard !executionReceiptInFlight else { executionReceiptRefreshPending = true; return }
+        executionReceiptInFlight = true
+        let root = support.appendingPathComponent("execution-owners")
+        startup.async { [self] in
+            beforeExecutionRead()
+            let tickets = try? CyderExecutionOwner.snapshot(root: root)
+            DispatchQueue.main.async { [self] in
+                guard !closing, let tickets else { finishExecutionReceiptRead(); return }
+                let receipts = tickets.compactMap { ticket -> CyderRequestJournal.ExecutionReceipt? in
+                    guard let correlation = ticket.correlation else { return nil }
+                    return .init(ticketID: ticket.id, requestID: correlation.requestID,
+                        launchID: correlation.launchID, epoch: ticket.issuer, digest: correlation.digest,
+                        phase: ticket.phase, ownerPID: ticket.owner?.pid, ownerBoot: ticket.owner?.boot,
+                        ownerStarted: ticket.owner?.started, childPID: ticket.child?.pid,
+                        childBoot: ticket.child?.boot, childStarted: ticket.child?.started, status: ticket.status, signalled: ticket.signalled)
+                }
+                journal.reconcileExecutions(receipts) { [self] result in
+                    guard !closing, case .success(let confirmed) = result else { finishExecutionReceiptRead(); return }
+                    let ids = Set(confirmed)
+                    startup.async { [self] in
+                        try? CyderExecutionOwner.prune(root: root, confirmed: tickets.filter { ids.contains($0.id) })
+                        DispatchQueue.main.async { [self] in
+                            finishExecutionReceiptRead()
+                            guard !closing else { return }
+                            journal.snapshot { [weak self] result in
+                                guard let self, !self.closing, case .success(let records) = result else { return }
+                                var latest = Dictionary(uniqueKeysWithValues: self.recovered.map { ($0.id, $0) })
+                                for record in records where record.version >= (latest[record.id]?.version ?? 0) { latest[record.id] = record }
+                                self.recovered = Array(latest.values)
+                                self.onRecoveryChanged?(self.recovered)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private func finishExecutionReceiptRead() {
+        executionReceiptInFlight = false
+        let again = executionReceiptRefreshPending
+        executionReceiptRefreshPending = false
+        if again { refreshExecutionReceipts() }
     }
 
     /// Reconcile against a durable snapshot without submit, resume, or dispatch.

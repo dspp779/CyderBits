@@ -204,3 +204,46 @@ try FileManager.default.removeItem(at: settingsURL)
 try FileManager.default.createSymbolicLink(at: settingsURL, withDestinationURL: settingsRoot)
 do { _ = try capture(); fatalError("symlink must not become defaults") } catch {}
 print("PASS accepted settings: immutable ACK retry/batch/resume, uncertainty, terminal purge, legacy resume, invalid/missing/FIFO/symlink")
+
+// Correlated native evidence must survive recovery without claiming Windows
+// success. These identities are injected journal data, not live processes.
+let receiptRoot = root.appendingPathComponent("native-receipts")
+let receiptJournal = J(directory: receiptRoot, delivery: delivery)
+_ = value(wait { receiptJournal.open(completion: $0) })
+let receiptNamespace = wait { receiptJournal.namespace(completion: $0) }!
+let receiptID = J.makeID(namespace: receiptNamespace)
+_ = value(wait { receiptJournal.submit(id: receiptID, payload: payload, completion: $0) })
+let receiptDispatch = value(wait { receiptJournal.authorizeDispatch(id: receiptID, completion: $0) })
+let ticketID = UUID()
+func nativeReceipt(ticket: UUID = ticketID, id: String = receiptID, launch: String = receiptDispatch.launchID!,
+                   epoch: UUID = receiptDispatch.executorEpoch!, digest: String = payload.digest,
+                   phase: String = "finished", child: Int32 = 22002) -> J.ExecutionReceipt {
+    .init(ticketID: ticket, requestID: id, launchID: launch, epoch: epoch, digest: digest,
+          phase: phase, ownerPID: 22001, ownerBoot: "injected-boot", ownerStarted: 10,
+          childPID: child, childBoot: "injected-boot", childStarted: 11,
+          status: phase == "finished" ? 0 : nil, signalled: phase == "finished" ? false : nil)
+}
+let wrongReceipts = [nativeReceipt(id: J.makeID(namespace: receiptNamespace)),
+    nativeReceipt(launch: UUID().uuidString), nativeReceipt(epoch: UUID()), nativeReceipt(digest: emptyArguments.digest)]
+precondition(value(wait { receiptJournal.reconcileExecutions(wrongReceipts, completion: $0) }).isEmpty)
+precondition(value(wait { receiptJournal.query(id: receiptID, completion: $0) }).executionReceipt == nil)
+receiptJournal.inject(.beforeWrite)
+precondition(wait { receiptJournal.reconcileExecutions([nativeReceipt()], completion: $0) } == .failure(.unavailable))
+precondition(value(wait { receiptJournal.query(id: receiptID, completion: $0) }).executionReceipt == nil)
+receiptJournal.inject(.afterCommit)
+let lostReceiptACK = DispatchSemaphore(value: 0)
+receiptJournal.reconcileExecutions([nativeReceipt()]) { _ in lostReceiptACK.signal() }
+let storedReceipt = value(wait { receiptJournal.query(id: receiptID, completion: $0) })
+precondition(lostReceiptACK.wait(timeout: .now()) == .timedOut)
+precondition(storedReceipt.executionReceipt == nativeReceipt() && storedReceipt.phase == .dispatching)
+precondition(value(wait { receiptJournal.reconcileExecutions([nativeReceipt()], completion: $0) }) == [ticketID])
+precondition(value(wait { receiptJournal.reconcileExecutions([nativeReceipt(phase: "active"), nativeReceipt(ticket: UUID()), nativeReceipt(child: 22003)], completion: $0) }).isEmpty)
+precondition(value(wait { receiptJournal.query(id: receiptID, completion: $0) }).executionReceipt == nativeReceipt())
+closeJournal(receiptJournal)
+let receiptRecovery = J(directory: receiptRoot, delivery: delivery)
+let reopenedReceipts = value(wait { receiptRecovery.open(completion: $0) })
+precondition(reopenedReceipts.count == 1 && reopenedReceipts[0].phase == .uncertain && reopenedReceipts[0].executionReceipt == nativeReceipt())
+precondition(wait { receiptRecovery.authorizeDispatch(id: receiptID, completion: $0) } == .failure(.tooLate))
+precondition(wait { receiptRecovery.resume(id: receiptID, completion: $0) } == .failure(.tooLate))
+closeJournal(receiptRecovery)
+print("PASS native receipt journal: exact ID/digest/launch/epoch, durable ACK retry, stale/conflicting evidence refused, no Windows success or replay on recovery")

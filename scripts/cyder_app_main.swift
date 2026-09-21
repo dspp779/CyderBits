@@ -1863,6 +1863,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             args: args,
             stage: .wineSpawn,
             operation: operation,
+            authorization: authorization,
             extraEnvironment: wineLaunchEnvironment,
             lease: lease,
             operationScope: .prefix(prefix),
@@ -2468,6 +2469,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         args: [String],
         stage: CyderStage,
         operation: String,
+        authorization: CyderRequestJournal.Record? = nil,
         extraEnvironment: [String: String] = [:],
         lease: CyderOperationGate.Lease? = nil,
         operationScope: CyderOperationGate.Scope? = nil,
@@ -2566,7 +2568,14 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
                 let helper = Bundle.main.bundleURL.appendingPathComponent("Contents/MacOS/CyderSwift")
                 guard FileManager.default.isExecutableFile(atPath: helper.path) else { throw CyderExecutionOwner.Failure.unavailable }
                 let issuer = onMainThread { instanceCoordinator.executionEpoch }
-                let ticket = try CyderExecutionOwner.prepare(root: ownerRoot, issuer: issuer, scope: prefix)
+                let correlation: CyderExecutionOwner.Correlation?
+                if let authorization {
+                    guard let launchID = authorization.launchID, authorization.executorEpoch == issuer else {
+                        throw CyderExecutionOwner.Failure.revoked
+                    }
+                    correlation = .init(requestID: authorization.id, launchID: launchID, digest: authorization.digest)
+                } else { correlation = nil }
+                let ticket = try CyderExecutionOwner.prepare(root: ownerRoot, issuer: issuer, scope: prefix, correlation: correlation)
                 process.executableURL = helper
                 process.arguments = ["--execution-owner", ownerRoot.path, ticket.uuidString, "--", "/bin/bash"] + args
             } catch {
@@ -2615,7 +2624,10 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
                 if let acquired { gate.release(acquired) }
                 onRelease()
                 guard let self else { return }
-                DispatchQueue.main.async { self.activeProcessOperations -= 1 }
+                DispatchQueue.main.async {
+                    self.activeProcessOperations -= 1
+                    self.instanceCoordinator.refreshExecutionReceipts()
+                }
             })
         progressTimer?.cancel()
         progressTimer = nil

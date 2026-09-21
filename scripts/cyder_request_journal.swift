@@ -74,6 +74,22 @@ enum CyderAcceptedSettings {
 /// Its owner queue is exclusively for disk transactions, never LifecycleStore
 /// or AppKit. No transport handler may acknowledge before its callback.
 final class CyderRequestJournal {
+    struct ExecutionReceipt: Codable, Equatable {
+        let ticketID: UUID
+        let requestID: String
+        let launchID: String
+        let epoch: UUID
+        let digest: String
+        let phase: String
+        let ownerPID: Int32?
+        let ownerBoot: String?
+        let ownerStarted: UInt64?
+        let childPID: Int32?
+        let childBoot: String?
+        let childStarted: UInt64?
+        let status: Int32?
+        var signalled: Bool? = nil
+    }
     enum Phase: String, Codable {
         case queued, dispatching, observing, completed, failed, cancelled, uncertain, awaitingUserResume
     }
@@ -93,6 +109,7 @@ final class CyderRequestJournal {
         var children: [String]? = nil
         var displayName: String? = nil
         var settingsSnapshot: Data? = nil
+        var executionReceipt: ExecutionReceipt? = nil
     }
     struct Document: Codable {
         let schema: Int
@@ -340,6 +357,50 @@ final class CyderRequestJournal {
             record.version = current.version + 1
             current.records[id] = record
             return record
+        }
+    }
+
+    /// A native executor receipt proves only its own layer. Even a successful
+    /// Bash exit does not resolve an uncertain Windows launch or authorize retry.
+    func reconcileExecutions(_ receipts: [ExecutionReceipt], completion: @escaping (Result<[UUID], Failure>) -> Void) {
+        queue.async { [self] in
+            do {
+                guard !closing, available, var next = document else { throw Failure.unavailable }
+                guard receipts.count <= 512 else { throw Failure.full }
+                let ranks = ["prepared": 0, "active": 1, "uncertain": 2, "finished": 3, "revoked": 3]
+                var confirmed: [UUID] = []
+                for receipt in receipts {
+                    guard let rank = ranks[receipt.phase], var record = next.records[receipt.requestID],
+                          record.digest == receipt.digest, record.launchID == receipt.launchID,
+                          record.executorEpoch == receipt.epoch else { continue }
+                    if let old = record.executionReceipt {
+                        guard old.ticketID == receipt.ticketID,
+                              rank >= (ranks[old.phase] ?? 4),
+                              !(rank == 3 && ranks[old.phase] == 3 && old != receipt) else { continue }
+                        if old.ownerPID != nil {
+                            guard old.ownerPID == receipt.ownerPID, old.ownerBoot == receipt.ownerBoot,
+                                  old.ownerStarted == receipt.ownerStarted else { continue }
+                        }
+                        if old.childPID != nil {
+                            guard old.childPID == receipt.childPID, old.childBoot == receipt.childBoot,
+                                  old.childStarted == receipt.childStarted else { continue }
+                        }
+                    }
+                    if record.executionReceipt != receipt {
+                        record.executionReceipt = receipt
+                        record.version = next.version + 1
+                        next.records[record.id] = record
+                    }
+                    confirmed.append(receipt.ticketID)
+                }
+                if next.records != document!.records {
+                    next.version += 1
+                    try persist(next)
+                    document = next
+                }
+                if fault == .afterCommit { fault = .none; return }
+                delivery.async { completion(.success(confirmed)) }
+            } catch { let failure = error as? Failure ?? .unavailable; delivery.async { completion(.failure(failure)) } }
         }
     }
 

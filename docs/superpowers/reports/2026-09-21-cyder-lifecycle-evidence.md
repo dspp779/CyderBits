@@ -333,3 +333,16 @@ C8 只修復「握手前父程序自行逾時退出」造成的實際所有權�
 - universal macOS11 `build-C9-r2.log` 通過。隔離包 `/private/tmp/cyder-lifecycle-c9-build/Cyder.app` 配置 local.cyder.lifecycle-c9、CD2 support/runtime、ad-hoc 簽章並驗證；manifest `build-C9-source-sha256.json`。本輪啟動的是該包原生 helper，未啟動完整 GUI 或 Wine，以上是 L1–2 證據，不能宣稱 Wine／NGS 相容性。
 
 C9 尚未解決 detached Bash 返回後的 wrapper late-spawn 交接；helper 崩潰但子程序存活時安全保留 uncertain，尚無完整結果接回。票據也尚未直接攜帶 request／launch correlation，finished／revoked 安全回收尚待加入（目前滿 512 筆會拒絕新工作，不能無界成長）。這些限制、環境 waiter、精確 process/window action、其餘 UX／I/O 與 V01–V14 仍繼續實作，目標不標完成。
+
+## C10：原要求關聯回執與終態票據回收
+
+- 正式 launch 將原 request ID、payload digest、launch ID、executor epoch 帶入 executor 票據；格式有界驗證，派送世代不符時拒絕建立執行權。helper 實際執行及結束時保留這些識別，另保存 exit／signal 區別。argv／environment 仍不進 ledger。
+- primary 啟動後、要求刷新及 native operation 實際返回時，背景核對 executor 票據。journal 僅接受四項識別全相符且 ticket ID 一致的回執；舊階段、替換的 owner／child 出生身分與互相矛盾的終態不覆寫已保存證據。一次批次原子持久提交後才回確認，ACK 遺失可重試。這只是 native executor／Bash 層證據，不改 dispatch／uncertain 為 Windows 啟動成功，也不授權 resume／重播。
+- 回執核對同時最多一個 physical worker，磁碟工作不進 main。執行期間多次刷新合併成至多一個待辦位，實際完成後再讀，避免較早快照漏掉同時返回的新結果；卡住時不增加 worker，quit 後不補送 journal 工作或更新畫面。無需等待這個額外核對才顯示 primary UI。
+- executor 容量仍為 512 筆。達到 128 筆時 prepare 可回收無 request 關聯的 finished／revoked，只保留 32 筆此類診斷票據（依檔名排序，不稱最新）。有關聯者須先寫入正式 journal 且取得 exact snapshot ACK，才能回收。每筆删除前取得 owner lock、重讀全票據等值，只刪 terminal；active／prepared／uncertain、未知或衝突關聯都保留。不刪 journal 的 request 去重紀錄，其原容量與拒絕策略不變。舊 helper 必须重讀票據，已回收 ID 不會重新建立權限。
+- `journal-C10.log` 通過：注入錯誤 request／digest／launch／epoch、before-write failure、after-commit ACK 遺失、舊 active／換 ticket／換 child 回執；原回執持久保留、重開仍 uncertain，authorize／resume 均拒絕。這些 process 數值是明確注入的 journal 證據，不是真實 Wine PID。
+- `instance-C10-r2.log` 通過：無 primary 期間注入的 finished 回執在重開後接回原要求，持久保存後才刪 executor 副本，無 launch 重播／成功誤判；新增受控 reader stall，60 次刷新只有一個 physical reader，main event loop 仍前進，放行後只追加一輪且正常退出。既有 election／startup deadline／corrupt history 斷言全保留。
+- `execution-owner-C10.log` 通過原生 helper 與 512 筆 injected terminal retention 測試。最新 fixture 增加真正 native helper 的 correlation／termination reason 斷言，並使用完整建置的 CyderSwift helper 入口重跑，`execution-owner-C10-app.log`／artifacts 通過。exact ACK 前後、stale ACK、uncertain 保留及已回收票據晚到拒絕均通過；log 的 unavailable 是刻意執行已回收票據的預期拒絕。此次沒有新增失敗輪次。`outbox-C10.log`、`request-ui-C10.log` 回歸通過。
+- universal macOS11 build 最新 `build-C10-r2.log` 通過；隔離包 `/private/tmp/cyder-lifecycle-c10-build/Cyder.app` 配置 local.cyder.lifecycle-c10、CD2 support/runtime、ad-hoc 簽章並驗證；manifest `build-C10-source-sha256.json`。本輪只啟動正式包的原生 helper，不是 GUI／Wine／NGS 相容性驗收。
+
+C10 補齊 executor 與原要求的可核對關聯及安全終態回收；它仍不能把 Bash 返回當作 Windows 已 exec。detached wrapper 的 late-spawn／最終執行權交接、helper 崩潰後的同 boot uncertainty 收斂、環境 waiter、精確 process/window action、剩餘 UX／I/O 與完整 V01–V14 矩陣繼續處理，目標保持進行中。
