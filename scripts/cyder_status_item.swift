@@ -14,7 +14,9 @@ final class CyderStatusItemController: NSObject, NSMenuDelegate {
 
     private struct Session {
         let id: String
-        var pid: Int32
+        var root: CyderLifecycle.ProcessID?
+        let authority: CyderLaunchObserver.Authority?
+        var nativeRoot: CyderLaunchObserver.NativeRoot? = nil
         let prefix: URL
         let rootDisplayName: String
         let fromSentinel: Bool
@@ -25,10 +27,11 @@ final class CyderStatusItemController: NSObject, NSMenuDelegate {
         var leftoverNames: [String] = []
         var isStopping = false
         var helperConnected: Bool
-        var adoptedPIDs: Set<Int32>
-        var foregroundPIDs: Set<Int32> = []
+        var adoptedPIDs: Set<CyderLifecycle.ProcessID>
+        var foregroundPIDs: Set<CyderLifecycle.ProcessID> = []
     }
 
+    var onWindowConfirmed: ((String) -> Void)?
     var onOpenPreferences: (() -> Void)?
     var onOpenGameLibrary: (() -> Void)?
     var onOpenTaskManager: ((URL) -> Void)?
@@ -43,6 +46,7 @@ final class CyderStatusItemController: NSObject, NSMenuDelegate {
     let lifecycleEpoch = UUID()
 
     private var sessions: [String: Session] = [:]
+    private var exitedProcesses: Set<CyderLifecycle.ProcessID> = []
     private var isQuiescing = false
     private var pendingEnvironmentAttachments = 0
     private var claimTokens: [String: UUID] = [:]
@@ -87,6 +91,7 @@ final class CyderStatusItemController: NSObject, NSMenuDelegate {
         completions.forEach { $0() }
         processQueue.async { [weak self] in
             guard let self else { return }
+            self.processQuiescing = true
             for source in self.processSources.values { source.cancel() }
             self.processSources.removeAll()
         }
@@ -145,8 +150,10 @@ final class CyderStatusItemController: NSObject, NSMenuDelegate {
         guard !hasLifecycleSnapshot || (snapshot.epoch == latestLifecycle.epoch && snapshot.revision > latestLifecycle.revision) else { return }
         hasLifecycleSnapshot = true
         latestLifecycle = snapshot
-        let endedPrefixes = Set(snapshot.environments.values.filter { $0.existence == .exited }.map(\.prefix))
-        let ended = sessions.values.filter { endedPrefixes.contains(environmentPrefixes[$0.prefix.path] ?? $0.prefix.path) }.map(\.id)
+        let endedScopes = Set(snapshot.environments.values.filter { $0.existence == .exited }.map {
+            "\($0.id.uid):\(Int64(bitPattern: $0.id.device)):\($0.id.inode)"
+        })
+        let ended = sessions.values.filter { $0.nativeRoot?.prefixScope.map { endedScopes.contains($0) } == true }.map(\.id)
         for id in ended { endLaunch(id: id) }
         if snapshot.keepStatusItem && !isQuiescing { installStatusItemIfNeeded() }
         refresh()
@@ -172,11 +179,13 @@ final class CyderStatusItemController: NSObject, NSMenuDelegate {
     private var animationFrame = 0
     private var uiVisible = false
     private var menuIsOpen = false
-    private var processSources: [Int32: DispatchSourceProcess] = [:]
+    private var processSources: [CyderLifecycle.ProcessID: DispatchSourceProcess] = [:]
+    private var processQuiescing = false // processQueue only
     private let processQueue = DispatchQueue(label: "local.cyder.status-proc")
     private let observationQueue = DispatchQueue(label: "local.cyder.status-observation", qos: .utility)
 
-    var hasActiveSessions: Bool { !sessions.isEmpty } // presentation only; never an app exit policy
+    private var visibleSessions: [Session] { sessions.values.filter { !$0.activated || !$0.adoptedPIDs.isEmpty } }
+    var hasActiveSessions: Bool { !visibleSessions.isEmpty } // presentation only; never an app exit policy
 
     /// Keep the menu-bar item available while a Cyder-owned window is open,
     /// even when no Wine process is currently being monitored.
@@ -206,51 +215,44 @@ final class CyderStatusItemController: NSObject, NSMenuDelegate {
 
     func adoptWindowedProcess(pid: Int32, prefix: String, name: String?) {
         precondition(Thread.isMainThread)
-        guard pid > 0 else { return }
+        guard !isQuiescing, pid > 0, claimInFlight < 2 else { return }
         let target = (prefix as NSString).standardizingPath
-        let key: String?
-        if let existing = sessions.first(where: { $0.value.adoptedPIDs.contains(pid) })?.key {
-            key = existing
-        } else {
-            // Snapshot ownership on main, but query the OS away from AppKit.
-            let candidates = sessions.filter { $0.value.prefix.path == target }
-                .map { (id: $0.key, pids: $0.value.adoptedPIDs) }
-            observationQueue.async { [weak self] in
-                let owner = candidates.first { candidate in
-                    candidate.pids.contains { wineProcessTreeIDs(root: $0).contains(pid) }
-                }
-                guard let owner else { return }
-                DispatchQueue.main.async {
-                    guard let self,
-                          let current = self.sessions[owner.id],
-                          !current.adoptedPIDs.isDisjoint(with: owner.pids),
-                          self.sessionVersions[owner.id] != nil else { return }
-                    self.adoptWindow(id: owner.id, pid: pid, name: name)
+        let candidates = sessions.filter { target.isEmpty || $0.value.prefix.path == target }.map {
+            (id: $0.key, version: sessionVersions[$0.key], roots: roots(for: $0.value))
+        }
+        claimInFlight += 1
+        observationQueue.async { [weak self] in
+            var owners: [(String, UUID?, CyderLifecycle.ProcessID)] = []
+            if case .live(let target) = CyderProcessEvidence.inspect(pid),
+               wineOnscreenWindows(ownedBy: [pid]).contains(where: { $0.pid == pid }) {
+                for candidate in candidates where CyderProcessEvidence.tree(roots: candidate.roots).contains(target.id) {
+                    if CyderProcessEvidence.live(target.id) { owners.append((candidate.id, candidate.version, target.id)) }
                 }
             }
-            key = nil
+            let confirmed = owners
+            DispatchQueue.main.async {
+                guard let self else { return }; self.claimInFlight -= 1
+                guard !self.isQuiescing, confirmed.count == 1, let owner = confirmed.first,
+                      self.sessionVersions[owner.0] == owner.1 else { return }
+                self.adoptWindow(id: owner.0, process: owner.2, name: name)
+            }
         }
-        guard let key else { return }
-        adoptWindow(id: key, pid: pid, name: name)
     }
 
-    private func adoptWindow(id: String, pid: Int32, name: String?) {
-        guard var session = sessions[id] else { return }
-        session.adoptedPIDs.insert(pid)
-        session.foregroundPIDs.insert(pid)
+    private func roots(for session: Session) -> Set<CyderLifecycle.ProcessID> {
+        var roots = session.adoptedPIDs
+        if let root = session.root { roots.insert(root) }
+        return roots
+    }
+    private func adoptWindow(id: String, process: CyderLifecycle.ProcessID, name: String?) {
+        guard !isQuiescing, !exitedProcesses.contains(process), var session = sessions[id] else { return }
+        session.adoptedPIDs.insert(process)
+        session.foregroundPIDs.insert(process)
         applyWindowedHandoff(&session, preferredName: name)
         sessions[id] = session
-        watchPID(pid)
+        watchProcess(process)
         refresh()
-    }
-
-    func markActivated(pid: Int32) {
-        guard let key = sessions.first(where: { $0.value.pid == pid || $0.value.adoptedPIDs.contains(pid) })?.key,
-              var session = sessions[key] else { return }
-        session.activated = true
-        session.hasForeground = true
-        sessions[key] = session
-        refresh()
+        onWindowConfirmed?(id)
     }
 
     func markActivated(id: String) {
@@ -273,7 +275,7 @@ final class CyderStatusItemController: NSObject, NSMenuDelegate {
             session.activated = true
             self.sessions[id] = session
             let retained = !session.adoptedPIDs.isEmpty || session.hasForeground
-            if retained { self.refresh() } else { self.endLaunch(id: id) }
+            if retained || session.nativeRoot != nil { self.refresh() } else { self.endLaunch(id: id) }
             completion(retained)
         }
     }
@@ -307,9 +309,7 @@ final class CyderStatusItemController: NSObject, NSMenuDelegate {
         claimTokens[id] = token
         claimCompletions[id] = completion
         claimInFlight += 1
-        var roots = session.adoptedPIDs
-        if session.pid > 0 { roots.insert(session.pid) }
-        let capturedRoots = roots
+        let capturedRoots = roots(for: session)
         // Timeout completes observation only. The actual worker still occupies
         // its slot until the OS call returns; retries cannot grow blocked work.
         DispatchQueue.main.asyncAfter(deadline: .now() + 5) { [weak self] in
@@ -318,38 +318,25 @@ final class CyderStatusItemController: NSObject, NSMenuDelegate {
             self.claimCompletions.removeValue(forKey: id)?()
         }
         observationQueue.async { [weak self] in
-            var expanded = capturedRoots
-            for pid in capturedRoots { expanded.formUnion(wineProcessTreeIDs(root: pid)) }
-            // Prefix is not launch ownership evidence. Observe only the proven tree.
-            let windows = wineOnscreenWindows(ownedBy: expanded)
-            let live = expanded.filter { kill($0, 0) == 0 || errno == EPERM }
+            let expanded = CyderProcessEvidence.tree(roots: capturedRoots)
+            let windows = wineOnscreenWindows(ownedBy: Set(expanded.map(\.pid)))
+            let live = Set(expanded.filter { CyderProcessEvidence.live($0) })
             DispatchQueue.main.async {
                 guard let self else { return }
                 self.claimInFlight -= 1
                 guard self.claimTokens[id] == token else { return }
                 self.claimTokens.removeValue(forKey: id)
                 defer { self.claimCompletions.removeValue(forKey: id)?() }
-                guard self.sessionVersions[id] == sessionVersion, var updated = self.sessions[id] else { return }
+                guard !self.isQuiescing, self.sessionVersions[id] == sessionVersion, var updated = self.sessions[id] else { return }
+                let live = live.subtracting(self.exitedProcesses)
                 updated.adoptedPIDs.formUnion(live)
                 self.sessions[id] = updated
-                for pid in live { self.watchPID(pid) }
-                for window in windows where live.contains(window.pid) {
-                    self.adoptWindow(id: id, pid: window.pid, name: window.ownerName)
+                for process in live { self.watchProcess(process) }
+                for window in windows {
+                    guard let process = live.first(where: { $0.pid == window.pid }) else { continue }
+                    self.adoptWindow(id: id, process: process, name: window.ownerName)
                 }
             }
-        }
-    }
-
-    func cancelMonitoring(pid: Int32, notifyWhenEmpty: Bool = true) {
-        guard let key = sessions.first(where: { $0.value.pid == pid })?.key,
-              sessions.removeValue(forKey: key) != nil else { return }
-        refresh()
-        if notifyWhenEmpty {
-            finishIfEmpty(hadSessions: true)
-        } else if sessions.isEmpty {
-            animationTimer?.invalidate()
-            animationTimer = nil
-            removeStatusItemIfUnused()
         }
     }
 
@@ -381,45 +368,29 @@ final class CyderStatusItemController: NSObject, NSMenuDelegate {
         finishIfEmpty(hadSessions: !removed.isEmpty)
     }
 
-    func beginLaunch(id: String, prefix: URL, executableName: String, pid: Int32) {
+    func beginLaunch(id: String, prefix: URL, executableName: String, authority: CyderLaunchObserver.Authority? = nil) {
         precondition(Thread.isMainThread)
         guard !isQuiescing else { return }
         sessionVersions[id] = UUID()
         launchIngressPending = false
         let name = executableName.trimmingCharacters(in: .whitespacesAndNewlines)
         let display = name.isEmpty ? "Wine" : name
-        sessions[id] = Session(
-            id: id,
-            pid: pid,
-            prefix: prefix.standardizedFileURL,
-            rootDisplayName: display,
-            fromSentinel: true,
-            displayName: display,
-            helperConnected: false,
-            adoptedPIDs: pid > 0 ? [pid] : []
-        )
-        if pid > 0 { monitorEnvironment(prefix: prefix) }
+        sessions[id] = Session(id: id, root: nil, authority: authority, prefix: prefix.standardizedFileURL,
+            rootDisplayName: display, fromSentinel: true, displayName: display,
+            helperConnected: false, adoptedPIDs: [])
         installStatusItemIfNeeded()
-        watchPID(pid)
         refresh()
     }
 
-    func updateLaunch(id: String, pid: Int32, holders: [CyderSentinelHolder]) {
-        precondition(Thread.isMainThread)
-        guard var session = sessions[id] else { return }
-        _ = holders
-        if pid > 0 {
-            session.pid = pid
-            session.adoptedPIDs.insert(pid)
-            sessions[id] = session
-            watchPID(pid)
-            refresh()
-        }
-    }
-
+    /// Workspace termination is an invalidation hint, not authority to remove
+    /// whichever process happens to own the same numeric PID now.
     func noteProcessExited(_ pid: Int32) {
         precondition(Thread.isMainThread)
-        handleProcessExit(pid)
+        let captured = Set(sessions.values.flatMap { roots(for: $0) }).filter { $0.pid == pid }
+        processQueue.async { [weak self] in
+            let ended = captured.filter { CyderProcessEvidence.hasEnded($0) }
+            DispatchQueue.main.async { ended.forEach { self?.handleProcessExit($0) } }
+        }
     }
 
     func noteHelperDisconnected(id: String) {
@@ -441,39 +412,31 @@ final class CyderStatusItemController: NSObject, NSMenuDelegate {
         finishIfEmpty(hadSessions: true)
     }
 
-    func attachRootPID(id: String, pid: Int32) {
+    func attachNativeRoot(_ receipt: CyderLaunchObserver.NativeRoot) {
         precondition(Thread.isMainThread)
-        guard pid > 0, var session = sessions[id] else { return }
-        session.pid = pid
-        session.adoptedPIDs.insert(pid)
+        let id = receipt.authority.launch
+        guard !isQuiescing, var session = sessions[id], session.authority == receipt.authority,
+              receipt.pid > 0, receipt.started > 0, !receipt.boot.isEmpty, receipt.prefixScope != nil,
+              ["spawned", "exited"].contains(receipt.phase) else { return }
+        if receipt.phase == "exited" {
+            guard let status = receipt.status, (0...255).contains(status), let signalled = receipt.signalled,
+                  !signalled || (1...127).contains(status) else { return }
+        }
+        if let previous = session.nativeRoot {
+            guard previous.ticket == receipt.ticket, previous.pid == receipt.pid, previous.boot == receipt.boot,
+                  previous.started == receipt.started, previous.prefixScope == receipt.prefixScope,
+                  previous.phase != "exited" || previous == receipt else { return }
+            if previous == receipt { return }
+        }
+        let process = CyderLifecycle.ProcessID(boot: receipt.boot, pid: receipt.pid, started: receipt.started)
+        session.nativeRoot = receipt
+        session.root = receipt.phase == "spawned" ? process : nil
         sessions[id] = session
-        monitorEnvironment(prefix: session.prefix)
-        watchPID(pid)
-        claimLiveWindows(id: id)
+        if receipt.phase == "exited" { handleProcessExit(process) }
+        else { watchProcess(process); claimLiveWindows(id: id) }
         refresh()
     }
-
-    func beginMonitoring(pid: Int32, prefix: URL, executablePath: String, lifecycleURL: URL) {
-        precondition(Thread.isMainThread)
-        guard pid > 0 else { return }
-        _ = lifecycleURL
-        let name = URL(fileURLWithPath: executablePath).deletingPathExtension().lastPathComponent
-        let id = "pid:\(pid)"
-        sessions[id] = Session(
-            id: id,
-            pid: pid,
-            prefix: prefix.standardizedFileURL,
-            rootDisplayName: name,
-            fromSentinel: false,
-            displayName: name,
-            helperConnected: false,
-            adoptedPIDs: [pid]
-        )
-        if pid > 0 { monitorEnvironment(prefix: prefix) }
-        installStatusItemIfNeeded()
-        watchPID(pid)
-        refresh()
-    }
+    func nativeRootPID(id: String) -> Int32 { sessions[id]?.nativeRoot?.pid ?? 0 }
 
     func isMonitoring(prefix: String) -> Bool {
         precondition(Thread.isMainThread)
@@ -482,123 +445,79 @@ final class CyderStatusItemController: NSObject, NSMenuDelegate {
     }
 
     private func cancelOrphanedProcessSources(removed session: Session) {
-        var removedPIDs = session.adoptedPIDs
-        if session.pid > 0 {
-            removedPIDs.insert(session.pid)
-        }
-        removedPIDs.formUnion(session.foregroundPIDs)
-        let stillWatched = Set(sessions.values.flatMap { other -> [Int32] in
-            var ids = Array(other.adoptedPIDs)
-            if other.pid > 0 { ids.append(other.pid) }
-            ids.append(contentsOf: other.foregroundPIDs)
-            return ids
-        })
-        let orphaned = removedPIDs.subtracting(stillWatched)
-        guard !orphaned.isEmpty else { return }
+        let removed = roots(for: session).union(session.foregroundPIDs)
+        let stillWatched = Set(sessions.values.flatMap { roots(for: $0).union($0.foregroundPIDs) })
+        let orphaned = removed.subtracting(stillWatched)
         processQueue.async { [weak self] in
             guard let self else { return }
-            for pid in orphaned {
-                self.processSources.removeValue(forKey: pid)?.cancel()
-            }
+            for process in orphaned { self.processSources.removeValue(forKey: process)?.cancel() }
         }
     }
 
-    private func watchPID(_ pid: Int32) {
-        guard pid > 0 else { return }
-        processQueue.async { [weak self] in
-            self?.watchPIDOnQueue(pid)
-        }
+    private func watchProcess(_ process: CyderLifecycle.ProcessID) {
+        processQueue.async { [weak self] in self?.watchProcessOnQueue(process) }
     }
-
-    private func watchPIDOnQueue(_ pid: Int32) {
-        guard processSources[pid] == nil else { return }
-        if kill(pid, 0) != 0 && errno == ESRCH {
-            DispatchQueue.main.async { [weak self] in
-                self?.handleProcessExit(pid)
+    private func watchProcessOnQueue(_ process: CyderLifecycle.ProcessID, discover: Bool = true) {
+        guard !processQuiescing, processSources[process] == nil, processSources.count < 1024 else { return }
+        guard CyderProcessEvidence.live(process) else {
+            if CyderProcessEvidence.hasEnded(process) {
+                DispatchQueue.main.async { [weak self] in self?.handleProcessExit(process) }
             }
             return
         }
-        let source = DispatchSource.makeProcessSource(
-            identifier: pid,
-            eventMask: [.exit, .fork, .exec],
-            queue: processQueue
-        )
+        let source = DispatchSource.makeProcessSource(identifier: process.pid, eventMask: [.exit, .fork, .exec], queue: processQueue)
         source.setEventHandler { [weak self, weak source] in
-            guard let self, let source else { return }
+            guard let self, let source, self.processSources[process] === source else { return }
             let events = source.data
-            if events.contains(.fork) || events.contains(.exec) {
-                let children = wineProcessTreeIDs(root: pid)
-                for child in children {
-                    self.watchPIDOnQueue(child)
-                }
-                DispatchQueue.main.async {
-                    self.handleProcessSpawn(root: pid, children: children)
-                }
-            }
+            if events.contains(.fork) || events.contains(.exec) { self.discoverChildren(process) }
             if events.contains(.exit) {
-                source.cancel()
-                self.processSources.removeValue(forKey: pid)
-                DispatchQueue.main.async {
-                    self.handleProcessExit(pid)
-                }
+                source.cancel(); self.processSources.removeValue(forKey: process)
+                DispatchQueue.main.async { self.handleProcessExit(process) }
             }
         }
-        processSources[pid] = source
-        source.resume()
-        let existing = wineProcessTreeIDs(root: pid)
-        for child in existing where child != pid {
-            watchPIDOnQueue(child)
+        processSources[process] = source; source.resume()
+        guard CyderProcessEvidence.live(process) else {
+            processSources.removeValue(forKey: process)?.cancel()
+            if CyderProcessEvidence.hasEnded(process) {
+                DispatchQueue.main.async { [weak self] in self?.handleProcessExit(process) }
+            }
+            return
         }
-        DispatchQueue.main.async { [weak self] in
-            self?.handleProcessSpawn(root: pid, children: existing)
-        }
+        if discover { discoverChildren(process) }
     }
-
-    private func handleProcessSpawn(root: Int32, children: Set<Int32>) {
+    private func discoverChildren(_ root: CyderLifecycle.ProcessID) {
+        guard !processQuiescing else { return }
+        let children = CyderProcessEvidence.tree(roots: [root])
+        for child in children where child != root { watchProcessOnQueue(child, discover: false) }
+        DispatchQueue.main.async { [weak self] in self?.handleProcessSpawn(root: root, children: children) }
+    }
+    private func handleProcessSpawn(root: CyderLifecycle.ProcessID, children: Set<CyderLifecycle.ProcessID>) {
         precondition(Thread.isMainThread)
-        var changed = false
-        var probePIDs = Set<Int32>()
-        var probePrefix = ""
+        guard !isQuiescing else { return }
         for (key, var session) in sessions {
-            let related = session.adoptedPIDs.contains(root)
-                || !session.adoptedPIDs.isDisjoint(with: children)
-            guard related else { continue }
-            session.adoptedPIDs.insert(root)
-            session.adoptedPIDs.formUnion(children)
+            let receipt = session.nativeRoot
+            let recordedRoot = receipt?.pid == root.pid && receipt?.boot == root.boot && receipt?.started == root.started
+            guard roots(for: session).contains(root) || recordedRoot else { continue }
+            session.adoptedPIDs.formUnion(children.subtracting(exitedProcesses))
             sessions[key] = session
-            probePIDs = session.adoptedPIDs
-            probePrefix = session.prefix.path
-            changed = true
+            claimLiveWindows(id: key)
         }
-        if changed {
-            refresh()
-            probeWindows(ownedBy: probePIDs, prefix: probePrefix)
-        }
+        refresh()
     }
-
-    private func handleProcessExit(_ pid: Int32) {
+    private func handleProcessExit(_ process: CyderLifecycle.ProcessID) {
         precondition(Thread.isMainThread)
-        let affected = sessions.filter { $0.value.adoptedPIDs.contains(pid) || $0.value.pid == pid }
-        for (id, _) in affected {
-            guard var session = sessions[id] else { continue }
-            session.adoptedPIDs.remove(pid)
-            if session.pid == pid { session.pid = 0 }
-            session.foregroundPIDs.remove(pid)
-            let live = session.adoptedPIDs
-            session.adoptedPIDs = live
-            session.foregroundPIDs = session.foregroundPIDs.intersection(live)
-            if !session.foregroundPIDs.isEmpty {
-                sessions[id] = session
-            } else if !live.isEmpty {
-                session.hasForeground = false
-                session.leftoverNames = leftoverNames(for: session)
-                sessions[id] = session
-            } else {
-                session.hasForeground = false
-                session.leftoverNames = []
-                sessions[id] = session
-                finishSessionIfIdle(id)
-            }
+        guard !isQuiescing else { return }
+        exitedProcesses.insert(process)
+        processQueue.async { [weak self] in self?.processSources.removeValue(forKey: process)?.cancel() }
+        let affected = sessions.filter { roots(for: $0.value).contains(process) || $0.value.foregroundPIDs.contains(process) }
+        for (id, var session) in affected {
+            session.adoptedPIDs.remove(process)
+            if session.root == process { session.root = nil }
+            session.foregroundPIDs.remove(process)
+            session.hasForeground = !session.foregroundPIDs.isEmpty
+            if session.adoptedPIDs.isEmpty { session.leftoverNames = [] }
+            sessions[id] = session
+            if !session.hasForeground { finishSessionIfIdle(id) }
         }
         if !affected.isEmpty { refresh() }
     }
@@ -626,24 +545,10 @@ final class CyderStatusItemController: NSObject, NSMenuDelegate {
             refresh()
             return
         }
-        endLaunch(id: id)
-    }
-
-    private func probeWindows(ownedBy pids: Set<Int32>, prefix: String) {
-        guard !pids.isEmpty, !prefix.isEmpty else { return }
-        DispatchQueue.global(qos: .utility).async { [weak self] in
-            let windows = wineOnscreenWindows(ownedBy: pids)
-            guard !windows.isEmpty else { return }
-            DispatchQueue.main.async {
-                for window in windows {
-                    self?.adoptWindowedProcess(
-                        pid: window.pid,
-                        prefix: prefix,
-                        name: window.ownerName
-                    )
-                }
-            }
-        }
+        // Keep immutable root provenance for a child snapshot already in
+        // flight. An empty completed group is hidden; environment exit retires it.
+        sessions[id] = session
+        refresh()
     }
 
     private func installStatusItemIfNeeded() {
@@ -720,7 +625,7 @@ final class CyderStatusItemController: NSObject, NSMenuDelegate {
     private func rebuild(_ menu: NSMenu) {
         menuMutationCount += 1
         menu.removeAllItems()
-        let ordered = sessions.values.sorted { $0.displayName.localizedStandardCompare($1.displayName) == .orderedAscending }
+        let ordered = visibleSessions.sorted { $0.displayName.localizedStandardCompare($1.displayName) == .orderedAscending }
         for session in ordered {
             let state: String
             if session.isStopping {
@@ -732,7 +637,7 @@ final class CyderStatusItemController: NSObject, NSMenuDelegate {
             } else if let leftover = session.leftoverNames.first {
                 state = "背景執行：\(leftover)"
             } else {
-                state = "背景執行"
+                state = "執行中；尚未確認視窗"
             }
             let item = NSMenuItem(title: "\(session.displayName) — \(state)", action: nil, keyEquivalent: "")
             item.isEnabled = false
@@ -788,8 +693,7 @@ final class CyderStatusItemController: NSObject, NSMenuDelegate {
 
     private var currentVisualState: VisualState {
         if latestLifecycle.environments.values.contains(where: { $0.stop == .executing }) { return .stopping }
-        if sessions.values.contains(where: { !$0.activated && !$0.hasForeground }) { return .starting }
-        if sessions.values.contains(where: { $0.activated && !$0.hasForeground }) { return .background }
+        if visibleSessions.contains(where: { !$0.activated && !$0.hasForeground }) { return .starting }
         return .running
     }
 
@@ -837,10 +741,11 @@ final class CyderStatusItemController: NSObject, NSMenuDelegate {
         switch state {
         case .starting: return "Cyder 正在啟動 Windows 環境"
         case .running:
-            if sessions.count == 1, let name = sessions.values.first?.displayName {
+            let visible = visibleSessions
+            if visible.count == 1, let name = visible.first?.displayName {
                 return "\(name) 執行中"
             }
-            return "\(sessions.count) 個程式執行中"
+            return visible.isEmpty ? (latestLifecycle.hasEnvironment ? "Windows 環境狀態" : "Cyder") : "\(visible.count) 個程式執行中"
         case .background: return "Windows 環境仍在執行"
         case .stopping: return "Cyder 正在結束 Windows 程序"
         case .attention: return "Cyder 無法確認背景程序已結束"

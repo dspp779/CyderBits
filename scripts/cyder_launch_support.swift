@@ -166,11 +166,9 @@ func wineHandoffOnscreenWindows(since start: Date) -> [CyderOnscreenWindow] {
 
 func wineOnscreenWindows(ownedBy pids: Set<Int32>) -> [CyderOnscreenWindow] {
     guard !pids.isEmpty else { return [] }
-    var owners = pids
-    for pid in pids where pid > 0 {
-        owners.formUnion(wineProcessTreeIDs(root: pid))
-    }
-    return cyderOnscreenWindows().filter { owners.contains($0.pid) }
+    // Callers supply an already-verified ownership set. Do not expand numeric
+    // PIDs here after the caller has validated their process births.
+    return cyderOnscreenWindows().filter { pids.contains($0.pid) }
 }
 
 /// Onscreen Wine windows that belong to this bottle. Used after a launcher
@@ -351,12 +349,11 @@ func wineProcessTreeIDs(root: Int32) -> Set<Int32> {
     while let pid = pending.popLast() {
         if !seen.insert(pid).inserted { continue }
         var children = [pid_t](repeating: 0, count: 256)
-        let bytes = children.withUnsafeMutableBufferPointer { buffer in
+        let count = children.withUnsafeMutableBufferPointer { buffer in
             proc_listchildpids(pid, buffer.baseAddress, Int32(buffer.count * MemoryLayout<pid_t>.stride))
         }
-        guard bytes > 0 else { continue }
-        let count = Int(bytes) / MemoryLayout<pid_t>.stride
-        for child in children.prefix(max(0, count)) where child > 0 {
+        guard count > 0 else { continue }
+        for child in children.prefix(min(children.count, Int(count))) where child > 0 {
             pending.append(child)
         }
     }

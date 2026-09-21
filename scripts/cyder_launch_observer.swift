@@ -3,10 +3,11 @@ import Darwin
 
 final class WineActivationWaiter {
     let prefix: String
+    let launchID: String?
     private let lock = NSLock()
     private var activated = false
     private var handler: (() -> Void)?
-    init(prefix: String) { self.prefix = (prefix as NSString).standardizingPath }
+    init(prefix: String, launchID: String? = nil) { self.prefix = (prefix as NSString).standardizingPath; self.launchID = launchID }
     func signal() {
         lock.lock(); activated = true; let callback = handler; lock.unlock()
         callback?()

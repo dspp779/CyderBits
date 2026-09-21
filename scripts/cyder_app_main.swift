@@ -112,14 +112,14 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         coordinator.onRecoveryChanged = { [weak self] records in
             guard let self, !self.quitTransaction else { return }
             self.requestRecords = records
-            if let observer = self.wineLaunchObserver {
-                for record in records {
-                    guard let receipt = record.executionReceipt, let root = receipt.nativeSpawn,
-                          let pid = root.processPID, let boot = root.processBoot, let started = root.processStarted else { continue }
-                    observer.receive(.init(authority: .init(request: receipt.requestID, launch: receipt.launchID,
-                        digest: receipt.digest, epoch: receipt.epoch), ticket: receipt.ticketID, phase: root.phase,
-                        pid: pid, boot: boot, started: started, status: root.status, signalled: root.signalled, prefixScope: receipt.prefixScope))
-                }
+            for record in records {
+                guard let receipt = record.executionReceipt, let root = receipt.nativeSpawn,
+                      let pid = root.processPID, let boot = root.processBoot, let started = root.processStarted else { continue }
+                let proof = CyderLaunchObserver.NativeRoot(authority: .init(request: receipt.requestID, launch: receipt.launchID,
+                    digest: receipt.digest, epoch: receipt.epoch), ticket: receipt.ticketID, phase: root.phase,
+                    pid: pid, boot: boot, started: started, status: root.status, signalled: root.signalled, prefixScope: receipt.prefixScope)
+                self.statusItemController.attachNativeRoot(proof)
+                self.wineLaunchObserver?.receive(proof)
             }
             self.existingLibraryController?.updateRequestSummary(CyderRequestRow.summary(records, outbox: self.outboxNotices))
             self.existingRequestController?.update(records, outbox: self.outboxNotices)
@@ -156,6 +156,11 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
     )
     private lazy var statusItemController: CyderStatusItemController = {
         let controller = CyderStatusItemController()
+        controller.onWindowConfirmed = { [weak self] launchID in
+            guard let self, !self.quitTransaction, let waiter = self.wineActivationWaiter,
+                  waiter.launchID == launchID else { return }
+            waiter.signal()
+        }
         controller.onOpenPreferences = { [weak self] in self?.showSettings() }
         controller.onOpenGameLibrary = { [weak self] in self?.showGameLibrary() }
         controller.onOpenTaskManager = { [weak self] prefix in
@@ -1728,11 +1733,13 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         lease: CyderOperationGate.Lease? = nil,
         launchTarget: CyderWineLaunchTarget = .exe
     ) async -> CyderLaunchOutcome {
-        let activationWaiter = WineActivationWaiter(prefix: prefix.path)
-        let observer = CyderLaunchObserver(authority: authorization.flatMap { record in
+        let launchID = authorization?.launchID ?? UUID().uuidString
+        let authority: CyderLaunchObserver.Authority? = authorization.flatMap { record in
             guard let launch = record.launchID, let epoch = record.executorEpoch else { return nil }
             return .init(request: record.id, launch: launch, digest: record.digest, epoch: epoch)
-        })
+        }
+        let activationWaiter = WineActivationWaiter(prefix: prefix.path, launchID: launchID)
+        let observer = CyderLaunchObserver(authority: authority)
         onMainThread { wineActivationWaiter = activationWaiter; wineLaunchObserver = observer }
         defer {
             onMainThread {
@@ -1788,14 +1795,13 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         var snapshotOwnedByExecutor = false
         defer { if !snapshotOwnedByExecutor { try? FileManager.default.removeItem(at: snapshotURL) } }
 
-        let launchID = authorization?.launchID ?? UUID().uuidString
         let executableName = URL(fileURLWithPath: exe).deletingPathExtension().lastPathComponent
         onMainThread {
             statusItemController.beginLaunch(
                 id: launchID,
                 prefix: prefix,
                 executableName: executableName,
-                pid: 0
+                authority: authority
             )
         }
         let pidURL = requestDirectory.appendingPathComponent("wine-\(launchID).pid")
@@ -1803,7 +1809,6 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         let activatedURL = requestDirectory.appendingPathComponent("wine-\(launchID).activated")
         let lifecycleURL = requestDirectory.appendingPathComponent("wine-\(launchID).lifecycle")
         var launchActivated = false
-        var winePID: Int32 = 0
         var retainTransport = false
         defer {
             if !retainTransport { try? FileManager.default.removeItem(at: pidURL) }
@@ -1941,23 +1946,10 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             ))
         }
 
-        winePID = {
-            guard let text = try? String(contentsOf: pidURL, encoding: .utf8),
-                  let value = Int32(text.trimmingCharacters(in: .whitespacesAndNewlines)),
-                  value > 0 else { return 0 }
-            return value
-        }()
-        if winePID > 0 {
-            onMainThread {
-                statusItemController.attachRootPID(id: launchID, pid: winePID)
-                if #available(macOS 11.0, *),
-                   let resourcePath = Bundle.main.resourcePath {
-                    let context = CyderLaunchContext(resourcePath: resourcePath)
-                    CyderURIHandlerManager.shared.beginWineSession(
-                        prefix: prefix,
-                        launcher: context.launcher
-                    )
-                }
+        onMainThread {
+            if #available(macOS 11.0, *), let resourcePath = Bundle.main.resourcePath {
+                let context = CyderLaunchContext(resourcePath: resourcePath)
+                CyderURIHandlerManager.shared.beginWineSession(prefix: prefix, launcher: context.launcher)
             }
         }
         let observation = await observer.wait(duration: 30, signal: activationWaiter)
@@ -1972,7 +1964,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             CyderDiagnostics.shared.info("wine launch completed without activation; root receipt ended")
             return .success
         case .rootFailed(let status):
-            return earlyWineExitFailure(executablePath: exe, winePID: winePID, exitStatus: status, fallbackLogURL: result.logURL)
+            return earlyWineExitFailure(executablePath: exe, winePID: onMainThread { statusItemController.nativeRootPID(id: launchID) }, exitStatus: status, fallbackLogURL: result.logURL)
         case .unconfirmed:
             retainTransport = true
             CyderDiagnostics.shared.warning("launch observation ended without confirmation; detached executor may remain")
@@ -2120,91 +2112,24 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         let userInfo = notification.userInfo ?? [:]
         let pid = (userInfo["ActivatingAppPID"] as? NSNumber)?.int32Value ?? 0
         let prefix = userInfo["ActivatingAppPrefix"] as? String ?? ""
-
-        let handle = { [weak self] in
-            guard let self, pid > 0, !prefix.isEmpty else { return }
-
-            let standardizedPrefix = (prefix as NSString).standardizingPath
-            let waiter = self.wineActivationWaiter
-            let matchesLaunchWaiter = waiter?.prefix == standardizedPrefix
-            let belongsToMonitoredSession = self.statusItemController.isMonitoring(prefix: standardizedPrefix)
-            guard matchesLaunchWaiter || belongsToMonitoredSession else { return }
-
-            // Dismiss starting UI as soon as Wine reports an activating
-            // process. Some Win32 dialogs never become a Dock/.regular app.
-            if matchesLaunchWaiter {
-                self.wineActivationWaiter = nil
-                waiter?.signal()
-            }
-            self.hideSetup()
-
-            // Attach the visible Wine process to the existing session so a
-            // launcher like GGMWebStart can exit without looking like "background
-            // cleanup" while MapleStory (or another windowed EXE) is running.
-            self.statusItemController.adoptWindowedProcess(
-                pid: pid,
-                prefix: standardizedPrefix,
-                name: NSRunningApplication(processIdentifier: pid)?.localizedName
-            )
-
-            // The notification comes from the Wine Cocoa process that is
-            // ready to become foreground. Cooperatively hand activation to it
-            // on macOS 14+, without PID searches or activation polling. Keep
-            // doing this for monitored sessions after the initial launch so a
-            // background Cyder instance can forward later focus requests.
-            guard let application = NSRunningApplication(processIdentifier: pid) else { return }
-            if application.activationPolicy != .regular {
-                return
-            }
-            if #available(macOS 14.0, *) {
-                let source = NSRunningApplication.current
-                NSApp.yieldActivation(to: application)
-                _ = application.activate(from: source, options: [.activateAllWindows])
-            } else {
-                _ = application.activate(options: [.activateAllWindows, .activateIgnoringOtherApps])
-            }
-            if !matchesLaunchWaiter {
-                CyderDiagnostics.shared.info(
-                    "forwarded Wine activation pid=\(pid) prefix=\(standardizedPrefix)"
-                )
-            }
-        }
-        if Thread.isMainThread {
-            handle()
-        } else {
-            DispatchQueue.main.async(execute: handle)
+        guard pid > 0, !prefix.isEmpty else { return }
+        // Distributed notifications are hints. The controller validates exact
+        // process-tree ownership and a current visible window off AppKit.
+        DispatchQueue.main.async { [weak self] in
+            guard let self, !self.quitTransaction else { return }
+            self.statusItemController.adoptWindowedProcess(pid: pid, prefix: prefix, name: nil)
         }
     }
 
     @objc private func wineWorkspaceDidActivate(_ notification: Notification) {
         guard let application = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication,
               isWineMacApplication(application) else { return }
-        let pid = application.processIdentifier
-        let handle = { [weak self] in
-            guard let self, pid > 0 else { return }
-            let prefix = winePrefix(forProcess: pid) ?? self.wineActivationWaiter?.prefix ?? ""
-            guard !prefix.isEmpty else { return }
-            let standardizedPrefix = (prefix as NSString).standardizingPath
-            let waiter = self.wineActivationWaiter
-            let matchesLaunchWaiter = waiter?.prefix == standardizedPrefix
-            let belongsToMonitoredSession = self.statusItemController.isMonitoring(prefix: standardizedPrefix)
-            guard matchesLaunchWaiter || belongsToMonitoredSession else { return }
-
-            if matchesLaunchWaiter {
-                self.wineActivationWaiter = nil
-                waiter?.signal()
-            }
-            self.statusItemController.adoptWindowedProcess(
-                pid: pid,
-                prefix: standardizedPrefix,
-                name: application.localizedName
-            )
-            self.hideSetup()
-        }
-        if Thread.isMainThread {
-            handle()
-        } else {
-            DispatchQueue.main.async(execute: handle)
+        let pid = application.processIdentifier, name = application.localizedName
+        DispatchQueue.main.async { [weak self] in
+            guard let self, !self.quitTransaction, pid > 0 else { return }
+            // No WINEPREFIX read or fallback to whichever request is waiting.
+            // The actual root/descendant birth is the ownership evidence.
+            self.statusItemController.adoptWindowedProcess(pid: pid, prefix: "", name: name)
         }
     }
 

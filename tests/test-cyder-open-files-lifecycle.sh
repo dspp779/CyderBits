@@ -74,10 +74,14 @@ assert_contains "$source_text" 'didActivateApplicationNotification' \
   "a Wine Dock app must finish starting from an activation notification"
 assert_not_contains "$source_text" 'application.activationPolicy == .regular else' \
   "starting UI must dismiss even when Wine stays a non-Dock accessory process"
-assert_contains "$source_text" 'belongsToMonitoredSession' \
-  "background Wine activation must be routable after the initial launch"
-assert_contains "$source_text" 'forwarded Wine activation' \
-  "background activation forwarding must be diagnosed"
+assert_contains "$source_text" 'controller.onWindowConfirmed' \
+  "launch completion must follow a verified owned window"
+assert_contains "$source_text" 'waiter.launchID == launchID' \
+  "a same-prefix notification cannot complete a different request"
+assert_not_contains "$source_text" 'matchesLaunchWaiter' \
+  "prefix-only activation must not grant completion or focus"
+assert_not_contains "$source_text" 'yieldActivation(to: application)' \
+  "unverified or late notifications must not steal focus"
 assert_contains "$source_text" 'launchEnvironment: launchEnvironment' \
   "game-library test settings must flow into the monitored Bash launch"
 assert_not_contains "$source_text" 'launchLogShowsFolderAccessDenied()' \

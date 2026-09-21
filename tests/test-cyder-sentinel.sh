@@ -81,15 +81,15 @@ assert_contains "$app" 'controller.onLifecycleIdle' \
 
 assert_contains "$app" 'statusItemController.beginLaunch(' \
   "Swift must create the LaunchGroup when the Wine relay starts, not wait for helper hello"
-assert_contains "$app" 'attachRootPID(id: launchID' \
-  "the pid file must attach to this launch id, not to whichever group shares the prefix"
+assert_contains "$app" 'statusItemController.attachNativeRoot(proof)' \
+  "native proof must attach to its own launch, never a prefix-only group"
 assert_not_contains "$app" 'sentinel.onLaunchEnded = { [weak self] id in
                 self?.statusItemController.endLaunch(id: id)' \
   "helper disconnect must not endLaunch"
 assert_not_contains "$app" 'self?.statusItemController.endLaunch(id: id)' \
   "onLaunchEnded must not call endLaunch"
-assert_contains "$status" 'func attachRootPID(id: String, pid: Int32)' \
-  "root PID attach is keyed by launch id"
+assert_contains "$status" 'func attachNativeRoot(_ receipt: CyderLaunchObserver.NativeRoot)' \
+  "root attach verifies launch authority and process birth"
 assert_not_contains "$status" 'exactlyOneStartingGroup' \
   "one starting group is not evidence that another prefix process belongs to it"
 assert_not_contains "$status" 'for (key, var session) in sessions where session.prefix.path == target' \
@@ -102,7 +102,7 @@ assert_not_contains "$app" 'observationFinished.wait()' \
   "observation finalization must not wait indefinitely for an OS query"
 assert_not_contains "$status" 'wineOnscreenWindows(matchingPrefix:' \
   "prefix membership must not be mistaken for launch ownership"
-assert_contains "$status" 'wineOnscreenWindows(ownedBy: expanded)' \
+assert_contains "$status" 'wineOnscreenWindows(ownedBy: Set(expanded.map(\.pid)))' \
   "launch window claims require a proven process tree"
 assert_not_contains "$app" 'cancelMonitoring(pid: winePID' \
   "failed launches must not cancel unrelated monitoring by numeric PID"
