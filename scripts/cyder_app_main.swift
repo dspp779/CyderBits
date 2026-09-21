@@ -129,6 +129,8 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         existingRequestController = controller
         controller.onResume = { [weak self] id, done in self?.instanceCoordinator.resumeRequest(id: id, completion: done) }
         controller.onCancel = { [weak self] id, done in self?.instanceCoordinator.cancelRequest(id: id, completion: done) }
+        controller.onResend = { [weak self] id, done in self?.instanceCoordinator.recoverOutbox(id: id, cancel: false, completion: done) }
+        controller.onWithdraw = { [weak self] id, done in self?.instanceCoordinator.recoverOutbox(id: id, cancel: true, completion: done) }
         controller.onRefresh = { [weak self] in self?.instanceCoordinator.refreshRequests() }
         controller.onOpenDiagnostics = { NSWorkspace.shared.open(CyderPaths.support.appendingPathComponent("Logs")) }
         controller.onClose = { [weak self] in

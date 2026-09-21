@@ -6,6 +6,8 @@ struct CyderRequestRow: Equatable {
     let detail: String
     let canResume: Bool
     let canCancel: Bool
+    var canResend = false
+    var canWithdraw = false
     static func project(_ records: [CyderRequestJournal.Record], outbox: [CyderOutboxNotice] = []) -> [Self] {
         let accepted: [Self] = records.compactMap { record in
             guard record.children == nil else { return nil }
@@ -29,7 +31,7 @@ struct CyderRequestRow: Equatable {
         let retained = outbox.map { notice in
             Self(id: notice.id,
                  title: String(notice.title.unicodeScalars.filter { !CharacterSet.controlCharacters.contains($0) }.map(String.init).joined().prefix(100)),
-                 detail: notice.detail, canResume: false, canCancel: false)
+                 detail: notice.detail, canResume: false, canCancel: false, canResend: notice.canRecover, canWithdraw: notice.canRecover)
         }
         return (accepted + retained).sorted { $0.id < $1.id }
     }
@@ -48,9 +50,11 @@ struct CyderRequestRow: Equatable {
 /// Nonmodal projection of durable request state. Buttons carry stable IDs;
 /// both this view and the journal recheck capability before any action.
 final class CyderRequestWindowController: NSWindowController, NSWindowDelegate, NSTableViewDataSource, NSTableViewDelegate {
-    enum Action { case resume, cancel }
+    enum Action { case resume, cancel, resend, withdraw }
     var onResume: ((String, @escaping (Bool) -> Void) -> Void)?
     var onCancel: ((String, @escaping (Bool) -> Void) -> Void)?
+    var onResend: ((String, @escaping (Bool) -> Void) -> Void)?
+    var onWithdraw: ((String, @escaping (Bool) -> Void) -> Void)?
     var onRefresh: (() -> Void)?
     var onOpenDiagnostics: (() -> Void)?
     var onClose: (() -> Void)?
@@ -75,17 +79,24 @@ final class CyderRequestWindowController: NSWindowController, NSWindowDelegate, 
     }
     func perform(_ action: Action, id: String) {
         precondition(Thread.isMainThread)
-        guard !pending.contains(id), let row = rows.first(where: { $0.id == id }),
-              (action == .resume ? row.canResume : row.canCancel) else { return }
-        let callback = action == .resume ? onResume : onCancel
+        guard !pending.contains(id), let row = rows.first(where: { $0.id == id }) else { return }
+        let allowed: Bool
+        let callback: ((String, @escaping (Bool) -> Void) -> Void)?
+        switch action {
+        case .resume: allowed = row.canResume; callback = onResume
+        case .cancel: allowed = row.canCancel; callback = onCancel
+        case .resend: allowed = row.canResend; callback = onResend
+        case .withdraw: allowed = row.canWithdraw; callback = onWithdraw
+        }
+        guard allowed else { return }
         guard let callback else { return }
         pending.insert(id); table.reloadData(); feedback.stringValue = "正在儲存變更…"
         callback(id) { [weak self] succeeded in
             guard let self else { return }
             self.pending.remove(id); self.table.reloadData()
             self.feedback.stringValue = succeeded
-                ? (action == .resume ? "已加入啟動佇列。" : "已取消尚未派送的要求。")
-                : "狀態已改變或無法儲存；請重新整理。已派送的程式不會被終止。"
+                ? (action == .resume ? "已加入啟動佇列。" : action == .resend ? "已核對原要求；請查看更新狀態。" : "已取消尚未派送的要求。")
+                : "結果尚未確認或狀態已改變；請重新整理。關閉視窗不代表取消。"
         }
     }
     func windowWillClose(_ notification: Notification) { onClose?() }
@@ -99,7 +110,7 @@ final class CyderRequestWindowController: NSWindowController, NSWindowDelegate, 
         detail.font = .systemFont(ofSize: 11); detail.textColor = .secondaryLabelColor
         let labels = NSStackView(views: [title, detail]); labels.orientation = .vertical; labels.alignment = .leading; labels.spacing = 4
         let buttons = NSStackView(); buttons.orientation = .horizontal
-        for (label, allowed, tag) in [("繼續", item.canResume, 0), ("取消", item.canCancel, 1)] where allowed {
+        for (label, allowed, tag) in [("繼續", item.canResume, 0), ("取消", item.canCancel, 1), ("重新傳送", item.canResend, 2), ("取消", item.canWithdraw, 3)] where allowed {
             let button = NSButton(title: label, target: self, action: #selector(pressed(_:)))
             button.identifier = NSUserInterfaceItemIdentifier(item.id); button.tag = tag
             button.bezelStyle = .rounded; button.isEnabled = !pending.contains(item.id)
@@ -118,7 +129,9 @@ final class CyderRequestWindowController: NSWindowController, NSWindowDelegate, 
     }
     @objc private func pressed(_ sender: NSButton) {
         guard let id = sender.identifier?.rawValue else { return }
-        perform(sender.tag == 0 ? .resume : .cancel, id: id)
+        let actions: [Action] = [.resume, .cancel, .resend, .withdraw]
+        guard actions.indices.contains(sender.tag) else { return }
+        perform(actions[sender.tag], id: id)
     }
     @objc private func refresh() { onRefresh?() }
     @objc private func diagnostics() { onOpenDiagnostics?() }

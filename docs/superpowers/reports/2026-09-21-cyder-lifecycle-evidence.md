@@ -297,3 +297,16 @@ F6 fixture 清理追記：11:29 左右重新核對，前批 80423／81445 仍在
 - 本批新增測試各輪皆通過；後續兩項檢查改善了 admission 起算期限及 accepted 與 cleanup 的分離，改動後重跑相關測試與建置。完整 universal macOS11 build 最新 `build-C6-r2.log`，隔離包 `/private/tmp/cyder-lifecycle-c6-build/Cyder.app` 配置 local.cyder.lifecycle-c6、CD2 support/runtime、ad-hoc 簽章，manifest `build-C6-source-sha256.json`。本輪未啟動完整 app／Wine；本節證據為 L1–2，不代表 Wine／NGS 相容性。
 
 C6 仍有明確範圍限制：未接受副本目前只核對、保留與呈現，尚未提供經驗證的原 ID 明確重送／撤回；secondary 未確認 fallback 尚未接上遠端狀態查詢。詳細 feedback owner／錯誤分類、跨崩潰 supervisor ownership／late-spawn fencing、環境 waiter 分工、精確程序／視窗操作、剩餘 action I/O 及 V01–V14 最終矩陣繼續處理，目標不標完成。
+
+## C7：原 ID 的明確重新傳送與取消
+
+- C6 的未接受副本現在可於正式要求視窗操作「重新傳送」／「取消」，僅限 canonical outbox filename、有效 payload／digest、目前 journal namespace，且核對快照中尚無該 ID 的紀錄。其他 unknown／corrupt／conflict／舊 namespace 仍無假動作。能力只是 UI 投影，實際操作重新讀取 private FD 並比對原 ID／digest；檔案已替換或狀態改變時拒絕或交由 journal 判定。
+- 重新傳送直接以原 ID／原 payload 進入唯一 journal submit transaction；若競爭者先接受，接回原紀錄，既有 delivered fence 保證不重複派送。重開後的 awaitingUserResume／uncertain 仍不會因此自動重播。取消以同 ID／digest 保存 tombstone，之後晚到 submit 接回 cancelled；已跨 dispatch 的 cancel 回失敗，不能顯示成功或終止程式。
+- 一個實際 recovery action，與 outbox scanner 共用有界 owner；五秒觀察期限不釋出卡住的工作。若檔案核對晚於期限或 quit，不能再送 journal mutation。已交給 journal 的 mutation 若晚到仍按其持久結果更新狀態，沒有重複 completion。副本清理保留 physical slot 至真正返回，接受結果不等待清理。核對失敗後刷新 notice，避免留下指向舊 bytes 的能力。
+- `test-cyder-outbox.sh` 增加真正 AppKit table-cell NSButton／selector→coordinator→journal 路徑：原 ID 重送一次、舊 button 再點不派送；取消 tombstone 後經實際 socket 晚到 submit 回 cancelled；替換 bytes 後按原 row 拒絕、原檔保留；外部 submit 先接受並 authorizeDispatch 後，舊取消要求不能成功。另以受控 recovery read stall 驗證期限一次、60 次 busy 不增加 physical read、quit 後 journal 仍空且原副本保留。最新 `outbox-C7-r8.log` 通過，保留 C6 所有容量、格式、掃描與轉送斷言。
+- 保留失敗：r3／r4 顯示副本核對失敗後未更新舊 notice，正式 guard failure 分支補 refresh；r5 的新 deadline fixture 在 start 後才註冊 onOutboxChanged，漏掉快速完成事件，改為先註冊後啟動。未延長期限或刪除斷言，r6／r7 通過。`request-ui-C7.log`、`instance-C7.log` 回歸通過。
+- 已檢視 `.local/lifecycle-evidence/outbox-C7.png` 的正式 contentView 渲染，原要求標題／說明及重新傳送、取消按鈕可讀且未裁切；外圍/footer 透明區於離屏 viewer 顯黑，並非桌面截圖。最新 universal macOS11 build `build-C7-r2.log` 通過；隔離包 `/private/tmp/cyder-lifecycle-c7-build/Cyder.app` 配置 local.cyder.lifecycle-c7、CD2 support/runtime 與 ad-hoc 簽章，manifest `build-C7-source-sha256.json`。本輪沒有啟動完整 app 或 Wine，以上為 L1–2，不能宣稱 Wine／NGS 相容性通過。
+
+C7 補齊 primary 端未接受副本的明確恢復操作；secondary fallback 的遠端狀態核對、詳細 feedback owner／錯誤分類、supervisor 與跨崩潰 late-spawn fencing、環境 waiter、精確程序／視窗動作、剩餘主執行緒 action I/O 與 V01–V14 最終交付仍待完成。目標保持進行中。
+
+C7 提交前追加：恢復核對返回時也直接比較同一 monotonic expiresAt，不能只依主佇列 deadline callback 是否已送達；r8 與第二次 universal build 重新通過。

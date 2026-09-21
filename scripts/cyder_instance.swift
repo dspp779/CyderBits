@@ -18,6 +18,9 @@ struct CyderOutboxNotice: Equatable {
     let id: String
     let title: String
     let detail: String
+    var requestID: String? = nil
+    var digest: String? = nil
+    var canRecover: Bool { requestID != nil && digest != nil }
 }
 
 enum CyderRequestOutbox {
@@ -138,6 +141,13 @@ enum CyderRequestOutbox {
               current.st_ctimespec.tv_nsec == identity.st_ctimespec.tv_nsec else { throw Failure.invalid }
         guard unlinkat(directory, name, 0) == 0, fsync(directory) == 0 else { throw Failure.unavailable }
     }
+    static func retainedRequest(id: String, digest: String, support: URL) throws -> CyderRequestMessage {
+        try withDirectory(support) { directory in
+            let (message, _, _) = try read(directory, filename(id))
+            guard message.requestID == id, message.payloadDigest == digest else { throw Failure.invalid }
+            return message
+        }
+    }
     static func acknowledge(_ record: CyderRequestJournal.Record, support: URL) throws {
         try withDirectory(support) { directory in
             let name = filename(record.id)
@@ -146,7 +156,7 @@ enum CyderRequestOutbox {
             try remove(directory, name: name, identity: identity)
         }
     }
-    static func reconcile(support: URL, records: [CyderRequestJournal.Record]) throws -> [CyderOutboxNotice] {
+    static func reconcile(support: URL, records: [CyderRequestJournal.Record], namespace: UUID? = nil) throws -> [CyderOutboxNotice] {
         let path = support.appendingPathComponent("request-outbox").path
         var info = stat()
         if lstat(path, &info) != 0, errno == ENOENT { return [] }
@@ -171,10 +181,13 @@ enum CyderRequestOutbox {
                     do { try remove(directory, name: name, identity: identity) }
                     catch { notices.append(.init(id: "outbox:" + id, title: "已核對啟動要求", detail: "要求已被接受；本機副本尚未移除，不會重複派送。")) }
                 } else {
+                    let recoverable = accepted[id] == nil && name == filename(id) &&
+                        namespace.map { id.hasPrefix($0.uuidString + ":") } == true
                     notices.append(.init(id: "outbox:" + id, title: message.payload?.displayName ?? "未確認的啟動要求",
                         detail: accepted[id] == nil
-                            ? "尚無相符的接受紀錄；請重新整理核對。不會自動啟動或產生新要求。"
-                            : "原要求與接受紀錄不一致；已保留副本，請查看診斷記錄。"))
+                            ? (recoverable ? "尚無接受紀錄；可核對原要求後重新傳送或取消。" : "無法核對原紀錄；已保留副本，不會自動啟動。")
+                            : "原要求與接受紀錄不一致；已保留副本，請查看診斷記錄。",
+                        requestID: recoverable ? id : nil, digest: recoverable ? message.payloadDigest : nil))
                 }
             }
             return notices
@@ -190,6 +203,7 @@ final class CyderInstanceCoordinator {
     private let forwarding = DispatchQueue(label: "local.cyder.instance-forward")
     private let outboxQueue = DispatchQueue(label: "local.cyder.instance-outbox")
     private var outboxScan: UUID?
+    private var outboxAction: UUID?
     private var forwardInFlight = false
     private(set) var outboxNotices: [CyderOutboxNotice] = []
     var onOutboxChanged: (([CyderOutboxNotice]) -> Void)?
@@ -479,7 +493,7 @@ final class CyderInstanceCoordinator {
     /// Reconcile against a durable snapshot without submit, resume, or dispatch.
     /// A deadline does not release the physical scanner or create another one.
     private func refreshOutbox(records: [CyderRequestJournal.Record]) {
-        guard primary, !closing, outboxScan == nil else { return }
+        guard primary, !closing, outboxScan == nil, outboxAction == nil else { return }
         let token = UUID(); outboxScan = token
         DispatchQueue.main.asyncAfter(deadline: .now() + max(0, outboxDeadline)) { [weak self] in
             guard let self, !self.closing, self.outboxScan == token else { return }
@@ -487,9 +501,10 @@ final class CyderInstanceCoordinator {
                 detail: "核對尚未確認；不會自動啟動，其他操作仍可使用。")]
             self.onOutboxChanged?(self.outboxNotices)
         }
+        let currentNamespace = namespace
         outboxQueue.async { [self] in
             beforeOutboxRead()
-            let result = Result { try CyderRequestOutbox.reconcile(support: support, records: records) }
+            let result = Result { try CyderRequestOutbox.reconcile(support: support, records: records, namespace: currentNamespace) }
             DispatchQueue.main.async { [self] in
                 guard outboxScan == token else { return }; outboxScan = nil
                 guard !closing else { return }
@@ -499,6 +514,58 @@ final class CyderInstanceCoordinator {
                     detail: "暫時無法讀取或要求過多；請重新整理或查看診斷記錄。不會自動啟動。")]
                 }
                 onOutboxChanged?(outboxNotices)
+            }
+        }
+    }
+
+    /// Explicit recovery keeps the original identity. Journal transactions
+    /// arbitrate a concurrent submit/cancel; a stale UI is never authority.
+    func recoverOutbox(id noticeID: String, cancel: Bool, completion: @escaping (Bool) -> Void) {
+        precondition(Thread.isMainThread)
+        guard primary, !closing, outboxScan == nil, outboxAction == nil,
+              let notice = outboxNotices.first(where: { $0.id == noticeID }),
+              let id = notice.requestID, let digest = notice.digest,
+              namespace.map({ id.hasPrefix($0.uuidString + ":") }) == true else { completion(false); return }
+        let token = UUID(); outboxAction = token
+        let expiresAt = ProcessInfo.processInfo.systemUptime + max(0, outboxDeadline)
+        var reported = false // main only; observation does not release work
+        func report(_ success: Bool) {
+            guard !reported else { return }; reported = true; completion(success)
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + max(0, outboxDeadline)) { [weak self] in
+            guard let self, self.outboxAction == token, !self.closing else { return }
+            report(false)
+        }
+        outboxQueue.async { [self] in
+            beforeOutboxRead()
+            let result = Result { try CyderRequestOutbox.retainedRequest(id: id, digest: digest, support: support) }
+            DispatchQueue.main.async { [self] in
+                guard outboxAction == token else { return }
+                guard primary, !closing, !reported, ProcessInfo.processInfo.systemUptime < expiresAt,
+                      case .success(let message) = result, let payload = message.payload else {
+                    outboxAction = nil; report(false); refreshRequests(); return
+                }
+                let accepted: CyderRequestJournal.Reply = { [self] result in
+                    guard case .success(let record) = result else {
+                        outboxAction = nil; report(false); refreshRequests(); return
+                    }
+                    if !closing {
+                        outboxNotices.removeAll { $0.id == noticeID }
+                        onOutboxChanged?(outboxNotices)
+                        if cancel { cancelled(record) } else { deliver(record) }
+                        report(true) // durable result; cleanup is a separate lifetime
+                    }
+                    outboxQueue.async { [self] in
+                        try? CyderRequestOutbox.acknowledge(record, support: support)
+                        DispatchQueue.main.async { [self] in
+                            guard outboxAction == token else { return }
+                            outboxAction = nil
+                            if !closing { refreshRequests() }
+                        }
+                    }
+                }
+                if cancel { journal.cancel(id: id, digest: digest, completion: accepted) }
+                else { journal.submit(id: id, payload: payload, completion: accepted) }
             }
         }
     }
