@@ -60,7 +60,7 @@ enum CyderLifecycle {
         let request: String
         let environment: EnvironmentID
         let name: String
-        let deadline: TimeInterval // monotonic; never reset by root exit
+        var deadline: TimeInterval // monotonic; never reset by root exit
         var outcome: Outcome?
         var processes: Set<ProcessID> = []
     }
@@ -104,6 +104,9 @@ enum CyderLifecycle {
         case manage(Environment)
         case accepted(Request) // emitted only after durable acceptance
         case dispatchCommitted(Stamp, request: String, launch: Launch)
+        // Attaches an already committed executor; this never emits a spawn.
+        case executionAttached(Stamp, Request, Launch)
+        case observationStarted(Stamp, launch: String, deadline: TimeInterval)
         case cancellationCommitted(request: String)
         case observationFinished(Stamp, launch: String, outcome: Outcome)
         case deadline(TimeInterval)
@@ -124,6 +127,7 @@ enum CyderLifecycle {
         case reconcile(Stamp)
         case stop(Stamp, UUID)
         case observationCompleted(String, Outcome)
+        case windowConfirmed(String)
         case persistQuiescing
         case cancelOwnedObservers
     }
@@ -213,6 +217,21 @@ enum CyderLifecycle {
                 requests[id] = request
                 launches[launch.id] = launch
                 launchStamps[launch.id] = stamp
+            case .executionAttached(let stamp, var request, let launch):
+                guard accepts(stamp), request.environment == stamp.environment,
+                      launch.environment == stamp.environment, launch.request == request.id,
+                      request.launch == launch.id, [.dispatching, .observing].contains(request.phase),
+                      !request.id.isEmpty, !request.digest.isEmpty, launches[launch.id] == nil,
+                      requests[request.id] == nil else { return [] }
+                request.phase = .observing
+                requests[request.id] = request
+                launches[launch.id] = launch
+                launchStamps[launch.id] = stamp
+            case .observationStarted(let stamp, let id, let deadline):
+                guard accepts(stamp, includingExited: true), launchStamps[id] == stamp,
+                      launches[id]?.outcome == nil, launches[id]?.deadline == .infinity,
+                      deadline.isFinite else { return [] }
+                launches[id]?.deadline = deadline
             case .cancellationCommitted(let id):
                 guard var request = requests[id], [.submitted, .queued, .awaitingUserResume].contains(request.phase) else { return [] }
                 request.phase = .cancelled
@@ -285,6 +304,9 @@ enum CyderLifecycle {
                       processes[window.id.process]?.existence == .alive,
                       !exitedProcesses.contains(.init(environment: stamp.environment, process: window.id.process)) else { return [] }
                 windows[window.id] = window
+                if let launch = processes[window.id.process]?.launch, launches[launch]?.outcome == nil {
+                    effects.append(.windowConfirmed(launch))
+                }
             case .windowClosed(let stamp, let id):
                 guard accepts(stamp), processes[id.process]?.environment == stamp.environment else { return [] }
                 windows.removeValue(forKey: id)
@@ -331,8 +353,15 @@ final class CyderLifecycleStore {
         self.consume = consume
     }
     func send(_ event: CyderLifecycle.Event) {
+        send([event])
+    }
+    /// One evidence batch yields one UI snapshot, preserving event order and
+    /// every effect without copying the growing model once per scanned PID.
+    func send(_ events: [CyderLifecycle.Event]) {
+        guard !events.isEmpty else { return }
         queue.async { [self] in
-            let effects = state.reduce(event)
+            var effects: [CyderLifecycle.Effect] = []
+            for event in events { effects += state.reduce(event) }
             let snapshot = state.snapshot
             delivery.async { [consume] in consume(snapshot, effects) }
         }

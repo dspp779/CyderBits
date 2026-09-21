@@ -92,5 +92,42 @@ scannedExit.reduce(.processObserved(scannedExit.stamp(for: a)!, .init(id: proces
 observe(&scannedExit)
 check(scannedExit.snapshot.processes[process]?.existence == .exited && scannedExit.snapshot.windows.isEmpty, "exit snapshot also revokes windows and prevents resurrection")
 
+var attached = fresh()
+let attachedStamp = attached.stamp(for: a)!
+let committed = L.Request(id: "committed", digest: "digest", environment: a, phase: .dispatching, launch: "committed")
+let committedLaunch = L.Launch(id: "committed", request: "committed", environment: a, name: "Committed", deadline: .infinity)
+check(attached.reduce(.executionAttached(attachedStamp, committed, committedLaunch)).isEmpty, "attaching an executor must not dispatch or emit effects")
+check(attached.snapshot.requests["committed"]?.phase == .observing && attached.snapshot.launches.count == 1, "actual committed work enters model atomically")
+attached.reduce(.processObserved(attachedStamp, .init(id: process, name: "Fixture", environment: a,
+    launch: "committed", ownership: .rootReceipt, existence: .alive)))
+check(attached.reduce(.windowObserved(attachedStamp, window)) == [.windowConfirmed("committed")], "window activation is issued only by the accepting store")
+check(attached.reduce(.windowObserved(attached.stamp(for: b)!, window)).isEmpty, "wrong-scope window cannot signal an observation")
+attached.reduce(.executionAttached(attachedStamp, committed, committedLaunch))
+check(attached.snapshot.launches.count == 1, "duplicate attachment cannot create another launch")
+attached.reduce(.observationStarted(attachedStamp, launch: "committed", deadline: 20))
+attached.reduce(.observationStarted(attachedStamp, launch: "committed", deadline: 200))
+check(attached.snapshot.launches["committed"]?.deadline == 20, "observer publishes its deadline once without resetting on later callbacks")
+check(attached.reduce(.deadline(20)) == [.observationCompleted("committed", .unconfirmed)], "attached launch has the same bounded observation policy")
+var historical = fresh()
+let uncertain = L.Request(id: "committed", digest: "digest", environment: a, phase: .uncertain, launch: "committed")
+historical.reduce(.executionAttached(historical.stamp(for: a)!, uncertain, committedLaunch))
+check(historical.snapshot.requests.isEmpty && historical.snapshot.launches.isEmpty, "historical uncertain record cannot manufacture a live executor")
+
+let delivered = DispatchSemaphore(value: 0), batchEpoch = UUID()
+var batchSnapshot: L.Snapshot?, batchEffects: [L.Effect] = []
+let batchStore = CyderLifecycleStore(epoch: batchEpoch, delivery: DispatchQueue(label: "fixture.delivery")) {
+    batchSnapshot = $0; batchEffects = $1; delivered.signal()
+}
+let batchStamp = L.Stamp(epoch: batchEpoch, environment: a, generation: 1)
+let processes: [L.Event] = (1...1024).map {
+    .processObserved(batchStamp, .init(id: .init(boot: "fixture", pid: Int32($0), started: UInt64($0)),
+        name: "Fixture", environment: a, existence: .alive))
+}
+batchStore.send([.manage(environment(a))] + processes + [.quit])
+check(delivered.wait(timeout: .now() + 5) == .success, "large evidence batch delivered")
+check(batchSnapshot?.processes.count == 1024 && batchSnapshot?.phase == .quiescing, "batch preserves all events before delivery")
+check(batchEffects == [.persistQuiescing, .cancelOwnedObservers], "batch retains quit effects without stop")
+check(delivered.wait(timeout: .now()) == .timedOut, "one physical batch yields one snapshot")
+
 if !failures.isEmpty { failures.forEach { print("FAIL \($0)") }; exit(1) }
 print("PASS lifecycle environment isolation, generation replacement, drain and uncertain outcomes")

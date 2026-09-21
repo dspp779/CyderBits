@@ -121,6 +121,18 @@ final class CyderEnvironmentMonitor {
             }
         }
     }
+    /// Captured from the same writer that registered this live executor. A
+    /// pathname or the UI's last delivered snapshot cannot supply this stamp.
+    func executionStamp(_ token: UUID) async -> L.Stamp? {
+        await withCheckedContinuation { continuation in
+            queue.async { [self] in
+                guard !closed, let entry = entries.values.first(where: { $0.executions.contains(token) && !$0.exited }) else {
+                    continuation.resume(returning: nil); return
+                }
+                continuation.resume(returning: stamp(entry))
+            }
+        }
+    }
     /// Native root proof shortens the launch grace only for the registration
     /// whose actual prefix identity matches the native spawn ticket. Two probes
     /// begun after both proof and executor release are still required.

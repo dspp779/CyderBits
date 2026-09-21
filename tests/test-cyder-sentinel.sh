@@ -43,8 +43,8 @@ assert_contains "$common" 'cyder_exec_game >"$fifo" 2>&1 3>&-' \
   "Wine must not inherit the fifo write end"
 assert_contains "$sentinel" 'closeInheritedHelperFileDescriptors' \
   "the sentinel helper must drop inherited fds so it cannot hold its own fifo write end"
-assert_contains "$status" '背景執行' \
-  "windowless background processes must not be described as cleanup"
+assert_contains "$status" '執行中；尚未確認視窗' \
+  "live process evidence without a window must not infer tray/background or cleanup"
 assert_contains "$status" '暫時無法確認執行狀態' \
   "unconfirmed environment presence must remain visible"
 assert_contains "$status" 'func beginLaunch(' \

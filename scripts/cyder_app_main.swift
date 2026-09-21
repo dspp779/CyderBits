@@ -1796,14 +1796,6 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         defer { if !snapshotOwnedByExecutor { try? FileManager.default.removeItem(at: snapshotURL) } }
 
         let executableName = URL(fileURLWithPath: exe).deletingPathExtension().lastPathComponent
-        onMainThread {
-            statusItemController.beginLaunch(
-                id: launchID,
-                prefix: prefix,
-                executableName: executableName,
-                authority: authority
-            )
-        }
         let pidURL = requestDirectory.appendingPathComponent("wine-\(launchID).pid")
         let exitResultURL = requestDirectory.appendingPathComponent("wine-\(launchID).result")
         let activatedURL = requestDirectory.appendingPathComponent("wine-\(launchID).activated")
@@ -1881,6 +1873,20 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         }
         observer.observeDrain { scope in monitor.confirmRootExit(execution, prefixScope: scope) }
         defer { monitor.cancelDrainObservation(execution) }
+        guard let stamp = await monitor.executionStamp(execution), let authorization, let authority,
+              authorization.phase == .dispatching else {
+            monitor.endExecution(execution)
+            return .unconfirmed
+        }
+        let lifecycleController = onMainThread { statusItemController }
+        onMainThread {
+            statusItemController.beginLaunch(id: launchID, prefix: prefix, executableName: executableName,
+                authority: authority, stamp: stamp,
+                committedRequest: .init(id: authorization.id, digest: authorization.digest, environment: stamp.environment,
+                    phase: .dispatching, launch: launchID))
+        }
+        var lifecycleOutcome: CyderLifecycle.Outcome = .failed
+        defer { lifecycleController.receiveLifecycleEvent(.observationFinished(stamp, launch: launchID, outcome: lifecycleOutcome)) }
         let result = await runLauncher(
             context: context,
             args: args,
@@ -1891,7 +1897,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             lease: lease,
             operationScope: .prefix(prefix),
             onSpawn: { [weak self] receipt in
-                guard let self, let authorization else { return }
+                guard let self else { return }
                 let birth = CyderEnvironmentProbe.processIdentity(receipt.supervisorPID)
                 self.instanceCoordinator.recordSpawn(authorization, pid: receipt.supervisorPID, boot: birth?.boot, started: birth?.started)
             },
@@ -1907,7 +1913,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         )
         snapshotOwnedByExecutor = result.didStart
         if !result.didStart { monitor.endExecution(execution) }
-        if result.isUnconfirmed { retainTransport = true; return .unconfirmed }
+        if result.isUnconfirmed { lifecycleOutcome = .unconfirmed; retainTransport = true; return .unconfirmed }
         guard result.succeeded else {
             if launchTarget == .msi && result.status == 75 {
                 return .failure(CyderFailure(
@@ -1952,20 +1958,25 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
                 CyderURIHandlerManager.shared.beginWineSession(prefix: prefix, launcher: context.launcher)
             }
         }
-        let observation = await observer.wait(duration: 30, signal: activationWaiter)
+        let observation = await observer.wait(duration: 30, signal: activationWaiter, onStarted: { deadline in
+            lifecycleController.receiveLifecycleEvent(.observationStarted(stamp, launch: launchID, deadline: deadline))
+        })
         switch observation {
         case .activated:
+            lifecycleOutcome = .confirmedStarted
             launchActivated = true
             FileManager.default.createFile(atPath: activatedURL.path, contents: Data())
             CyderDiagnostics.shared.enter(.wineActivation, detail: "notification-received")
             onMainThread { statusItemController.markActivated(id: launchID) }
             return .success
         case .finishedWithoutWindow:
+            lifecycleOutcome = .finishedWithoutWindow
             CyderDiagnostics.shared.info("wine launch completed without activation; root receipt ended")
             return .success
         case .rootFailed(let status):
             return earlyWineExitFailure(executablePath: exe, winePID: onMainThread { statusItemController.nativeRootPID(id: launchID) }, exitStatus: status, fallbackLogURL: result.logURL)
         case .unconfirmed:
+            lifecycleOutcome = .unconfirmed
             retainTransport = true
             CyderDiagnostics.shared.warning("launch observation ended without confirmation; detached executor may remain")
             return .unconfirmed

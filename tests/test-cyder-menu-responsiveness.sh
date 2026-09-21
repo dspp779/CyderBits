@@ -11,7 +11,7 @@ final class CyderDiagnostics {
     static let shared = CyderDiagnostics()
     func info(_ message: String) {}
 }
-struct TestWindow { let pid: Int32; let ownerName: String }
+struct TestWindow { let pid: Int32; let ownerName: String; var windowID: UInt32 = 1 }
 func cyderUsefulWindowOwnerName(_ name: String) -> String? { name }
 func cyderWineArgvName(pid: Int32) -> String? { nil }
 func wineProcessTreeIDs(root: Int32) -> Set<Int32> {

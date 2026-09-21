@@ -127,6 +127,7 @@ final class CyderSetupPanel {
 struct CyderOnscreenWindow {
     let pid: Int32
     let ownerName: String
+    let windowID: UInt32
 }
 
 /// True when the Wine process (or a child) already owns a normal onscreen window.
@@ -233,7 +234,8 @@ private func cyderOnscreenWindows() -> [CyderOnscreenWindow] {
     var windows: [CyderOnscreenWindow] = []
     for window in info {
         let pid = Int32((window[kCGWindowOwnerPID as String] as? pid_t) ?? 0)
-        guard pid > 0 else { continue }
+        guard pid > 0, let number = window[kCGWindowNumber as String] as? NSNumber,
+              number.uint32Value != 0 else { continue }
         let layer = window[kCGWindowLayer as String] as? Int ?? 0
         guard layer == 0 else { continue }
         let bounds = window[kCGWindowBounds as String] as? NSDictionary
@@ -241,7 +243,7 @@ private func cyderOnscreenWindows() -> [CyderOnscreenWindow] {
         let height = (bounds?["Height"] as? NSNumber)?.doubleValue ?? 0
         guard width >= 80, height >= 80 else { continue }
         let ownerName = window[kCGWindowOwnerName as String] as? String ?? ""
-        windows.append(CyderOnscreenWindow(pid: pid, ownerName: ownerName))
+        windows.append(CyderOnscreenWindow(pid: pid, ownerName: ownerName, windowID: number.uint32Value))
     }
     return windows
 }
