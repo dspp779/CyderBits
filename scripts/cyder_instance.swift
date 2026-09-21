@@ -40,12 +40,14 @@ final class CyderInstanceCoordinator {
     init(support: URL = CyderPaths.support,
          bundleID: String = ProcessInfo.processInfo.environment["CYDER_BUNDLE_ID"]
             ?? Bundle.main.bundleIdentifier ?? "local.cyder.app",
-         startupDeadline: TimeInterval = 5, beforeElection: @escaping () -> Void = {}) {
+         startupDeadline: TimeInterval = 5, beforeElection: @escaping () -> Void = {},
+         normalizeSettings: @escaping (Data) throws -> Data = { $0 }) {
         self.support = support
         self.startupDeadline = startupDeadline
         self.beforeElection = beforeElection
         path = support.appendingPathComponent(".requests-v1.sock").path
-        journal = CyderRequestJournal(directory: support.appendingPathComponent("request-journal"))
+        journal = CyderRequestJournal(directory: support.appendingPathComponent("request-journal"),
+            captureSettings: { try normalizeSettings(CyderAcceptedSettings.capture(at: support.appendingPathComponent("settings.json"))) })
         channel = CyderRequestChannel(path: path)
         sentinel = CyderSentinelServer(support: support, bundleID: bundleID)
     }
@@ -131,8 +133,12 @@ final class CyderInstanceCoordinator {
     private func receive(_ message: CyderRequestMessage, reply: @escaping (CyderRequestReply) -> Void) {
         precondition(Thread.isMainThread)
         func respond(_ status: String, _ record: CyderRequestJournal.Record? = nil) {
+            // Acceptance settings belong to the primary executor, not the wire
+            // ACK/status projection (which has a smaller transport byte budget).
+            var wireRecord = record
+            wireRecord?.settingsSnapshot = nil
             reply(.init(protocolVersion: 1, requestID: message.requestID, primaryEpoch: journal.executorEpoch,
-                        namespace: namespace, status: status, record: record))
+                        namespace: namespace, status: status, record: wireRecord))
         }
         guard primary else { respond("unavailable"); return }
         if message.kind == "hello" { respond(closing ? "closing" : "ready"); return }

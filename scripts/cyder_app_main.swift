@@ -107,7 +107,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
     private var launchIntent: CyderLaunchIntent = .undetermined
     private var deferredInstanceRequests: [CyderInstanceRequest] = []
     private lazy var instanceCoordinator: CyderInstanceCoordinator = {
-        let coordinator = CyderInstanceCoordinator()
+        let coordinator = CyderInstanceCoordinator(normalizeSettings: CyderSettingsStore.acceptedSnapshot)
         coordinator.onRecoveryChanged = { [weak self] records in
             guard let self else { return }
             self.requestRecords = records
@@ -1729,6 +1729,32 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             ))
         }
 
+        // Accepted requests must never consult settings saved after acceptance.
+        // The native launcher reads both settings layers before detaching Wine;
+        // its actual exit (not the UI observation deadline) owns file cleanup.
+        let snapshotURL = requestDirectory.appendingPathComponent("settings-\(UUID().uuidString).json")
+        let acceptedSettings: CyderSettings
+        do {
+            guard let snapshot = authorization?.settingsSnapshot else {
+                throw CyderRequestJournal.Failure.invalid
+            }
+            acceptedSettings = try JSONDecoder().decode(CyderSettings.self, from: snapshot)
+            var info = stat()
+            guard lstat(requestDirectory.path, &info) == 0, info.st_mode & S_IFMT == S_IFDIR,
+                  info.st_uid == getuid(), chmod(requestDirectory.path, 0o700) == 0 else {
+                throw CyderRequestJournal.Failure.unavailable
+            }
+            try JSONEncoder().encode(acceptedSettings).write(to: snapshotURL, options: .atomic)
+            try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: snapshotURL.path)
+        } catch {
+            try? FileManager.default.removeItem(at: snapshotURL)
+            return .failure(CyderFailure(code: "CYD-WIN-001", stage: .wineSpawn,
+                summary: "無法讀取這筆啟動要求的設定，尚未啟動 Windows 程式。",
+                technicalDetails: "Accepted settings snapshot unavailable or invalid"))
+        }
+        var snapshotOwnedByExecutor = false
+        defer { if !snapshotOwnedByExecutor { try? FileManager.default.removeItem(at: snapshotURL) } }
+
         let launchID = authorization?.launchID ?? UUID().uuidString
         let executableName = URL(fileURLWithPath: exe).deletingPathExtension().lastPathComponent
         onMainThread {
@@ -1782,10 +1808,12 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             args.append("--")
             args.append(contentsOf: launchArguments)
         }
-        var wineLaunchEnvironment = launchEnvironment
+        var wineLaunchEnvironment = CyderSettingsStore.environment(acceptedSettings)
+        wineLaunchEnvironment.merge(launchEnvironment) { _, override in override }
         // Internal transport and lifecycle keys always win over per-game
         // environment values.
         wineLaunchEnvironment.merge([
+            "CYDER_WINE_SETTINGS_SNAPSHOT": snapshotURL.path,
             "CYDER_WINE_DETACH": "1",
             "CYDER_WINE_PID_FILE": pidURL.path,
             "CYDER_WINE_RESULT_FILE": exitResultURL.path,
@@ -1826,6 +1854,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
                 self.instanceCoordinator.recordSpawn(authorization, pid: receipt.supervisorPID, boot: birth?.boot, started: birth?.started)
             },
             onRelease: { [weak self] in
+                try? FileManager.default.removeItem(at: snapshotURL)
                 monitor.endExecution(execution)
                 guard let self else { return }
                 DispatchQueue.main.async {
@@ -1834,6 +1863,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
                 }
             }
         )
+        snapshotOwnedByExecutor = result.didStart
         if !result.didStart { monitor.endExecution(execution) }
         if result.isUnconfirmed { retainTransport = true; return .unconfirmed }
         guard result.succeeded else {
@@ -2473,8 +2503,10 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         process.executableURL = URL(fileURLWithPath: "/bin/bash")
         process.arguments = args
         var environment = context.environment
-        for (key, value) in CyderSettingsStore.shared.environment {
-            environment[key] = value
+        if extraEnvironment["CYDER_WINE_SETTINGS_SNAPSHOT"] == nil {
+            for (key, value) in CyderSettingsStore.shared.environment {
+                environment[key] = value
+            }
         }
         for (key, value) in extraEnvironment {
             environment[key] = value

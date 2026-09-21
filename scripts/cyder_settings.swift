@@ -1063,7 +1063,17 @@ final class CyderSettingsStore {
         }
     }
 
-    var environment: [String: String] {
+    /// Materialize defaults and migrations before journal acceptance, so even
+    /// absent keys cannot change meaning while the request waits or recovers.
+    static func acceptedSnapshot(_ data: Data) throws -> Data {
+        let settings = try JSONDecoder().decode(CyderSettings.self, from: data)
+        return try JSONEncoder().encode(settings)
+    }
+
+    var environment: [String: String] { Self.environment(value) }
+
+    /// Pure projection used by accepted requests; never consults mutable shared state.
+    static func environment(_ value: CyderSettings) -> [String: String] {
         [
             "CYDER_MSYNC": value.msync ? "1" : "0",
             "CYDER_ESYNC": (value.esync ?? false) ? "1" : "0",

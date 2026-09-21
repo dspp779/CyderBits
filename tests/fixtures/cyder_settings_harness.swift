@@ -6,7 +6,7 @@ struct CyderSettingsHarness {
         let path = URL(fileURLWithPath: CommandLine.arguments[1])
         let store = CyderSettingsStore(url: path)
         let profileID = "profile-0123456789abcdef01234567"
-        precondition(store.value.schemaVersion == 12)
+        precondition(store.value.schemaVersion == 13)
         precondition(store.value.graphicsBackend == .default)
         precondition(store.value.dxvkFrameRate == .sixty)
         precondition(store.value.graphicsHud == .off)
@@ -33,6 +33,17 @@ struct CyderSettingsHarness {
         precondition(!store.hasSettings(profileID: unknownID, legacyBasename: "game.exe"))
         precondition(store.environment(profileID: nil, legacyBasename: "game.exe")["LEGACY_VALUE"] == "yes")
 
+        let normalized = try CyderSettingsStore.acceptedSnapshot(Data("{}".utf8))
+        let normalizedObject = try JSONSerialization.jsonObject(with: normalized) as! [String: Any]
+        precondition(normalizedObject["schemaVersion"] as? Int == 13)
+        precondition(normalizedObject["dpi"] as? Int == 96)
+        precondition(normalizedObject["fontMingLiuTarget"] as? String != nil)
+        do {
+            _ = try CyderSettingsStore.acceptedSnapshot(Data(#"{"dpi":"invalid"}"#.utf8))
+            fatalError("malformed settings must fail before durable acceptance")
+        } catch {}
+        let acceptedSettings = store.value
+        let acceptedEnvironment = CyderSettingsStore.environment(acceptedSettings)
         try store.update { settings in
             settings.dpi = 144
             settings.msync = true
@@ -45,6 +56,8 @@ struct CyderSettingsHarness {
             settings.perProfile["not-a-profile"] = CyderExecutableSettings()
             settings.perProfile[profileID]?.environment["NOT VALID"] = "discard"
         }
+        precondition(CyderSettingsStore.environment(acceptedSettings) == acceptedEnvironment)
+        precondition(acceptedEnvironment["CYDER_DPI"] == "480" && store.environment["CYDER_DPI"] == "144")
         let legacy = store.environment(profileID: nil, legacyBasename: "game.exe")
         precondition(legacy["CYDER_DPI"] == "96")
         precondition(legacy["CYDER_MSYNC"] == "0")
@@ -65,7 +78,7 @@ struct CyderSettingsHarness {
         let environment = profile["environment"] as! [String: Any]
         precondition(environment["NOT VALID"] == nil)
         let reloaded = CyderSettingsStore(url: path)
-        precondition(reloaded.value.schemaVersion == 12)
+        precondition(reloaded.value.schemaVersion == 13)
         precondition(!reloaded.value.maplestoryWZCache)
         precondition(reloaded.value.revision == 1)
 
@@ -85,6 +98,7 @@ struct CyderSettingsHarness {
         precondition(!CyderSettings.isValidEnvironmentKey("WINEDEBUG"))
         precondition(!CyderSettings.isValidEnvironmentKey("DYLD_INSERT_LIBRARIES"))
         precondition(!CyderSettings.isValidEnvironmentKey("CYDER_WINE_RESULT_FILE"))
+        precondition(!CyderSettings.isValidEnvironmentKey("CYDER_WINE_SETTINGS_SNAPSHOT"))
         precondition(!CyderSettings.isValidEnvironmentKey("CYDER_GRAPHICS_HUD_PREFERENCE"))
         precondition(CyderSettings.isValidEnvironmentKey("CYDER_GRAPHICS_BACKEND_PATH"))
 

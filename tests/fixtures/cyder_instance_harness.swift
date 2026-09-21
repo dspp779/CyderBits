@@ -15,6 +15,8 @@ var received: [CyderInstanceRequest] = []
 primary.start(onRequest: { received.append($0) }) { role = $0 }
 pump { role != nil }
 precondition(role == .primary)
+let acceptedPreferences = Data(#"{"schemaVersion":13,"dpi":144}"#.utf8)
+try acceptedPreferences.write(to: CyderPaths.support.appendingPathComponent("settings.json"))
 let secondary = CyderInstanceCoordinator(support: CyderPaths.support, bundleID: "test")
 var secondRole: CyderInstanceCoordinator.Role?
 secondary.start(onRequest: { _ in fatalError("secondary dispatch") }) { secondRole = $0 }
@@ -24,6 +26,18 @@ var ack: Bool?
 secondary.forward(files: ["/trusted/one.exe", "/trusted/two.exe"], arguments: [], urls: ["test://uri"], showUI: false) { ack = $0 }
 pump { ack != nil && received.count == 3 }
 precondition(ack == true)
+precondition(received.allSatisfy { $0.record.settingsSnapshot == acceptedPreferences })
+try Data(#"{"schemaVersion":13,"dpi":192}"#.utf8).write(to: CyderPaths.support.appendingPathComponent("settings.json"), options: .atomic)
+var wireStatus: CyderRequestReply?
+let queryID = received[0].record.id
+DispatchQueue.global().async {
+    let response = CyderRequestChannel.exchange(path: CyderPaths.support.appendingPathComponent(".requests-v1.sock").path,
+        message: .init(protocolVersion: 1, kind: "query", requestID: queryID, payloadDigest: nil, senderEpoch: UUID(), payload: nil))
+    DispatchQueue.main.async { wireStatus = response }
+}
+pump { wireStatus != nil }
+precondition(wireStatus?.status == "existingStatus" && wireStatus?.record?.settingsSnapshot == nil,
+             "private settings snapshot must not inflate the ACK/status transport")
 precondition(Set(received.map { $0.record.id }).count == 3, "batch must have separate durable child IDs")
 precondition(received[0].files == ["/trusted/one.exe"] && received[1].files == ["/trusted/two.exe"] && received[2].urls == ["test://uri"], "mixed batch order/content lost")
 precondition(received.allSatisfy { $0.arguments == [] && $0.record.phase == .queued })
@@ -45,6 +59,7 @@ var authorized = false
 primary.authorize(received[0].record) { dispatched = $0; authorized = true }
 pump { authorized }
 precondition(dispatched?.phase == .dispatching)
+precondition(dispatched?.settingsSnapshot == acceptedPreferences, "dispatch reread mutable settings")
 // Quit races with a queued authorization: at most committed dispatch is uncertain;
 // completion cannot release a new spawn after the main-thread freeze.
 var late: CyderRequestJournal.Record?

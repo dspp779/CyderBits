@@ -241,3 +241,17 @@ F3 不完成整體 F。接續須處理圖示／設定等主執行緒 I/O、prima
 追加檢查發現 `CyderRequestChannel.stop` 原本無條件 unlink：逾時 secondary 尚未啟動 channel，清理卻可能移除真實 primary 的 endpoint。現改為記錄自己 bind 的 socket device/inode，stop 只刪除仍匹配者；未 bind／重複 stop 均不刪他人 path。`instance-F5-r3.log` 增加真實 primary 存活時的逾時 secondary，清理後仍能透過另一 secondary 成功接受新要求；`channel-F5.log` 回歸通過。這個缺陷在 staged 前檢查發現並修正，沒有提交已知錯誤版。
 
 仍未完成：正常初次角色確認之前的首屏可更早呈現，目前失聯降級由五秒期限觸發；outbox 的原 ID 核對／恢復介面、完整錯誤分類與 feedback owner；設定等主執行緒 I/O、immutable settings、supervisor／late-spawn fencing、環境 waiter 整合、精確 process/window actions、V01–V14 與最終可重現交付。F5 不作全部恢復體驗完成宣告。
+
+## C5：接受時固定啟動設定
+
+- journal 在同 ID／digest 去重之後、原子接受提交之前擷取一次已保存設定；批次子要求共用同一份內容，UI-only 不讀啟動設定。app 注入正式 `CyderSettings` decode/encode，於接受時具體化預設值、舊版遷移與清理，不能等到派送時才決定缺省欄位。設定快照獨立於客戶端 payload digest；ACK 遺失後重送不重讀，即使目前設定已損壞仍接回原要求。
+- 讀取限定同 UID、regular file、NOFOLLOW／NONBLOCK、256 KiB；讀取前後核對同 FD 的 size/mtime/ctime。只有真正不存在的檔案代表預設設定，FIFO／symlink／不支援 schema／損壞內容不當作空設定。journal 仍受 512 筆／16 MiB 上限，快照計入原子檔案容量。取消與已確認 terminal 清 payload 及快照；uncertain 保留且不自動重播。舊 queued 紀錄重開仍為 awaitingUserResume，只有明確繼續才補取快照；有快照者繼續仍保留原內容。
+- 正式 EXE／MSI／script／link／reg／URI→Wine 共用入口要求 authorization snapshot，無快照／解碼錯誤不 spawn。全域 environment 改由快照的純函式投影，Bash 的全域與 per-profile 讀取改接私有 `launch-requests/settings-UUID.json`（目錄 0700／檔案 0600）；明確 test override 保持優先。缺檔／損壞／不在工作目錄的快照拒絕啟動，不能退回目前 settings.json。standalone CLI 未提供快照時保留原設定讀取行為。
+- Bash 在分離背景 supervisor 前完成兩層設定讀取；快照檔由原生 launcher 的 actual-exit callback 清除，觀察逾時不提前刪除。Cyder 本身崩潰後可能留下私有 transport 檔，尚未新增安全回收政策，不能依年齡猜測舊執行者已退出。此修改不解決既有 detached supervisor／跨崩潰 late-spawn fencing 缺口。
+- socket ACK／status projection 不回傳整份設定，避免額外暴露無關規則或超出較小的 wire frame 上限；primary 內部 dispatch 仍帶完整持久快照。`test-cyder-instance-runtime.sh` 驅動真實 coordinator/channel：接受後修改設定、query 不帶快照、authorize 仍使用原值。`instance-C5-r5.log` 為本批最終結果。
+- 正式 journal fault harness 驗證 lost ACK、同 ID、batch、明確 resume、uncertain 保留、terminal/cancel 清除、legacy restore/resume、corrupt/absent/FIFO/symlink：`journal-C5-r3.log` 通過。`test-cyder-settings-snapshot.sh` 以無程式碼的空 EXE 路徑驅動正式 Bash readers：全域/per-game 不受後改影響、explicit test override、CLI、缺失/損壞/symlink fail closed、失敗不進 mutation；`settings-snapshot-C5-r3.log` 通過。沒有啟動 Wine。
+- 回歸：channel、settings shell、open-files lifecycle（含正式 observer）通過，logs 為 `channel-C5.log`、`settings-C5.log`、`open-files-C5-r2.log`。Swift settings fixture 發現舊 schema 12 斷言與正式 schema 13 不符；改為驗證遷移及重讀均為 13，保留所有其他斷言，追加預設值具體化、malformed 拒絕、快照 environment 不受後改影響與保護 transport key。`settings-swift-C5-r3.log` 通過。
+- 保留失敗：`plutil -lint` 在這台 macOS 拒絕 JSON（`settings-snapshot-C5.log`／debug），改用 `-convert json -o /dev/null` 驗證後通過；新增 coordinator fixture 初次漏 message 參數，次輪 senderEpoch 型別錯誤（`instance-C5-r2.log`／r3），修正測試後通過。最初 open-files 命令寫錯檔名，exit 127，改跑實際 harness。舊 schema 斷言造成兩個原生 fixture（80423、81445）停在 OS UE，桌面權限亦重現；核對映像後只向這兩個 fixture 送 SIGKILL，不把卡住的執行當通過。修正 fixture 後新程序正常完成。
+- 全來源 typecheck 通過；最新 universal macOS11 build 為 `build-C5-r2.log`。隔離包 `/private/tmp/cyder-lifecycle-c5-build/Cyder.app` 使用 `local.cyder.lifecycle-c5`、CD2 support/runtime 與 ad-hoc 簽章，manifest `build-C5-source-sha256.json`。本輪未啟動完整 app；本節為 L1–2 原生／故障注入證據，不是真實 Wine 或 NGS 相容性結論。
+
+仍須完成：設定 UI 與部分 action 的主執行緒 I/O、outbox／feedback owner、supervisor 與跨崩潰執行權、環境 waiter、精確 process/window 動作、完整 V01–V14 及最終交付。C5 固定設定內容，不把動態 profile 路由或環境身分也宣稱為已固定。目標保持進行中。

@@ -124,3 +124,83 @@ try FileManager.default.removeItem(at: missingRoot.appendingPathComponent("reque
 let lost = J(directory: missingRoot, delivery: delivery)
 precondition(wait { lost.open(completion: $0) } == .failure(.corrupt))
 print("PASS journal: durable ACK loss/dedupe, ownership, nil argv, cancel/dispatch, crash recovery, late receipt, disk fault, quiesce, corrupt history")
+
+// Saved settings are accepted exactly once, outside the client's payload hash.
+let settingsURL = root.appendingPathComponent("settings.json")
+let snapshotA = Data(#"{"schemaVersion":13,"dpi":144,"perProfile":{}}"#.utf8)
+let snapshotB = Data(#"{"schemaVersion":13,"dpi":192,"perProfile":{}}"#.utf8)
+try snapshotA.write(to: settingsURL)
+let capture = { try CyderAcceptedSettings.capture(at: settingsURL) }
+let settingsRoot = root.appendingPathComponent("immutable-settings")
+var snapshots = J(directory: settingsRoot, delivery: delivery, captureSettings: capture)
+_ = value(wait { snapshots.open(completion: $0) })
+let settingsNamespace = wait { snapshots.namespace(completion: $0) }!
+let settingsID = J.makeID(namespace: settingsNamespace)
+snapshots.inject(.afterCommit)
+snapshots.submit(id: settingsID, payload: payload) { _ in fatalError("lost ACK must not arrive") }
+let acceptedA = value(wait { snapshots.query(id: settingsID, completion: $0) })
+precondition(acceptedA.settingsSnapshot == snapshotA)
+try snapshotB.write(to: settingsURL, options: .atomic)
+let retryA = value(wait { snapshots.submit(id: settingsID, payload: payload, completion: $0) })
+precondition(retryA == acceptedA, "ACK loss retry must preserve accepted settings")
+let batchID = J.makeID(namespace: settingsNamespace)
+let batchPayload = CyderRequestPayload(files: ["/a.exe", "/b.exe"], arguments: nil, urls: [], showUI: true)
+let batch = value(wait { snapshots.submit(id: batchID, payload: batchPayload, completion: $0) })
+precondition(batch.settingsSnapshot == nil && batch.children?.count == 3)
+for childID in batch.children! {
+    let child = value(wait { snapshots.query(id: childID, completion: $0) })
+    precondition(child.settingsSnapshot == (child.payload!.showUI ? nil : snapshotB))
+}
+_ = value(wait { snapshots.cancel(id: batchID, digest: batchPayload.digest, completion: $0) })
+for childID in batch.children! {
+    let child = value(wait { snapshots.query(id: childID, completion: $0) })
+    precondition(child.payload == nil && child.settingsSnapshot == nil)
+}
+closeJournal(snapshots)
+snapshots = J(directory: settingsRoot, delivery: delivery, captureSettings: capture)
+_ = value(wait { snapshots.open(completion: $0) })
+let resumedA = value(wait { snapshots.resume(id: settingsID, completion: $0) })
+precondition(resumedA.settingsSnapshot == snapshotA, "explicit resume must retain a previously accepted snapshot")
+let dispatchA = value(wait { snapshots.authorizeDispatch(id: settingsID, completion: $0) })
+let uncertainA = value(wait { snapshots.complete(id: settingsID, launchID: dispatchA.launchID!, epoch: dispatchA.executorEpoch!, outcome: "deadline", failed: false, uncertain: true, completion: $0) })
+precondition(uncertainA.settingsSnapshot == snapshotA)
+let terminalID = J.makeID(namespace: settingsNamespace)
+_ = value(wait { snapshots.submit(id: terminalID, payload: payload, completion: $0) })
+let terminalDispatch = value(wait { snapshots.authorizeDispatch(id: terminalID, completion: $0) })
+let terminal = value(wait { snapshots.complete(id: terminalID, launchID: terminalDispatch.launchID!, epoch: terminalDispatch.executorEpoch!, outcome: "done", failed: false, completion: $0) })
+precondition(terminal.settingsSnapshot == nil && terminal.payload == nil)
+try Data("corrupt".utf8).write(to: settingsURL, options: .atomic)
+precondition(value(wait { snapshots.submit(id: settingsID, payload: payload, completion: $0) }) == uncertainA)
+let rejectedID = J.makeID(namespace: settingsNamespace)
+precondition(wait { snapshots.submit(id: rejectedID, payload: payload, completion: $0) } == .failure(.invalid))
+precondition(wait { snapshots.query(id: rejectedID, completion: $0) } == .failure(.missing))
+let ui = CyderRequestPayload(files: [], arguments: nil, urls: [], showUI: true)
+precondition(value(wait { snapshots.submit(id: J.makeID(namespace: settingsNamespace), payload: ui, completion: $0) }).settingsSnapshot == nil,
+             "UI-only requests must not read corrupt saved launch preferences")
+closeJournal(snapshots)
+// Legacy records cannot gain new settings during restore; only explicit resume.
+let legacyRoot = root.appendingPathComponent("legacy-settings")
+let legacy = J(directory: legacyRoot, delivery: delivery)
+_ = value(wait { legacy.open(completion: $0) })
+let legacyNamespace = wait { legacy.namespace(completion: $0) }!
+let legacyID = J.makeID(namespace: legacyNamespace)
+_ = value(wait { legacy.submit(id: legacyID, payload: payload, completion: $0) })
+closeJournal(legacy)
+try snapshotB.write(to: settingsURL, options: .atomic)
+let migration = J(directory: legacyRoot, delivery: delivery, captureSettings: capture)
+let legacyRecords = value(wait { migration.open(completion: $0) })
+precondition(legacyRecords[0].settingsSnapshot == nil && legacyRecords[0].phase == .awaitingUserResume)
+precondition(value(wait { migration.resume(id: legacyID, completion: $0) }).settingsSnapshot == snapshotB)
+closeJournal(migration)
+for bad in ["[]", "{\"schemaVersion\":14}", "{\"schemaVersion\":true}", "{\"schemaVersion\":1.5}"] {
+    precondition(!CyderAcceptedSettings.isValid(Data(bad.utf8)))
+}
+try FileManager.default.removeItem(at: settingsURL)
+let absent = try capture()
+precondition(absent == Data("{}".utf8))
+precondition(mkfifo(settingsURL.path, 0o600) == 0)
+do { _ = try capture(); fatalError("FIFO must not block or become defaults") } catch {}
+try FileManager.default.removeItem(at: settingsURL)
+try FileManager.default.createSymbolicLink(at: settingsURL, withDestinationURL: settingsRoot)
+do { _ = try capture(); fatalError("symlink must not become defaults") } catch {}
+print("PASS accepted settings: immutable ACK retry/batch/resume, uncertainty, terminal purge, legacy resume, invalid/missing/FIFO/symlink")

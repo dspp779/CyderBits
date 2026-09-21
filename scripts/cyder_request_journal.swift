@@ -26,6 +26,50 @@ struct CyderRequestPayload: Codable, Equatable {
     }
 }
 
+/// Read on the journal owner queue, before durable acceptance. An unreadable
+/// file is not equivalent to defaults; only ENOENT means no saved preferences.
+enum CyderAcceptedSettings {
+    static let maxBytes = 262144
+    static func capture(at url: URL) throws -> Data {
+        let fd = Darwin.open(url.path, O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC)
+        guard fd >= 0 else {
+            if errno == ENOENT {
+                var info = stat()
+                if lstat(url.path, &info) != 0, errno == ENOENT { return Data("{}".utf8) }
+            }
+            throw CyderRequestJournal.Failure.unavailable
+        }
+        defer { Darwin.close(fd) }
+        var before = stat()
+        guard fstat(fd, &before) == 0, before.st_mode & S_IFMT == S_IFREG,
+              before.st_uid == getuid(), before.st_size >= 0,
+              before.st_size <= maxBytes else { throw CyderRequestJournal.Failure.invalid }
+        let handle = FileHandle(fileDescriptor: fd, closeOnDealloc: false)
+        let data = try handle.read(upToCount: maxBytes + 1) ?? Data()
+        var after = stat()
+        guard fstat(fd, &after) == 0, data.count == before.st_size,
+              before.st_size == after.st_size,
+              before.st_mtimespec.tv_sec == after.st_mtimespec.tv_sec,
+              before.st_mtimespec.tv_nsec == after.st_mtimespec.tv_nsec,
+              before.st_ctimespec.tv_sec == after.st_ctimespec.tv_sec,
+              before.st_ctimespec.tv_nsec == after.st_ctimespec.tv_nsec,
+              isValid(data) else { throw CyderRequestJournal.Failure.invalid }
+        return data
+    }
+
+    static func isValid(_ data: Data) -> Bool {
+        guard data.count <= maxBytes,
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return false }
+        if let version = object["schemaVersion"] {
+            guard let number = version as? NSNumber,
+                  String(cString: number.objCType) != "c",
+                  number.doubleValue.rounded() == number.doubleValue,
+                  (1...13).contains(number.intValue) else { return false }
+        }
+        return true
+    }
+}
+
 /// The durable journal is the only authority for acceptance and dispatch.
 /// Its owner queue is exclusively for disk transactions, never LifecycleStore
 /// or AppKit. No transport handler may acknowledge before its callback.
@@ -48,6 +92,7 @@ final class CyderRequestJournal {
         var outcome: String?
         var children: [String]? = nil
         var displayName: String? = nil
+        var settingsSnapshot: Data? = nil
     }
     struct Document: Codable {
         let schema: Int
@@ -64,6 +109,7 @@ final class CyderRequestJournal {
     private let file: URL
     private let queue = DispatchQueue(label: "local.cyder.request-journal", qos: .userInitiated)
     private let delivery: DispatchQueue
+    private let captureSettings: (() throws -> Data)?
     private var document: Document?
     private var closing = false
     private var fault: Fault = .none
@@ -73,11 +119,12 @@ final class CyderRequestJournal {
     private var ownerFD: Int32 = -1
     let executorEpoch = UUID()
 
-    init(directory: URL, limit: Int = 512, delivery: DispatchQueue = .main) {
+    init(directory: URL, limit: Int = 512, delivery: DispatchQueue = .main, captureSettings: (() throws -> Data)? = nil) {
         self.directory = directory
         file = directory.appendingPathComponent("requests-v1.json")
         self.limit = limit
         self.delivery = delivery
+        self.captureSettings = captureSettings
     }
 
     func open(completion: @escaping (Result<[Record], Failure>) -> Void) {
@@ -113,6 +160,7 @@ final class CyderRequestJournal {
                           loaded.records.allSatisfy({ $0.key == $0.value.id && validID($0.key, namespace: loaded.namespace) }) else { throw Failure.corrupt }
                     for (id, record) in loaded.records {
                         if let payload = record.payload, !payload.isValid || payload.digest != record.digest { throw Failure.corrupt }
+                        if let snapshot = record.settingsSnapshot, !CyderAcceptedSettings.isValid(snapshot) { throw Failure.corrupt }
                         switch record.phase {
                         case .queued:
                             loaded.records[id]?.phase = .awaitingUserResume
@@ -182,6 +230,7 @@ final class CyderRequestJournal {
                 return previous
             }
             guard !closing else { throw Failure.closing }
+            let settingsSnapshot = try snapshot(for: payload)
             var children: [CyderRequestPayload] = payload.files.map {
                 CyderRequestPayload(files: [$0], arguments: payload.arguments, urls: [], showUI: false, settings: payload.settings)
             }
@@ -198,7 +247,7 @@ final class CyderRequestJournal {
                     let uuid = [String(chars[0..<8]), String(chars[8..<12]), String(chars[12..<16]), String(chars[16..<20]), String(chars[20..<32])].joined(separator: "-").uppercased()
                     let childID = current.namespace.uuidString + ":" + uuid
                     guard current.records[childID] == nil else { throw Failure.conflictingPayload }
-                    current.records[childID] = Record(id: childID, digest: child.digest, version: current.version + 1, phase: .queued, payload: child, displayName: child.displayName)
+                    current.records[childID] = Record(id: childID, digest: child.digest, version: current.version + 1, phase: .queued, payload: child, displayName: child.displayName, settingsSnapshot: child.files.isEmpty && child.urls.isEmpty ? nil : settingsSnapshot)
                     childIDs.append(childID)
                 }
                 let parent = Record(id: id, digest: payload.digest, version: current.version + 1, phase: .completed,
@@ -207,10 +256,17 @@ final class CyderRequestJournal {
                 return parent
             }
             guard current.records.count < limit else { throw Failure.full }
-            let record = Record(id: id, digest: payload.digest, version: current.version + 1, phase: .queued, payload: payload, displayName: payload.displayName)
+            let record = Record(id: id, digest: payload.digest, version: current.version + 1, phase: .queued, payload: payload, displayName: payload.displayName, settingsSnapshot: settingsSnapshot)
             current.records[id] = record
             return record
         }
+    }
+
+    private func snapshot(for payload: CyderRequestPayload) throws -> Data? {
+        guard !payload.files.isEmpty || !payload.urls.isEmpty, let captureSettings else { return nil }
+        let snapshot = try captureSettings()
+        guard CyderAcceptedSettings.isValid(snapshot) else { throw Failure.invalid }
+        return snapshot
     }
 
     func query(id: String, completion: @escaping Reply) {
@@ -239,6 +295,7 @@ final class CyderRequestJournal {
                 for child in children {
                     current.records[child]?.phase = .cancelled
                     current.records[child]?.payload = nil
+                    current.records[child]?.settingsSnapshot = nil
                     current.records[child]?.version = current.version + 1
                 }
             } else {
@@ -247,6 +304,7 @@ final class CyderRequestJournal {
             guard current.records[id] != nil || current.records.count < limit else { throw Failure.full }
             record.phase = .cancelled
             record.payload = nil
+            record.settingsSnapshot = nil
             record.version = current.version + 1
             current.records[id] = record
             return record
@@ -291,7 +349,7 @@ final class CyderRequestJournal {
                   record.executorEpoch == epoch else { throw Failure.wrongExecutor }
             guard [.dispatching, .observing].contains(record.phase) else { throw Failure.tooLate }
             record.phase = uncertain ? .uncertain : (failed ? .failed : .completed)
-            if !uncertain { record.payload = nil } // uncertain retains recovery context; never automatically replay
+            if !uncertain { record.payload = nil; record.settingsSnapshot = nil } // uncertain retains recovery context; never automatically replay
             record.outcome = String(outcome.prefix(128))
             record.version = current.version + 1
             current.records[id] = record
@@ -304,6 +362,8 @@ final class CyderRequestJournal {
             guard !closing else { throw Failure.closing }
             guard var record = current.records[id], record.phase == .awaitingUserResume,
                   record.payload != nil else { throw Failure.tooLate }
+            // Legacy queued records acquire a snapshot only after explicit resume.
+            if record.settingsSnapshot == nil { record.settingsSnapshot = try snapshot(for: record.payload!) }
             record.phase = .queued
             record.outcome = nil
             record.version = current.version + 1

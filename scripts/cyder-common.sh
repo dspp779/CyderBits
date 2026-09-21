@@ -693,8 +693,25 @@ cyder_migrate_legacy_layout() {
   fi
 }
 
+# Native accepted requests supply a private immutable copy. Missing/corrupt
+# copies fail closed; falling back to today's preferences would change intent.
+cyder_launch_settings_path() {
+  if [[ -n "${CYDER_WINE_SETTINGS_SNAPSHOT:-}" ]]; then
+    local snapshot="$CYDER_WINE_SETTINGS_SNAPSHOT" parent expected
+    [[ -f "$snapshot" && ! -L "$snapshot" ]] || return 1
+    parent="$(cd "$(dirname "$snapshot")" && pwd -P)" || return 1
+    expected="$(cd "$CYDER_SUPPORT/launch-requests" && pwd -P)" || return 1
+    [[ "$parent" == "$expected" ]] || return 1
+    /usr/bin/plutil -convert json -o /dev/null "$snapshot" >/dev/null 2>&1 || return 1
+    printf '%s\n' "$snapshot"
+  else
+    printf '%s\n' "$CYDER_SUPPORT/settings.json"
+  fi
+}
+
 cyder_load_saved_settings() {
-  local settings="$CYDER_SUPPORT/settings.json"
+  local settings
+  settings="$(cyder_launch_settings_path)" || return 1
   # Process-level values are authoritative. Native Cyder uses them for the
   # currently selected game's overrides; reloading the global settings file
   # here used to replace Retina=0/DPI=96 with the global Retina preference.
@@ -2682,7 +2699,8 @@ cyder_load_game_settings() {
   local exe="$1"
   local engine_root="${2:-${CYDER_ENGINES:-}/${CYDER_ENGINE_NAME:-}}"
   local profile_script="$CYDER_SCRIPTS/cyder-profile.sh"
-  local settings_file="$CYDER_SUPPORT/settings.json"
+  local settings_file
+  settings_file="$(cyder_launch_settings_path)" || return 1
   local profile_id game_json launch_request="${CYDER_TEST_SETTINGS_REQUEST:-}"
   CYDER_GAME_ARGUMENTS=()
   CYDER_GAME_SETTINGS_FOUND=0
@@ -2791,7 +2809,7 @@ cyder_prepare_game_launch_settings() {
   local engine_root="$2"
   local prefix="$3"
   local exe="$4"
-  cyder_load_game_settings "$exe" "$engine_root"
+  cyder_load_game_settings "$exe" "$engine_root" || return $?
   cyder_apply_maplestory_wz_cache "$exe"
   cyder_resolve_effective_graphics_backend "$engine_root" "$exe"
 
@@ -2816,7 +2834,7 @@ cyder_prepare_installer_launch_settings() {
   local wine_bin="$1"
   local engine_root="$2"
   local prefix="$3"
-  cyder_load_saved_settings
+  cyder_load_saved_settings || return $?
   cyder_apply_user_settings "$wine_bin" "$engine_root" "$prefix" || return $?
 }
 
