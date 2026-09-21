@@ -312,6 +312,7 @@ SWIFT_SOURCES=(
   "$SCRIPT_DIR/cyder_process_evidence.swift"
   "$SCRIPT_DIR/cyder_environment_monitor.swift"
   "$SCRIPT_DIR/cyder_recovery_observer.swift"
+  "$SCRIPT_DIR/cyder_independent_processes.swift"
   "$SCRIPT_DIR/cyder_recovery_records.swift"
   "$SCRIPT_DIR/cyder_window_access.swift"
   "$SCRIPT_DIR/cyder_status_item.swift"

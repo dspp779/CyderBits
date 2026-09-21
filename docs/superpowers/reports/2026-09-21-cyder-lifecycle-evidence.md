@@ -51,11 +51,11 @@ SIGN_IDENTITY=- CYDER_REQUIRE_NATIVE_SWIFT=1 CYDER_SWIFT_OPTIMIZATION=-Onone \
 
 ## 驗證矩陣（持續更新）
 
-以下為截至 C23 的證據摘要；各批次段落保留當時缺口與失敗，不以早期矩陣覆蓋後續結果。
+以下為截至 C24 的證據摘要；各批次段落保留當時缺口與失敗，不以早期矩陣覆蓋後續結果。
 
 | 項目 | 目前證據 | 剩餘／限制 |
 |---|---|---|
-| V01 | 正式 runner／monitor／設定／視窗 adapter 的受阻故障注入與 physical 上限；C22 30 次 callback proxy | 其餘 main I/O 盤點及完整 app 端到端量測 |
+| V01 | 正式 runner／monitor／設定／視窗 adapter 的受阻故障注入與 physical 上限；C22/C24 30 次 callback proxy，C24 含 32 個獨立程序列 | 其餘 main I/O 盤點及完整 app 端到端量測 |
 | V02 | 正式 menu callback mutation/removal 計數、快速重開、stale revision；C22 feedback 在 tracking 期間不改項目 | 真實 status menu tracking 仍受工具 target 限制 |
 | V03 | 真實 journal／Unix channel、ACK 遺失與同 ID 重送；C6/C7 outbox 核對及 retry 保留原 ID | 最終 app 整合回歸；不是網路／Wine 相容性結論 |
 | V04 | reducer 排列、journal cancel/dispatch、operation gate queued 取消及 C17 準備／spawn 邊界 | 最終全入口整合回歸 |
@@ -63,11 +63,11 @@ SIGN_IDENTITY=- CYDER_REQUIRE_NATIVE_SWIFT=1 CYDER_SWIFT_OPTIMIZATION=-Onone \
 | V06 | C16–C21 正式 root receipt／雙樣本 drain／generation／observer 固定期限；native child 與注入後繼證據 | Wine root 退出後失去 Unix ancestry 的後繼不可猜歸屬；真實接力未驗證 |
 | V07 | 正式環境 store／monitor 保留 alive 無視窗環境，觀察期限後不持續 starting；C19 drain 不被 request 擋住 | 實際 NGS 未測，無視窗替身只證明政策 |
 | V08 | E 真實 Wine 校準；C21 probe/identity/waiter spawn 受阻、新世代／舊事件／雙 empty 注入 | 單環境 waiter 分工仍須清理並做最後回歸 |
-| V09 | C18/C20 同 prefix 不共用視窗成功、完整 birth/scope；E 真實停止 CD2 未波及另一隔離 bottle | 未歸屬程序發現／呈現仍未完成；真實多遊戲視窗未測 |
+| V09 | C18/C20 同 prefix 不共用視窗成功、完整 birth/scope；E 真實停止 CD2 未波及另一隔離 bottle | C24 原生孤兒程序獨立發現／呈現通過；未登錄 bottle 補查及真實多遊戲視窗未測 |
 | V10 | D/E/C3 真實 Command-Q 保留 Wine births；C11 owner crash 保留 child；C17/C21/C22 quit fencing | 最新完整測試包及所有入口的最終回歸 |
 | V11 | E 真實設定明確停止後 UI 保留；正式 reducer／gate 區分 stop 與 quit | 最新 status stop 的實際 tracking 未測 |
 | V12 | C22 真實原生同名雙視窗／最小化有限通過；正式 action 注入替換、PID reuse、焦點變更、逾時、quit | Wine、其他 Space、VoiceOver 未驗；原生不穩定輪次保留 |
-| V13 | 真實 E 重開校準環境且無 replay；C23 正式 journal／registry reopen、原生出生身分接回選單、queued/historical 進入共用模型；prior-boot／重用／late generation／quit 故障注入 | 原 root 已退出且失去可驗 Unix ancestry 的後繼仍未接回；最新版完整 Wine GUI 重開尚未實測 |
+| V13 | 真實 E 重開校準環境且無 replay；C23 正式 journal／registry reopen、原生出生身分接回選單、queued/historical 進入共用模型；prior-boot／重用／late generation／quit 故障注入 | C24 以引擎／prefix 證據接回原生孤兒程序，保持未歸屬；缺少環境登錄仍待補查；最新版完整 Wine GUI 重開尚未實測 |
 | V14 | E/C21 engine／prefix／probe/identity 失聯故障注入；一個 worker 受阻仍有另一環境前進，退出可用 | 最终 app 局部降級 UX 與主執行緒 I/O 回歸 |
 
 
@@ -534,3 +534,20 @@ C21 修復已重現的正常空環境接新 launch 路徑；校準後、實際 s
 - 最後 `build-C23-r2.log` universal macOS11 建置成功；staged review 發現 pending recovery 應先比對 stamp 再移除，避免舊 effect 刪到新等待項，修正後重跑 recovery 並重建。先前 build／hash 保留，39 個最終輸入 hash 在編譯前後相同。`/private/tmp/cyder-lifecycle-c23-build/Cyder.app` 配置 local.cyder.lifecycle-c23、CD2 support/runtime，ad-hoc／strict verify 及 arm64／x86_64 核對通過。`build-C23-source-sha256.json` 保留 45 個來源／產物 hash，三支包內 Bash scripts bytes 與 repo 相同。本輪完整 Cyder.app／Wine GUI 未啟動，沒有新的 Wine／NGS 相容性宣稱；原生 recovery harness 的 process／AppKit 是真實、server／receipt metadata 則為標示的替代證據。
 
 C23 接通有完整 native root 證據的重新觀察及 queued/history 共用政策；原 root 已退出、後繼失去 Unix ancestry、缺少環境登錄的可信 bottle 補查與未歸屬程序呈現仍待完成。重複 waiter、其餘 UX／I/O、完整 V01–V14 最終驗收及可重現交付亦未完成，目標保持進行中。
+
+
+## C24：未歸屬程序的有界發現與獨立呈現
+
+- 靜態盤點確認既有 programRows 只列 launch，而 activation／Unix tree 不能發現已 reparent 的無視窗程序。新增正式 CyderProcessInventory／CyderIndependentProcesses，經 status controller → LifecycleStore → 共用 menu renderer 接線。環境仍為管理範圍，不從 prefix 推定遊戲歸屬；發現不建立 request／launch、不啟動 Wine、不自動要求 AX 權限或切換視窗。
+- 同 UID 的 sysctl KERN_PROC_UID 盤點上限 4096，另以原生完整 boot／PID／微秒出生身分查核。先核對目前管理環境之 engine 相對位置的精確 loader 路徑，再讀該程序的 WINEPREFIX，並重新核對 prefix UID/device/inode、環境路徑、image 與 birth。只接受絕對 WINEPREFIX；不把 CX_BOTTLE 名稱當路徑，不接管其他 prefix 或其他 engine。引擎位置 allowlist 不等於任意名稱含 wine 的檔案。以 monitor 已校準的 canonical server 路徑作詞法比對，不為每個 PID 解析所有環境的 symlink，避免無關的慢掛載點耗盡兩個 worker。
+- KERN_PROCARGS2 reader 上限 2 MiB／4096 個參數及環境項目，處理空參數、截斷、重複 WINEPREFIX 及無效資料；只保留 prefix 和第一個 .exe 的短 basename，沒有保存或輸出完整 argv／environment。核對 Apple [sysctl(3)](https://developer.apple.com/library/archive/documentation/System/Conceptual/ManPages_iPhoneOS/man3/sysctl.3.html) 的 KERN_PROC_UID 與長度／失敗語意，以及本機 SDK 結構。盤點失敗、超限或漏列均不能推定程序退出。
+- 一個實體 inventory worker、兩個實體 classification worker，各自不阻塞 UI/state queue；排隊上限 4096，保留尚未讀到的 PID 順序，不每輪重置而餓死尾端。每三秒刷新，五秒邏輯逾時保留仍受阻的實體占位；一個 PID 卡住時另一環境可前進。已知獨立 birth 即使沒列在盤點中也會重新讀取。DispatchSource 的 exit／exec 只提示再次驗身分，不以通知中的數值 PID 直接刪除程序。
+- 新 independentProcess reducer 事件不能覆蓋已知 launch／ownership。明確不存在或已換 birth 才標 exited；失聯／scope 證據不足保留 unconfirmed，移除視窗能力與待完成操作。世代不符、已退役 birth、quit 後的晚到結果被拒絕；alive 還需目前環境 alive／healthy。環境降級會撤掉獨立程序的可操作狀態，並拒絕較早讀取的 late alive。
+- 有完整回執的恢復可把先被盤點發現的 root 接回原 launch，解決兩個 observer 回覆順序競態；後來的獨立 alive／unknown／exit 不能再降級已證實的遊戲歸屬。沒有回執或可驗 ancestry 時仍獨立顯示。選單加入「其他執行中的 Windows 程序」，同名列以 PID 區分；已知 AX 視窗沿用同一精確 action renderer，沒有窗口時只是停用資訊列，未知不顯示 starting。
+- **真實原生程序、注入管理環境**：新 test-cyder-independent-processes.sh 編譯自建 C helper 放在測試 engine 位置，fork 後原 parent 退出、child 無視窗且 reparent。系統 PID 枚舉、image、argv/prefix、stat 與 birth 均實讀；正式 controller/store/AppKit menu 確認獨立列，quiesce 保留 child，另一 controller 無 journal 也可重新發現。最後只在核對完整 birth 後 SIGTERM 自建 child，程序退出但共享環境保持 alive。此測試的 engine 名稱／環境校準為 fixture；它不是 Wine、Windows 或 NGS 相容性證據。
+- **故障注入正式路徑**：一個讀取卡住、另一 bottle 可列出；盤點漏列不刪除、讀取失聯降級、同 PID 新 birth 分開；舊世代返回不得附加，新世代需新實體讀取；環境校準失聯與 late alive；兩個讀取超過五秒不增加 physical calls；quit 拒絕返回／排隊讀取。另驗已知歸屬不可被獨立事件降級、有回執可以認領先發現的 root，以及獨立 window 不製造 launch success、失聯後 late shown 被拒絕。
+- 最後 `independent-C24-r7.log` 全部通過且要求 harness 完成檔。32 個同名獨立列可區分，兩個讀取仍受阻時 30 筆 callback-cycle proxy 為 p95 **0.302 ms**、max **0.311625 ms**，原始資料 `independent-menu-C24.csv`。先前 r2–r4 空獨立列及 r5 的 32 列量測（p95 0.764292 ms、max 0.827708 ms）均留存；r7 是最終來源回歸，不挑選較小樣本。這仍是 menu delegate callback 代理值，不是真實點擊至呈現／tracking，也不是全 app 主執行緒無停頓的證明。
+- 回歸 `recovery-C24.log`、`lifecycle-binding-C24.log`、`lifecycle-isolation-C24.log`、`window-actions-C24-r3.log`、`status-item-C24-r2.log`、`open-files-C24.log` 通過。保留失敗：window-actions 首輪為 Swift 無法匯入 PROC_PIDPATHINFO_MAXSIZE macro，改用 SDK 對應的 4×MAXPATHLEN；受限環境的 independent 首輪無法取得自建 birth、window-actions r2 無有效輸出、status-item 首輪未產生必要 CSV，均不算通過。改由原生桌面權限執行取得上述完整結果。失敗 harness 86936（/private/tmp/cy-independent.iCjZvR/test，16:45:59）卡在 UE；首次清理因 ps 路徑截短而拒絕發訊號，之後以未截斷路徑／時間核對，只發一次 SIGKILL，未碰 Wine 或其他測試程序。r6 收緊 loader 比對後因 fixture 直接注入 /private/tmp、正式 image 卻為 /tmp 而失敗；限定自建 helper 的診斷保存在 independent-C24-r6-diagnostic.log。改由正式 EnvironmentProbe.identify 產生 canonical identity，加入可執行的假 server 檔而不執行它，r7 通過；沒有放寬 path equality。r6 的 UE harness 91582（16:55:50，/private/tmp/cy-independent.TkvUSW/test）亦核對後只發一次 SIGKILL；86936 仍是 UE，未重送。
+- 最後 `build-C24-r3.log` universal macOS11 編譯及簽名檢查通過，iconutil 的既有 ICNS fallback 正常；40 個編譯輸入前後 SHA256 一致；前兩次 build log 與輸入 hash 留存但不作最終交付，最後採完全詞法的 engine allowlist。隔離包 `/private/tmp/cyder-lifecycle-c24-build/Cyder.app` 配置 local.cyder.lifecycle-c24、CD2 support/runtime，ad-hoc／strict verify 與 arm64／x86_64 核對通過；`build-C24-source-sha256.json` 有 46 項，三支包內 Bash scripts bytes 與 repo 相同。本輪完整 Cyder.app／Wine GUI 未啟動，未覆蓋正式安裝或發布。
+
+本批對已登錄、校準可用環境補上孤兒／無視窗程序發現；並未承諾所有 Wine build 的 loader 位置與環境記憶體均可讀。缺少 WINEPREFIX、未知 loader 位置、權限不足、盤點超限時不猜 scope，環境入口照原校準政策保留。未登錄 bottle 的可信補查、重複 waiter 分工、其餘 UX／主執行緒 I/O 及完整 V01–V14 最終交付仍待收斂，目標保持進行中。

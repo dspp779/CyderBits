@@ -130,6 +130,7 @@ enum CyderLifecycle {
         case waiterFinished(Stamp, UUID, cancelled: Bool)
         case reconcileStarted(Stamp, UUID)
         case reconciled(Stamp, UUID, Existence, Health)
+        case independentProcess(Stamp, ProcessID, name: String, existence: Existence)
         case processObserved(Stamp, ProcessRecord)
         case processExited(Stamp, ProcessID)
         case windowObserved(Stamp, Window)
@@ -250,7 +251,8 @@ enum CyderLifecycle {
                       [.completed, .failed, .uncertain].contains(request.phase), request.launch == launch.id,
                       request.environment == nil || request.environment == stamp.environment,
                       launch.request == id, launch.environment == stamp.environment, launches[launch.id] == nil,
-                      processes[root] == nil, !exitedProcesses.contains(.init(environment: stamp.environment, process: root)) else { return [] }
+                      processes[root].map({ $0.launch == nil && $0.ownership == nil && $0.environment == stamp.environment && $0.existence != .exited }) ?? true,
+                      !exitedProcesses.contains(.init(environment: stamp.environment, process: root)) else { return [] }
                 launch.deadline = 0; launch.outcome = request.outcome ?? .unconfirmed
                 launch.processes = [root]
                 launches[launch.id] = launch; launchStamps[launch.id] = stamp
@@ -357,6 +359,19 @@ enum CyderLifecycle {
                     }
                     windows = windows.filter { processes[$0.key.process]?.existence != .exited }
                 }
+            case .independentProcess(let stamp, let id, let name, let existence):
+                guard accepts(stamp), id.pid > 0, id.started > 0, !id.boot.isEmpty,
+                      existence != .alive || (environments[stamp.environment]?.existence == .alive && environments[stamp.environment]?.health == .healthy),
+                      !exitedProcesses.contains(.init(environment: stamp.environment, process: id)),
+                      processes[id].map({ $0.environment == stamp.environment && $0.launch == nil && $0.ownership == nil }) ?? true,
+                      existence == .alive || processes[id] != nil else { return [] }
+                var record = processes[id] ?? .init(id: id, name: name, environment: stamp.environment,
+                    launch: nil, ownership: nil, existence: existence)
+                record.name = name; record.existence = existence
+                if record == processes[id] { return [] }
+                processes[id] = record
+                if existence != .alive { windows = windows.filter { $0.key.process != id } }
+                if existence == .exited { exitedProcesses.insert(.init(environment: stamp.environment, process: id)) }
             case .processObserved(let stamp, var process):
                 guard accepts(stamp), process.environment == stamp.environment,
                       !exitedProcesses.contains(.init(environment: stamp.environment, process: process.id)),

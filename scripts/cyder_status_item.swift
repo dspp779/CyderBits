@@ -60,6 +60,8 @@ final class CyderStatusItemController: NSObject, NSMenuDelegate {
     private var latestLifecycle = CyderLifecycle.State().snapshot
     private var hasLifecycleSnapshot = false
     private let windowDriver: CyderWindowAccess.Driver
+    private let discoveryDriver: CyderIndependentProcesses.Driver
+    private lazy var independentProcesses = CyderIndependentProcesses(driver: discoveryDriver) { [weak self] in self?.lifecycleStore.send($0) }
     private let recoveryInspect: (Int32) -> CyderProcessEvidence.Presence
     private var historyRecords: [String: CyderRecoveryObserver.Record] = [:]
     private var pendingRecovered: [String: (CyderRecoveryObserver.Record, CyderLifecycle.Stamp)] = [:]
@@ -68,7 +70,9 @@ final class CyderStatusItemController: NSObject, NSMenuDelegate {
     }
     private lazy var windowAccess = CyderWindowAccess(driver: windowDriver, event: { [weak self] in self?.lifecycleStore.send($0) })
     init(windowDriver: CyderWindowAccess.Driver = .system,
+         discoveryDriver: CyderIndependentProcesses.Driver = .system,
          recoveryInspect: @escaping (Int32) -> CyderProcessEvidence.Presence = CyderProcessEvidence.inspect) {
+        self.discoveryDriver = discoveryDriver
         self.windowDriver = windowDriver; self.recoveryInspect = recoveryInspect; super.init()
     }
     private lazy var lifecycleStore: CyderLifecycleStore = CyderLifecycleStore(epoch: lifecycleEpoch) { [weak self] snapshot, effects in
@@ -104,6 +108,7 @@ final class CyderStatusItemController: NSObject, NSMenuDelegate {
         animationTimer = nil
         lifecycleStore.send(.quit)
         windowAccess.stop()
+        independentProcesses.stop()
         recoveryObserver.stop(); pendingRecovered.removeAll()
         claimTokens.removeAll()
         let completions = Array(claimCompletions.values)
@@ -228,6 +233,7 @@ final class CyderStatusItemController: NSObject, NSMenuDelegate {
         latestLifecycle = snapshot
         windowAccess.update(snapshot)
         recoveryObserver.update(snapshot)
+        independentProcesses.update(snapshot)
         let endedScopes = Set(snapshot.environments.values.filter { $0.existence == .exited }.map {
             "\($0.id.uid):\(Int64(bitPattern: $0.id.device)):\($0.id.inode)"
         })
@@ -790,25 +796,24 @@ final class CyderStatusItemController: NSObject, NSMenuDelegate {
             let windows = latestLifecycle.windows.values.filter {
                 $0.id.source == "accessibility" && latestLifecycle.processes[$0.id.process]?.launch == row.id && $0.capability != .unsupported
             }.sorted { $0.title == $1.title ? $0.id.token < $1.id.token : $0.title.localizedStandardCompare($1.title) == .orderedAscending }
-            if windows.count == 1, let window = windows.first {
-                addWindowItem(menu, window: window, title: "\(row.name) — \(window.title.isEmpty ? "視窗" : window.title)")
-                continue
+            addProgramItem(menu, name: row.name, state: row.state, windows: windows)
+        }
+        let independent = latestLifecycle.processes.values.filter { $0.launch == nil && $0.existence != .exited }.sorted {
+            let order = $0.name.localizedStandardCompare($1.name)
+            if order != .orderedSame { return order == .orderedAscending }
+            return $0.id.pid == $1.id.pid ? $0.id.started < $1.id.started : $0.id.pid < $1.id.pid
+        }
+        if !independent.isEmpty {
+            if !ordered.isEmpty { menu.addItem(.separator()) }
+            menu.addItem(withTitle: "其他執行中的 Windows 程序", action: nil, keyEquivalent: "").isEnabled = false
+            for process in independent {
+                let windows = latestLifecycle.windows.values.filter {
+                    $0.id.process == process.id && $0.id.source == "accessibility" && $0.capability != .unsupported
+                }.sorted { $0.title == $1.title ? $0.id.token < $1.id.token : $0.title.localizedStandardCompare($1.title) == .orderedAscending }
+                let duplicate = independent.filter { $0.name == process.name }.count > 1
+                let name = process.name + (duplicate ? " (PID \(process.id.pid))" : "")
+                addProgramItem(menu, name: name, state: process.existence == .alive ? "執行中；尚未確認視窗" : "暫時無法確認執行狀態", windows: windows)
             }
-            if windows.count > 1 {
-                let group = menu.addItem(withTitle: row.name, action: nil, keyEquivalent: "")
-                let submenu = NSMenu(title: row.name)
-                submenu.autoenablesItems = false
-                for (index, window) in windows.enumerated() {
-                    let duplicate = windows.filter { $0.title == window.title }.count > 1
-                    let title = window.title.isEmpty ? "視窗" : window.title
-                    addWindowItem(submenu, window: window, title: title, suffix: duplicate ? " (\(index + 1))" : "")
-                }
-                group.submenu = submenu
-                continue
-            }
-            let item = NSMenuItem(title: "\(row.name) — \(row.state)", action: nil, keyEquivalent: "")
-            item.isEnabled = false
-            menu.addItem(item)
         }
         for environment in latestLifecycle.environments.values.sorted(by: { $0.prefix < $1.prefix })
             where environment.existence != .exited && !ordered.contains(where: { $0.prefix == environment.prefix }) {
@@ -887,6 +892,22 @@ final class CyderStatusItemController: NSObject, NSMenuDelegate {
         let quit = menu.addItem(withTitle: "退出 Cyder", action: #selector(quitCyder), keyEquivalent: "q")
         quit.target = self
     }
+    private func addProgramItem(_ menu: NSMenu, name: String, state: String, windows: [CyderLifecycle.Window]) {
+        if windows.count == 1, let window = windows.first {
+            addWindowItem(menu, window: window, title: "\(name) — \(window.title.isEmpty ? "視窗" : window.title)")
+        } else if windows.count > 1 {
+            let group = menu.addItem(withTitle: name, action: nil, keyEquivalent: "")
+            let submenu = NSMenu(title: name); submenu.autoenablesItems = false
+            for (index, window) in windows.enumerated() {
+                let duplicate = windows.filter { $0.title == window.title }.count > 1
+                addWindowItem(submenu, window: window, title: window.title.isEmpty ? "視窗" : window.title,
+                    suffix: duplicate ? " (\(index + 1))" : "")
+            }
+            group.submenu = submenu
+        } else {
+            menu.addItem(withTitle: "\(name) — \(state)", action: nil, keyEquivalent: "").isEnabled = false
+        }
+    }
     private final class WindowTarget: NSObject {
         let id: CyderLifecycle.WindowID
         init(_ id: CyderLifecycle.WindowID) { self.id = id }
@@ -907,7 +928,7 @@ final class CyderStatusItemController: NSObject, NSMenuDelegate {
         guard !isQuiescing, let target = item.representedObject as? WindowTarget else { return }
         lifecycleStore.send(.activateWindow(target.id, UUID()))
     }
-    @objc private func recheckWindows() { windowAccess.refresh(); recoveryObserver.refresh() }
+    @objc private func recheckWindows() { windowAccess.refresh(); recoveryObserver.refresh(); independentProcesses.refresh() }
     @objc private func requestWindowPermission() {
         guard !isQuiescing, !windowPermissionRequested else { return }
         windowPermissionRequested = true
