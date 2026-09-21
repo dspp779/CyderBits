@@ -17,10 +17,25 @@ final class WineActivationWaiter {
     }
 }
 
-/// Bounded legacy-sidecar adapter for the formal launch path. Completion is
-/// serialized independently from file reads so even a stuck filesystem cannot
-/// extend the original launch observation deadline or accumulate read workers.
+/// Native receipts and optional legacy readers share a fixed observation
+/// deadline. Neither log drainage nor a stuck filesystem extends that deadline.
 final class CyderLaunchObserver {
+    struct Authority: Equatable {
+        let request: String
+        let launch: String
+        let digest: String
+        let epoch: UUID
+    }
+    struct NativeRoot: Equatable {
+        let authority: Authority
+        let ticket: UUID
+        let phase: String
+        let pid: Int32
+        let boot: String
+        let started: UInt64
+        let status: Int32?
+        let signalled: Bool?
+    }
     struct Sample { let rootStatus: Int32?; let lifecycle: String? }
     enum Result: Equatable { case activated, finishedWithoutWindow, rootFailed(Int32), unconfirmed }
     private final class ReadPool {
@@ -37,13 +52,45 @@ final class CyderLaunchObserver {
     private var signal: WineActivationWaiter?
     private var finished = false
     private var reading = false
+    private let authority: Authority?
+    private var nativeRoot: NativeRoot?
+    private var observationDeadline: TimeInterval?
+
+    init(authority: Authority? = nil) { self.authority = authority }
+
+    func receive(_ root: NativeRoot) {
+        guard authority == root.authority else { return }
+        queue.async { [self] in
+            guard !finished, authority == root.authority, root.pid > 0, root.started > 0, !root.boot.isEmpty,
+                  ["spawned", "exited"].contains(root.phase) else { return }
+            if root.phase == "exited" {
+                guard let status = root.status, (0...255).contains(status), let signalled = root.signalled,
+                      !signalled || (1...127).contains(status) else { return }
+            }
+            if let previous = nativeRoot {
+                guard previous.ticket == root.ticket, previous.pid == root.pid, previous.boot == root.boot,
+                      previous.started == root.started, previous.phase != "exited" || previous == root else { return }
+            }
+            nativeRoot = root
+            evaluateNativeRoot()
+        }
+    }
+
+    private func evaluateNativeRoot() {
+        guard completion != nil, let root = nativeRoot, root.phase == "exited", let status = root.status else { return }
+        if root.signalled == true { finish(.rootFailed(128 + status)) }
+        else if status != 0 { finish(.rootFailed(status)) }
+        // Clean root exit is not proof that a successor or its environment
+        // ended. Keep the original deadline while activation may still arrive.
+    }
 
     func wait(until deadline: TimeInterval, signal: WineActivationWaiter,
-              read: @escaping () -> Sample) async -> Result {
+              read: (() -> Sample)? = nil) async -> Result {
         await withCheckedContinuation { continuation in
             queue.async { [self] in
                 guard !finished else { continuation.resume(returning: .unconfirmed); return }
                 completion = { continuation.resume(returning: $0) }
+                observationDeadline = deadline
                 self.signal = signal
                 signal.observe { [weak self] in
                     guard let self else { return }
@@ -51,10 +98,14 @@ final class CyderLaunchObserver {
                 }
                 let remaining = max(0, deadline - ProcessInfo.processInfo.systemUptime)
                 queue.asyncAfter(deadline: .now() + remaining) { [weak self] in self?.finish(.unconfirmed) }
-                let timer = DispatchSource.makeTimerSource(queue: queue)
-                timer.schedule(deadline: .now(), repeating: 0.25)
-                timer.setEventHandler { [weak self] in self?.sample(read) }
-                self.timer = timer; timer.resume()
+                if let read, authority == nil {
+                    let timer = DispatchSource.makeTimerSource(queue: queue)
+                    timer.schedule(deadline: .now(), repeating: 0.25)
+                    timer.setEventHandler { [weak self] in self?.sample(read) }
+                    self.timer = timer; timer.resume()
+                }
+                // An activation already observed before wait takes precedence.
+                queue.async { self.evaluateNativeRoot() }
             }
         }
     }
@@ -79,7 +130,8 @@ final class CyderLaunchObserver {
         timer?.cancel(); timer = nil
         signal?.observe(nil); signal = nil
         let callback = completion; completion = nil
-        callback?(result)
+        let expired = observationDeadline.map { ProcessInfo.processInfo.systemUptime >= $0 } ?? false
+        callback?(expired ? .unconfirmed : result)
     }
     static func readSidecar(_ url: URL) -> [String: String] {
         let fd = Darwin.open(url.path, O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC)

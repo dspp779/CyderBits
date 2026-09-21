@@ -63,4 +63,50 @@ try FileManager.default.createSymbolicLink(at: link, withDestinationURL: sidecar
 precondition(CyderLaunchObserver.readSidecar(link).isEmpty)
 let fifo = root.appendingPathComponent("fifo"); precondition(mkfifo(fifo.path, 0o600) == 0)
 precondition(CyderLaunchObserver.readSidecar(fifo).isEmpty, "FIFO should not block sidecar adapter")
+
+let authority = CyderLaunchObserver.Authority(request: "request", launch: "launch", digest: "digest", epoch: UUID())
+let ticket = UUID()
+func native(_ phase: String = "exited", authority a: CyderLaunchObserver.Authority = authority,
+            started: UInt64 = 100, status: Int32? = 53, signalled: Bool? = false) -> CyderLaunchObserver.NativeRoot {
+    .init(authority: a, ticket: ticket, phase: phase, pid: 999, boot: "injected-boot", started: started,
+          status: status, signalled: signalled)
+}
+var nativeFailure: CyderLaunchObserver.Result?
+let nativeObserver = CyderLaunchObserver(authority: authority)
+nativeObserver.receive(native()) // Receipt may precede observation setup.
+start(nativeObserver, WineActivationWaiter(prefix: root.path), duration: 1,
+      read: { fatalError("native launch consulted legacy sidecar") }) { nativeFailure = $0 }
+pump { nativeFailure != nil }; precondition(nativeFailure == .rootFailed(53))
+
+let wrongAuthorities = [
+    CyderLaunchObserver.Authority(request: "other", launch: authority.launch, digest: authority.digest, epoch: authority.epoch),
+    .init(request: authority.request, launch: "other", digest: authority.digest, epoch: authority.epoch),
+    .init(request: authority.request, launch: authority.launch, digest: "other", epoch: authority.epoch),
+    .init(request: authority.request, launch: authority.launch, digest: authority.digest, epoch: UUID())]
+let fenced = CyderLaunchObserver(authority: authority)
+for wrong in wrongAuthorities { fenced.receive(native(authority: wrong)) }
+fenced.receive(native("spawned", status: nil, signalled: nil))
+fenced.receive(native(started: 101)) // Same numeric PID, different birth.
+var fencedResult: CyderLaunchObserver.Result?
+start(fenced, WineActivationWaiter(prefix: root.path), duration: 0.1,
+      read: { fatalError("native launch read sidecar") }) { fencedResult = $0 }
+pump { fencedResult != nil }; precondition(fencedResult == .unconfirmed)
+
+let cleanNative = CyderLaunchObserver(authority: authority), cleanSignal = WineActivationWaiter(prefix: root.path)
+var cleanResult: CyderLaunchObserver.Result?
+cleanNative.receive(native(status: 0))
+start(cleanNative, cleanSignal, duration: 1, read: { fatalError() }) { cleanResult = $0 }
+DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { cleanSignal.signal() }
+pump { cleanResult != nil }; precondition(cleanResult == .activated, "clean native root discarded a late successor")
+let signalledNative = CyderLaunchObserver(authority: authority)
+var signalResult: CyderLaunchObserver.Result?
+signalledNative.receive(native(status: 9, signalled: true))
+start(signalledNative, WineActivationWaiter(prefix: root.path), duration: 1, read: { fatalError() }) { signalResult = $0 }
+pump { signalResult != nil }; precondition(signalResult == .rootFailed(137))
+let expiredNative = CyderLaunchObserver(authority: authority), expiredSignal = WineActivationWaiter(prefix: root.path)
+var expiredResult: CyderLaunchObserver.Result?
+expiredSignal.signal(); expiredNative.receive(native())
+start(expiredNative, expiredSignal, duration: -1, read: { fatalError() }) { expiredResult = $0 }
+pump { expiredResult != nil }; precondition(expiredResult == .unconfirmed, "queued activation/receipt bypassed original monotonic deadline")
+print("PASS native receipt observation: exact request/launch/digest/epoch, immutable process birth, pre-wait result, no sidecar read, clean root awaits successor, signal status preserved")
 print("PASS formal launch observer: early activation, root-to-child handoff, captured root failure, fixed deadline under stuck reads, global in-flight bound, late events, safe sidecars")

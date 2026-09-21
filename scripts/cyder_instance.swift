@@ -231,6 +231,7 @@ final class CyderInstanceCoordinator {
     var executionEpoch: UUID { journal.executorEpoch }
     private var executionReceiptInFlight = false
     private var executionReceiptRefreshPending = false
+    private var executionReceiptTimer: DispatchSourceTimer?
     private let beforeExecutionRead: () -> Void
     let sentinel: CyderSentinelServer
 
@@ -423,7 +424,11 @@ final class CyderInstanceCoordinator {
         guard let launch = record.launchID, let epoch = record.executorEpoch else { return }
         journal.receipt(id: record.id, launchID: launch, epoch: epoch, supervisorPID: pid,
                         layer: "native-launcher", boot: boot, started: started) { [weak self] result in
-            if case .success(let updated) = result { self?.publish(updated) }
+            if case .success(let updated) = result {
+                self?.publish(updated)
+                self?.startExecutionReceiptPolling()
+                self?.refreshExecutionReceipts()
+            }
         }
     }
 
@@ -512,6 +517,7 @@ final class CyderInstanceCoordinator {
             let tickets = try? CyderExecutionOwner.snapshot(root: root)
             DispatchQueue.main.async { [self] in
                 guard !closing, let tickets else { finishExecutionReceiptRead(); return }
+                updateExecutionReceiptPolling(tickets)
                 let receipts = tickets.compactMap { ticket -> CyderRequestJournal.ExecutionReceipt? in
                     guard let correlation = ticket.correlation else { return nil }
                     let spawn = ticket.nativeSpawn.map {
@@ -530,6 +536,7 @@ final class CyderInstanceCoordinator {
                 journal.reconcileExecutions(receipts) { [self] result in
                     guard !closing, case .success(let confirmed) = result else { finishExecutionReceiptRead(); return }
                     let ids = Set(confirmed)
+                    updateExecutionReceiptPolling(tickets, confirmed: ids)
                     startup.async { [self] in
                         try? CyderExecutionOwner.prune(root: root, confirmed: tickets.filter { ids.contains($0.id) })
                         DispatchQueue.main.async { [self] in
@@ -537,10 +544,13 @@ final class CyderInstanceCoordinator {
                             guard !closing else { return }
                             journal.snapshot { [weak self] result in
                                 guard let self, !self.closing, case .success(let records) = result else { return }
-                                var latest = Dictionary(uniqueKeysWithValues: self.recovered.map { ($0.id, $0) })
+                                let previous = Dictionary(uniqueKeysWithValues: self.recovered.map { ($0.id, $0) })
+                                var latest = previous
                                 for record in records where record.version >= (latest[record.id]?.version ?? 0) { latest[record.id] = record }
-                                self.recovered = Array(latest.values)
-                                self.onRecoveryChanged?(self.recovered)
+                                if latest != previous {
+                                    self.recovered = Array(latest.values)
+                                    self.onRecoveryChanged?(self.recovered)
+                                }
                             }
                         }
                     }
@@ -554,6 +564,26 @@ final class CyderInstanceCoordinator {
         let again = executionReceiptRefreshPending
         executionReceiptRefreshPending = false
         if again { refreshExecutionReceipts() }
+    }
+
+    private func updateExecutionReceiptPolling(_ tickets: [CyderExecutionOwner.Ticket], confirmed: Set<UUID> = []) {
+        let unresolved = tickets.contains {
+            $0.correlation != nil && (!confirmed.contains($0.id) ||
+                (!["finished", "revoked"].contains($0.phase) && !["exited", "failed"].contains($0.nativeSpawn?.phase ?? "")))
+        }
+        guard unresolved, !closing else {
+            executionReceiptTimer?.cancel(); executionReceiptTimer = nil
+            return
+        }
+        startExecutionReceiptPolling()
+    }
+
+    private func startExecutionReceiptPolling() {
+        guard primary, !closing, executionReceiptTimer == nil else { return }
+        let timer = DispatchSource.makeTimerSource(queue: .main)
+        timer.schedule(deadline: .now() + 1, repeating: 1, leeway: .milliseconds(100))
+        timer.setEventHandler { [weak self] in self?.refreshExecutionReceipts() }
+        executionReceiptTimer = timer; timer.resume()
     }
 
     /// Reconcile against a durable snapshot without submit, resume, or dispatch.
@@ -710,6 +740,7 @@ final class CyderInstanceCoordinator {
     func quiesce(completion: @escaping (Bool) -> Void) {
         precondition(Thread.isMainThread)
         closing = true // invalidate pending delivery callbacks immediately
+        executionReceiptTimer?.cancel(); executionReceiptTimer = nil
         startupGeneration = nil
         if primary { journal.quiesce(completion: completion) } else { completion(true) }
     }
@@ -717,6 +748,7 @@ final class CyderInstanceCoordinator {
     func stop(completion: @escaping () -> Void = {}) {
         precondition(Thread.isMainThread)
         closing = true
+        executionReceiptTimer?.cancel(); executionReceiptTimer = nil
         startupGeneration = nil
         guard primary else {
             if startupInFlight { cleanupCompletions.append(completion) } else { completion() }

@@ -406,3 +406,15 @@ C13 提交前追加：全域 scope ticket 使用 schema 2，普通票據繼續�
 - `moltenvk-C14.log`、`game-settings-C14.log` 回歸通過；後者仍保留先前已記錄的 plutil 缺 key／fallback warnings。Bash syntax、diff 檢查通過。universal macOS11 `build-C14.log` 成功；`/private/tmp/cyder-lifecycle-c14-build/Cyder.app` 配置 local.cyder.lifecycle-c14、CD2 support/runtime，ad-hoc 簽章驗證通過。`build-C14-source-sha256.json` 也新增核對包內 moltenvk-variant script 與來源一致。未啟動完整 GUI，未覆盖正式安裝或發布。
 
 本批為 L1–2 權限／原生程序／故障注入證據，不是 Wine／NGS／圖形驗收。共用 runtime scope 只保護 Cyder 原生 owner 管理的操作，不替手動 CLI 或外部安裝器建立全系統互斥。接續仍須將原生出生回執接入 lifecycle 事件、整合每環境 waiter 與可靠收尾、精確 process/window action、其餘 UX／I/O 及 V01–V14 矩陣；目標不標完成。
+
+## C15：原生 root 回執的連續核對與正式啟動觀察
+
+- 盤點確認 C10–C14 只在啟動、手動 refresh 或外層 launcher 返回时讀 executor；原生 Wine root 稍後退出不一定接回。coordinator 現在於實際 spawn 記錄後啟動每秒核對，只保留一個 physical reader、一次 pending invalidation。active／handedOff／uncertain 的未完成 root 繼續核對；native terminal 必須 durable journal ACK 後才可停輪詢及回收副本，不能因本地 JSON 顯示 finished 就提前停。quiesce／stop 取消排程，晚到回呼不補工作。
+- 無變化的 receipt 不再每秒重發 recovery UI 更新；有變化者仍先通過 request／digest／launch／epoch、ticket 與出生身分的 journal 驗證及持久保存，才通知 UI。app 的 recovery callback 也在 quit transaction 後拒絕更新。
+- 正式 runWineThroughLauncher 已改用原生 receipt 推送至 CyderLaunchObserver，不再從 legacy result／lifecycle sidecar 決定 root 結果。觀察器逐一核對 request、launch、digest、executor epoch；同 ticket 的 root PID／boot／出生時間不可更換，exited 不可倒退。before-wait 到達的原生結果會保留到觀察建立；signal 結果轉為慣例 128+signal 供錯誤顯示，journal 仍保存原始 signal／status。正常 root 0 不等於後繼或環境退出，因此繼續原 deadline 等啟動證據。啟動／退出回呼都直接比較原 monotonic deadline，不能由晚送的 timeout callback 延長期限。
+- `launch-observer-C15-r2.log` 通過：錯 request／launch／digest／epoch 拒絕，同 PID 不同出生拒絕、提前結果、native 模式完全不讀 legacy sidecar、root 0 後遲到啟動、signal 9→137、已過期觀察不被排隊中的啟動／結果繞過。原本受阻 reader 上限兩個、一次完成、晚到事件及安全 sidecar 的 legacy 測試保留；該 legacy 模式已非正式 launch consumer。
+- `instance-C15-r4.log` 實際驅動 coordinator、journal 與同一正式 launch observer。初始注入 handedOff／spawned 原生 metadata，後續只更新 executor 檔、不手動 refresh；自動核對將 root 53 持久保存，送達 observer，再回收 terminal ticket，request 仍 uncertain，不猜 Windows 成功。自動第二次讀取受控停滯 1.2 秒，timer 未增加 physical worker；暫時移開本 fixture 的 journal directory 令真正 atomic write 失敗，未送 terminal 到 UI、未刪 ticket，恢復目錄後自動重試成功。stop 後再等待 1.2 秒，reader 數量不增加。此處 root／boot 數值為注入證據，不是真實 Wine PID。
+- 第一輪 `instance-C15.log` 被舊字串「暫時無法確認啟動要求」斷言擋住，尚未進 runtime；檢查現行正式 enterReadOnly(.forwardUnconfirmed) 與 CyderUnavailableWindowController 可操作回饋後，將靜態接線斷言改成該現行路徑。既有 loader harness 的該視窗按鈕／不偽報取消斷言保留；不把字串測試當本輪 UI runtime 證據。instance runtime r2–r4 逐步加入自動 reader／fault／正式 observer 整合，最新完整 script 通過。
+- 最新 universal macOS11 `build-C15-r4.log` 通過；早期 build 期間曾追加產品接線，未使用其產物驗收，最後完整重建時來源固定。隔離包 `/private/tmp/cyder-lifecycle-c15-build/Cyder.app` 使用 local.cyder.lifecycle-c15、CD2 support/runtime、ad-hoc 簽章並驗證，manifest `build-C15-source-sha256.json`。本轮未啟動完整包 GUI 或 Wine，以上是正式原始碼 harness／故障注入及編譯證據。
+
+C15 尚未接通 native root 0 加環境排空的完成證據；目前 native 模式無視窗正常結束可在原期限回 unconfirmed，不能算 E 收尾驗收完成。接下來需將原生 prefix／出生身分綁入 lifecycle store 與 monitor，補正常 root／後繼／環境排空的結果，並移除重複 waiter、替換 legacy 數值 PID 的顯示／動作權威。完整精確 window action、其餘 UX／I/O 及 V01–V14 仍未完成，目標保持進行中。

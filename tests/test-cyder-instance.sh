@@ -36,8 +36,8 @@ assert_contains "$app" 'receiveInstanceRequest' \
   "the primary must consume forwarded launch requests"
 assert_not_contains "$instance" 'waitUntilNoPendingRequests' \
   "the secondary must not block AppKit waiting for a launch"
-assert_contains "$app" '暫時無法確認啟動要求' \
-  "unacknowledged forwards must give actionable feedback"
+assert_contains "$app" 'enterReadOnly(.forwardUnconfirmed)' \
+  "unacknowledged forwards must enter the current read-only recovery UI"
 assert_contains "$app" 'queuedLaunches' \
   "queued launches must remain in the primary process"
 assert_contains "$app" 'launchArguments: launch.arguments' \

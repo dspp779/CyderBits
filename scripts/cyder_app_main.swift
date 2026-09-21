@@ -110,8 +110,17 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
     private lazy var instanceCoordinator: CyderInstanceCoordinator = {
         let coordinator = CyderInstanceCoordinator(normalizeSettings: CyderSettingsStore.acceptedSnapshot)
         coordinator.onRecoveryChanged = { [weak self] records in
-            guard let self else { return }
+            guard let self, !self.quitTransaction else { return }
             self.requestRecords = records
+            if let observer = self.wineLaunchObserver {
+                for record in records {
+                    guard let receipt = record.executionReceipt, let root = receipt.nativeSpawn,
+                          let pid = root.processPID, let boot = root.processBoot, let started = root.processStarted else { continue }
+                    observer.receive(.init(authority: .init(request: receipt.requestID, launch: receipt.launchID,
+                        digest: receipt.digest, epoch: receipt.epoch), ticket: receipt.ticketID, phase: root.phase,
+                        pid: pid, boot: boot, started: started, status: root.status, signalled: root.signalled))
+                }
+            }
             self.existingLibraryController?.updateRequestSummary(CyderRequestRow.summary(records, outbox: self.outboxNotices))
             self.existingRequestController?.update(records, outbox: self.outboxNotices)
         }
@@ -1721,7 +1730,10 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
     ) async -> CyderLaunchOutcome {
         let observationDeadline = ProcessInfo.processInfo.systemUptime + 30
         let activationWaiter = WineActivationWaiter(prefix: prefix.path)
-        let observer = CyderLaunchObserver()
+        let observer = CyderLaunchObserver(authority: authorization.flatMap { record in
+            guard let launch = record.launchID, let epoch = record.executorEpoch else { return nil }
+            return .init(request: record.id, launch: launch, digest: record.digest, epoch: epoch)
+        })
         onMainThread { wineActivationWaiter = activationWaiter; wineLaunchObserver = observer }
         defer {
             onMainThread {
@@ -1946,11 +1958,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
                 }
             }
         }
-        let observation = await observer.wait(until: observationDeadline, signal: activationWaiter) {
-            let result = CyderLaunchObserver.readSidecar(exitResultURL)
-            let lifecycle = CyderLaunchObserver.readSidecar(lifecycleURL)
-            return .init(rootStatus: (result["exit_status"] ?? lifecycle["exit_status"]).flatMap(Int32.init), lifecycle: lifecycle["state"])
-        }
+        let observation = await observer.wait(until: observationDeadline, signal: activationWaiter)
         switch observation {
         case .activated:
             launchActivated = true

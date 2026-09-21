@@ -86,16 +86,42 @@ pump { stopped }
 // join its original request on re-election, then be safely pruned only after
 // the journal has saved it. This is explicitly injected native-layer evidence.
 let correlatedTicket = CyderExecutionOwner.Ticket(schema: 1, id: UUID(), issuer: dispatched!.executorEpoch!,
-    scope: "injected-prefix-scope", prefix: CyderPaths.support.path, phase: "finished", owner: .init(boot: "injected-native-boot", pid: 12345, started: 10),
+    scope: "injected-prefix-scope", prefix: CyderPaths.support.path, phase: "handedOff", owner: .init(boot: "injected-native-boot", pid: 12345, started: 10),
     child: .init(boot: "injected-native-boot", pid: 12346, started: 11), status: 0, signalled: false,
     correlation: .init(requestID: dispatched!.id, launchID: dispatched!.launchID!, digest: dispatched!.digest),
     handoff: .init(executable: "/injected/wine", pidFile: CyderPaths.support.appendingPathComponent("injected.pid").path),
-    nativeSpawn: .init(phase: "exited", bridge: .init(boot: "injected-native-boot", pid: 12347, started: 12),
-        process: .init(boot: "injected-native-boot", pid: 12348, started: 13), status: 53, signalled: false))
+    nativeSpawn: .init(phase: "spawned", bridge: .init(boot: "injected-native-boot", pid: 12347, started: 12),
+        process: .init(boot: "injected-native-boot", pid: 12348, started: 13)))
 let correlatedURL = ownerDirectory.appendingPathComponent(correlatedTicket.id.uuidString + ".json")
 try JSONEncoder().encode(correlatedTicket).write(to: correlatedURL)
 chmod(correlatedURL.path, 0o600)
-let replacement = CyderInstanceCoordinator(support: CyderPaths.support, bundleID: "test")
+let liveReceiptGate = DispatchSemaphore(value: 0)
+let receiptRetryGate = DispatchSemaphore(value: 0)
+var nativeReadsOnWorker = 0, nativeReadCount = 0
+let replacement = CyderInstanceCoordinator(support: CyderPaths.support, bundleID: "test", beforeExecutionRead: {
+    nativeReadsOnWorker += 1
+    let count = nativeReadsOnWorker
+    DispatchQueue.main.async { nativeReadCount = count }
+    if count == 2 { liveReceiptGate.wait() }
+    if count == 3 { receiptRetryGate.wait() }
+})
+let rootObserver = CyderLaunchObserver(authority: .init(request: dispatched!.id, launch: dispatched!.launchID!,
+    digest: dispatched!.digest, epoch: dispatched!.executorEpoch!))
+var rootObservation: CyderLaunchObserver.Result?
+Task.detached {
+    let result = await rootObserver.wait(until: ProcessInfo.processInfo.systemUptime + 8,
+        signal: WineActivationWaiter(prefix: CyderPaths.support.path))
+    DispatchQueue.main.async { rootObservation = result }
+}
+replacement.onRecoveryChanged = { records in
+    for record in records {
+        guard let receipt = record.executionReceipt, let root = receipt.nativeSpawn,
+              let pid = root.processPID, let boot = root.processBoot, let started = root.processStarted else { continue }
+        rootObserver.receive(.init(authority: .init(request: receipt.requestID, launch: receipt.launchID,
+            digest: receipt.digest, epoch: receipt.epoch), ticket: receipt.ticketID, phase: root.phase,
+            pid: pid, boot: boot, started: started, status: root.status, signalled: root.signalled))
+    }
+}
 var nextRole: CyderInstanceCoordinator.Role?
 var replayCount = 0
 replacement.start(onRequest: { _ in replayCount += 1 }) { nextRole = $0 }
@@ -105,6 +131,35 @@ precondition(replayCount == 0, "reopening replayed an accepted request")
 precondition(replacement.recovered.filter { $0.phase == .awaitingUserResume }.count >= 1)
 precondition(replacement.recovered.contains { $0.id == dispatched!.id && $0.phase == .uncertain })
 pump { replacement.recovered.first { $0.id == dispatched!.id }?.executionReceipt?.ticketID == correlatedTicket.id }
+precondition(FileManager.default.fileExists(atPath: correlatedURL.path), "live root ticket was pruned")
+pump { nativeReadCount == 2 } // Automatic polling, no manual refresh.
+var livePollTick = false
+DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { livePollTick = true }
+pump { livePollTick }
+precondition(nativeReadCount == 2, "automatic polling accumulated physical readers during a stall")
+// Make the next durable write fail while preserving the original journal and
+// its open ownership FD. Restore before allowing the one subsequent reader.
+let journalDirectory = CyderPaths.support.appendingPathComponent("request-journal")
+let preservedJournalDirectory = CyderPaths.support.appendingPathComponent("request-journal-preserved")
+try FileManager.default.moveItem(at: journalDirectory, to: preservedJournalDirectory)
+var completedTicket = correlatedTicket
+completedTicket.phase = "finished"
+completedTicket.nativeSpawn?.phase = "exited"
+completedTicket.nativeSpawn?.status = 53
+completedTicket.nativeSpawn?.signalled = false
+try JSONEncoder().encode(completedTicket).write(to: correlatedURL, options: .atomic)
+chmod(correlatedURL.path, 0o600)
+liveReceiptGate.signal()
+pump { nativeReadCount == 3 }
+precondition(replacement.recovered.first { $0.id == dispatched!.id }?.executionReceipt?.nativeSpawn?.phase == "spawned",
+             "uncommitted terminal receipt reached the UI")
+precondition(FileManager.default.fileExists(atPath: correlatedURL.path), "write failure pruned the terminal receipt")
+try FileManager.default.moveItem(at: preservedJournalDirectory, to: journalDirectory)
+receiptRetryGate.signal()
+// No manual refresh or native parent completion follows this root outcome.
+pump { replacement.recovered.first { $0.id == dispatched!.id }?.executionReceipt?.nativeSpawn?.status == 53 }
+pump { rootObservation != nil }
+precondition(rootObservation == .rootFailed(53), "durable root receipt did not reach the formal launch observer")
 pump { !FileManager.default.fileExists(atPath: correlatedURL.path) }
 precondition(replacement.recovered.first { $0.id == dispatched!.id }?.executionReceipt?.nativeSpawn?.status == 53,
              "executor pruning lost the distinct native Wine root result")
@@ -117,6 +172,12 @@ pump { replacementSaved != nil }
 var replacementStopped = false
 replacement.stop { replacementStopped = true }
 pump { replacementStopped }
+let readsAtStop = nativeReadCount
+var stoppedPollTick = false
+DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { stoppedPollTick = true }
+pump { stoppedPollTick }
+precondition(nativeReadCount == readsAtStop, "receipt polling survived coordinator stop")
+print("PASS automatic root receipt: late outcome persists without manual refresh, one physical reader through timer stall, failed durable write retries before UI/pruning, formal observer receives root status, quit cancels polling")
 print("PASS actual instance coordinator: single primary, durable mixed-batch ACK, queued children, quit/dispatch race, re-election, no replay")
 
 // A bounded startup observation cannot grant authority when the physical
