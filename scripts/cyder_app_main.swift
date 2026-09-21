@@ -2560,6 +2560,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         environment["CYDER_DIAGNOSTIC_STAGE"] = stage.rawValue
         environment["CYDER_DIAGNOSTIC_LOG"] = operationLog.path
         process.environment = environment
+        var handoffCleanupURL: URL?
         if !isObservation {
             let ownerRoot = CyderPaths.support.appendingPathComponent("execution-owners")
             let prefix: String?
@@ -2579,11 +2580,20 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
                 if extraEnvironment["CYDER_WINE_DETACH"] == "1", let pidFile = extraEnvironment["CYDER_WINE_PID_FILE"] {
                     handoff = .init(executable: CyderPaths.engine.appendingPathComponent("bin/wine").resolvingSymlinksInPath().path,
                                     pidFile: pidFile)
+                } else if args.contains("--taskmgr-prefix") {
+                    // prepare creates and verifies this private owner directory;
+                    // this per-operation transport is consumed by Bash only.
+                    let pidURL = ownerRoot.appendingPathComponent("taskmgr-\(UUID().uuidString).pid")
+                    handoffCleanupURL = pidURL
+                    environment["CYDER_WINE_PID_FILE"] = pidURL.path
+                    handoff = .init(executable: CyderPaths.engine.appendingPathComponent("bin/wine").resolvingSymlinksInPath().path,
+                                    pidFile: pidURL.path)
                 } else { handoff = nil }
                 let ticket = try CyderExecutionOwner.prepare(root: ownerRoot, issuer: issuer, scope: prefix,
                                                             correlation: correlation, handoff: handoff)
                 process.executableURL = helper
                 process.arguments = ["--execution-owner", ownerRoot.path, ticket.uuidString, "--", "/bin/bash"] + args
+                process.environment = environment
             } catch {
                 try? handle.close()
                 return CyderProcessResult(status: 75, terminationReason: .exit, logURL: operationLog,
@@ -2623,10 +2633,12 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         onMainThread { activeProcessOperations += 1 }
         transferredLease = true
         let gate = operationGate
+        let transportToRemove = handoffCleanupURL
         let outcome = await processRunner.run(process: process,
             policy: isLaunch ? .launch : (isObservation ? .observation : .mutation),
             deadline: isLaunch ? 30 : (isObservation ? 5 : ((args.contains("--stop-prefix") || args.contains("--stop-all")) ? 15 : nil)), output: handle,
             onSpawn: onSpawn, onRelease: { [weak self] in
+                if let transportToRemove { try? FileManager.default.removeItem(at: transportToRemove) }
                 if let acquired { gate.release(acquired) }
                 onRelease()
                 guard let self else { return }

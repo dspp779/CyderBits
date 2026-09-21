@@ -198,6 +198,49 @@ printf 'finished\\n' > "$TEST_ROOT/parent.finished"
     assert 'exit_status=75' in (denied / 'result').read_text()
     print('PASS native spawn error: nonexecutable Mach-O refuses before child creation, publishes no PID, one-use failure and supervisor exit code survive cleanup', flush=True)
 
+    manager = case('taskmgr')
+    manager_script = manager / 'launch.sh'
+    manager_script.write_text(script.read_text().split('cyder_sentinel_attach()')[0] + '''
+# Retain the formal frontend reader and executor while adding a controlled
+# pre-spawn stall and a fixture-only acknowledgement of the detached result.
+eval "$(declare -f cyder_wine_frontend_args | sed '1s/cyder_wine_frontend_args/cyder_test_frontend_original/')"
+cyder_wine_frontend_args() {
+  printf 'entered\\n' > "$TEST_ROOT/frontend.entered"
+  while [[ ! -e "$TEST_ROOT/frontend.release" ]]; do sleep 0.02; done
+  cyder_test_frontend_original "$@"
+}
+eval "$(declare -f cyder_exec_wine | sed '1s/cyder_exec_wine/cyder_test_exec_original/')"
+cyder_exec_wine() {
+  local result=0
+  cyder_test_exec_original "$@" || result=$?
+  printf '%s\\n' "$result" > "$TEST_ROOT/taskmgr.result"
+  return "$result"
+}
+cyder_open_prefix_taskmgr "$TEST_ROOT/runtime/bin/wine" "$TEST_ROOT/prefix"
+''')
+    manager_ticket = reserve(manager)
+    manager_owner = start(manager, manager_ticket, ['/bin/bash', str(manager_script)])
+    wait(lambda: (manager / 'frontend.entered').exists(), 'formal task manager frontend never entered')
+    time.sleep(.3)
+    assert manager_owner.poll() is None and receipt(manager_ticket)['phase'] == 'active', 'task manager released authority before its final spawn'
+    assert not (manager / 'pid').exists() and not (manager / 'native.entered').exists()
+    recover()
+    manager_conflict = start(manager, reserve(manager, False), ['/usr/bin/true'])
+    wait(lambda: manager_conflict.poll() is not None, 'task manager scope conflict did not return')
+    assert manager_conflict.returncode == 75
+    (manager / 'frontend.release').touch()
+    wait(lambda: manager_owner.poll() is not None and (manager / 'native.entered').exists(), 'task manager failed to hand off actual native spawn')
+    assert manager_owner.returncode == 0 and receipt(manager_ticket)['phase'] == 'handedOff'
+    assert receipt(manager_ticket)['nativeSpawn']['process']['pid'] == int((manager / 'pid').read_text())
+    manager_following = start(manager, reserve(manager, False), ['/usr/bin/true'])
+    wait(lambda: manager_following.poll() is not None, 'task manager retained scope for its entire lifetime')
+    assert manager_following.returncode == 0
+    (manager / 'native.release').touch()
+    wait(lambda: (manager / 'taskmgr.result').exists(), 'task manager native child did not finish')
+    assert (manager / 'taskmgr.result').read_text().strip() == '53'
+    assert receipt(manager_ticket)['nativeSpawn']['status'] == 53
+    print('PASS task manager: formal detached tool retains ownership through stalled frontend, publishes actual native PID, releases before tool exit and preserves its result', flush=True)
+
     for index in range(10):
         fast = case(f'fast-{index:02}')
         (fast / 'log.release').touch(); (fast / 'native.release').touch()
@@ -215,7 +258,7 @@ finally:
     safe_to_remove = True
     for directory in root.iterdir():
         if directory.is_dir() and directory != ledger:
-            for marker in ['log.release', 'native.release', 'bridge.release', 'parent.release']:
+            for marker in ['log.release', 'native.release', 'bridge.release', 'parent.release', 'frontend.release']:
                 (directory / marker).touch()
     for process in processes:
         try: process.wait(timeout=10)
@@ -229,7 +272,8 @@ finally:
         for path in ledger.glob('*.json'):
             if json.loads(path.read_text()).get('nativeSpawn', {}).get('phase') in ['claiming', 'spawned']:
                 return False
-        return all(not (d / 'parent.waiting').exists() or (d / 'parent.finished').exists()
+        return all((not (d / 'parent.waiting').exists() or (d / 'parent.finished').exists())
+                   and (not (d / 'frontend.entered').exists() or (d / 'taskmgr.result').exists())
                    for d in root.iterdir() if d.is_dir())
     try: wait(detached_finished, 'detached fixture remains unconfirmed', timeout=10)
     except AssertionError:

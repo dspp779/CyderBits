@@ -24,6 +24,7 @@ let script = root.appendingPathComponent("effect.sh")
 try Data(#"""
 #!/bin/bash
 set -e
+[[ -z "${!CYDER_EXECUTION_@}" ]] || exit 91
 printf 'entered\n' > "$1.entered"
 if [[ "$2" == wait ]]; then
   while [[ ! -f "$1.release" ]]; do sleep 0.02; done
@@ -38,6 +39,11 @@ func reserve(_ scope: String?, correlation: CyderExecutionOwner.Correlation? = n
 }
 func start(_ id: UUID, name: String, wait: Bool = false, status: Int = 0) throws -> Process {
     let p = Process(); p.executableURL = helper
+    var environment = ProcessInfo.processInfo.environment
+    for key in ["CYDER_EXECUTION_OWNER_ROOT", "CYDER_EXECUTION_OWNER_TICKET", "CYDER_EXECUTION_OWNER_HELPER", "CYDER_EXECUTION_FINAL"] {
+        environment[key] = "injected-stale-authority"
+    }
+    p.environment = environment
     p.arguments = ["--execution-owner", ledger.path, id.uuidString, "--", "/bin/bash", script.path,
                    root.appendingPathComponent(name).path, wait ? "wait" : "quick", String(status), "secret-executor-argv"]
     p.standardOutput = FileHandle.nullDevice; p.standardError = FileHandle.nullDevice

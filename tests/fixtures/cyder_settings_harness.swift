@@ -99,6 +99,9 @@ struct CyderSettingsHarness {
         precondition(!CyderSettings.isValidEnvironmentKey("DYLD_INSERT_LIBRARIES"))
         precondition(!CyderSettings.isValidEnvironmentKey("CYDER_WINE_RESULT_FILE"))
         precondition(!CyderSettings.isValidEnvironmentKey("CYDER_WINE_SETTINGS_SNAPSHOT"))
+        for key in ["CYDER_EXECUTION_OWNER_ROOT", "CYDER_EXECUTION_OWNER_TICKET", "CYDER_EXECUTION_OWNER_HELPER", "CYDER_EXECUTION_FINAL"] {
+            precondition(!CyderSettings.isValidEnvironmentKey(key))
+        }
         precondition(!CyderSettings.isValidEnvironmentKey("CYDER_GRAPHICS_HUD_PREFERENCE"))
         precondition(CyderSettings.isValidEnvironmentKey("CYDER_GRAPHICS_BACKEND_PATH"))
 

@@ -2438,7 +2438,7 @@ cyder_game_environment_key_is_allowed() {
     DYLD_*|LD_*) return 1 ;;
     WINEPREFIX|WINESERVER|WINEARCH|WINEDEBUG|CX_ROOT|CX_BOTTLE|CX_APPLEGPTK_LIBD3DSHARED_PATH) return 1 ;;
     CYDER_SUPPORT|CYDER_RUNTIME_ROOT|CYDER_ENGINES|CYDER_ENGINE_NAME|CYDER_ENGINE_SRC|CYDER_SCRIPTS|CYDER_APP|CYDER_MAPLESTORY_FILE_CACHE|CYDER_MAPLESTORY_FILE_CACHE_PREFERENCE) return 1 ;;
-    CYDER_WINE_*|CYDER_SESSION_*|CYDER_DIAGNOSTIC_*|CYDER_TEST_*|CYDER_RESULT_FILE|CYDER_PROGRESS_FILE) return 1 ;;
+    CYDER_WINE_*|CYDER_SESSION_*|CYDER_DIAGNOSTIC_*|CYDER_TEST_*|CYDER_EXECUTION_*|CYDER_RESULT_FILE|CYDER_PROGRESS_FILE) return 1 ;;
     CYDER_GPTK_ROOT|CYDER_GRAPHICS_*|CYDER_GAME_ARGUMENTS) return 1 ;;
   esac
   return 0
@@ -2911,10 +2911,15 @@ cyder_open_prefix_taskmgr() {
   local wine_bin="$1" prefix="$2"
   local wineserver="${wine_bin%/wine}/wineserver"
   local session_file sync=""
+  local pid_file="${CYDER_WINE_PID_FILE:-}"
   [[ -x "$wine_bin" ]] || { echo "Cyder Wine is unavailable: $wine_bin" >&2; return 2; }
+  if [[ -n "${CYDER_EXECUTION_OWNER_TICKET:-}" ]]; then
+    [[ "$pid_file" == /* ]] || return 75
+  fi
   mkdir -p "$CYDER_SUPPORT/Logs"
   (
     export WINEPREFIX="$prefix" WINESERVER="$wineserver"
+    if [[ -n "${CYDER_EXECUTION_OWNER_TICKET:-}" ]]; then export CYDER_EXECUTION_FINAL=1; fi
     # A Wine client must use the same synchronization protocol as the active
     # bottle server. Prefer the live session contract because per-game launch
     # settings can differ from the currently saved global preference.
@@ -2935,6 +2940,24 @@ cyder_open_prefix_taskmgr() {
     cd "$prefix"
     cyder_exec_wine "$wine_bin" taskmgr
   ) </dev/null >>"$CYDER_SUPPORT/Logs/taskmgr.log" 2>&1 &
+  local taskmgr_pid=$!
+  if [[ -n "${CYDER_EXECUTION_OWNER_TICKET:-}" ]]; then
+    # Like game launches, this independent tool must cross the native spawn
+    # boundary before its executor can release mutation authority.
+    while [[ ! -s "$pid_file" ]]; do
+      case $'\n'"$(jobs -pr)"$'\n' in
+        *$'\n'"$taskmgr_pid"$'\n'*) sleep 0.1 ;;
+        *)
+          local taskmgr_status=0
+          wait "$taskmgr_pid" || taskmgr_status=$?
+          [[ ! -s "$pid_file" ]] || break
+          [[ "$taskmgr_status" -ne 0 ]] || taskmgr_status=75
+          return "$taskmgr_status"
+          ;;
+      esac
+    done
+  fi
+  return 0
 }
 
 # Wine stores the per-prefix server socket under $TMPDIR (macOS LaunchServices

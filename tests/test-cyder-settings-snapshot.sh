@@ -13,16 +13,26 @@ python3 - "$PROFILE" "$CYDER_WINE_SETTINGS_SNAPSHOT" "$CYDER_SUPPORT/settings.js
 import json, sys
 profile, snapshot, live = sys.argv[1:]
 for path, dpi, argument in [(snapshot, 144, '--accepted'), (live, 192, '--later')]:
+    environment = {key: 'invalid-override' for key in
+                   ['CYDER_EXECUTION_OWNER_ROOT', 'CYDER_EXECUTION_OWNER_TICKET',
+                    'CYDER_EXECUTION_OWNER_HELPER', 'CYDER_EXECUTION_FINAL']}
+    environment['GAME_CUSTOM_VALUE'] = 'normal-value'
     with open(path, 'w') as f:
         json.dump({'schemaVersion': 13, 'dpi': dpi, 'retinaMode': False, 'graphicsBackend': 'default',
-                   'perProfile': {profile: {'arguments': [argument, 'two words'], 'dpi': dpi}}}, f)
+                   'perProfile': {profile: {'arguments': [argument, 'two words'], 'dpi': dpi,
+                                           'environment': environment}}}, f)
 PY
 (
   source "$ROOT/scripts/cyder-common.sh"
   unset CYDER_DPI CYDER_RETINA_MODE || true
   cyder_load_saved_settings
   [[ "$CYDER_DPI" == 144 && "$CYDER_RETINA_MODE" == 0 ]]
+  export CYDER_EXECUTION_OWNER_ROOT=authorized-root CYDER_EXECUTION_OWNER_TICKET=authorized-ticket
+  export CYDER_EXECUTION_OWNER_HELPER=authorized-helper CYDER_EXECUTION_FINAL=1
   cyder_load_game_settings "$TMP/game/test.exe" "$TMP/engine"
+  [[ "$CYDER_EXECUTION_OWNER_ROOT" == authorized-root && "$CYDER_EXECUTION_OWNER_TICKET" == authorized-ticket ]]
+  [[ "$CYDER_EXECUTION_OWNER_HELPER" == authorized-helper && "$CYDER_EXECUTION_FINAL" == 1 ]]
+  [[ "$GAME_CUSTOM_VALUE" == normal-value ]]
   [[ "$CYDER_DPI" == 144 && "${#CYDER_GAME_ARGUMENTS[@]}" == 2 ]]
   [[ "${CYDER_GAME_ARGUMENTS[0]}" == --accepted && "${CYDER_GAME_ARGUMENTS[1]}" == 'two words' ]]
   # Explicit test-launch overrides still win, without changing the saved copy.

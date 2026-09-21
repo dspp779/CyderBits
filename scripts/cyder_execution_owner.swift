@@ -296,13 +296,15 @@ enum CyderExecutionOwner {
             }
             ticket.phase = "active"; ticket.owner = owner; try directory.write(ticket)
             let child = Process(); child.executableURL = URL(fileURLWithPath: command[0]); child.arguments = Array(command.dropFirst())
+            // Authority is reconstructed from this ticket, never inherited
+            // from a parent launch or user-provided game environment.
+            var environment = ProcessInfo.processInfo.environment.filter { !$0.key.hasPrefix("CYDER_EXECUTION_") }
             if ticket.handoff != nil {
-                var environment = ProcessInfo.processInfo.environment
                 environment["CYDER_EXECUTION_OWNER_ROOT"] = root.path
                 environment["CYDER_EXECUTION_OWNER_TICKET"] = id.uuidString
                 environment["CYDER_EXECUTION_OWNER_HELPER"] = CommandLine.arguments[0]
-                child.environment = environment
             }
+            child.environment = environment
             child.standardInput = FileHandle.nullDevice
             child.standardOutput = FileHandle.standardOutput; child.standardError = FileHandle.standardError
             do { try child.run() }

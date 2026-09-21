@@ -369,3 +369,14 @@ C10 補齊 executor 與原要求的可核對關聯及安全終態回收；它仍
 - 最新 universal macOS11 build `build-C11-r3.log` 通過；`/private/tmp/cyder-lifecycle-c11-build/Cyder.app` 使用 local.cyder.lifecycle-c11、CD2 support/runtime、ad-hoc 簽章並驗證，manifest `build-C11-source-sha256.json` 同時核對包內 common／launcher 與 repo bytes 相同。完整 GUI 本輪未操作，未覆蓋正式安裝或發布。
 
 後續仍須完成：獨立 taskmgr 的舊 detached 路徑尚未接 final handoff；launch 中的 GPTK runtime symlink 設定須再核對全域互斥範圍；legacy sidecar／log-drain 與每環境 waiter 仍待整合到原生關聯事件。C11 修復本節的正常遊戲 launch 最末 spawn 交接，但沒有解決所有同 boot uncertainty 的收斂、精確 process/window action、剩餘 UX／I/O 或 V01–V14 全矩陣，不能標整體完成。
+
+## C12：工作管理員交接及執行憑證隔離
+
+- 正式 taskmgr-prefix 原先 fork 後立即返回，尚未到 cyder_exec_wine 即釋放 owner。新增 frontend gate 驅動正式 cyder_open_prefix_taskmgr，`taskmgr-C12-baseline.log` 明確重現「task manager released authority before its final spawn」。失敗 fixture 已放行且保存 artifacts，沒有啟動 Wine。
+- runLauncher 現為工作管理員建立同一原生 Handoff 票據及 private、唯一 PID transport。正式 shell 設定 final 入口，等待原生 spawn 公布 PID 或直接子工作實際結束，再返回；握手前錯誤保留原碼。scope 不等待工具整段壽命，native receipt 保存真正 child 的出生身分與退出碼。transport 在實際 ProcessRunner release 的背景 callback 刪除，觀察逾時不提前刪除。
+- 正式 Swift／Bash 遊戲設定都禁止覆寫 CYDER_EXECUTION_ namespace。每個原生 owner 清除繼承的該 namespace，再依本張票據重建需要的 handoff transport；一般操作不攜帶舊執行權，最終 Wine child 仍不繼承此 transport。settings snapshot 測試注入四個覆寫值，確認合法 transport 未變而一般自訂變數仍套用；原生 owner fixture 注入 stale authority，確認其真正 Bash child 全部清除。
+- `taskmgr-C12-r2.log` 及完整包 helper＋包內 scripts 的 `taskmgr-C12-app.log`／artifacts 全通過。frontend stall 期間 owner active、未公布 PID、同 scope 拒絕；放行後 PID 等於 native receipt，下一個同 scope 操作可在工具退出前成功，工具結果 53 保留。C11 的 log stall、late bridge、spawn 前後精確 fixture owner crash、不可執行檔與十次快退出斷言同時回歸。
+- `execution-owner-C12.log`、`settings-C12.log`、`settings-snapshot-C12.log` 通過。Bash syntax、diff 檢查通過。測試使用可信自建 x86_64 Mach-O 與隔離檔案，沒有 Windows app／NGS 結論；本輪未從完整 AppKit 選單點擊工作管理員，該接線由 universal 編譯驗證，不能冒稱 GUI 實測。
+- universal macOS11 最新 `build-C12-r2.log` 通過；隔離包 `/private/tmp/cyder-lifecycle-c12-build/Cyder.app` 配置 local.cyder.lifecycle-c12、CD2 support/runtime、ad-hoc 簽章並驗證。`build-C12-source-sha256.json` 保存來源及包內程式 hash，核對 common／launcher 與 repo bytes 相同。完整包測試在建置完成後執行，未覆蓋正式安裝。
+
+C12 完成 taskmgr 的 late-spawn 修復。後續 GPTK 共享 runtime symlink 的變更仍需全域互斥；native receipts 與 lifecycle 事件、環境 waiter、精確 process/window action、剩餘 UX／I/O 及 V01–V14 全矩陣繼續處理，整體目標保持進行中。
