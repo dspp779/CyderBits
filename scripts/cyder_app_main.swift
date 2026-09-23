@@ -81,6 +81,8 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
     private let setupProgress = CyderSetupProgress()
     private var terminateWhenSettingsClose = false
     private var openingGameLibrary = false
+    private var openingGamesDirectory = false
+    private var gamesDirectoryPresentation: UUID?
     private var environmentPreparationInProgress = false
     private var wineActivationWaiter: WineActivationWaiter?
     private var wineLaunchObserver: CyderLaunchObserver?
@@ -2407,17 +2409,39 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func openRecommendedGamesDirectory() {
+        precondition(Thread.isMainThread)
+        guard !quitTransaction, !openingGamesDirectory else { return }
+        openingGamesDirectory = true
+        let presentation = UUID()
+        gamesDirectoryPresentation = presentation
         let configured = Bundle.main.object(forInfoDictionaryKey: "CyderRecommendedGamesDirectory") as? String
         let configuredPath = configured.flatMap { $0.isEmpty ? nil : $0 } ?? "~/Games"
-        let relative = configuredPath
-            .replacingOccurrences(of: "~/", with: "")
-        let games = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent(relative, isDirectory: true)
-        do {
-            try FileManager.default.createDirectory(at: games, withIntermediateDirectories: true)
-            NSWorkspace.shared.open(games)
-        } catch {
-            showAlert("無法建立 Games 資料夾", error.localizedDescription, style: .critical)
+        let relative = configuredPath.replacingOccurrences(of: "~/", with: "")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 5) { [weak self] in
+            guard let self, !self.quitTransaction, self.gamesDirectoryPresentation == presentation else { return }
+            self.gamesDirectoryPresentation = nil
+            self.showAlert("資料夾尚未確認", "建立資料夾的時間較長。你可以稍後在 Finder 前往 \(configuredPath)；Cyder 不會在這個操作稍後完成時突然開啟 Finder。")
+        }
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let result = Result<URL, Error> {
+                let games = FileManager.default.homeDirectoryForCurrentUser
+                    .appendingPathComponent(relative, isDirectory: true)
+                try FileManager.default.createDirectory(at: games, withIntermediateDirectories: true)
+                return games
+            }
+            DispatchQueue.main.async {
+                guard let self else { return }
+                // Keep the physical reservation until the filesystem call
+                // returns, even after the feedback deadline or during quit.
+                self.openingGamesDirectory = false
+                guard !self.quitTransaction, self.gamesDirectoryPresentation == presentation else { return }
+                self.gamesDirectoryPresentation = nil
+                switch result {
+                case .success(let games): NSWorkspace.shared.open(games)
+                case .failure(let error):
+                    self.showAlert("無法建立 Games 資料夾", error.localizedDescription, style: .critical)
+                }
+            }
         }
     }
 
