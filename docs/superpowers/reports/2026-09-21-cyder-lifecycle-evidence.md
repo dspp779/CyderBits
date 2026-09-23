@@ -51,7 +51,7 @@ SIGN_IDENTITY=- CYDER_REQUIRE_NATIVE_SWIFT=1 CYDER_SWIFT_OPTIMIZATION=-Onone \
 
 ## 驗證矩陣（持續更新）
 
-以下為截至 C31 的證據摘要；各批次段落保留當時缺口與失敗，不以早期矩陣覆蓋後續結果。
+以下為截至 C32 的證據摘要；各批次段落保留當時缺口與失敗，不以早期矩陣覆蓋後續結果。
 
 | 項目 | 目前證據 | 剩餘／限制 |
 |---|---|---|
@@ -669,3 +669,16 @@ C30 提交後以 require_escalated 在沙箱外執行系統 /usr/bin/arch -x86_6
 - open-files-C31.log（正式 observer／receipt）及 bootstrap-timing-C31.log（shell 進度格式／時間記錄，無 Wine）通過；未改其斷言。build-C31.log 以 C30 記錄的主機 Python override 完成 universal macOS11 編譯，無 Swift warning/error；44 個輸入編譯前後 hash 一致。隔離包 /private/tmp/cyder-lifecycle-c31-build/Cyder.app，local.cyder.lifecycle-c31、CD2 support/runtime，ad-hoc／strict verify、雙架構及三支包內 shell bytes 核對通過，build-C31-source-sha256.json 保存 50 項。
 
 本批沒有啟動完整 app GUI、沒有 Wine spawn／停止或系統安裝；C30 已確認的當前 Rosetta 限制仍適用。已修正進度讀取晚到／取消的具體權限缺口，尚待其餘 UI I/O 盤點、目前測試包最終整合及完整可重現交付；V01–V14 未整體升級為完成。
+
+
+## C32：錯誤修復入口 I/O、隔離建置入口與現行 UI 回歸
+
+- 盤點 app delegate 的 FileManager／contentsOf／sync 呼叫及其 caller：environmentState／engine/graphics marker／prefix resolution 均位於 launchPreparation worker 或 detached launch／environment prepare；root error／protected path 檢查也在 launch observer 返回後的背景流程。onMainThread 的 sync 是背景送回 UI，沒有 main 等 background 的方向。ensureRosettaForEnvironment 只有 ensureEnvironment 一個 caller，後者只由 prepareEnvironmentFromLibrary 的 detached task 呼叫；它的歷史 main-thread sync fallback 目前沒有可达 caller，未宣稱 Rosetta 的同步 Process 等待本身具有期限，也沒有執行安裝。
+- 確認 presentProtectedGameFolderFailure 的「打開 Games 資料夾」會在主執行緒 createDirectory。現將 home 路徑查詢／mkdir 放到 userInitiated 背景工作；重複請求合併成一筆，五秒只撤銷顯示權限而保留 physical reservation。完成後回 main，僅尚未逾時且未退出時開 Finder／顯示失敗；逾時提示使用者可自行在 Finder 前往目的地，晚到不突然搶焦點。這是可逆的錯誤修復入口修改，以 caller/diff 盤點及完整編譯核對；本輪沒有對這個新入口做真實 Finder 點擊或掛載受阻實測，不冒稱實測通過。
+- 新增 scripts/build-cyder-lifecycle-test.sh：每次建立全新私有 tmp root，固定 ad-hoc universal 原生 app，建立唯一 bundle ID 與隔離 support/runtime wrapper；核對來源編譯前後 hash、三支包內主要 shell、簽名及雙架構，最後才寫 verified。不啟動 app、Wine 或安裝系統元件，也不覆寫既有輸出。sourceHEAD 僅記錄建置時 HEAD，確切來源由輸入 hash 證明。腳本第一次在 lipo 命令把 input 放在 -verify_arch 後而失敗，沒有 verified；修正參數順序後以全新 root 完整重建成功，兩次 log 保留，未放寬雙架構檢查。
+- build-C32-r2.log 指向最終 /private/tmp/cyder-lifecycle.94ZZeY/build/Cyder.app；45 個輸入（包含新 builder）及 6 個關鍵產物 hash 保存在該 root 的 manifest.json，完整 build.log/sign.log/identity.json/verified 亦在同處。失敗 root /private/tmp/cyder-lifecycle.snLRRr 留存。本包使用全新隔離資料，不再沿用早期 CD2。執行步驟與證據邊界見 [測試版指南](2026-09-23-cyder-lifecycle-test-guide.md)。
+- library-C32.log 在桌面 session 由本次 build 清單的全部 Swift（除 app main，由 fixture 提供 main）重編譯，正式 loader、實際 NSWindow／NSButton／collection 行為通過，完成檔存在；涵蓋慢讀取、50 次刷新只一筆物理工作、歷史损坏保留、missing EXE 不刪資料、唯讀 callback 防線、未確認文案與退出後晚到。library-C32.png 及其 unavailable.png 以實際 view render 產生並目視檢查：文案與按鈕無截斷，空遊戲庫的加入／準備入口、未確認視窗的瀏覽／診斷／退出入口可辨。不是 computer-use 截圖或完整 app delegate 驗收；harness 預設較新 deployment target 產生既有 activateIgnoringOtherApps deprecated 警告，產品 macOS11 build 未出現該 warning。
+- settings-access-C32.log 通過正式 settings owner 的磁碟合併／衝突／損壞、受阻上限、期限／晚到、quit、FIFO；正式 shell --help 在 preferences FIFO 存在時仍可返回，無 Wine。
+- menu-C32.log 在桌面 session 通過正式 status adapter 的受阻掃描、tracking mutation/removal、快速重開、stale revision／foreign epoch；30 次 callback cycle 的 p95=0.031166ms、max=0.03625ms，原始資料保存在 [CSV](2026-09-23-menu-callback-C32.csv)。它符合本任務 callback 代理工程門檻，不能改稱全 app 點擊至呈現延遲或整體不存在 250ms hang。
+
+本批未做新的 Wine／NGS 或完整 GUI 操作。可重現建置入口已實際跑通，當前首屏元件／選單／設定 owner 有新回歸證據；完整 app delegate 的各入口整合與最後逐項完成審核仍待處理，目標保持進行中。
