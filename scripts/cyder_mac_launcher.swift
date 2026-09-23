@@ -110,11 +110,20 @@ enum CyderMacLauncherInstaller {
         process.standardError = stderr
         try process.run()
         // Drain while the child runs, so a full error pipe cannot prevent exit.
-        let errorData = stderr.fileHandleForReading.readDataToEndOfFile()
+        var errorData = Data()
+        var truncated = false
+        while let chunk = try stderr.fileHandleForReading.read(upToCount: 64 * 1024), !chunk.isEmpty {
+            errorData.append(chunk)
+            if errorData.count > 64 * 1024 {
+                errorData.removeFirst(errorData.count - 64 * 1024)
+                truncated = true
+            }
+        }
         process.waitUntilExit()
         guard process.terminationStatus == 0 else {
-            let detail = String(data: errorData, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines)
-                ?? "exit \(process.terminationStatus)"
+            let tail = String(decoding: errorData, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
+            let detail = (truncated ? "（內容較長，以下為最後一段）\n" : "")
+                + (tail.isEmpty ? "exit \(process.terminationStatus)" : tail)
             throw CyderMacLauncherError.scriptFailed(detail)
         }
         registerWithLaunchServices(destination)

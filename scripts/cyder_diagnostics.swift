@@ -630,7 +630,9 @@ final class CyderDiagnostics {
     }
 
     private static func readPreviousSession(from url: URL) -> CyderPreviousSession? {
-        guard let data = try? Data(contentsOf: url),
+        guard let handle = try? FileHandle(forReadingFrom: url) else { return nil }
+        defer { try? handle.close() }
+        guard let data = try? handle.read(upToCount: 65_537), data.count <= 65_536,
               let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               object["state"] as? String == "running"
         else { return nil }

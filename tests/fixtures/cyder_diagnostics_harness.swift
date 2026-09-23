@@ -33,6 +33,9 @@ struct CyderDiagnosticsHarness {
                 exit(11)
             }
             diagnostics.finish(outcome: "recovered")
+        case "oversized":
+            guard diagnostics.previousUnexpectedSession == nil else { exit(19) }
+            diagnostics.finish(outcome: "oversized-marker-ignored")
         case "record-failure":
             diagnostics.record(CyderFailure(
                 code: "CYD-TEST-001",

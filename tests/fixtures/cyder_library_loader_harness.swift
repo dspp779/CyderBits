@@ -239,11 +239,12 @@ var largeFailureFinished = false
 CyderMacLauncherInstaller.install(game: fileGame) { result in
     precondition(Thread.isMainThread)
     guard case .failure(CyderMacLauncherError.scriptFailed(let detail)) = result else { preconditionFailure("helper failure lost") }
-    precondition(detail.count == 131072, "helper error pipe truncated or missing")
+    precondition(detail.hasPrefix("（內容較長，以下為最後一段）\n"), "truncation was not disclosed")
+    precondition(detail.filter { $0 == "x" }.count == 65_536, "helper error tail was not bounded")
     largeFailureFinished = true
 }
 pump { largeFailureFinished }
-print("PASS installer: actual native child, 128 KiB stderr drained before wait, main completion, no Applications writes")
+print("PASS installer: actual native child, 128 KiB stderr drained with 64 KiB tail, main completion, no Applications writes")
 print("PASS file actions: actual menu, off-main stalled read, one physical worker, deadline/selection/quit fences, installer late result and asynchronous preflight")
 
 let unavailable = CyderUnavailableWindowController()

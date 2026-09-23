@@ -31,6 +31,14 @@ recovered="$(cat "$TMP/support/Logs/session-state.json")"
 assert_contains "$recovered" '"state" : "completed"' "recovered session should finish normally"
 assert_contains "$recovered" '"outcome" : "recovered"' "completion outcome should be recorded"
 
+/usr/bin/python3 - "$TMP/oversized-support/Logs/session-state.json" <<'PY'
+import json,pathlib,sys
+path=pathlib.Path(sys.argv[1])
+path.parent.mkdir(parents=True)
+path.write_text(json.dumps(dict(state='running', stage='wine-spawn', padding='x'*70_000)))
+PY
+CYDER_SUPPORT="$TMP/oversized-support" "$TMP/diagnostics-harness" oversized
+
 CYDER_SUPPORT="$TMP/support" "$TMP/diagnostics-harness" record-failure
 failure="$(cat "$TMP/support/Logs/last-error.json")"
 assert_contains "$failure" '"code" : "CYD-TEST-001"' "structured error code should be persisted"

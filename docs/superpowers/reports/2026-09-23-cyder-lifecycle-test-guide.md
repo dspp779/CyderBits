@@ -27,21 +27,21 @@ manifest 的 sourceHEAD 僅記錄當時 Git HEAD；若在含本任務未提交�
 
 ## 本輪產物及驗證
 
-C35 目前產物：`/private/tmp/cyder-lifecycle.kCQ7Ws/build/Cyder.app`。C32 雖通過簽名及來源驗證，但其測試 bundle ID 過長，使 sentinel socket 路徑超過 Darwin 上限；不應再使用 C32 包作 GUI 驗收。新 builder 使用短識別碼並檢查通訊路徑長度，保留舊產物作失敗證據。
+C36 目前產物：`/private/tmp/cyder-lifecycle.A0NNsH/build/Cyder.app`。C32 雖通過簽名及來源驗證，但其測試 bundle ID 過長，使 sentinel socket 路徑超過 Darwin 上限；不應再使用 C32 包作 GUI 驗收。新 builder 使用短識別碼並檢查通訊路徑長度，保留舊產物作失敗證據。
 
 可用以下命令複核成功包（不啟動 app）：
 
 ```bash
-codesign --verify --deep --strict --verbose=2 /private/tmp/cyder-lifecycle.kCQ7Ws/build/Cyder.app
-lipo /private/tmp/cyder-lifecycle.kCQ7Ws/build/Cyder.app/Contents/MacOS/CyderSwift -verify_arch arm64 x86_64
-cat /private/tmp/cyder-lifecycle.kCQ7Ws/identity.json
-cat /private/tmp/cyder-lifecycle.kCQ7Ws/verified
+codesign --verify --deep --strict --verbose=2 /private/tmp/cyder-lifecycle.A0NNsH/build/Cyder.app
+lipo /private/tmp/cyder-lifecycle.A0NNsH/build/Cyder.app/Contents/MacOS/CyderSwift -verify_arch arm64 x86_64
+cat /private/tmp/cyder-lifecycle.A0NNsH/identity.json
+cat /private/tmp/cyder-lifecycle.A0NNsH/verified
 ```
 
 要開啟這個已隔離的測試包：
 
 ```bash
-open /private/tmp/cyder-lifecycle.kCQ7Ws/build/Cyder.app
+open /private/tmp/cyder-lifecycle.A0NNsH/build/Cyder.app
 ```
 
 重新建置時使用新輸出所印出的路徑，不沿用上述範例。不要搬到 Applications 或替换正式 Cyder。首次畫面應可先使用遊戲庫；環境準備是獨立操作。
@@ -72,3 +72,5 @@ C33 新增的 app integration 測試呼叫正式 CyderMain.main() 與完整 dele
 C34 遊戲庫回歸另含 Finder 查詢／捷徑安裝的受阻與晚到測試，以及輸出 128 KiB 錯誤的自建本機 helper。測試不實際開 Finder、不写入使用者 Applications；其通過不等於已完成所有診斷 I/O 與整體回應性驗收。
 
 C35 app integration 另在臨時編譯的診斷 shared 建構點注入正式 beforeIO 接點，確實停住 writer；其餘產品實作 body 保留，marker／未建立 session log／三秒退出有斷言。前兩輪 FIFO 方法未成功造成受阻，已更正，不能列為慢磁碟實測。一般診斷在容量滿時可丟棄並記錄筆數，最後 structured error 與 finish 有獨立保留；永久受阻時退出優先，最後診斷可能未寫完，durable request journal 的契約不受此政策影響。
+
+C36 最終包限制 installer stderr 尾端及前次 diagnostic marker 為 64 KiB；超量輸出／marker 皆有正式路徑回歸。輸出截斷會明示，不能把沒有完整診斷當成沒有錯誤。

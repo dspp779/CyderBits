@@ -51,7 +51,7 @@ SIGN_IDENTITY=- CYDER_REQUIRE_NATIVE_SWIFT=1 CYDER_SWIFT_OPTIMIZATION=-Onone \
 
 ## 驗證矩陣（持續更新）
 
-以下為截至 C35 的證據摘要；各批次段落保留當時缺口與失敗，不以早期矩陣覆蓋後續結果。
+以下為截至 C36 的證據摘要；各批次段落保留當時缺口與失敗，不以早期矩陣覆蓋後續結果。
 
 | 項目 | 目前證據 | 剩餘／限制 |
 |---|---|---|
@@ -725,3 +725,13 @@ C30 提交後以 require_escalated 在沙箱外執行系統 /usr/bin/arch -x86_6
 - build-C35-r2.log 最終包 /private/tmp/cyder-lifecycle.kCQ7Ws/build/Cyder.app，local.cy.059ab0585b4243d5；45 個 source inputs／6 個 artifacts、strict ad-hoc／兩架構核對通過，無 Swift warning/error。r1 包是 review 前中間版本，r2 恢復了關閉後清理 warning 並整理 flush 接線；原始 log 均保留。未發布、未操作 Wine、未覆蓋正式安裝。
 
 本批修復主日誌的同步 I/O 及維護 caller；最後依 §21 再核對所有受影響輸出緩衝上限、A–F 接線與 V01–V14 證據，尚未在此段宣告目標完成。
+
+
+## C36：最後輸出上限核對
+
+- 依 §21 對本輪新增的背景輸出路徑再核對：C34 installer 已排空 pipe，但 readDataToEndOfFile 仍可保存全部 stderr。改為每次最多 64 KiB、持續排空並只留最後 64 KiB，超量明示「內容較長，以下為最後一段」。保留實際 exit status 判斷、main completion 和 UI physical reservation，不以截斷當作程序成功。
+- library-C36.log 的真實 native helper 仍輸出 128 KiB 並 exit 7；正式 installer 收到有截斷標記、恰好 64 KiB 的錯誤尾端。把 C34 的「全量錯誤」斷言改成規格要求的有界尾端，保留實際 helper/error completion 與其他所有 UI 邊界斷言，完成檔通過。這不是減少輸出來逃避 pipe 容量測試。
+- 診斷前次 state marker 改為 FileHandle 最多讀 65,537 bytes，超過 64 KiB 即不認作可用 marker，避免對異常大檔直接配置完整 Data。diagnostics-C36.log 保留原有正常 recovery／timing／failure／export／cleanup／rolling 結果，新增 70,000 字元 padding 的有效 JSON marker 必須被忽略，通過。這不是 request journal 政策變更；接受紀錄及 dedup tombstone 沒有刪改。
+- build-C36.log 最終 /private/tmp/cyder-lifecycle.A0NNsH/build/Cyder.app 通過 universal macOS11、strict ad-hoc、45 個來源／6 個主要產物 hash，沒有 Swift warning/error。完整 delegate 最近回歸為 C35-r4；之後只改上述兩個受獨立測試覆蓋的讀取上限，app/quit/coordinator body 未改。未再無理由重跑未變更的 Wine、owner 或環境校準 suite。
+
+A–F／V01–V14 的最後驗收對照另見交付摘要；本節保留實際修正、範圍及量測，不以編譯或替身通過宣稱最新版真實 Wine／NGS 全面相容。
