@@ -41,7 +41,12 @@ for path,digest in inputs.items():
     if hashlib.sha256(Path(path).read_bytes()).hexdigest()!=digest:
         raise SystemExit('Source changed during build: '+path)
 app=out/'build/Cyder.app'
-identity='local.cyder.lifecycle.'+uuid.uuid4().hex
+identity='local.cy.'+uuid.uuid4().hex[:16]
+# Darwin sockaddr_un.sun_path includes its terminating NUL in 104 bytes.
+# Keep the production sentinel namespace; reject unusable test paths instead.
+for socket in [out/'support'/('.native-sentinel-'+identity+'.sock'), out/'support/.requests-v1.sock']:
+    if len(os.fsencode(socket)) >= 104:
+        raise SystemExit('Isolated socket path exceeds Darwin limit: '+str(socket))
 info=app/'Contents/Info.plist'
 values=plistlib.loads(info.read_bytes())
 values.update(CFBundleIdentifier=identity,CFBundleName='Cyder Lifecycle Test',CFBundleDisplayName='Cyder Lifecycle Test')

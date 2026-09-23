@@ -51,20 +51,20 @@ SIGN_IDENTITY=- CYDER_REQUIRE_NATIVE_SWIFT=1 CYDER_SWIFT_OPTIMIZATION=-Onone \
 
 ## 驗證矩陣（持續更新）
 
-以下為截至 C32 的證據摘要；各批次段落保留當時缺口與失敗，不以早期矩陣覆蓋後續結果。
+以下為截至 C33 的證據摘要；各批次段落保留當時缺口與失敗，不以早期矩陣覆蓋後續結果。
 
 | 項目 | 目前證據 | 剩餘／限制 |
 |---|---|---|
 | V01 | 正式 runner／monitor／設定／視窗 adapter 的受阻故障注入與 physical 上限；C22/C24 30 次 callback proxy，C24 含 32 個獨立程序列；C30 引擎資源載入改非同步，main-actor 受阻注入通過；C31 進度讀取只有一個 physical slot，晚到結果不重開 UI | 其餘 main I/O 盤點及完整 app 端到端量測 |
 | V02 | 正式 menu callback mutation/removal 計數、快速重開、stale revision；C22 feedback 在 tracking 期間不改項目 | 真實 status menu tracking 仍受工具 target 限制 |
-| V03 | 真實 journal／Unix channel、ACK 遺失與同 ID 重送；C6/C7 outbox 核對及 retry 保留原 ID | 最終 app 整合回歸；不是網路／Wine 相容性結論 |
+| V03 | 真實 journal／Unix channel、ACK 遺失與同 ID 重送；C6/C7 outbox 核對及 retry 保留原 ID | C33 完整 app 的 secondary 真實 socket 轉送只產生一筆 ui-presented；不是網路／Wine 相容性結論 |
 | V04 | reducer 排列、journal cancel/dispatch、operation gate queued 取消及 C17 準備／spawn 邊界 | 最終全入口整合回歸 |
 | V05 | C9–C12 原生 owner／handoff 故障注入，spawn 前後 crash、late wrapper、same-boot uncertain 不重播 | 不等於實際 Windows／NGS 崩潰恢復實測 |
 | V06 | C16–C21 正式 root receipt／雙樣本 drain／generation／observer 固定期限；native child 與注入後繼證據 | Wine root 退出後失去 Unix ancestry 的後繼不可猜歸屬；真實接力未驗證 |
 | V07 | 正式環境 store／monitor 保留 alive 無視窗環境，觀察期限後不持續 starting；C19 drain 不被 request 擋住 | 實際 NGS 未測，無視窗替身只證明政策 |
 | V08 | E 真實 Wine 校準；C21 probe/identity/waiter spawn 受阻、新世代／舊事件／雙 empty 注入 | C28 原生 app supervisor 已移除 per-launch waiter，兩個原生 x86 root／包內整合通過；最新版完整 Wine GUI 仍未重測 |
 | V09 | C18/C20 同 prefix 不共用視窗成功、完整 birth/scope；E 真實停止 CD2 未波及另一隔離 bottle | C24 原生孤兒程序獨立發現／呈現、C25 可信 bottle 目錄補查通過；真實多遊戲視窗未測 |
-| V10 | D/E/C3 真實 Command-Q 保留 Wine births；C11 owner crash 保留 child；C17/C21/C22 quit fencing | 最新完整測試包及所有入口的最終回歸 |
+| V10 | D/E/C3 真實 Command-Q 保留 Wine births；C11 owner crash 保留 child；C17/C21/C22 quit fencing | C33 正式 delegate 的 NSMenu、NSApp.terminate、普通 RunLoop 與主佇列退出通過；實際按鍵與帶 Wine 的最新版包仍未重測 |
 | V11 | E 真實設定明確停止後 UI 保留；正式 reducer／gate 區分 stop 與 quit | 最新 status stop 的實際 tracking 未測 |
 | V12 | C22 真實原生同名雙視窗／最小化有限通過；正式 action 注入替換、PID reuse、焦點變更、逾時、quit | Wine、其他 Space、VoiceOver 未驗；原生不穩定輪次保留 |
 | V13 | 真實 E 重開校準環境且無 replay；C23 正式 journal／registry reopen、原生出生身分接回選單、queued/historical 進入共用模型；prior-boot／重用／late generation／quit 故障注入 | C24 以引擎／prefix 證據接回原生孤兒程序，保持未歸屬；C25 目錄補查及損壞 registry 保留／當前世代保護、C27 首次 registry 與 admission 排序通過；最新版完整 Wine GUI 重開尚未實測 |
@@ -682,3 +682,18 @@ C30 提交後以 require_escalated 在沙箱外執行系統 /usr/bin/arch -x86_6
 - menu-C32.log 在桌面 session 通過正式 status adapter 的受阻掃描、tracking mutation/removal、快速重開、stale revision／foreign epoch；30 次 callback cycle 的 p95=0.031166ms、max=0.03625ms，原始資料保存在 [CSV](2026-09-23-menu-callback-C32.csv)。它符合本任務 callback 代理工程門檻，不能改稱全 app 點擊至呈現延遲或整體不存在 250ms hang。
 
 本批未做新的 Wine／NGS 或完整 GUI 操作。可重現建置入口已實際跑通，當前首屏元件／選單／設定 owner 有新回歸證據；完整 app delegate 的各入口整合與最後逐項完成審核仍待處理，目標保持進行中。
+
+
+## C33：完整程式入口重放揭露並修復設定、退出與降級缺陷
+
+- 本輪再次先嘗試 CUA 綁定 C32 隔離包。要求 30 秒 timeout，工具實際在 6559.9504 秒後返回 -10005 timeoutReached，沒有 AX tree 或 screenshot；未再無限重試。原始摘要 computer-use-C33.txt 保留。當前主機已為 macOS 27.0 (26A428)、arm64／Swift 6.0；先前 macOS 15.7.7 與真實 Wine 結果仍只屬當時組合。C32 app 的 log 顯示 session 約 188ms 後 terminated，但無該次 stack，不能僅據 CUA 錯誤推定產品無缺陷，也不能將長工具等待當成 app 啟動延遲。
+- 新 test-cyder-app-integration.sh 編譯產品建置清單的全部 Swift；僅在臨時複本移除 @main attribute，由 fixture 安排事件後呼叫未修改的 CyderMain.main()。保留真正 CyderAppDelegate、NSApplication、NSMenu、window controllers、coordinator、journal 與 Unix sockets；每案獨立 bundle/support/runtime，secondary 與 primary 共用該案身分。測試包資源是最小空目錄，不宣稱已操作最終包內引擎或圖形 payload。種入的 EXE 路徑不存在且要求不得重播，沒有啟動 Wine。
+- **設定視窗**：原 convenience init(settingsAccess: = .shared) 讓產品的零參數建構選到 NSWindowController 繼承的空 initializer；注入 settingsAccess 的舊 harness 因此漏測。r2–r5 真正 menu target/action 已送達、delegate 狀態 ready 且沒有 quit，仍無設定視窗。現在增加明確 convenience init() 轉交 .shared，保留注入入口；r6 起正式設定／要求／遊戲庫／reopen 路徑正常。先前懷疑 NSMenu.performActionForItem 未派送不是根因：r7 及最終版恢復該 API 後通過。
+- **退出期限**：r6 在正式 applicationShouldTerminate 返回 terminateLater 後直到 fixture 25 秒 watchdog 才退出。對本次精確 Popen child 的 sample 顯示主 GCD block → quitFromMenu → NSApplication.terminate → nested modal RunLoop；該 queue 無法重入執行自身 cleanup completion 或 asyncAfter deadline。改用加入 common 與 modalPanel mode 的三秒 Timer，finishQuit 單次回覆並撤銷 timer。沒有改變既有三秒工程期限、durable accepted 契約或加入任何 Wine stop。Apple [terminateLater](https://developer.apple.com/documentation/appkit/nsapplication/terminatereply/terminatelater) 與 [terminate](https://developer.apple.com/documentation/appkit/nsapplication/terminate(_:)) 的 modal termination loop 契約支持此修正；app-quit-C33-sample.log 與其 sample.txt 保留失敗堆疊。
+- **降級早退**：r7 direct、r8 menu 在 journal 建立前結束。r8 unexpected-termination-stack.json 指向正式 status onLifecycleIdle；該回呼未核對 primary/readOnly authority，在 ownership unavailable 視窗呈現期間就要求退出。現在限有主實例權限、非唯讀、非開啟遊戲庫且無可見降級視窗時才能自動退出。新增過長 bundle ID 造成 sentinel bind 失敗的完整 app 案例：等待 0.5 秒讓實際 idle settlement 執行，降級視窗仍可用；設定／要求選單禁用，實際瀏覽按鈕開啟唯讀遊戲庫，明確退出成功，未取得 journal。
+- **測試建置識別碼**：上述失敗也揭露 C32 builder 的 UUID 全長識別碼讓 sentinel pathname 超過 Darwin sun_path 104 bytes（含 NUL）。r7 direct 路徑比 menu 長兩字元即可跨界；r8 加長獨立 case 身分反而使 menu 也失敗，先前猜測 OS 重複身分不是此失敗原因。builder 現用較短隨機身分，明確檢查兩個 socket 路徑長度；不改產品 sentinel pathname 協定。過長的自訂產品路徑仍是明確唯讀降級，並未宣稱支援任意長度。C32 舊包雖通過 hash/signature，不能再當成可用 GUI 交付；指南已指向新包。
+- r1 在沙箱內 AppKit abort，沒有完成檔；不算通過。r2–r8 保留各自失敗 root／log。r9 全部行為通過，cp 對已退出後殘留 socket 印出不複製警告；r10 改為只保留一般檔案、排除 fixture app，另加唯讀選單斷言，再完整通過且完成檔存在。最終 app-integration-C33-r10.log：NSMenu 主佇列退出 3.031294s、NSApp.terminate 主佇列 3.001400s、普通 RunLoop 0.005666s、降級 0.000674s。這是 fixture 退出耗時，不是 UI 呈現 latency；小於八秒是保留三秒 deadline 加排程餘裕的工程測試界線。
+- recovery 案例以正式 journal 提交 queued／dispatching，再啟動完整 app；前者變 awaitingUserResume、後者 uncertain。真實第二 app 轉送 showUI 只多一筆 completed/ui-presented，原兩筆完整 record 不變。退出、完整重開後記錄仍不變、無 executor request。最終證據 app-integration-C33-final 包含各 app 日誌、狀態與 complete。settings-ui-C33.log 的既有注入式 AppKit 回歸亦通過；沒有把缺少完成檔的早期沙箱結果當 PASS。
+- 最終 build-C33-r3.log 成功產物 /private/tmp/cyder-lifecycle.Zbd0pJ/build/Cyder.app；短身分 local.cy.417b5740e3824a97、全新 support/runtime，45 個輸入与 6 個关键產物 hash、ad-hoc strict verify、arm64+x86_64 全通過，無 Swift warning/error。r1/r2 建置是本輪中間來源且身分仍過長，不作最終交付。沒有發布／正式安裝／Rosetta 安裝／Wine 操作。
+
+本輪補到完整程式的 UI、轉送、恢復與退出整合，並修復可重現的產品缺陷；不把 event replay 稱為真實 CUA／Command-Q 按鍵或 Wine 相容性。後續盤點仍發現遊戲庫 Finder／建立 macOS 捷徑 action 的同步檔案查詢，須修復並完成 V01–V14 最終逐項審核，目標尚未完成。

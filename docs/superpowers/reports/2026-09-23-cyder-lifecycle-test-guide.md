@@ -27,21 +27,21 @@ manifest 的 sourceHEAD 僅記錄當時 Git HEAD；若在含本任務未提交�
 
 ## 本輪產物及驗證
 
-C32 成功產物：`/private/tmp/cyder-lifecycle.94ZZeY/build/Cyder.app`。首次 `/private/tmp/cyder-lifecycle.snLRRr` 因新腳本的 lipo 參數順序錯誤未完成驗證，保留作失敗證據，勿當作最終包。
+C33 目前產物：`/private/tmp/cyder-lifecycle.Zbd0pJ/build/Cyder.app`。C32 雖通過簽名及來源驗證，但其測試 bundle ID 過長，使 sentinel socket 路徑超過 Darwin 上限；不應再使用 C32 包作 GUI 驗收。新 builder 使用短識別碼並檢查通訊路徑長度，保留舊產物作失敗證據。
 
 可用以下命令複核成功包（不啟動 app）：
 
 ```bash
-codesign --verify --deep --strict --verbose=2 /private/tmp/cyder-lifecycle.94ZZeY/build/Cyder.app
-lipo /private/tmp/cyder-lifecycle.94ZZeY/build/Cyder.app/Contents/MacOS/CyderSwift -verify_arch arm64 x86_64
-cat /private/tmp/cyder-lifecycle.94ZZeY/identity.json
-cat /private/tmp/cyder-lifecycle.94ZZeY/verified
+codesign --verify --deep --strict --verbose=2 /private/tmp/cyder-lifecycle.Zbd0pJ/build/Cyder.app
+lipo /private/tmp/cyder-lifecycle.Zbd0pJ/build/Cyder.app/Contents/MacOS/CyderSwift -verify_arch arm64 x86_64
+cat /private/tmp/cyder-lifecycle.Zbd0pJ/identity.json
+cat /private/tmp/cyder-lifecycle.Zbd0pJ/verified
 ```
 
 要開啟這個已隔離的測試包：
 
 ```bash
-open /private/tmp/cyder-lifecycle.94ZZeY/build/Cyder.app
+open /private/tmp/cyder-lifecycle.Zbd0pJ/build/Cyder.app
 ```
 
 重新建置時使用新輸出所印出的路徑，不沿用上述範例。不要搬到 Applications 或替换正式 Cyder。首次畫面應可先使用遊戲庫；環境準備是獨立操作。
@@ -59,7 +59,10 @@ bash tests/test-cyder-open-files-lifecycle.sh
 bash tests/test-cyder-settings-access.sh
 bash tests/test-cyder-bootstrap-timing.sh
 bash tests/test-cyder-library-loader.sh
+bash tests/test-cyder-app-integration.sh
 CYDER_MENU_SAMPLES=/private/tmp/cyder-menu-callback-samples.csv bash tests/test-cyder-menu-responsiveness.sh
 ```
 
 menu 測試的 30 筆數據是 callback-cycle 代理指標，不是真正滑鼠點擊至畫面呈現的延遲。library 測試使用實際 AppKit 控制與正式 loader，但未執行完整 app delegate，也未操作 Wine 視窗。C32 原始樣本見 [CSV](2026-09-23-menu-callback-C32.csv)；其他生命周期／journal／owner／環境校準測試及既有真實操作見證據報告各批次，不以這份短清單取代完整 V01–V14 驗收。
+
+C33 新增的 app integration 測試呼叫正式 CyderMain.main() 與完整 delegate，驗證設定／要求／遊戲庫、reopen、三種退出來源、ownership 失敗唯讀 UI、第二實例 socket 轉送與歷史 queued/dispatching 不重播。它是臨時最小 bundle 內的事件重放，不是實際 CUA 點擊、鍵盤 Command-Q 或最終引擎包實測。可設定 CYDER_APP_INTEGRATION_ARTIFACTS 保存完成檔、日誌及 durable state。當前 CUA 綁定工具 timeout、主機 Rosetta 不可用，相關限制仍適用。
