@@ -51,7 +51,7 @@ SIGN_IDENTITY=- CYDER_REQUIRE_NATIVE_SWIFT=1 CYDER_SWIFT_OPTIMIZATION=-Onone \
 
 ## 驗證矩陣（持續更新）
 
-以下為截至 C34 的證據摘要；各批次段落保留當時缺口與失敗，不以早期矩陣覆蓋後續結果。
+以下為截至 C35 的證據摘要；各批次段落保留當時缺口與失敗，不以早期矩陣覆蓋後續結果。
 
 | 項目 | 目前證據 | 剩餘／限制 |
 |---|---|---|
@@ -68,7 +68,7 @@ SIGN_IDENTITY=- CYDER_REQUIRE_NATIVE_SWIFT=1 CYDER_SWIFT_OPTIMIZATION=-Onone \
 | V11 | E 真實設定明確停止後 UI 保留；正式 reducer／gate 區分 stop 與 quit | 最新 status stop 的實際 tracking 未測 |
 | V12 | C22 真實原生同名雙視窗／最小化有限通過；正式 action 注入替換、PID reuse、焦點變更、逾時、quit | Wine、其他 Space、VoiceOver 未驗；原生不穩定輪次保留 |
 | V13 | 真實 E 重開校準環境且無 replay；C23 正式 journal／registry reopen、原生出生身分接回選單、queued/historical 進入共用模型；prior-boot／重用／late generation／quit 故障注入 | C24 以引擎／prefix 證據接回原生孤兒程序，保持未歸屬；C25 目錄補查及損壞 registry 保留／當前世代保護、C27 首次 registry 與 admission 排序通過；最新版完整 Wine GUI 重開尚未實測 |
-| V14 | E/C21 engine／prefix／probe/identity 失聯故障注入；一個 worker 受阻仍有另一環境前進，退出可用 | C33 完整 app 的 ownership 失敗保留唯讀 UI、可瀏覽及退出；C34 遊戲庫動作回歸通過，診斷 I/O 仍待修復 |
+| V14 | E/C21 engine／prefix／probe/identity 失聯故障注入；一個 worker 受阻仍有另一環境前進，退出可用 | C33 完整 app 的 ownership 失敗保留唯讀 UI、可瀏覽及退出；C34 遊戲庫動作及 C35 真正受阻診斷的完整 app UI／退出回歸通過 |
 
 
 回應性工程目標：p95 ≤100ms、單次本功能 main block <250ms，至少 30 個原始樣本。callback cycle 是代理指標，**不是點擊至畫面呈現延遲**；真實端到端尚未量測。
@@ -710,3 +710,18 @@ C30 提交後以 require_escalated 在沙箱外執行系統 /usr/bin/arch -x86_6
 - build-C34.log 成功：/private/tmp/cyder-lifecycle.pNTDsa/build/Cyder.app，local.cy.19d0b61d1d924959，全新私有 state，45 個來源及 6 個產物 hash、雙架構／ad-hoc strict verify 均通過，無 Swift warning/error。指南已更新目前包。未發布／覆蓋正式安裝／操作 Wine。
 
 後續盤點發現 CyderDiagnostics 的初始化、每筆 log 的 synchronize、finish／state 檔寫入仍可由 main caller 執行，cleanDebugLogsAsync 雖標 async 也直接在 MainActor 呼叫刪檔。這可能在慢檔案系統阻塞首屏及退出，必須移出主執行緒並驗證卡住 logger 不拖住 UI；因此尚未標記目標完成。
+
+
+## C35：診斷 I/O 不再阻塞首屏、清理或退出
+
+- CyderDiagnostics initializer 現只建立記憶體狀態／路徑，背景單一序列 queue 建立目錄、讀前次 session、開日誌、輪替／重導 stream、寫 state。info／warning／enter／record／finish 的磁碟 write、synchronize 與 JSON 原子替換同樣在該 queue；記憶體鎖內不做 I/O。前次 session 使用 completion 回到 main，不阻塞遊戲庫首屏；退出後晚到不顯示恢復提示。
+- 一般待寫最多 128 筆，普通訊息限 16 KiB；structured error 每欄限 16 KiB，合併保留最新待寫 failure。finish 有獨立單次位置，先關閉普通接收，晚到 stage 不把 completed 改回 running；drain 後記錄丟棄筆數。最後 cleanup warning 仍受相同容量上限且可在 terminal state 後記錄，不重新打開 session。這是最佳努力的診斷記錄，不能取代或削弱既有 durable journal 的 accepted 契約；磁碟永久受阻、退出期限先到時，不保證最後診斷已落盤。
+- applicationShouldTerminate 的所有角色共用原三秒 modal Timer：先凍結自身工作，啟動非同步 finish，primary 完成 coordinator 清理後再以非同步 flush 嘗試保存日誌；secondary／唯讀也嘗試 flush，但不取得 primary 行為。journal 清理未確認的既有 warning 保留。Timer 可直接退出，不等卡住的 logger，也沒有新增停止 Wine 路徑。普通 RunLoop 可以快速完成；由主 GCD block 進入 terminateLater 的案例仍可能使用三秒 fallback。
+- cleanDebugLogsAsync 原本直接在 MainActor 刪檔，現在與 export 共用一筆背景維護工作；清理與 logger 在同一 I/O queue 序列化，移除磁碟期間對記憶體鎖的占用。五秒回饋撤銷 presentation 而不釋放卡住工作，關設定窗／退出／逾時後晚到不彈窗；真正維護 UI 的選檔／確認未做 CUA 操作，本輪確認正式清理／匯出 API 的既有結果及 caller 接線／編譯。
+- diagnostics-C35.log 通過既有 timing、unfinished/recover、structured failure/home redaction、export、cleanup、rolling log 測試。harness 現在等非同步 flush 完成再檢查檔案或退出；原結果斷言保留，不把還未落盤當作成功。settings-ui-C35.log 及其完成檔通過正式設定 AppKit 回歸。
+- diagnostics-async-C35-r2.log 新增兩個正式元件 stall：初始化前與第一筆 ordinary write 前卡住。各送 10,000 筆一般日誌、1,000 筆 failure，再由 main 完成 30 次 RunLoop timer；待寫不超過 128、只一個 physical writer、finish 在 0.1 秒工程斷言內返回。放行後 latest error F999、16 KiB 欄位、dropped 記錄、第一次 completed outcome、重複 finish／晚到 stage、final cleanup warning 都通過，state/complete 在 diagnostics-C35-final。這是注入，不是慢磁碟硬即時性能保證。
+- **更正 FIFO 證據**：app-integration-C35.log 與 r2 的 slowlog 最初以 FIFO 準備 session-state，正常 UI／退出均通過，當時誤認為成功卡住讀取。r3 加入「FIFO 未被覆寫且未建立 session log」斷言後失敗，保留 /private/tmp/cy-app.9UPBq1：Foundation 並未停在此讀取，後續 atomic state write 取代 FIFO。因此 r1/r2 不算 logger stall 通過，不刪除 r3 失敗。
+- r4 改用正式 beforeIO 注入：僅在臨時編譯複本將 shared 的建構參數設成 fixture hook；所有 CyderDiagnostics／CyderMain／delegate／window／coordinator 實作 body 不变。slowlog 在背景 hook 寫 diagnostic-blocked.json 後永久等候，parent 確認 marker 存在且沒有 session log，證明故障確實停住 writer。完整 app 的遊戲庫／設定／要求／reopen 仍成功，quit 3.004616s。其他完整入口、唯讀、真實 secondary socket、歷史要求不重播也通過，app-integration-C35-r4.log 及 app-integration-C35-r4-final/complete 為本輪有效整合證據；不是實際 CUA 或 FIFO 受阻成功。
+- build-C35-r2.log 最終包 /private/tmp/cyder-lifecycle.kCQ7Ws/build/Cyder.app，local.cy.059ab0585b4243d5；45 個 source inputs／6 個 artifacts、strict ad-hoc／兩架構核對通過，無 Swift warning/error。r1 包是 review 前中間版本，r2 恢復了關閉後清理 warning 並整理 flush 接線；原始 log 均保留。未發布、未操作 Wine、未覆蓋正式安裝。
+
+本批修復主日誌的同步 I/O 及維護 caller；最後依 §21 再核對所有受影響輸出緩衝上限、A–F 接線與 V01–V14 證據，尚未在此段宣告目標完成。

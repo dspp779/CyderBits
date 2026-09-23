@@ -13,6 +13,14 @@ func save(_ name: String, _ object: [String: Any]) {
 func require(_ ok: @autoclosure () -> Bool, _ reason: String) {
     if !ok() { save("failed.json", ["reason": reason]); fputs("FAIL: \(reason)\n", stderr); exit(1) }
 }
+func cyderFixtureDiagnosticIO() {
+    guard mode == "slowlog" else { return }
+    require(!Thread.isMainThread, "diagnostic I/O reached main")
+    save("diagnostic-blocked.json", ["entered": true])
+    // The actual shared diagnostic writer cannot initialize or flush. The
+    // production quit deadline must exit without waiting for this worker.
+    DispatchSemaphore(value: 0).wait()
+}
 func pump(_ ready: () -> Bool) {
     let deadline = Date().addingTimeInterval(8)
     while !ready(), Date() < deadline { RunLoop.main.run(until: Date().addingTimeInterval(0.002)) }

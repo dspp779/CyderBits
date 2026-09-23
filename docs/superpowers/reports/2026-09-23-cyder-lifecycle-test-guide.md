@@ -27,21 +27,21 @@ manifest 的 sourceHEAD 僅記錄當時 Git HEAD；若在含本任務未提交�
 
 ## 本輪產物及驗證
 
-C34 目前產物：`/private/tmp/cyder-lifecycle.pNTDsa/build/Cyder.app`。C32 雖通過簽名及來源驗證，但其測試 bundle ID 過長，使 sentinel socket 路徑超過 Darwin 上限；不應再使用 C32 包作 GUI 驗收。新 builder 使用短識別碼並檢查通訊路徑長度，保留舊產物作失敗證據。
+C35 目前產物：`/private/tmp/cyder-lifecycle.kCQ7Ws/build/Cyder.app`。C32 雖通過簽名及來源驗證，但其測試 bundle ID 過長，使 sentinel socket 路徑超過 Darwin 上限；不應再使用 C32 包作 GUI 驗收。新 builder 使用短識別碼並檢查通訊路徑長度，保留舊產物作失敗證據。
 
 可用以下命令複核成功包（不啟動 app）：
 
 ```bash
-codesign --verify --deep --strict --verbose=2 /private/tmp/cyder-lifecycle.pNTDsa/build/Cyder.app
-lipo /private/tmp/cyder-lifecycle.pNTDsa/build/Cyder.app/Contents/MacOS/CyderSwift -verify_arch arm64 x86_64
-cat /private/tmp/cyder-lifecycle.pNTDsa/identity.json
-cat /private/tmp/cyder-lifecycle.pNTDsa/verified
+codesign --verify --deep --strict --verbose=2 /private/tmp/cyder-lifecycle.kCQ7Ws/build/Cyder.app
+lipo /private/tmp/cyder-lifecycle.kCQ7Ws/build/Cyder.app/Contents/MacOS/CyderSwift -verify_arch arm64 x86_64
+cat /private/tmp/cyder-lifecycle.kCQ7Ws/identity.json
+cat /private/tmp/cyder-lifecycle.kCQ7Ws/verified
 ```
 
 要開啟這個已隔離的測試包：
 
 ```bash
-open /private/tmp/cyder-lifecycle.pNTDsa/build/Cyder.app
+open /private/tmp/cyder-lifecycle.kCQ7Ws/build/Cyder.app
 ```
 
 重新建置時使用新輸出所印出的路徑，不沿用上述範例。不要搬到 Applications 或替换正式 Cyder。首次畫面應可先使用遊戲庫；環境準備是獨立操作。
@@ -55,6 +55,8 @@ open /private/tmp/cyder-lifecycle.pNTDsa/build/Cyder.app
 ```bash
 bash tests/test-cyder-launch-context.sh
 bash tests/test-cyder-setup-progress.sh
+bash tests/test-cyder-diagnostics.sh
+bash tests/test-cyder-diagnostics-async.sh
 bash tests/test-cyder-open-files-lifecycle.sh
 bash tests/test-cyder-settings-access.sh
 bash tests/test-cyder-bootstrap-timing.sh
@@ -68,3 +70,5 @@ menu 測試的 30 筆數據是 callback-cycle 代理指標，不是真正滑鼠�
 C33 新增的 app integration 測試呼叫正式 CyderMain.main() 與完整 delegate，驗證設定／要求／遊戲庫、reopen、三種退出來源、ownership 失敗唯讀 UI、第二實例 socket 轉送與歷史 queued/dispatching 不重播。它是臨時最小 bundle 內的事件重放，不是實際 CUA 點擊、鍵盤 Command-Q 或最終引擎包實測。可設定 CYDER_APP_INTEGRATION_ARTIFACTS 保存完成檔、日誌及 durable state。當前 CUA 綁定工具 timeout、主機 Rosetta 不可用，相關限制仍適用。
 
 C34 遊戲庫回歸另含 Finder 查詢／捷徑安裝的受阻與晚到測試，以及輸出 128 KiB 錯誤的自建本機 helper。測試不實際開 Finder、不写入使用者 Applications；其通過不等於已完成所有診斷 I/O 與整體回應性驗收。
+
+C35 app integration 另在臨時編譯的診斷 shared 建構點注入正式 beforeIO 接點，確實停住 writer；其餘產品實作 body 保留，marker／未建立 session log／三秒退出有斷言。前兩輪 FIFO 方法未成功造成受阻，已更正，不能列為慢磁碟實測。一般診斷在容量滿時可丟棄並記錄筆數，最後 structured error 與 finish 有獨立保留；永久受阻時退出優先，最後診斷可能未寫完，durable request journal 的契約不受此政策影響。

@@ -110,17 +110,68 @@ final class CyderDiagnostics {
     private var stageEnteredAt = Date()
     private var didFinish = false
     private var operationSequence = 0
-    private(set) var previousUnexpectedSession: CyderPreviousSession?
+    private var previousSession: CyderPreviousSession?
+    var previousUnexpectedSession: CyderPreviousSession? {
+        lock.lock(); defer { lock.unlock() }; return previousSession
+    }
+    private let ioQueue = DispatchQueue(label: "local.cyder.diagnostics-io", qos: .utility)
+    private var pendingWrites = 0
+    private var droppedWrites = 0
+    private var pendingFailure: CyderFailure?
+    private var failureScheduled = false
+    private let redirectStreams: Bool
+    private let beforeIO: () -> Void
+    private let homePath = FileManager.default.homeDirectoryForCurrentUser.path
 
-    private static let timestampFormatter: ISO8601DateFormatter = {
+    // Nonblocking and bounded: a stalled filesystem retains one physical
+    // writer and at most 128 ordinary records, one latest error and one finish.
+    private func enqueue(afterFinish: Bool = false, _ work: @escaping () -> Void) {
+        lock.lock()
+        guard (!didFinish || afterFinish), pendingWrites < 128 else {
+            if !didFinish { droppedWrites += 1 }
+            lock.unlock(); return
+        }
+        pendingWrites += 1
+        ioQueue.async { [self] in
+            beforeIO(); work()
+            lock.lock(); pendingWrites -= 1; lock.unlock()
+        }
+        lock.unlock()
+    }
+
+    var pendingWriteCount: Int {
+        lock.lock(); defer { lock.unlock() }; return pendingWrites
+    }
+
+    /// The completion runs off main, after preceding diagnostics work. UI
+    /// callers must keep an independent deadline and must never wait for it.
+    func flush(completion: @escaping () -> Void) {
+        ioQueue.async { DispatchQueue.global(qos: .utility).async(execute: completion) }
+    }
+
+    func loadPreviousSession(completion: @escaping (CyderPreviousSession?) -> Void) {
+        flush { [self] in
+            let previous = previousUnexpectedSession
+            DispatchQueue.main.async { completion(previous) }
+        }
+    }
+
+    private func bounded(_ text: String) -> String {
+        String(decoding: text.utf8.prefix(16_384), as: UTF8.self)
+    }
+
+    private let timestampFormatter: ISO8601DateFormatter = {
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         return formatter
     }()
 
-    private init() {
+    init(support: URL? = nil, redirectStreams: Bool = true, beforeIO: @escaping () -> Void = {}) {
+        self.redirectStreams = redirectStreams
+        self.beforeIO = beforeIO
         let environment = ProcessInfo.processInfo.environment
-        if let override = environment["CYDER_SUPPORT"], !override.isEmpty {
+        if let support { supportURL = support }
+        else if let override = environment["CYDER_SUPPORT"], !override.isEmpty {
             supportURL = URL(fileURLWithPath: override, isDirectory: true)
         } else {
             supportURL = FileManager.default.homeDirectoryForCurrentUser
@@ -131,23 +182,32 @@ final class CyderDiagnostics {
         let operationsURL = logsURL.appendingPathComponent("operations", isDirectory: true)
         stateURL = logsURL.appendingPathComponent("session-state.json")
         lastErrorURL = logsURL.appendingPathComponent("last-error.json")
-        startedAt = Self.timestampFormatter.string(from: startedAtDate)
+        startedAt = timestampFormatter.string(from: startedAtDate)
 
-        let timestamp = Self.timestampFormatter.string(from: Date())
+        let timestamp = timestampFormatter.string(from: Date())
             .replacingOccurrences(of: ":", with: "-")
         sessionLogURL = sessionsURL.appendingPathComponent("\(timestamp)-\(sessionID).log")
 
+        ioQueue.async { [self] in
+            beforeIO()
+            initializeStorage(sessionsURL: sessionsURL, operationsURL: operationsURL)
+        }
+    }
+
+    private func initializeStorage(sessionsURL: URL, operationsURL: URL) {
+        precondition(!Thread.isMainThread)
         do {
             try FileManager.default.createDirectory(at: sessionsURL, withIntermediateDirectories: true)
             try FileManager.default.createDirectory(at: operationsURL, withIntermediateDirectories: true)
-            previousUnexpectedSession = Self.readPreviousSession(from: stateURL)
+            let previous = Self.readPreviousSession(from: stateURL)
+            lock.lock(); previousSession = previous; lock.unlock()
             FileManager.default.createFile(atPath: sessionLogURL.path, contents: nil)
             logHandle = try FileHandle(forWritingTo: sessionLogURL)
             try logHandle?.seekToEnd()
-            redirectStandardStreams()
+            if redirectStreams { redirectStandardStreams() }
             rotateLogs(in: sessionsURL, keeping: 10)
             writeState(state: "running", outcome: nil)
-            log(
+            writeLog(
                 "INFO",
                 "session started appVersion=\(appVersion) os=\(ProcessInfo.processInfo.operatingSystemVersionString) arch=\(Self.machineArchitecture())"
             )
@@ -157,7 +217,8 @@ final class CyderDiagnostics {
     }
 
     deinit {
-        try? logHandle?.close()
+        let handle = logHandle
+        ioQueue.async { try? handle?.close() }
     }
 
     var appVersion: String {
@@ -167,6 +228,7 @@ final class CyderDiagnostics {
     func enter(_ newStage: CyderStage, detail: String? = nil) {
         let now = Date()
         lock.lock()
+        guard !didFinish else { lock.unlock(); return }
         let previous = stage
         let previousMs = now.timeIntervalSince(stageEnteredAt) * 1000
         let sessionMs = now.timeIntervalSince(startedAtDate) * 1000
@@ -175,7 +237,7 @@ final class CyderDiagnostics {
         lock.unlock()
         var message = "stage=\(newStage.rawValue)"
         if let detail {
-            message += " detail=\(detail)"
+            message += " detail=\(bounded(detail))"
         }
         message += String(
             format: " previous=%@ previous_ms=%.0f session_ms=%.0f",
@@ -183,8 +245,11 @@ final class CyderDiagnostics {
             previousMs,
             sessionMs
         )
-        log("INFO", message)
-        writeState(state: "running", outcome: nil)
+        let line = message
+        enqueue { [self] in
+            writeLog("INFO", line)
+            writeState(state: "running", outcome: nil)
+        }
     }
 
     func noteElapsed(operation: String, milliseconds: Double, extra: String = "") {
@@ -197,14 +262,37 @@ final class CyderDiagnostics {
     }
 
     func warning(_ message: String) {
-        log("WARN", message)
+        let limited = bounded(message)
+        // Final cleanup can still report a warning after the terminal state
+        // was queued. It does not reopen the session or bypass the backlog cap.
+        enqueue(afterFinish: true) { [self] in writeLog("WARN", limited) }
     }
 
     func record(_ failure: CyderFailure) {
-        log("ERROR", failure.diagnosticText.replacingOccurrences(of: "\n", with: " | "))
+        let limited = CyderFailure(code: bounded(failure.code), stage: failure.stage,
+            summary: bounded(failure.summary), technicalDetails: bounded(failure.technicalDetails),
+            exitCode: failure.exitCode, terminationReason: failure.terminationReason.map(bounded), logURL: failure.logURL)
+        lock.lock()
+        guard !didFinish else { lock.unlock(); return }
+        pendingFailure = limited
+        guard !failureScheduled else { lock.unlock(); return }
+        failureScheduled = true
+        ioQueue.async { [self] in
+            beforeIO()
+            lock.lock()
+            let value = pendingFailure
+            pendingFailure = nil; failureScheduled = false
+            lock.unlock()
+            if let value { writeFailure(value) }
+        }
+        lock.unlock()
+    }
+
+    private func writeFailure(_ failure: CyderFailure) {
+        writeLog("ERROR", failure.diagnosticText.replacingOccurrences(of: "\n", with: " | "))
         var payload: [String: Any] = [
             "sessionID": sessionID,
-            "timestamp": Self.timestampFormatter.string(from: Date()),
+            "timestamp": timestampFormatter.string(from: Date()),
             "code": failure.code,
             "stage": failure.stage.rawValue,
             "summary": failure.summary,
@@ -229,9 +317,17 @@ final class CyderDiagnostics {
         didFinish = true
         stage = .completed
         let sessionMs = Date().timeIntervalSince(startedAtDate) * 1000
+        let limitedOutcome = bounded(outcome)
+        // Reserved independently of ordinary log capacity. Ordering under the
+        // same lock prevents a pre-finish submit from landing after this write.
+        ioQueue.async { [self] in
+            beforeIO()
+            lock.lock(); let dropped = droppedWrites; lock.unlock()
+            if dropped > 0 { writeLog("WARN", "diagnostic backlog dropped=\(dropped)") }
+            writeLog("INFO", String(format: "session finished outcome=%@ session_ms=%.0f", limitedOutcome, sessionMs))
+            writeState(state: "completed", outcome: limitedOutcome)
+        }
         lock.unlock()
-        log("INFO", String(format: "session finished outcome=%@ session_ms=%.0f", outcome, sessionMs))
-        writeState(state: "completed", outcome: outcome)
     }
 
     func makeOperationLog(_ name: String) -> URL {
@@ -329,6 +425,11 @@ final class CyderDiagnostics {
     /// the operations/sessions directories. The active Cyder session file is
     /// truncated in place so this running app can continue logging safely.
     func cleanupDebugLogs() throws -> CyderLogCleanupSummary {
+        precondition(!Thread.isMainThread)
+        return try ioQueue.sync { try cleanupDebugLogsOnWorker() }
+    }
+
+    private func cleanupDebugLogsOnWorker() throws -> CyderLogCleanupSummary {
         let manager = FileManager.default
         var targets: [URL] = []
         let latestLaunches = [
@@ -342,14 +443,12 @@ final class CyderDiagnostics {
         }
         let activeSessionPath = sessionLogURL.standardizedFileURL.path
         var activeSessionByteCount: Int64 = 0
-        lock.lock()
         if fileExistsOrSymlink(sessionLogURL) {
             activeSessionByteCount = Int64((try? sessionLogURL.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0)
             try? logHandle?.synchronize()
             try? logHandle?.truncate(atOffset: 0)
             try? logHandle?.seek(toOffset: 0)
         }
-        lock.unlock()
 
         for directoryName in ["operations", "sessions"] {
             let directory = logsURL.appendingPathComponent(directoryName, isDirectory: true)
@@ -420,17 +519,20 @@ final class CyderDiagnostics {
     }
 
     func redact(_ text: String) -> String {
-        let home = FileManager.default.homeDirectoryForCurrentUser.path
-        guard !home.isEmpty else { return text }
-        return text.replacingOccurrences(of: home, with: "~")
+        guard !homePath.isEmpty else { return text }
+        return text.replacingOccurrences(of: homePath, with: "~")
     }
 
     private func log(_ level: String, _ message: String) {
-        let timestamp = Self.timestampFormatter.string(from: Date())
+        let limited = bounded(message)
+        enqueue { [self] in writeLog(level, limited) }
+    }
+
+    private func writeLog(_ level: String, _ message: String) {
+        precondition(!Thread.isMainThread)
+        let timestamp = timestampFormatter.string(from: Date())
         let line = "\(timestamp) [\(level)] [\(sessionID)] \(redact(message))\n"
         guard let data = line.data(using: .utf8) else { return }
-        lock.lock()
-        defer { lock.unlock() }
         do {
             try logHandle?.write(contentsOf: data)
             try logHandle?.synchronize()

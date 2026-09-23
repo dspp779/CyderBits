@@ -40,6 +40,8 @@ private enum CyderLaunchIntent: Equatable {
 final class CyderAppDelegate: NSObject, NSApplicationDelegate {
     private let operationGate = CyderOperationGate()
     private let launchPreparation = CyderLaunchPreparation<CyderOperationGate.Scope?>()
+    private var diagnosticsOperationInProgress = false
+    private var diagnosticsPresentation: UUID?
     private var requestRecords: [CyderRequestJournal.Record] = []
     private var outboxNotices: [CyderOutboxNotice] = []
     private weak var existingSettingsController: CyderSettingsWindowController?
@@ -254,8 +256,13 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             }
         }
         controller.onClose = { [weak self] in
-            guard let self,
-                  !self.environmentPreparationInProgress,
+            guard let self else { return }
+            if self.diagnosticsPresentation != nil {
+                self.diagnosticsPresentation = nil
+                self.environmentPreparationInProgress = false
+                self.hideSetup()
+            }
+            guard !self.environmentPreparationInProgress,
                   !self.openingGameLibrary,
                   self.existingRequestController?.window?.isVisible != true,
                   self.existingLibraryController?.window?.isVisible != true else { return }
@@ -886,26 +893,23 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        if !isPrimaryInstance {
-            quitTransaction = true
-            setupProgress.invalidate()
-            existingLibraryController?.quiesce()
-            CyderGameIconStore.shared.quiesce()
-            return .terminateNow
-        }
         guard !quitTransaction else { return .terminateLater }
         quitTransaction = true
+        diagnosticsPresentation = nil
         setupProgress.invalidate()
-        statusItemController.quiesce()
-        bottleRecovery.stop()
-        environmentMonitor.stop()
-        processRunner.quiesce()
-        operationGate.quiesce()
-        launchPreparation.quiesce()
         existingLibraryController?.quiesce()
         CyderGameIconStore.shared.quiesce()
-        CyderSettingsAccess.shared.quiesce()
-        wineLaunchObserver?.cancel()
+        if isPrimaryInstance {
+            statusItemController.quiesce()
+            bottleRecovery.stop()
+            environmentMonitor.stop()
+            processRunner.quiesce()
+            operationGate.quiesce()
+            launchPreparation.quiesce()
+            CyderSettingsAccess.shared.quiesce()
+            wineLaunchObserver?.cancel()
+        }
+        CyderDiagnostics.shared.finish(outcome: "terminated")
         var replied = false
         var quitDeadline: Timer?
         func finishQuit() {
@@ -926,11 +930,18 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         quitDeadline = timer
         RunLoop.main.add(timer, forMode: .common)
         RunLoop.main.add(timer, forMode: .modalPanel)
-        instanceCoordinator.quiesce { [weak self] saved in
-            guard let self else { finishQuit(); return }
-            if !saved { CyderDiagnostics.shared.warning("quit: retaining durable journal for conservative recovery") }
-            self.instanceCoordinator.stop { finishQuit() }
+        func flushDiagnostics() {
+            CyderDiagnostics.shared.flush {
+                DispatchQueue.main.async { finishQuit() }
+            }
         }
+        if isPrimaryInstance {
+            instanceCoordinator.quiesce { [weak self] saved in
+                guard let self else { flushDiagnostics(); return }
+                if !saved { CyderDiagnostics.shared.warning("quit: retaining durable journal for conservative recovery") }
+                self.instanceCoordinator.stop { flushDiagnostics() }
+            }
+        } else { flushDiagnostics() }
         return .terminateLater
     }
 
@@ -1024,6 +1035,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func exportLastGameLog() {
+        guard !quitTransaction, !diagnosticsOperationInProgress else { return }
         let panel = NSSavePanel()
         panel.title = "匯出上次遊戲記錄"
         panel.message = "選擇要複製上次遊戲 Wine log 的位置。"
@@ -1034,31 +1046,46 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         }
         guard panel.runModal() == .OK, let destination = panel.url else { return }
 
+        runDiagnosticsIO(message: "正在匯出上次遊戲記錄…", work: {
+            try CyderDiagnostics.shared.exportLastGameLog(to: destination)
+        }) { [weak self] result in
+            switch result {
+            case .success: self?.showAlert("上次遊戲記錄已匯出", destination.path, style: .informational)
+            case .failure(let error): self?.showAlert("無法匯出上次遊戲記錄", error.localizedDescription, style: .critical)
+            }
+        }
+    }
+
+    /// One physical diagnostics maintenance job survives its UI deadline. A
+    /// late filesystem result cannot re-open a dialog after close/quit/timeout.
+    private func runDiagnosticsIO<Value>(message: String, work: @escaping () throws -> Value,
+                                         completion: @escaping (Result<Value, Error>) -> Void) {
+        guard !quitTransaction, !diagnosticsOperationInProgress else { return }
+        diagnosticsOperationInProgress = true
+        let presentation = UUID()
+        diagnosticsPresentation = presentation
         environmentPreparationInProgress = true
-        showSetup("正在匯出上次遊戲記錄…")
+        showSetup(message)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 5) { [weak self] in
+            guard let self, self.diagnosticsPresentation == presentation, !self.quitTransaction else { return }
+            self.diagnosticsPresentation = nil
+            self.environmentPreparationInProgress = false
+            self.hideSetup()
+            if self.existingSettingsController?.window?.isVisible == true {
+                self.showAlert("記錄作業尚未確認", "檔案處理時間較長。您可以繼續使用或退出 Cyder，稍後再檢查結果。")
+            }
+        }
         DispatchQueue.global(qos: .utility).async { [weak self] in
-            guard let self else { return }
-            do {
-                try CyderDiagnostics.shared.exportLastGameLog(to: destination)
-                DispatchQueue.main.async {
-                    self.hideSetup()
-                    self.environmentPreparationInProgress = false
-                    self.showAlert(
-                        "上次遊戲記錄已匯出",
-                        destination.path,
-                        style: .informational
-                    )
-                }
-            } catch {
-                DispatchQueue.main.async {
-                    self.hideSetup()
-                    self.environmentPreparationInProgress = false
-                    self.showAlert(
-                        "無法匯出上次遊戲記錄",
-                        error.localizedDescription,
-                        style: .critical
-                    )
-                }
+            let result = Result { try work() }
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.diagnosticsOperationInProgress = false
+                guard self.diagnosticsPresentation == presentation, !self.quitTransaction else { return }
+                self.diagnosticsPresentation = nil
+                self.environmentPreparationInProgress = false
+                self.hideSetup()
+                guard self.existingSettingsController?.window?.isVisible == true else { return }
+                completion(result)
             }
         }
     }
@@ -1066,10 +1093,12 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
     private func cleanDebugLogs() { Task { @MainActor in await cleanDebugLogsAsync() } }
 
     @MainActor private func cleanDebugLogsAsync() async {
+        guard !quitTransaction, !diagnosticsOperationInProgress else { return }
         guard await !hasRunningExes() else {
             showAlert("無法清理除錯記錄", "請先關閉所有遊戲，再清理目前的 Wine launch/debug log。")
             return
         }
+        guard !quitTransaction else { return }
         let alert = NSAlert()
         alert.messageText = "清理除錯記錄？"
         alert.informativeText = "這會移除 Wine launch/debug log，以及 Logs/operations 和 Logs/sessions 內的紀錄，但不會刪除遊戲、Windows 環境或偏好設定。"
@@ -1079,21 +1108,17 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         guard runFrontmostAlert(alert, dockVisible: true, anchorWindow: settingsController.window)
             == .alertFirstButtonReturn else { return }
 
-        do {
-            let summary = try CyderDiagnostics.shared.cleanupDebugLogs()
-            let bytes = ByteCountFormatter.string(
-                fromByteCount: summary.byteCount,
-                countStyle: .file
-            )
-            showAlert(
-                "除錯記錄已清理",
-                summary.fileCount == 0
-                    ? "目前沒有可清理的除錯記錄。"
-                    : "已移除 \(summary.fileCount) 個檔案，共 \(bytes)。",
-                style: .informational
-            )
-        } catch {
-            showAlert("無法清理除錯記錄", error.localizedDescription, style: .critical)
+        runDiagnosticsIO(message: "正在清理除錯記錄…", work: {
+            try CyderDiagnostics.shared.cleanupDebugLogs()
+        }) { [weak self] result in
+            guard let self else { return }
+            switch result {
+            case .success(let summary):
+                let bytes = ByteCountFormatter.string(fromByteCount: summary.byteCount, countStyle: .file)
+                self.showAlert("除錯記錄已清理", summary.fileCount == 0
+                    ? "目前沒有可清理的除錯記錄。" : "已移除 \(summary.fileCount) 個檔案，共 \(bytes)。", style: .informational)
+            case .failure(let error): self.showAlert("無法清理除錯記錄", error.localizedDescription, style: .critical)
+            }
         }
     }
 
@@ -2334,9 +2359,11 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func showPreviousCrashIfNeeded() {
-        guard CyderDiagnostics.shared.previousUnexpectedSession != nil else { return }
-        // No startup modal; the library keeps a dismissible diagnostics entry.
-        gameLibraryController.showRecoveryNotice()
+        CyderDiagnostics.shared.loadPreviousSession { [weak self] previous in
+            guard let self, previous != nil, !self.quitTransaction else { return }
+            // No startup modal; a stalled diagnostic read never gates first UI.
+            self.gameLibraryController.showRecoveryNotice()
+        }
     }
 
     @discardableResult

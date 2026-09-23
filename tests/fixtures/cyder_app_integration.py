@@ -51,12 +51,16 @@ def records(case):
     return json.loads(path.read_text())['records'] if path.exists() else {}
 
 try:
-    for mode in ['menu', 'direct', 'runloop', 'unavailable']:
+    for mode in ['menu', 'direct', 'runloop', 'unavailable', 'slowlog']:
         child, output = start(mode, mode, 'primary')
         state = finish(child, output)
         assert records(mode) == {}, 'browsing generated a launch request'
         if mode == 'unavailable':
             assert not (root / mode / 'support/request-journal').exists(), 'read-only fallback acquired journal'
+        if mode == 'slowlog':
+            logs = root / mode / 'support/Logs'
+            assert (output / 'diagnostic-blocked.json').exists(), 'diagnostic fault was not entered'
+            assert not list((logs / 'sessions').glob('*.log')), 'diagnostic initializer passed the blocked read'
         print('PASS full app entry:', mode, state['actions'], 'quit_seconds=', state['quitSeconds'], flush=True)
     seed, seed_output = start('seed', 'recovery', 'seed')
     ids = finish(seed, seed_output, seed=True)
