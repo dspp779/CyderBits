@@ -652,3 +652,8 @@ bash tests/test-cyder-windows-documents.sh
 ```
 
 以上 build command 產生本次程式，但若重新建置，要再設定前述隔離 bundle identity／wrapper 並重新 ad-hoc 簽名，才可作 GUI 測試；不要直接把一般 wrapper 用於正式資料。已完成隔離設定的本批產物與 manifest 保留在上述路徑。新發現的使用者 docs/releases/next.md 未修改／納入。本批修復 context 的 UI I/O；setup progress 取消後晚到、其餘 UI I/O、最終 V01–V14 整合與完整交付仍待完成，目標保持進行中。
+
+
+### C30 主機 Rosetta 唯讀複核（2026-09-23）
+
+C30 提交後以 require_escalated 在沙箱外執行系統 /usr/bin/arch -x86_64 /usr/bin/true，仍得到 Bad CPU type、status 1；pkgutil 查詢 com.apple.pkg.RosettaUpdateAuto 也無 receipt、status 1。工具輸出轉錄保存於 rosetta-C30-host-check.log。這支持「目前主機無法執行此 x86 系統測試」而非僅沙箱拒絕，未安裝／更新任何系統元件，沒有執行 Wine。先前 C28/C29 的 x86 實測仍是其當時紀錄，不能推論為今日 runtime 可用；本次 universal 編譯、arm64 API 故障注入及文件路由替身保持各自證據範圍。真實 x86 Wine 復測須先恢復可執行的 Rosetta 環境，其餘產品修正與替代驗證繼續，不因此停止目標。
