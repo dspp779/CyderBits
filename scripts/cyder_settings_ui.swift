@@ -140,7 +140,14 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate,
     private let uriHandlerProgress = NSProgressIndicator()
     private let uriHandlerRescanButton = NSButton()
 
-    convenience init(settingsAccess: CyderSettingsAccess = .shared) {
+    // Keep the production zero-argument entry explicit. Otherwise overload
+    // resolution can select NSWindowController's inherited empty initializer
+    // instead of the dependency-injected convenience initializer.
+    convenience init() {
+        self.init(settingsAccess: .shared)
+    }
+
+    convenience init(settingsAccess: CyderSettingsAccess) {
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 560, height: 380),
             styleMask: [.titled, .closable],

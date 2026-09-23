@@ -185,10 +185,12 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             self?.runStopEnvironment(prefix: prefix, stamp: stamp, operation: operation)
         }
         controller.onLifecycleIdle = { [weak self] in
-            guard let self, self.didFinishLaunch, self.instanceReady, !self.libraryLaunchInProgress, self.queuedLaunches.isEmpty, self.activeProcessOperations == 0, self.pendingLaunchAcquisitions.isEmpty,
+            guard let self, self.isPrimaryInstance, !self.readOnlyMode, self.didFinishLaunch, self.instanceReady,
+                  !self.openingGameLibrary, !self.libraryLaunchInProgress, self.queuedLaunches.isEmpty, self.activeProcessOperations == 0, self.pendingLaunchAcquisitions.isEmpty,
                   !self.environmentPreparationInProgress,
                   self.existingSettingsController?.window?.isVisible != true,
                   self.existingRequestController?.window?.isVisible != true,
+                  self.existingUnavailableController?.window?.isVisible != true,
                   self.existingLibraryController?.window?.isVisible != true else { return }
             NSApp.terminate(nil)
         }
@@ -905,15 +907,25 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         CyderSettingsAccess.shared.quiesce()
         wineLaunchObserver?.cancel()
         var replied = false
+        var quitDeadline: Timer?
         func finishQuit() {
             guard !replied else { return }
             replied = true
+            quitDeadline?.invalidate()
+            quitDeadline = nil
             sender.reply(toApplicationShouldTerminate: true)
         }
         // Every accepted request is already durable. The deadline may skip
         // disposable cleanup; reopening conservatively reclassifies queued and
         // dispatching records without replay. Neither branch stops Wine.
-        DispatchQueue.main.asyncAfter(deadline: .now() + 3) { finishQuit() }
+        // terminateLater runs a nested modal loop. If termination originated
+        // inside a main dispatch block, that queue cannot reenter to run its
+        // own deadline/completions. A modal-mode timer still delivers the
+        // bounded reply without waiting for the outer dispatch block to return.
+        let timer = Timer(timeInterval: 3, repeats: false) { _ in finishQuit() }
+        quitDeadline = timer
+        RunLoop.main.add(timer, forMode: .common)
+        RunLoop.main.add(timer, forMode: .modalPanel)
         instanceCoordinator.quiesce { [weak self] saved in
             guard let self else { finishQuit(); return }
             if !saved { CyderDiagnostics.shared.warning("quit: retaining durable journal for conservative recovery") }
