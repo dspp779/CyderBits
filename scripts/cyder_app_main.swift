@@ -78,6 +78,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
     }
     private var documentLaunchRequested = false
     private var setupPanel: CyderSetupPanel?
+    private let setupProgress = CyderSetupProgress()
     private var terminateWhenSettingsClose = false
     private var openingGameLibrary = false
     private var environmentPreparationInProgress = false
@@ -304,7 +305,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         environmentPreparationInProgress = true
         settingsController.close()
         gameLibraryController.close()
-        showSetup("正在建立獨立遊戲環境…")
+        let progressPresentation = showSetup("正在建立獨立遊戲環境…")
         Task.detached(priority: .userInitiated) { [weak self] in
             guard let self else { return }
             let context = await CyderLaunchContext(resourcePath: resourcePath)
@@ -312,7 +313,8 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
                 context: context,
                 args: [context.launcher, "--profile-create", executable.path, "golden"],
                 stage: .bootstrap,
-                operation: "profile-create"
+                operation: "profile-create",
+                progressPresentation: progressPresentation
             )
             DispatchQueue.main.async {
                 self.hideSetup()
@@ -400,7 +402,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             return
         }
         environmentPreparationInProgress = true
-        showSetup("正在重建 Windows 遊戲環境…")
+        let progressPresentation = showSetup("正在重建 Windows 遊戲環境…")
         Task.detached(priority: .userInitiated) { [weak self] in
             guard let self else { return }
             let context = await CyderLaunchContext(resourcePath: resourcePath)
@@ -408,7 +410,8 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
                 context: context,
                 args: [context.launcher, "--engine-src", context.engineSrc, "--rebuild-prefix"],
                 stage: .bootstrap,
-                operation: "rebuild-prefix"
+                operation: "rebuild-prefix",
+                progressPresentation: progressPresentation
             )
             DispatchQueue.main.async {
                 self.hideSetup()
@@ -881,12 +884,14 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         if !isPrimaryInstance {
             quitTransaction = true
+            setupProgress.invalidate()
             existingLibraryController?.quiesce()
             CyderGameIconStore.shared.quiesce()
             return .terminateNow
         }
         guard !quitTransaction else { return .terminateLater }
         quitTransaction = true
+        setupProgress.invalidate()
         statusItemController.quiesce()
         bottleRecovery.stop()
         environmentMonitor.stop()
@@ -1486,13 +1491,14 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         var bootstrapHealthChecked = false
         if bootstrapNeeded {
             CyderDiagnostics.shared.enter(.bootstrap)
-            showSetup("正在準備遊戲環境…")
+            let progressPresentation = showSetup("正在準備遊戲環境…")
             let result = await runLauncher(
                 context: context,
                 args: [context.launcher, "--engine-src", context.engineSrc, "--bootstrap-only"],
                 stage: .bootstrap,
                 operation: "bootstrap",
-                expectsMachineResult: true
+                expectsMachineResult: true,
+                progressPresentation: progressPresentation
             )
             if !result.succeeded {
                 return failure(
@@ -2229,19 +2235,28 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    private func showSetup(_ message: String) {
+    @discardableResult
+    private func showSetup(_ message: String) -> UUID? {
         onMainThread {
-            guard !quitTransaction else { return }
-            if environmentPreparationInProgress, let library = existingLibraryController, library.window?.isVisible == true {
-                library.updateEnvironmentStatus(message, busy: true)
-                return
-            }
-            if setupPanel == nil {
-                setupPanel = CyderSetupPanel()
-                setupPanel?.show()
-            }
-            setupPanel?.setMessage(message)
+            guard !quitTransaction else { return nil }
+            let presentation = setupProgress.present()
+            renderSetup(message)
+            return presentation
         }
+    }
+
+    private func renderSetup(_ message: String) {
+        precondition(Thread.isMainThread)
+        guard !quitTransaction else { return }
+        if environmentPreparationInProgress, let library = existingLibraryController, library.window?.isVisible == true {
+            library.updateEnvironmentStatus(message, busy: true)
+            return
+        }
+        if setupPanel == nil {
+            setupPanel = CyderSetupPanel()
+            setupPanel?.show()
+        }
+        setupPanel?.setMessage(message)
     }
 
     private func formattedSetupProgress(_ raw: String) -> String {
@@ -2276,6 +2291,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
 
     private func hideSetup() {
         onMainThread {
+            setupProgress.invalidate()
             setupPanel?.close()
             setupPanel = nil
         }
@@ -2443,6 +2459,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         lease: CyderOperationGate.Lease? = nil,
         operationScope: CyderOperationGate.Scope? = nil,
         expectsMachineResult: Bool = false,
+        progressPresentation: UUID? = nil,
         validateBeforeSpawn: @escaping () -> Bool = { true },
         onSpawn: @escaping (CyderProcessRunner.Receipt) -> Void = { _ in },
         onRelease: @escaping () -> Void = {}
@@ -2588,26 +2605,12 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         process.standardOutput = handle
         process.standardError = handle
 
-        var progressTimer: DispatchSourceTimer?
-        var lastProgress = ""
-        if trackProgress {
-            let timer = DispatchSource.makeTimerSource(queue: DispatchQueue.global(qos: .utility))
-            timer.schedule(deadline: .now() + 0.2, repeating: 0.25)
-            timer.setEventHandler { [weak self] in
+        let progressWatch: UUID? = onMainThread {
+            guard trackProgress, let progressPresentation, !quitTransaction else { return nil }
+            return setupProgress.begin(presentation: progressPresentation, url: progressURL) { [weak self] text in
                 guard let self else { return }
-                guard let data = try? Data(contentsOf: progressURL),
-                      let text = String(data: data, encoding: .utf8)?
-                        .trimmingCharacters(in: .whitespacesAndNewlines),
-                      !text.isEmpty,
-                      text != lastProgress
-                else {
-                    return
-                }
-                lastProgress = text
-                self.showSetup(self.formattedSetupProgress(text))
+                self.renderSetup(self.formattedSetupProgress(text))
             }
-            progressTimer = timer
-            timer.resume()
         }
 
         let started = ProcessInfo.processInfo.systemUptime
@@ -2628,8 +2631,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
                     self.instanceCoordinator.refreshExecutionReceipts()
                 }
             })
-        progressTimer?.cancel()
-        progressTimer = nil
+        if let progressWatch { onMainThread { setupProgress.end(progressWatch) } }
         let status: Int32
         let reason: Process.TerminationReason
         var unconfirmed = false

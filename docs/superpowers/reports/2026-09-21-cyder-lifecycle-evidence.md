@@ -51,11 +51,11 @@ SIGN_IDENTITY=- CYDER_REQUIRE_NATIVE_SWIFT=1 CYDER_SWIFT_OPTIMIZATION=-Onone \
 
 ## 驗證矩陣（持續更新）
 
-以下為截至 C30 的證據摘要；各批次段落保留當時缺口與失敗，不以早期矩陣覆蓋後續結果。
+以下為截至 C31 的證據摘要；各批次段落保留當時缺口與失敗，不以早期矩陣覆蓋後續結果。
 
 | 項目 | 目前證據 | 剩餘／限制 |
 |---|---|---|
-| V01 | 正式 runner／monitor／設定／視窗 adapter 的受阻故障注入與 physical 上限；C22/C24 30 次 callback proxy，C24 含 32 個獨立程序列；C30 引擎資源載入改非同步，main-actor 受阻注入通過 | 其餘 main I/O 盤點及完整 app 端到端量測 |
+| V01 | 正式 runner／monitor／設定／視窗 adapter 的受阻故障注入與 physical 上限；C22/C24 30 次 callback proxy，C24 含 32 個獨立程序列；C30 引擎資源載入改非同步，main-actor 受阻注入通過；C31 進度讀取只有一個 physical slot，晚到結果不重開 UI | 其餘 main I/O 盤點及完整 app 端到端量測 |
 | V02 | 正式 menu callback mutation/removal 計數、快速重開、stale revision；C22 feedback 在 tracking 期間不改項目 | 真實 status menu tracking 仍受工具 target 限制 |
 | V03 | 真實 journal／Unix channel、ACK 遺失與同 ID 重送；C6/C7 outbox 核對及 retry 保留原 ID | 最終 app 整合回歸；不是網路／Wine 相容性結論 |
 | V04 | reducer 排列、journal cancel/dispatch、operation gate queued 取消及 C17 準備／spawn 邊界 | 最終全入口整合回歸 |
@@ -657,3 +657,15 @@ bash tests/test-cyder-windows-documents.sh
 ### C30 主機 Rosetta 唯讀複核（2026-09-23）
 
 C30 提交後以 require_escalated 在沙箱外執行系統 /usr/bin/arch -x86_64 /usr/bin/true，仍得到 Bad CPU type、status 1；pkgutil 查詢 com.apple.pkg.RosettaUpdateAuto 也無 receipt、status 1。工具輸出轉錄保存於 rosetta-C30-host-check.log。這支持「目前主機無法執行此 x86 系統測試」而非僅沙箱拒絕，未安裝／更新任何系統元件，沒有執行 Wine。先前 C28/C29 的 x86 實測仍是其當時紀錄，不能推論為今日 runtime 可用；本次 universal 編譯、arm64 API 故障注入及文件路由替身保持各自證據範圍。真實 x86 Wine 復測須先恢復可執行的 Rosetta 環境，其餘產品修正與替代驗證繼續，不因此停止目標。
+
+
+## C31：準備進度的畫面世代與讀取上限
+
+- C30 後續盤點確認原 runLauncher 只 cancel timer；正在執行的 Data(contentsOf:) 返回後仍直接呼叫 showSetup，該函式會建立 panel 或覆寫 library 狀態。Apple [Dispatch Sources — Canceling a Dispatch Source](https://developer.apple.com/library/archive/documentation/General/Conceptual/ConcurrencyProgrammingGuide/GCDWorkQueues/GCDWorkQueues.html) 明確指出取消是非同步，已處理中的 event 會繼續，故 cancel 本身不足以撤銷 UI 更新權限。此結論來自正式程式路徑與 API 契約；本批沒有宣稱在真實 GUI 重現了舊視窗重開。
+- 新 CyderSetupProgress 為 main-thread authority：每次 showSetup 取得新的 presentation UUID；profile-create、rebuild、bootstrap 把該 UUID 傳進 runLauncher。開始讀取時另配 watch UUID，讀取返回主執行緒後同時核對 presentation／watch，才呼叫既有 renderer。延遲的 begin 不可認領較新的畫面，舊 end 不會取消新的 watch。hideSetup、較新的 showSetup、primary／secondary 的終止入口都撤銷舊權限。進度回報只更新已授權 renderer，不再次呼叫建立新世代的 showSetup。
+- 檔案讀取仍在 utility worker；整個 adapter 同時最多一筆實際讀取，取消／替換不提早釋放讀取占位。新的 timer tick 在舊讀取卡住時直接返回，不累積 queue 工作；舊讀取真正返回後才允許下一筆。進度檔最多 64 KiB，缺檔、UTF-8 損壞、超量或空白不覆寫既有訊息；重複文字不重新呈現。讀取卡住不提供假的新進度，也不等待其返回才取消 UI。
+- `bash tests/test-cyder-setup-progress.sh` 通過（setup-progress-C31.log）：正式 adapter／真正 Dispatch worker，第一筆讀取注入停頓；40 次替換仍只有一筆讀取，main RunLoop 完成 30 次 callback；釋放後舊結果丟棄、最新進度正常送達；晚到 begin/end、hide/quit 撤銷、重複資料、真正臨時檔的缺失／無效 UTF-8／過大／更新均有行為斷言，完成檔必須存在。這是 L2 受阻注入及正式進度 API，不是 NSMenu 點擊到呈現量測，也不是完整 GUI 實測。
+- mutation check 只對臨時複本移除最後 presentation/watch 核對，再執行同一未修改 harness；它因舊資料混入而在 event-loop deadline 失敗，且未產生完成檔。setup-progress-C31-mutation.log 保留預期 FAIL 與外層 PASS mutation check，證明測試能拒絕缺少最後核對的版本；沒有把 mutation 的失敗當作產品通過、也未修改正式建置來源。
+- open-files-C31.log（正式 observer／receipt）及 bootstrap-timing-C31.log（shell 進度格式／時間記錄，無 Wine）通過；未改其斷言。build-C31.log 以 C30 記錄的主機 Python override 完成 universal macOS11 編譯，無 Swift warning/error；44 個輸入編譯前後 hash 一致。隔離包 /private/tmp/cyder-lifecycle-c31-build/Cyder.app，local.cyder.lifecycle-c31、CD2 support/runtime，ad-hoc／strict verify、雙架構及三支包內 shell bytes 核對通過，build-C31-source-sha256.json 保存 50 項。
+
+本批沒有啟動完整 app GUI、沒有 Wine spawn／停止或系統安裝；C30 已確認的當前 Rosetta 限制仍適用。已修正進度讀取晚到／取消的具體權限缺口，尚待其餘 UI I/O 盤點、目前測試包最終整合及完整可重現交付；V01–V14 未整體升級為完成。
