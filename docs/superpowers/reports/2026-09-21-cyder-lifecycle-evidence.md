@@ -1,6 +1,6 @@
 # Cyder lifecycle implementation evidence
 
-本任務進行中，**尚未達成 A–F 完成條件**。本報告只列已執行證據；L1/L2 不代表 Wine／NGS 相容。
+本任務的 **A–F 實作與允許替代證據的驗收完成**；交付版本及 V01–V14 最終對照見 [交付摘要](2026-09-23-cyder-lifecycle-delivery.md)。下文按時間保留各批當時的未完成事項、失敗與修正；L1/L2 不代表 Wine／NGS 相容。
 
 ## 範圍、分支與基線
 
@@ -55,10 +55,10 @@ SIGN_IDENTITY=- CYDER_REQUIRE_NATIVE_SWIFT=1 CYDER_SWIFT_OPTIMIZATION=-Onone \
 
 | 項目 | 目前證據 | 剩餘／限制 |
 |---|---|---|
-| V01 | 正式 runner／monitor／設定／視窗 adapter 的受阻故障注入與 physical 上限；C22/C24 30 次 callback proxy，C24 含 32 個獨立程序列；C30 引擎資源載入改非同步，main-actor 受阻注入通過；C31 進度讀取只有一個 physical slot，晚到結果不重開 UI | 其餘 main I/O 盤點及完整 app 端到端量測 |
+| V01 | 正式 runner／monitor／設定／視窗 adapter 的受阻故障注入與 physical 上限；C22/C24 30 次 callback proxy，C24 含 32 個獨立程序列；C30 引擎資源載入改非同步，main-actor 受阻注入通過；C31 進度讀取只有一個 physical slot，晚到結果不重開 UI | C30–C36 已處理識別的 UI／診斷 I/O；完整 app 端到端量測仍未取得 |
 | V02 | 正式 menu callback mutation/removal 計數、快速重開、stale revision；C22 feedback 在 tracking 期間不改項目 | 真實 status menu tracking 仍受工具 target 限制 |
 | V03 | 真實 journal／Unix channel、ACK 遺失與同 ID 重送；C6/C7 outbox 核對及 retry 保留原 ID | C33 完整 app 的 secondary 真實 socket 轉送只產生一筆 ui-presented；不是網路／Wine 相容性結論 |
-| V04 | reducer 排列、journal cancel/dispatch、operation gate queued 取消及 C17 準備／spawn 邊界 | 最終全入口整合回歸 |
+| V04 | reducer 排列、journal cancel/dispatch、operation gate queued 取消及 C17 準備／spawn 邊界 | 正式取消／派送共用邊界已驗；C33/C35 補完整入口接線。未做所有實際輸入裝置排列 |
 | V05 | C9–C12 原生 owner／handoff 故障注入，spawn 前後 crash、late wrapper、same-boot uncertain 不重播 | 不等於實際 Windows／NGS 崩潰恢復實測 |
 | V06 | C16–C21 正式 root receipt／雙樣本 drain／generation／observer 固定期限；native child 與注入後繼證據 | Wine root 退出後失去 Unix ancestry 的後繼不可猜歸屬；真實接力未驗證 |
 | V07 | 正式環境 store／monitor 保留 alive 無視窗環境，觀察期限後不持續 starting；C19 drain 不被 request 擋住 | 實際 NGS 未測，無視窗替身只證明政策 |
@@ -735,3 +735,8 @@ C30 提交後以 require_escalated 在沙箱外執行系統 /usr/bin/arch -x86_6
 - build-C36.log 最終 /private/tmp/cyder-lifecycle.A0NNsH/build/Cyder.app 通過 universal macOS11、strict ad-hoc、45 個來源／6 個主要產物 hash，沒有 Swift warning/error。完整 delegate 最近回歸為 C35-r4；之後只改上述兩個受獨立測試覆蓋的讀取上限，app/quit/coordinator body 未改。未再無理由重跑未變更的 Wine、owner 或環境校準 suite。
 
 A–F／V01–V14 的最後驗收對照另見交付摘要；本節保留實際修正、範圍及量測，不以編譯或替身通過宣稱最新版真實 Wine／NGS 全面相容。
+
+
+## 最終驗收狀態
+
+2026-09-23 逐項核對 A–F／V01–V14、當前產品 diff、失敗更正、必要測試與來源 manifest；依本任務允許的替代證據完成應用層交付。產品來源 `b0d4bd59` 與 C36 包 45 個輸入完全相同，6 個主要產物 hash／簽名／雙架構再核對通過。詳見 [交付摘要](2026-09-23-cyder-lifecycle-delivery.md)，其中清楚保留新版 Wine／NGS、真實 tracking／端到端、Space／VoiceOver 的未驗證範圍。沒有自行 push、merge、發布或覆蓋正式安裝。

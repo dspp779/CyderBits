@@ -2,7 +2,7 @@
 
 > 2026-09-21 實作授權：本任務已進入 A–F 實作與隔離測試。下文「只做文件／不建置／不操作 Wine／待使用者實測」均為先前階段歷史紀錄，不再限制本任務；依 goal prompt 先真實實測，受阻後採明確標示的替代驗證。允許任務分支上的 Conventional Commits；不 push、merge、發布或覆蓋正式安裝。進度及證據另記於 `docs/superpowers/reports/2026-09-21-cyder-lifecycle-evidence.md`。
 
-日期：2026-09-21。狀態：設計收斂完成，所有批次待實作；沒有本次 Wine／遊戲操作或驗收結果。
+日期：2026-09-21；驗收更新：2026-09-23。A–F 應用層實作與授權的替代驗證完成，實機限制及 V01–V14 結果見 [交付摘要](../reports/2026-09-23-cyder-lifecycle-delivery.md)。下文批次順序與早期測試盤點保留為追溯，不代表仍需從 A 重做。
 
 設計依據：[統一規格](../specs/2026-08-19-launchgroup-menu-bar-design.md) §12–23；細項追溯：[歷史計畫](2026-08-19-launchgroup-menu-bar.md) Task 5–28。後續以本文件為實作入口，不順序重跑歷史 Task 1–4，不把既有勾選當作新版完成。
 
@@ -10,7 +10,7 @@
 
 | 批次 | 範圍與主要檔案 | 前置／完成條件 |
 |---|---|---|
-| A：共用狀態 | 新 lifecycle model／store（名稱待實作）、status item 與 app adapter | 先完成無 I/O reducer；環境、程序、視窗、request 分離，單一退出政策、epoch 與 snapshot revision。舊 observer 可送事件，不可保留獨立退出權威 |
+| A：共用狀態 | cyder_lifecycle.swift 的 model／store、status item 與 app adapter | 先完成無 I/O reducer；環境、程序、視窗、request 分離，單一退出政策、epoch 與 snapshot revision。舊 observer 可送事件，不可保留獨立退出權威 |
 | B：選單回應性 | cyder_status_item.swift、app 的選單生命週期接線 | 依 A；兩個開關回呼不改選單，更新只讀快照，tracking 不移除；慢掃描不阻塞主事件處理 |
 | C：可靠接管與派送 | cyder_instance.swift、cyder_sentinel.swift、app 入口、journal／非同步 runner | 依 A；持久 ACK、同 ID 去重、取消／dispatch 序列化、primary 所有權；先驗證崩潰間隙，再切換 consumer，禁止新舊同時派送 |
 | D：退出隔離 | app 的 quit／termination／stop 路徑、supervisor 清理接線 | 依 A、C 的 queued 保存與派送凍結；退出零停止環境指令，停止不關 Cyder UI，accepted 不遺失。不可只移除 -k 就視為完整退出修復 |
@@ -36,7 +36,7 @@ D 的意圖／路由單元可與 B 同時準備，但使用者可用的退出整
 | L2：原生編譯與隔離 harness | 相關 Swift typecheck、真實非同步回呼、tmp journal／socket、AppKit callback／tracking | NGS 與 engine 相容性；手動呼叫 callback 不等於真實 tracking |
 | L3：實機驗收 | 指定 engine 與 macOS、實際 Wine／NGS／Space／tray／VoiceOver、Instruments | 未測組合全部支援 |
 
-目前只完成 L0 的文件差異檢查。L1／L2 要先檢查測試腳本副作用並限定替身；L3 依使用者現況延後，不能自動啟動／停止 Wine 或發布產品。
+目前已完成正式路徑的 L1／L2 及部分限定 L3；不是所有平台／Wine 組合都已通過。真實操作受阻後的替代方法與範圍依交付摘要逐項列示；本次授權只允許隔離測試，不包含發布產品。
 
 ## 最小驗收矩陣
 
@@ -57,7 +57,7 @@ D 的意圖／路由單元可與 B 同時準備，但使用者可用的退出整
 | V13 | 重開後遊戲還在／OS 已重啟／紀錄損壞 | UI 先可用，重新驗身分，不重播舊要求 | F／L1–3 |
 | V14 | 一個環境失聯／engine 缺失 | 局部降級，其他環境可操作，退出仍可用 | E、F／L1–3 |
 
-## 現有測試的處理
+## 實作前測試盤點（歷史；處理結果見證據報告）
 
 - `tests/test-cyder-menu-responsiveness.sh` 已有慢掃描替身，但目前手動呼叫 AppKit delegate，不能驗證真正 tracking；需補回呼內 mutation 計數、延後移除與 stale revision 行為，不能只確認返回即可。
 - `tests/test-cyder-instance.sh` 仍要求 requestPollTimer／waitUntilNoPendingRequests 等舊機制；改驗可靠接管與回應性，不為讓字串測試通過保留輪詢／同步等待。
@@ -69,8 +69,8 @@ D 的意圖／路由單元可與 B 同時準備，但使用者可用的退出整
 
 每批記錄：變更檔案、替換掉的舊權威、已跑命令與結果、未驗證行為、下一批依賴。測試失敗區分回歸／舊契約衝突／既有問題，不能未調查就標成既有問題。只跑與改動有關的必要檢查，通過後不無理由重複。
 
-需要回退時保留 journal 與去重 tombstone；舊版本若不能讀新 schema，禁止自動派送舊要求。內部遷移以一致 adapter／單一 consumer 切換，不用同時跑兩套 executor 的方式比對。沒有使用者要求不 commit、不打包／部署。
+需要回退時保留 journal 與去重 tombstone；舊版本若不能讀新 schema，禁止自動派送舊要求。內部遷移以一致 adapter／單一 consumer 切換，不用同時跑兩套 executor 的方式比對。本任務已授權在專用分支分批 Conventional Commits 及隔離測試建置；未授權 push、merge 或發布。
 
-## 下一個實際工作
+## 交付與後續實機復測
 
-從 A 開始：最小純狀態型別、事件 reducer 與不可變快照，以及 V04／V08／V09／V10 的模型測試。先不接真實 Wine；通過後接入唯一存續政策並進 B。這是下一批實作範圍，本次尚未建立程式碼或執行測試。
+正式路徑及目前完成界線見 [交付摘要](../reports/2026-09-23-cyder-lifecycle-delivery.md)。使用 [測試版指南](../reports/2026-09-23-cyder-lifecycle-test-guide.md) 可重建全新隔離包；舊證據與失敗輪次不刪除。後續真實 Wine／NGS、Space、VoiceOver 與端到端性能復測需要可用的 Rosetta／UI 工具，不把本次替代驗證改稱相容性實測通過。

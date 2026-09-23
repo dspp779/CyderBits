@@ -112,21 +112,26 @@ LaunchServices，並把 `--args` 後的每一個值原樣轉送給 Windows 程�
 `-n` 是動態參數契約的一部分：LaunchServices 只會把 argv 交給新建立的 app instance；
 省略 `-n` 可能只把 EXE 的 open event 送到既有 Cyder，而遺失這次參數。
 
-macOS 11+ 的 Cyder native launcher 會對每個 bundle/support root 維持一個 primary
- instance。primary 以 Unix domain socket bind 取得所有權；即使 `open -n` 建立了額外的
-短暫 instance，它也連不上第二個 listen，因此不會建立第二個選單列 icon。該 instance
-會把 EXE、動態參數或「顯示 Cyder」要求透過暫存 request 轉送給 primary，再自行結束。
-每次由 Cyder 啟動的 EXE 在 primary 建立一個 LaunchGroup（穩定 id）。
-選單列與 Cyder 進程是否還在，只問「設定／遊戲庫是否開著」或「是否還有未結束的 LaunchGroup」。
-根 Unix PID 來自 `CYDER_WINE_PID_FILE` 並用 process-exit／fork 事件監看；後來的視窗 PID
-由 Wine／Dock 啟動通知認領，且同一 bottle 兩場啟動不得用 prefix 掃窗互搶。
-`--sentinel-connect` fifo 仍可存在，但 EOF／helper 斷線不代表遊戲結束。
-`wineserver -w` 只用於 supervisor 的 bottle 排空，不決定選單列。
-前景名稱來自 Wine 啟動通知與 Dock activation，而不是對 `CGWindowList` 做定時輪詢。
-不同 bundle 或 support root 是刻意隔離的執行環境，因此各自擁有自己的 icon。
+macOS 11+ 的 Cyder native launcher 在隔離的 support root 內維持單一可派送 primary。
+sentinel 與 journal 以檔案鎖確認所有權，Unix socket 負責傳輸；socket 不回應不代表可以奪取活 primary。
+`open -n` 建立的額外 instance 以固定 request ID 轉送 EXE、動態參數或「顯示 Cyder」要求，
+只有 durable journal 接受後才 ACK；重送不重新派送。無法確認時提供唯讀遊戲庫及診斷入口，
+不以自動重試冒險重複啟動。
 
-選單列 session、Steam helper、同一 prefix 多程式，以及後續 process monitor 的設計
-記錄見 [Cyder Session 與 Windows 程序監控設計](cyder-session-process-monitoring.zh-TW.md)。
+一次啟動的 LaunchGroup 提供顯示及有界交棒觀察；選單存續由受管理環境、未決要求與 Cyder 視窗決定。
+根程序使用可信 executor receipt 的 boot／PID／出生時間與 prefix 身分；同 prefix 不推定遊戲歸屬，
+無 launch 證據的程序可獨立呈現。視窗操作另核對有效 token 及能力，不以同名或數字 PID 代替身分。
+
+原生 monitor 每個 prefix 世代最多一個背景 `wineserver -w`；返回只觸發重新校準，
+不能單憑 exit 0、無視窗或根程序退出認定環境排空。原生 supervisor 不再每 launch 各建 waiter；
+CLI 相容路徑的觀察機制保留。NGS 類型的無視窗程序仍活時保留環境入口，不持續顯示啟動中。
+
+「退出 Cyder」只停止自身 UI／觀察，不停止遊戲；「停止 Windows 環境」是另一個需確認範圍的操作。
+重開會核對當前 OS／prefix 身分並接回可信環境，歷史 queued／uncertain 要求不會自動重播。
+選單只讀快照；磁碟、程序及視窗觀察在背景進行，逾時不釋放仍卡住的實體工作槽。
+
+實作、驗證限制及隔離測試包見 [lifecycle 交付摘要](superpowers/reports/2026-09-23-cyder-lifecycle-delivery.md)。
+[早期 Session 設計](cyder-session-process-monitoring.zh-TW.md) 保留作歷史研究，不是目前的執行契約。
 
 也可不經 LaunchServices，直接使用 `EXE [ARG ...]` 呼叫 app executable：
 

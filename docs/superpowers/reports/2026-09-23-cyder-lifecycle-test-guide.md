@@ -1,6 +1,6 @@
 # Cyder lifecycle 隔離測試版：建置與執行
 
-目前仍在整合驗收中；這份文件是可重現入口，不是全面 Wine／NGS 相容性聲明。逐項結果與未驗證範圍見 [證據報告](2026-09-21-cyder-lifecycle-evidence.md)。
+A–F 應用層實作與本任務允許的替代驗收已完成。這份文件提供可重現入口；逐項結果及未驗證的實機範圍見 [交付摘要](2026-09-23-cyder-lifecycle-delivery.md) 與 [證據報告](2026-09-21-cyder-lifecycle-evidence.md)。
 
 ## 建置
 

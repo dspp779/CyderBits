@@ -1,6 +1,6 @@
 # Cyder Session 與 Windows 程序監控設計
 
-> 狀態：設計記錄，尚未實作
+> 狀態：2026-08-12 的歷史研究提案，已由 [統一設計 §12–23](superpowers/specs/2026-08-19-launchgroup-menu-bar-design.md) 與 [A–F 交付](superpowers/reports/2026-09-23-cyder-lifecycle-delivery.md) 取代。本文的「目前」及 Win32 monitor／supervisor waiter 建議僅描述當時方案，不是現行 runtime。
 >
 > 更新日期：2026-08-12
 
