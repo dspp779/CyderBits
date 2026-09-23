@@ -1252,6 +1252,16 @@ final class CyderGameLibraryWindowController: NSWindowController, NSWindowDelega
     private var independentIDs: Set<String> = []
     private var gameSettingsController: CyderGameSettingsWindowController?
     private var macLauncherInstallInProgress = false
+    private var revealInProgress = false
+    private var isQuiescing = false
+    private var revealPresentation: UUID?
+    private var installPresentation: UUID?
+    var fileActionDeadline: TimeInterval = 5
+    var fileExists: (String) -> Bool = { FileManager.default.fileExists(atPath: $0) }
+    var revealInFinder: ([URL]) -> Void = { NSWorkspace.shared.activateFileViewerSelecting($0) }
+    var installMacLauncher: (CyderGameRecord, @escaping (Result<URL, Error>) -> Void) -> Void = {
+        CyderMacLauncherInstaller.install(game: $0, completion: $1)
+    }
     private let toolbarPreferencesButton = NSButton()
     private let toolbarRefreshButton = NSButton()
     private let toolbarAddButton = NSButton()
@@ -1295,11 +1305,18 @@ final class CyderGameLibraryWindowController: NSWindowController, NSWindowDelega
         }
     }
 
-    func windowWillClose(_ notification: Notification) { onClose?() }
+    func windowWillClose(_ notification: Notification) {
+        revealPresentation = nil; installPresentation = nil
+        onClose?()
+    }
 
     func prepareForDisplay() { loader.request() }
 
-    func quiesce() { loader.quiesce() }
+    func quiesce() {
+        isQuiescing = true
+        revealPresentation = nil; installPresentation = nil
+        loader.quiesce()
+    }
 
     private func apply(_ update: CyderLibraryLoader.Update) {
         precondition(Thread.isMainThread)
@@ -1515,12 +1532,13 @@ final class CyderGameLibraryWindowController: NSWindowController, NSWindowDelega
             : "加入 macOS 應用程式"
         let macApp = menu.addItem(withTitle: macAppTitle, action: #selector(installMacAppForSelectedGame), keyEquivalent: "")
         macApp.target = self
-        macApp.isEnabled = !readOnly && !macLauncherInstallInProgress
+        macApp.isEnabled = !readOnly && !isQuiescing && !macLauncherInstallInProgress
         let options = menu.addItem(withTitle: "選項", action: #selector(openSettingsForSelectedGame), keyEquivalent: "")
         options.target = self
         options.isEnabled = !readOnly
         let reveal = menu.addItem(withTitle: "顯示於 Finder", action: #selector(revealSelectedGameInFinder), keyEquivalent: "")
         reveal.target = self
+        reveal.isEnabled = !isQuiescing && !revealInProgress
         return menu
     }
 
@@ -1605,30 +1623,56 @@ final class CyderGameLibraryWindowController: NSWindowController, NSWindowDelega
     }
 
     @objc private func revealSelectedGameInFinder() {
-        guard let game = selectedGame else { return }
+        guard !isQuiescing, !revealInProgress, let game = selectedGame else { return }
         let url = game.executableURL
-        guard FileManager.default.fileExists(atPath: url.path) else {
-            showAlert(title: "找不到遊戲", message: "這個 EXE 已不在原本的位置。")
-            return
+        let presentation = UUID(), exists = fileExists
+        revealInProgress = true; revealPresentation = presentation
+        DispatchQueue.main.asyncAfter(deadline: .now() + fileActionDeadline) { [weak self] in
+            guard let self, self.revealPresentation == presentation, !self.isQuiescing else { return }
+            self.revealPresentation = nil
+            self.loadStatus.stringValue = "檔案位置尚未確認；可先繼續使用，稍後再試"
         }
-        NSWorkspace.shared.activateFileViewerSelecting([url])
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let available = exists(url.path)
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                self.revealInProgress = false
+                guard self.revealPresentation == presentation, !self.isQuiescing else { return }
+                self.revealPresentation = nil
+                guard self.window?.isVisible == true, self.selectedGameID == game.id else { return }
+                if available { self.loadStatus.stringValue = ""; self.revealInFinder([url]) }
+                else { self.loadStatus.stringValue = "找不到遊戲：這個 EXE 已不在原本的位置" }
+            }
+        }
     }
 
     @objc private func installMacAppForSelectedGame() {
-        guard !readOnly, let game = selectedGame, !macLauncherInstallInProgress else { return }
-        guard FileManager.default.fileExists(atPath: game.executablePath) else {
-            showAlert(title: "找不到遊戲", message: "這個 EXE 已不在原本的位置。")
-            return
-        }
+        guard !readOnly, !isQuiescing, let game = selectedGame, !macLauncherInstallInProgress else { return }
         macLauncherInstallInProgress = true
-        let updating = CyderMacLauncherInstaller.isInstalled(for: game)
-        CyderMacLauncherInstaller.install(game: game) { [weak self] result in
+        let updating = game.macAppPath != nil
+        let presentation = UUID()
+        installPresentation = presentation
+        self.loadStatus.stringValue = "正在建立 macOS 應用程式…"
+        DispatchQueue.main.asyncAfter(deadline: .now() + fileActionDeadline) { [weak self] in
+            guard let self, self.installPresentation == presentation, !self.isQuiescing else { return }
+            self.installPresentation = nil
+            self.loadStatus.stringValue = "建立結果尚未確認；可先繼續使用，稍後在 Finder 檢查"
+        }
+        installMacLauncher(game) { [weak self] result in
             guard let self else { return }
-            self.macLauncherInstallInProgress = false
+            guard self.installPresentation == presentation, !self.isQuiescing else {
+                self.macLauncherInstallInProgress = false
+                return
+            }
             switch result {
             case .success(let appURL):
                 self.loader.request(.setMacApp(game.id, appURL.path)) { [weak self] saved in
-                    guard self != nil else { return }
+                    guard let self else { return }
+                    self.macLauncherInstallInProgress = false
+                    guard self.installPresentation == presentation, !self.isQuiescing else { return }
+                    self.installPresentation = nil
+                    guard self.window?.isVisible == true else { return }
+                    self.loadStatus.stringValue = ""
                     let persistFailed = !saved
                     let alert = NSAlert()
                     if persistFailed {
@@ -1649,6 +1693,9 @@ final class CyderGameLibraryWindowController: NSWindowController, NSWindowDelega
                     }
                 }
             case .failure(let error):
+                self.macLauncherInstallInProgress = false
+                self.installPresentation = nil
+                self.loadStatus.stringValue = ""
                 self.showAlert(title: "無法建立 macOS 應用程式", message: error.localizedDescription)
             }
         }

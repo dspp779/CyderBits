@@ -75,60 +75,50 @@ enum CyderMacLauncherInstaller {
         cyderApp: URL = Bundle.main.bundleURL,
         completion: @escaping (Result<URL, Error>) -> Void
     ) {
+        DispatchQueue.global(qos: .userInitiated).async {
+            let result = Result { try installOnWorker(game: game, cyderApp: cyderApp) }
+            DispatchQueue.main.async { completion(result) }
+        }
+    }
+
+    private static func installOnWorker(game: CyderGameRecord, cyderApp: URL) throws -> URL {
+        precondition(!Thread.isMainThread)
         guard FileManager.default.fileExists(atPath: game.executablePath) else {
-            completion(.failure(CyderMacLauncherError.missingExecutable(game.executablePath)))
-            return
+            throw CyderMacLauncherError.missingExecutable(game.executablePath)
         }
         guard let resources = Bundle.main.resourceURL else {
-            completion(.failure(CyderMacLauncherError.missingHelper))
-            return
+            throw CyderMacLauncherError.missingHelper
         }
         let helper = resources.appendingPathComponent("ogom-scripts/cyder-create-mac-launcher.sh")
         guard FileManager.default.isExecutableFile(atPath: helper.path) else {
-            completion(.failure(CyderMacLauncherError.missingHelper))
-            return
+            throw CyderMacLauncherError.missingHelper
         }
-
         let destination = appURL(for: game)
-        var processArguments = [
+        var arguments = [
             "--exe", game.executablePath,
             "--cyder-app", cyderApp.path,
             "--output", destination.path,
             "--name", game.displayName,
             "--bundle-id", "local.cyder.launcher.\(game.id)",
         ]
-        if let icon = iconPNG(for: game) {
-            processArguments.append(contentsOf: ["--icon-png", icon.path])
+        if let icon = iconPNG(for: game) { arguments.append(contentsOf: ["--icon-png", icon.path]) }
+        let process = Process()
+        process.executableURL = helper
+        process.arguments = arguments
+        let stderr = Pipe()
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = stderr
+        try process.run()
+        // Drain while the child runs, so a full error pipe cannot prevent exit.
+        let errorData = stderr.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
+        guard process.terminationStatus == 0 else {
+            let detail = String(data: errorData, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines)
+                ?? "exit \(process.terminationStatus)"
+            throw CyderMacLauncherError.scriptFailed(detail)
         }
-
-        DispatchQueue.global(qos: .userInitiated).async {
-            let process = Process()
-            process.executableURL = helper
-            process.arguments = processArguments
-            let stderr = Pipe()
-            process.standardOutput = FileHandle.nullDevice
-            process.standardError = stderr
-            do {
-                try process.run()
-                process.waitUntilExit()
-                guard process.terminationStatus == 0 else {
-                    let detail = String(data: stderr.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?
-                        .trimmingCharacters(in: .whitespacesAndNewlines) ?? "exit \(process.terminationStatus)"
-                    DispatchQueue.main.async {
-                        completion(.failure(CyderMacLauncherError.scriptFailed(detail)))
-                    }
-                    return
-                }
-                registerWithLaunchServices(destination)
-                DispatchQueue.main.async {
-                    completion(.success(destination))
-                }
-            } catch {
-                DispatchQueue.main.async {
-                    completion(.failure(error))
-                }
-            }
-        }
+        registerWithLaunchServices(destination)
+        return destination
     }
 
     private static func registerWithLaunchServices(_ appURL: URL) {

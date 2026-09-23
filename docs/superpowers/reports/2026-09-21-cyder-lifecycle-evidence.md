@@ -51,7 +51,7 @@ SIGN_IDENTITY=- CYDER_REQUIRE_NATIVE_SWIFT=1 CYDER_SWIFT_OPTIMIZATION=-Onone \
 
 ## 驗證矩陣（持續更新）
 
-以下為截至 C33 的證據摘要；各批次段落保留當時缺口與失敗，不以早期矩陣覆蓋後續結果。
+以下為截至 C34 的證據摘要；各批次段落保留當時缺口與失敗，不以早期矩陣覆蓋後續結果。
 
 | 項目 | 目前證據 | 剩餘／限制 |
 |---|---|---|
@@ -68,7 +68,7 @@ SIGN_IDENTITY=- CYDER_REQUIRE_NATIVE_SWIFT=1 CYDER_SWIFT_OPTIMIZATION=-Onone \
 | V11 | E 真實設定明確停止後 UI 保留；正式 reducer／gate 區分 stop 與 quit | 最新 status stop 的實際 tracking 未測 |
 | V12 | C22 真實原生同名雙視窗／最小化有限通過；正式 action 注入替換、PID reuse、焦點變更、逾時、quit | Wine、其他 Space、VoiceOver 未驗；原生不穩定輪次保留 |
 | V13 | 真實 E 重開校準環境且無 replay；C23 正式 journal／registry reopen、原生出生身分接回選單、queued/historical 進入共用模型；prior-boot／重用／late generation／quit 故障注入 | C24 以引擎／prefix 證據接回原生孤兒程序，保持未歸屬；C25 目錄補查及損壞 registry 保留／當前世代保護、C27 首次 registry 與 admission 排序通過；最新版完整 Wine GUI 重開尚未實測 |
-| V14 | E/C21 engine／prefix／probe/identity 失聯故障注入；一個 worker 受阻仍有另一環境前進，退出可用 | 最终 app 局部降級 UX 與主執行緒 I/O 回歸 |
+| V14 | E/C21 engine／prefix／probe/identity 失聯故障注入；一個 worker 受阻仍有另一環境前進，退出可用 | C33 完整 app 的 ownership 失敗保留唯讀 UI、可瀏覽及退出；C34 遊戲庫動作回歸通過，診斷 I/O 仍待修復 |
 
 
 回應性工程目標：p95 ≤100ms、單次本功能 main block <250ms，至少 30 個原始樣本。callback cycle 是代理指標，**不是點擊至畫面呈現延遲**；真實端到端尚未量測。
@@ -697,3 +697,16 @@ C30 提交後以 require_escalated 在沙箱外執行系統 /usr/bin/arch -x86_6
 - 最終 build-C33-r3.log 成功產物 /private/tmp/cyder-lifecycle.Zbd0pJ/build/Cyder.app；短身分 local.cy.417b5740e3824a97、全新 support/runtime，45 個輸入与 6 個关键產物 hash、ad-hoc strict verify、arm64+x86_64 全通過，無 Swift warning/error。r1/r2 建置是本輪中間來源且身分仍過長，不作最終交付。沒有發布／正式安裝／Rosetta 安裝／Wine 操作。
 
 本輪補到完整程式的 UI、轉送、恢復與退出整合，並修復可重現的產品缺陷；不把 event replay 稱為真實 CUA／Command-Q 按鍵或 Wine 相容性。後續盤點仍發現遊戲庫 Finder／建立 macOS 捷徑 action 的同步檔案查詢，須修復並完成 V01–V14 最終逐項審核，目標尚未完成。
+
+
+## C34：遊戲庫檔案動作移出主執行緒
+
+- Finder action 的 fileExists 改為單一背景查詢；同時只允許一笔，五秒回饋只撤銷畫面權限，不釋放卡住的實體工作。返回後必須仍為同一 presentation、同一選取遊戲、視窗可見且未 quiesce 才開 Finder。缺檔及逾時採遊戲庫內文案；正常成功清掉舊錯誤。關窗／退出撤銷權限，晚到不開 Finder。
+- 建立 macOS 捷徑不再於 action 讀 EXE／已安裝路徑。顯示加入或更新取自現行 game record；正式 installer 的 EXE／helper／icon 檢查、路徑建構、Process 及 Launch Services registration 均移到原背景 worker，所有結果回 main。原先 waitUntilExit 後才讀 stderr 可能互相等待，現先排空 error pipe 再 wait；不改 helper 參數／輸出位置／註冊契約。
+- 捷徑 action 保留一筆實體工作到安裝／metadata callback 真正返回，五秒後顯示「建立結果尚未確認」，不假稱已取消，也不立即允許第二筆。關窗、退出、逾時撤銷其 presentation；安裝成功後的 library 寫入亦保留同一權限核對，關窗再開不會被舊持久化 callback 彈出成功提示。已開始的本機捷徑 helper 可自行完成，沒有終止它或 Wine；逾時後應由使用者在 Finder 檢查實際產物。
+- library-C34.log 首輪正式 context-menu action 測試通過；review 發現 metadata 寫入後仍可能晚到彈窗，補上最後 callback 的同一 presentation 核對，library-C34-r2.log 增加關窗再開且 write pending 案例後通過。r3 再加入 installer 的真實 native helper：只輸出 128 KiB stderr 並 exit 7，不寫 Applications，正式 installer 完整收到 scriptFailed，未死鎖；缺 EXE 的正式預檢也以非同步 main completion 回傳。最終 library-C34-r3.log 與必要 ui-completed 檔通過，既有較新 target 的 activateIgnoringOtherApps deprecated warning 保留。
+- 正式遊戲庫測試同時證明：40 次 Finder 要求只有一筆卡住查詢、期限到仍保留占位；釋放後不開 Finder，再試可成功；變更選取不開舊目標；40 次建立捷徑只有一筆，晚到 success 不改 metadata／不彈窗；metadata pending 期間關窗再開沒有舊成功提示；quit 拒绝晚到 action、callback。這些是正式 controller 的事件重放與注入，Finder 開啟／實際建立用户捷徑由替身取代，未宣稱實測該兩個 OS 動作。
+- app-integration-C34.log 對現行全部來源再跑完整入口，選單／設定／要求／reopen、ownership failure 唯讀、第二實例轉送、历史 queued/dispatching 不重播均通過。主佇列 menu／direct 退出約 3.032156／3.000562s，普通 RunLoop 0.008635s，降級 0.000858s；原始記錄與 complete 在 app-integration-C34-final，仍是原生程式重放，非 CUA／Wine。
+- build-C34.log 成功：/private/tmp/cyder-lifecycle.pNTDsa/build/Cyder.app，local.cy.19d0b61d1d924959，全新私有 state，45 個來源及 6 個產物 hash、雙架構／ad-hoc strict verify 均通過，無 Swift warning/error。指南已更新目前包。未發布／覆蓋正式安裝／操作 Wine。
+
+後續盤點發現 CyderDiagnostics 的初始化、每筆 log 的 synchronize、finish／state 檔寫入仍可由 main caller 執行，cleanDebugLogsAsync 雖標 async 也直接在 MainActor 呼叫刪檔。這可能在慢檔案系統阻塞首屏及退出，必須移出主執行緒並驗證卡住 logger 不拖住 UI；因此尚未標記目標完成。

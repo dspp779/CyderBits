@@ -128,6 +128,124 @@ precondition(context.items[0].isEnabled == false && context.items[1].isEnabled =
 precondition(forbiddenActions == 0, "read-only UI invoked a mutation/launch callback")
 readonlyController.quiesce(); readonlyController.close()
 
+// Exercise the actual context-menu targets with stalled filesystem and
+// installer adapters. No Finder opening or user Applications writes occur.
+let fileGame = CyderGameRecord(id: firstID, executablePath: exe.path)
+let otherGame = CyderGameRecord(id: "second", executablePath: root.appendingPathComponent("other.exe").path)
+let metadataGate = DispatchSemaphore(value: 0), metadataCounter = Counter()
+let fileLoader = CyderLibraryLoader(read: { operation in
+    if case .setMacApp = operation { metadataCounter.increment(); metadataGate.wait() }
+    return .init(games: [fileGame, otherGame], independentIDs: [])
+})
+DispatchQueue.global().asyncAfter(deadline: .now() + 15) {
+    fputs("FAIL: file-action fixture deadline\n", stderr); _exit(79)
+}
+let fileController = CyderGameLibraryWindowController(loader: fileLoader)
+fileController.fileActionDeadline = 0.05
+fileController.showWindow(nil); fileController.prepareForDisplay()
+pump { !fileLoader.isBusy }
+let fileCollection = views(fileController.window!.contentView!).compactMap { $0 as? NSCollectionView }.first!
+let fileTile = fileController.collectionView(fileCollection, itemForRepresentedObjectAt: IndexPath(item: 0, section: 0)) as! CyderGameTileItem
+let otherTile = fileController.collectionView(fileCollection, itemForRepresentedObjectAt: IndexPath(item: 1, section: 0)) as! CyderGameTileItem
+func contextAction(_ tile: CyderGameTileItem, _ title: String) {
+    let menu = tile.onContextMenu!()!
+    let index = menu.items.firstIndex(where: { $0.title == title })!
+    menu.performActionForItem(at: index)
+}
+func fileMessage(_ text: String) -> Bool {
+    views(fileController.window!.contentView!).contains { ($0 as? NSTextField)?.stringValue.contains(text) == true }
+}
+var revealed: [URL] = []
+fileController.revealInFinder = { precondition(Thread.isMainThread); revealed += $0 }
+let fileCounter = Counter(), fileGate = DispatchSemaphore(value: 0)
+fileController.fileExists = { _ in fileCounter.increment(); fileGate.wait(); return true }
+for _ in 0..<40 { contextAction(fileTile, "顯示於 Finder") }
+pump { fileMessage("檔案位置尚未確認") }
+precondition(fileCounter.value == 1)
+precondition(fileTile.onContextMenu!()!.items.last!.isEnabled == false)
+fileGate.signal()
+pump { fileTile.onContextMenu!()!.items.last!.isEnabled }
+precondition(revealed.isEmpty, "late filesystem result opened Finder")
+fileController.fileExists = { _ in precondition(!Thread.isMainThread); return true }
+contextAction(fileTile, "顯示於 Finder")
+pump { revealed.count == 1 }
+precondition(revealed == [exe])
+// A newer selection also revokes the meaning of the original target.
+let selectionGate = DispatchSemaphore(value: 0), selectionCounter = Counter()
+fileController.fileExists = { _ in selectionCounter.increment(); selectionGate.wait(); return true }
+contextAction(fileTile, "顯示於 Finder")
+pump { selectionCounter.value == 1 }
+_ = otherTile.onContextMenu?()
+selectionGate.signal()
+pump { otherTile.onContextMenu!()!.items.last!.isEnabled }
+precondition(revealed.count == 1, "changed selection opened the old target")
+var installs = 0
+var installCompletion: ((Result<URL, Error>) -> Void)?
+fileController.installMacLauncher = { _, completion in installs += 1; installCompletion = completion }
+for _ in 0..<40 { contextAction(fileTile, "加入 macOS 應用程式") }
+pump { fileMessage("建立結果尚未確認") }
+precondition(installs == 1 && !fileTile.onContextMenu!()!.items[0].isEnabled)
+installCompletion?(.success(root.appendingPathComponent("Late.app")))
+precondition(fileMessage("建立結果尚未確認") && !fileLoader.isBusy, "late install changed presentation or metadata")
+precondition(fileTile.onContextMenu!()!.items[0].isEnabled)
+contextAction(fileTile, "加入 macOS 應用程式")
+precondition(installs == 2)
+installCompletion?(.success(root.appendingPathComponent("Saved.app")))
+pump { metadataCounter.value == 1 }
+precondition(!fileTile.onContextMenu!()!.items[0].isEnabled)
+fileController.close(); fileController.showWindow(nil)
+metadataGate.signal()
+pump { !fileLoader.isBusy && fileTile.onContextMenu!()!.items[0].isEnabled }
+precondition(NSApp.modalWindow == nil, "old persistence completion opened a success dialog")
+contextAction(fileTile, "加入 macOS 應用程式")
+precondition(installs == 3)
+let quitGate = DispatchSemaphore(value: 0), quitCounter = Counter()
+fileController.fileExists = { _ in quitCounter.increment(); quitGate.wait(); return true }
+contextAction(fileTile, "顯示於 Finder")
+pump { quitCounter.value == 1 }
+fileController.quiesce()
+installCompletion?(.success(root.appendingPathComponent("Quit.app")))
+quitGate.signal()
+contextAction(fileTile, "加入 macOS 應用程式")
+contextAction(fileTile, "顯示於 Finder")
+var quitSettled = false
+DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { quitSettled = true }
+pump { quitSettled }
+precondition(installs == 3 && quitCounter.value == 1 && revealed.count == 1 && !fileLoader.isBusy)
+fileController.close()
+// The default installer also delivers preflight failure asynchronously on main.
+var defaultInstallFinished = false
+CyderMacLauncherInstaller.install(game: fileGame) { result in
+    precondition(Thread.isMainThread)
+    guard case .failure(CyderMacLauncherError.missingExecutable) = result else { preconditionFailure("missing executable preflight") }
+    defaultInstallFinished = true
+}
+precondition(!defaultInstallFinished, "installer performed synchronous preflight completion")
+pump { defaultInstallFinished }
+// Run the production installer against an isolated helper that only emits a
+// large failure. It never writes the computed Applications destination.
+let helperDirectory = Bundle.main.resourceURL!.appendingPathComponent("ogom-scripts")
+precondition(helperDirectory.path.hasPrefix(root.deletingLastPathComponent().path + "/"))
+try FileManager.default.createDirectory(at: helperDirectory, withIntermediateDirectories: true)
+let failingHelper = helperDirectory.appendingPathComponent("cyder-create-mac-launcher.sh")
+try """
+#!/bin/bash
+for ((i=0; i<4096; i++)); do printf 'xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx'; done >&2
+exit 7
+""".write(to: failingHelper, atomically: true, encoding: .utf8)
+try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: failingHelper.path)
+try Data().write(to: exe)
+var largeFailureFinished = false
+CyderMacLauncherInstaller.install(game: fileGame) { result in
+    precondition(Thread.isMainThread)
+    guard case .failure(CyderMacLauncherError.scriptFailed(let detail)) = result else { preconditionFailure("helper failure lost") }
+    precondition(detail.count == 131072, "helper error pipe truncated or missing")
+    largeFailureFinished = true
+}
+pump { largeFailureFinished }
+print("PASS installer: actual native child, 128 KiB stderr drained before wait, main completion, no Applications writes")
+print("PASS file actions: actual menu, off-main stalled read, one physical worker, deadline/selection/quit fences, installer late result and asynchronous preflight")
+
 let unavailable = CyderUnavailableWindowController()
 var browsed = 0, diagnostics = 0, quits = 0
 unavailable.onLibrary = { browsed += 1 }; unavailable.onDiagnostics = { diagnostics += 1 }; unavailable.onQuit = { quits += 1 }
