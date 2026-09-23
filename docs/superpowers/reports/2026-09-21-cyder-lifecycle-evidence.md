@@ -51,11 +51,11 @@ SIGN_IDENTITY=- CYDER_REQUIRE_NATIVE_SWIFT=1 CYDER_SWIFT_OPTIMIZATION=-Onone \
 
 ## 驗證矩陣（持續更新）
 
-以下為截至 C29 的證據摘要；各批次段落保留當時缺口與失敗，不以早期矩陣覆蓋後續結果。
+以下為截至 C30 的證據摘要；各批次段落保留當時缺口與失敗，不以早期矩陣覆蓋後續結果。
 
 | 項目 | 目前證據 | 剩餘／限制 |
 |---|---|---|
-| V01 | 正式 runner／monitor／設定／視窗 adapter 的受阻故障注入與 physical 上限；C22/C24 30 次 callback proxy，C24 含 32 個獨立程序列 | 其餘 main I/O 盤點及完整 app 端到端量測 |
+| V01 | 正式 runner／monitor／設定／視窗 adapter 的受阻故障注入與 physical 上限；C22/C24 30 次 callback proxy，C24 含 32 個獨立程序列；C30 引擎資源載入改非同步，main-actor 受阻注入通過 | 其餘 main I/O 盤點及完整 app 端到端量測 |
 | V02 | 正式 menu callback mutation/removal 計數、快速重開、stale revision；C22 feedback 在 tracking 期間不改項目 | 真實 status menu tracking 仍受工具 target 限制 |
 | V03 | 真實 journal／Unix channel、ACK 遺失與同 ID 重送；C6/C7 outbox 核對及 retry 保留原 ID | 最終 app 整合回歸；不是網路／Wine 相容性結論 |
 | V04 | reducer 排列、journal cancel/dispatch、operation gate queued 取消及 C17 準備／spawn 邊界 | 最終全入口整合回歸 |
@@ -627,3 +627,28 @@ C26 留下的首次恢復合併容量及 admission 排序問題已有正式路�
 - `build-C29.log` universal macOS11 建置成功；42 個輸入檔編譯前後 hash 一致。`/private/tmp/cyder-lifecycle-c29-build/Cyder.app` 設 local.cyder.lifecycle-c29、CD2 support/runtime，ad-hoc／strict verify 和雙架構核對通過；三支包內 shell bytes 與 repo 相同，build-C29-source-sha256.json 保存 48 項。未啟動完整 GUI 或操作 Wine；只執行包內無 UI executor 入口與自建程序整合，未發布／覆蓋正式安裝。
 
 已修正並驗證新 session 鎖的初始化／崩潰互斥；舊版無法驗身分的鎖保留為明確局部錯誤，不把它當成 Wine 已結束。本批沒有新的 UI 延遲數字。接下來繼續目前 app 的 UX／主執行緒 I/O、V01–V14 最終整合驗收與可重現交付；目標尚未完成。
+
+
+## C30：移出 UI 入口的引擎資源同步讀取
+
+- 盤點確認 CyderLaunchContext 原同步 initializer 會讀 engine-archive.txt／engine-version.txt 並查詢 archive 是否存在；建立／移除 profile、重建、遊戲庫啟動、準備環境、Winetricks、prefix action／stop、URI launch 多個入口在 Task.detached 之前建構 context。它們不是僅組合字串，慢磁碟可能直接卡住 UI。
+- 將 context 與原 resolver 移至 cyder_launch_context.swift，加入正式 universal build。initializer 改為 async，資源解析明確在 detached task 執行並 await 結果，所有 caller 由編譯器要求 await；UI 入口先顯示既有狀態，再於既有 worker 載入。URI session begin/end 與設定掃描只需要 launcher 字串，改用不讀檔的 launcherPath。archive manifest 優先、version slug fallback、engine-payload fallback 及環境變數不變。
+- 新 test-cyder-launch-context.sh 驅動正式 initializer：從 main actor 呼叫、注入卡住的 resolver，斷言 resolver 不在 main；等待期間主 RunLoop 完成 30 次 timer callback、context 尚未完成，釋放後只得到原預期資料。另以真正臨時目錄驗證缺檔、slug archive、manifest 優先及 manifest 指向缺檔的 fallback。launch-context-C30-r2.log 通過且有強制完成檔；r1 通過但有 Sendable function conversion 警告，改為明確 closure 後 r2 無警告。這是 L2 正式 API／故障注入，不是實際 NSMenu tracking 或端到端延遲量測；30 次 callback 也沒有被換名為 30 次選單量測。
+- open-files-C30.log 通過既有正式 observer／receipt 行為測試。windows-documents-C30.log 失敗在文件錯誤訊息未出現；隔離重現的 windows-documents-C30-isolated-diagnosis.log 證實目前 Rosetta 檢查失敗，launcher 在文件驗證前進入 softwareupdate 的授權提示，未提供同意、未完成安裝即退出。沒有接受授權或嘗試修復系統安裝。該測試原本部分命令未指定隔離 support，現全部設為測試臨時 support/runtime，並明確以 uname 替身略過與此文件路由測試無關的 Rosetta 安裝。所有原文件錯誤／缺環境斷言保留，windows-documents-C30-r3.log 通過；這不證明目前主機能執行 x86 Wine。r2 失敗輸出亦保留。
+- build-C30.log 首輪在 CompatDB inspect 選到 .brew-x86/bin/python3 時回報 Bad CPU type，尚未進入 Swift 編譯；本次不修改 engine／Homebrew。以建置程序局部的 exported Bash function 將 python3 指向 /usr/bin/python3 後，build-C30-r2.log universal macOS11 編譯成功，沒有 Swift warning/error；staged diff 發現新增檔尾多一空行，移除後再以 build-C30-r3.log 完整重建，最終 manifest 對應 r3。iconutil 的既有 portable fallback 正常使用。
+- 43 個來源輸入編譯前後 hash 相同；隔離包 /private/tmp/cyder-lifecycle-c30-build/Cyder.app 設 local.cyder.lifecycle-c30、CD2 support/runtime，ad-hoc 簽名／strict verify、arm64+x86_64 核對通過；三支包內 shell 與 repo bytes 一致，build-C30-source-sha256.json 保存 49 項。未啟動本包完整 GUI、未操作 Wine、未發布或覆蓋正式安裝；不能以 universal 編譯成功宣稱當前 x86 runtime 可用。
+- Apple [Improving app responsiveness](https://developer.apple.com/documentation/xcode/improving-app-responsiveness) 建議同步工作若不能改寫，可用 detached task 避免繼承 MainActor；本次採此明確邊界。測試的 timer 間隔與樣本數是工程 fixture，非 Apple 門檻。
+
+本批可重現建置（在 repo 執行 Bash）：
+
+```bash
+python3() { /usr/bin/python3 "$@"; }
+export -f python3
+SIGN_IDENTITY=- CYDER_REQUIRE_NATIVE_SWIFT=1 CYDER_SWIFT_OPTIMIZATION=-Onone \
+  bash scripts/create-cyder-app.sh /private/tmp/cyder-lifecycle-c30-build
+bash tests/test-cyder-launch-context.sh
+bash tests/test-cyder-open-files-lifecycle.sh
+bash tests/test-cyder-windows-documents.sh
+```
+
+以上 build command 產生本次程式，但若重新建置，要再設定前述隔離 bundle identity／wrapper 並重新 ad-hoc 簽名，才可作 GUI 測試；不要直接把一般 wrapper 用於正式資料。已完成隔離設定的本批產物與 manifest 保留在上述路徑。新發現的使用者 docs/releases/next.md 未修改／納入。本批修復 context 的 UI I/O；setup progress 取消後晚到、其餘 UI I/O、最終 V01–V14 整合與完整交付仍待完成，目標保持進行中。

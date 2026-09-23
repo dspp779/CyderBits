@@ -304,10 +304,10 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         environmentPreparationInProgress = true
         settingsController.close()
         gameLibraryController.close()
-        let context = CyderLaunchContext(resourcePath: resourcePath)
         showSetup("正在建立獨立遊戲環境…")
         Task.detached(priority: .userInitiated) { [weak self] in
             guard let self else { return }
+            let context = await CyderLaunchContext(resourcePath: resourcePath)
             let result = await self.runLauncher(
                 context: context,
                 args: [context.launcher, "--profile-create", executable.path, "golden"],
@@ -347,13 +347,13 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             return
         }
         environmentPreparationInProgress = true
-        let context = CyderLaunchContext(resourcePath: resourcePath)
         showSetup("正在移除獨立遊戲環境…")
         Task.detached(priority: .userInitiated) { [weak self] in
             guard let self else {
                 DispatchQueue.main.async { completion(false) }
                 return
             }
+            let context = await CyderLaunchContext(resourcePath: resourcePath)
             let result = await self.runLauncher(
                 context: context,
                 args: [context.launcher, "--profile-remove", executable.path],
@@ -400,10 +400,10 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             return
         }
         environmentPreparationInProgress = true
-        let context = CyderLaunchContext(resourcePath: resourcePath)
         showSetup("正在重建 Windows 遊戲環境…")
         Task.detached(priority: .userInitiated) { [weak self] in
             guard let self else { return }
+            let context = await CyderLaunchContext(resourcePath: resourcePath)
             let result = await self.runLauncher(
                 context: context,
                 args: [context.launcher, "--engine-src", context.engineSrc, "--rebuild-prefix"],
@@ -1131,11 +1131,11 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             launchNextQueuedExecutableIfReady()
             return
         }
-        let context = CyderLaunchContext(resourcePath: resourcePath)
         presentExternalLaunchStarting()
         libraryLaunchInProgress = true
         Task.detached(priority: .userInitiated) { [weak self] in
             guard let self else { return }
+            let context = await CyderLaunchContext(resourcePath: resourcePath)
             var launchEnvironment: [String: String] = [:]
             var request: URL?
             var retainRequest = false
@@ -1304,7 +1304,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
     @discardableResult
     private func stopAllExesWaiting() async -> Bool {
         guard let resourcePath = Bundle.main.resourcePath else { return false }
-        let context = CyderLaunchContext(resourcePath: resourcePath)
+        let context = await CyderLaunchContext(resourcePath: resourcePath)
         let result = await runLauncher(
             context: context,
             args: [context.launcher, "--stop-all"],
@@ -1319,7 +1319,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
 
     private func hasRunningExes() async -> Bool {
         guard let resourcePath = Bundle.main.resourcePath else { return true }
-        let context = CyderLaunchContext(resourcePath: resourcePath)
+        let context = await CyderLaunchContext(resourcePath: resourcePath)
         let result = await runLauncher(
             context: context,
             args: [context.launcher, "--has-running-exes"],
@@ -1331,7 +1331,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
 
     private func applySettingsImmediately(registrySetting: String) async -> Bool {
         guard let resourcePath = Bundle.main.resourcePath else { return false }
-        let context = CyderLaunchContext(resourcePath: resourcePath)
+        let context = await CyderLaunchContext(resourcePath: resourcePath)
         return await runLauncher(
             context: context,
             args: [context.launcher, "--apply-settings-only"],
@@ -1343,7 +1343,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
 
     private func applySettingsWhileRunning(draftEnvironment: [String: String]) async -> Bool {
         guard let resourcePath = Bundle.main.resourcePath else { return false }
-        let context = CyderLaunchContext(resourcePath: resourcePath)
+        let context = await CyderLaunchContext(resourcePath: resourcePath)
         var env = draftEnvironment
         env["CYDER_FORCE_SETTINGS"] = "1"
         return await runLauncher(
@@ -1537,9 +1537,9 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         }
         environmentPreparationInProgress = true
         existingLibraryController?.updateEnvironmentStatus("正在檢查 Windows 環境…", busy: true)
-        let context = CyderLaunchContext(resourcePath: resourcePath)
         Task.detached(priority: .userInitiated) { [weak self] in
             guard let self else { return }
+            let context = await CyderLaunchContext(resourcePath: resourcePath)
             let failure = await self.ensureEnvironment(context: context)
             DispatchQueue.main.async {
                 self.environmentPreparationInProgress = false
@@ -1708,11 +1708,11 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             return
         }
 
-        let context = CyderLaunchContext(resourcePath: resourcePath)
         environmentPreparationInProgress = true
         showSetup("正在安裝 Winetricks 元件…")
         Task.detached(priority: .userInitiated) { [weak self] in
             guard let self else { return }
+            let context = await CyderLaunchContext(resourcePath: resourcePath)
             let result = await self.runLauncher(
                 context: context,
                 args: [context.launcher, "--install-winetricks"] + verbs,
@@ -1971,8 +1971,8 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
 
         onMainThread {
             if #available(macOS 11.0, *), let resourcePath = Bundle.main.resourcePath {
-                let context = CyderLaunchContext(resourcePath: resourcePath)
-                CyderURIHandlerManager.shared.beginWineSession(prefix: prefix, launcher: context.launcher)
+                CyderURIHandlerManager.shared.beginWineSession(prefix: prefix,
+                    launcher: CyderLaunchContext.launcherPath(resourcePath: resourcePath))
             }
         }
         let observation = await observer.wait(duration: 30, signal: activationWaiter, onStarted: { deadline in
@@ -2005,9 +2005,9 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             showAlert("操作未完成", "Cyder 缺少必要的 Resources 目錄。")
             return
         }
-        let context = CyderLaunchContext(resourcePath: resourcePath)
         Task.detached(priority: .userInitiated) { [weak self] in
             guard let self else { return }
+            let context = await CyderLaunchContext(resourcePath: resourcePath)
             let result = await self.runLauncher(
                 context: context,
                 args: [context.launcher, action, prefix.path],
@@ -2041,13 +2041,13 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
 
     private func runStopEnvironment(prefix: URL, stamp: CyderLifecycle.Stamp, operation: UUID) {
         guard !quitTransaction, let resourcePath = Bundle.main.resourcePath else { return }
-        let context = CyderLaunchContext(resourcePath: resourcePath)
         // Prefix here comes from the monitor's canonical snapshot. Reserve the
         // effect's position now, before dispatching any background preparation.
         operationGate.acquire(.environment(prefix.path)) { [weak self] lease in
             guard let self, let lease else { return }
             guard !self.quitTransaction else { self.operationGate.release(lease); return }
             Task.detached(priority: .userInitiated) {
+                let context = await CyderLaunchContext(resourcePath: resourcePath)
                 let result = await self.runLauncher(context: context,
                     args: [context.launcher, "--stop-prefix", prefix.path], stage: .wineSpawn, operation: "stop-prefix",
                     lease: lease,
@@ -2714,8 +2714,8 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
     @available(macOS 11.0, *)
     private func handleWineSessionEnded(prefix: URL) {
         guard let resourcePath = Bundle.main.resourcePath else { return }
-        let context = CyderLaunchContext(resourcePath: resourcePath)
-        CyderURIHandlerManager.shared.wineSessionEnded(prefix: prefix, launcher: context.launcher)
+        CyderURIHandlerManager.shared.wineSessionEnded(prefix: prefix,
+            launcher: CyderLaunchContext.launcherPath(resourcePath: resourcePath))
     }
 
     @available(macOS 11.0, *)
@@ -2780,11 +2780,11 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             launchNextQueuedExecutableIfReady()
             return
         }
-        let context = CyderLaunchContext(resourcePath: resourcePath)
         let prefix = CyderPaths.sharedBottle
         libraryLaunchInProgress = true
         Task.detached(priority: .userInitiated) { [weak self] in
             guard let self else { return }
+            let context = await CyderLaunchContext(resourcePath: resourcePath)
             CyderDiagnostics.shared.enter(.exeValidation, detail: "uri-precheck")
             let started = ProcessInfo.processInfo.systemUptime
             let validation = CyderURIHandlerManager.shared.validateLaunch(prefix: prefix, launcher: context.launcher)
@@ -2821,10 +2821,9 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             completion(nil, false)
             return
         }
-        let context = CyderLaunchContext(resourcePath: resourcePath)
         CyderURIHandlerManager.shared.scanAsync(
             prefix: CyderPaths.sharedBottle,
-            launcher: context.launcher
+            launcher: CyderLaunchContext.launcherPath(resourcePath: resourcePath)
         ) { record in
             completion(record, CyderURIHandlerManager.shared.isCyderDefaultHandler())
         }

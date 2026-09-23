@@ -79,6 +79,15 @@ assert_contains "$wrapper" '--launch-reg' \
 
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/cyder-win-docs.XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
+export CYDER_SUPPORT="$TMP/support"
+export CYDER_RUNTIME_ROOT="$TMP/runtime"
+# This fixture tests document validation with no installed Wine environment.
+# Keep the unrelated Rosetta installer out of this test (including on ARM
+# hosts without Rosetta); never request a system installation from a test.
+uname() {
+  if [[ "${1:-}" == "-m" ]]; then printf 'x86_64\n'; else /usr/bin/uname "$@"; fi
+}
+export -f uname
 touch "$TMP/sample.bat" "$TMP/sample.cmd" "$TMP/sample.lnk" "$TMP/sample.reg"
 
 set +e
