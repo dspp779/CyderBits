@@ -34,8 +34,10 @@ assert_contains "$script" 'CYDER_REQUIRE_NATIVE_SWIFT' \
   "release channel must fail closed when native Swift compilation fails"
 assert_contains "$script" 'verify_release_app_contract' \
   "release channel must verify version and universal native CyderSwift"
-assert_contains "$script" '/usr/bin/lipo "$swift" -verify_arch x86_64 arm64' \
-  "release channel must pass the input file before lipo verification options"
+assert_contains "$script" 'for arch in x86_64 arm64' \
+  "release channel must check both required architectures"
+assert_contains "$script" '/usr/bin/lipo "$swift" -verify_arch "$arch"' \
+  "release channel must verify each slice separately for lipo compatibility"
 assert_contains "$script" 'requires a stable semantic version' \
   "release channel must reject dev and rc version strings"
 assert_contains "$script" 'run_release_verify' \

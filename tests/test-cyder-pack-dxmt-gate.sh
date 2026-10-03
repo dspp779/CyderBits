@@ -64,7 +64,7 @@ chmod +x "$fake_zstd"
 
 CYDER_ENGINE_ARTIFACTS_DIR="$artifacts" CYDER_ENGINE_VERSION_LABEL="test" \
   CYDER_ZSTD="$fake_zstd" WINE_INSTALL="$engine" \
-  bash "$ROOT/scripts/pack-engine-artifact.sh"
+  bash "$ROOT/scripts/pack-engine-artifact.sh" --xz
 assert test -f "$artifacts/graphics/dxvk-1.2.3.tar.zst"
 assert test -f "$artifacts/graphics/dxmt-4.5.6.tar.zst"
 assert test -f "$artifacts/graphics/dxvk-version.txt"

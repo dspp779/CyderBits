@@ -174,10 +174,15 @@ verify_release_app_contract() {
     echo "Release app requires native CyderSwift; shell fallback found." >&2
     exit 1
   }
-  /usr/bin/lipo "$swift" -verify_arch x86_64 arm64 >/dev/null || {
-    echo "Release CyderSwift is not universal (x86_64 + arm64)." >&2
-    exit 1
-  }
+  # Some lipo versions parse the second -verify_arch argument as another input.
+  # Check each required slice separately so both architectures remain mandatory.
+  local arch
+  for arch in x86_64 arm64; do
+    /usr/bin/lipo "$swift" -verify_arch "$arch" >/dev/null || {
+      echo "Release CyderSwift is missing required architecture: $arch" >&2
+      exit 1
+    }
+  done
 }
 
 # Newest versioned Cyder-*.zip under OUT_DIR (previous formal release baseline).
