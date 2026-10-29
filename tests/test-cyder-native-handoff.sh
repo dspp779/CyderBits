@@ -23,6 +23,13 @@ trap cleanup EXIT
 cat > "$TEST_DIR/main.swift" <<'SWIFT'
 import Foundation
 import Darwin
+if CommandLine.arguments.dropFirst().first == "--check-host-identity" {
+    guard CyderExecutionOwner.Birth.current() != nil else {
+        fputs("Native handoff tests require same-user process identity and kern.bootsessionuuid access; rerun in the host execution environment. No handoff was attempted.\n", stderr)
+        exit(1)
+    }
+    exit(0)
+}
 if CommandLine.arguments.dropFirst().first == "--environment-state" {
     DispatchQueue.global().async { exit(CyderEnvironmentCommand.run(arguments: CommandLine.arguments)) }
     dispatchMain()
@@ -50,5 +57,10 @@ if CommandLine.arguments.count == 3, CommandLine.arguments[1] == "--recover" {
 exit(CyderExecutionOwner.run(arguments: CommandLine.arguments))
 SWIFT
 swiftc -module-cache-path "$TEST_DIR/cache" "$ROOT/scripts/cyder_execution_owner.swift" "$ROOT/scripts/cyder_lifecycle.swift" "$ROOT/scripts/cyder_environment_probe.swift" "$ROOT/scripts/cyder_environment_command.swift" "$TEST_DIR/main.swift" -o "$TEST_DIR/helper"
+"$TEST_DIR/helper" --check-host-identity
+if ! /usr/bin/arch -x86_64 /usr/bin/true >/dev/null 2>&1; then
+  echo "Native handoff tests require x86_64 execution (Rosetta 2 on Apple Silicon). No handoff was attempted; this is not a pass or skip." >&2
+  exit 1
+fi
 clang -arch x86_64 "$ROOT/tests/fixtures/cyder_native_handoff.c" -o "$TEST_DIR/native"
 python3 "$ROOT/tests/fixtures/cyder_native_handoff.py" "$TEST_DIR/state" "$TEST_DIR/helper" "${CYDER_TEST_SOURCE_SCRIPTS:-$ROOT/scripts}" "$TEST_DIR/native"

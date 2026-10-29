@@ -6,7 +6,7 @@ import CryptoKit
 /// revocable; once claimed, only the executor's actual outcome releases it.
 /// Arguments/environment remain in process memory, never in this ledger.
 enum CyderExecutionOwner {
-    enum Failure: Error { case invalid, unavailable, busy, full, revoked, uncertain, ownerMissing, scopeChanged, executableChanged }
+    enum Failure: Error { case invalid, unavailable, busy, full, revoked, processIdentityUnavailable, uncertain, ownerMissing, scopeChanged, executableChanged }
     struct Birth: Codable, Equatable {
         let boot: String
         let pid: Int32
@@ -295,7 +295,11 @@ enum CyderExecutionOwner {
             defer { if scopeLock >= 0 { Darwin.close(scopeLock) } }
             let ownerLock = try directory.lock(id.uuidString + ".lock"); defer { Darwin.close(ownerLock) }
             ticket = try directory.read(name)
-            guard ticket.phase == "prepared", let owner = Birth.current() else { throw Failure.revoked }
+            guard ticket.phase == "prepared" else { throw Failure.revoked }
+            // An unreadable process/boot identity is not a revoked ticket.
+            // Fail closed and leave the prepared ticket untouched so a host
+            // permission problem is diagnosable without weakening ownership.
+            guard let owner = Birth.current() else { throw Failure.processIdentityUnavailable }
             guard try identify(ticket.prefix).key == ticket.scope else { throw Failure.invalid }
             // An executor crash can leave descendants alive. Absence of its
             // lock is not permission to bypass an unresolved prior operation.
@@ -346,6 +350,9 @@ enum CyderExecutionOwner {
             if ticket.phase == "uncertain" || (ticket.handoff != nil && ticket.nativeSpawn == nil && child.terminationStatus == 0) { return 75 }
             return child.terminationReason == .uncaughtSignal ? 128 + child.terminationStatus : child.terminationStatus
         } catch {
+            if case Failure.processIdentityUnavailable = error {
+                fputs("Cyder executor cannot verify process identity (same-user proc_pidinfo / kern.bootsessionuuid); host permissions are required.\n", stderr)
+            }
             fputs("Cyder executor could not claim or confirm its operation: \(error)\n", stderr)
             return 75
         }
