@@ -88,6 +88,7 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate,
     private let fontMingLiu = NSPopUpButton()
     private let fontSongti = NSPopUpButton()
     private let smoothing = NSPopUpButton()
+    private let scrolling = NSSwitch()
     private let graphicsBackend = NSPopUpButton()
     private let moltenvkVariant = NSPopUpButton()
     private let dxvkFrameRate = NSPopUpButton()
@@ -188,6 +189,7 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate,
         settingsTabView = tabs
         tabs.addTabViewItem(makeGeneralTab())
         tabs.addTabViewItem(makeDisplayTab())
+        tabs.addTabViewItem(makeInputTab())
         tabs.addTabViewItem(makeFontsTab())
         tabs.addTabViewItem(makeGraphicsTab())
         tabs.addTabViewItem(makeAdvancedTab())
@@ -358,6 +360,16 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate,
             row("高解析度（Retina Mode）", retina),
             row("縮放比例 / DPI", dpi),
             note("建議使用高解析度模式與 200%。\n125%、150%、175%、250% 等非整數倍率，可能讓部分老遊戲的像素邊緣出現鋸齒或模糊。"),
+        ])
+    }
+
+    private func makeInputTab() -> NSTabViewItem {
+        scrolling.identifier = NSUserInterfaceItemIdentifier("settings-scrolling")
+        scrolling.target = self
+        scrolling.action = #selector(scrollingChanged)
+        return tab("輸入", rows: [
+            row("精準捲動", scrolling),
+            note("開啟可能會捲動過快。"),
         ])
     }
 
@@ -802,6 +814,7 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate,
         syncMode.selectItem(at: CyderSyncMode(msync: value.msync, esync: value.esync ?? false).rawValue)
         updateSyncModeDescription()
         wineLocale.selectItem(at: value.wineLocale.menuIndex)
+        scrolling.state = value.scrolling == .precise ? .on : .off
         retina.state = value.retinaMode ? .on : .off
         let dpiValues = [96, 120, 144, 168, 192, 240]
         dpi.selectItem(at: dpiValues.firstIndex(of: value.dpi) ?? 4)
@@ -978,6 +991,12 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate,
             "CYDER_MSYNC": mode == .msync ? "1" : "0",
             "CYDER_ESYNC": mode == .esync ? "1" : "0",
         ]
+    }
+
+    @objc private func scrollingChanged() {
+        // Save the preference only. The next EXE launch performs the backed-up
+        // registry update; do not edit live bottles from the preferences UI.
+        saveImmediately()
     }
 
     @objc private func retinaChanged() {
@@ -1277,6 +1296,7 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate,
             draft.fontSongtiTarget = cyderFontTarget(at: fontSongti.indexOfSelectedItem)
             draft.fontSmoothing = smoothingValues[max(0, smoothing.indexOfSelectedItem)]
         }
+        draft.scrolling = scrolling.state == .on ? .precise : .traditional
         draft.graphicsBackend = graphicsBackendValue
         draft.moltenvkVariant = moltenvkVariantValue
         draft.dxvkFrameRate = CyderDxvkFrameRate(menuIndex: dxvkFrameRate.indexOfSelectedItem)
@@ -1821,6 +1841,7 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate,
         syncMode.selectItem(at: CyderSyncMode(msync: value.msync, esync: value.esync ?? false).rawValue)
         updateSyncModeDescription()
         wineLocale.selectItem(at: value.wineLocale.menuIndex)
+        scrolling.state = .off
         retina.state = value.retinaMode ? .on : .off
         dpi.selectItem(at: dpiValues.firstIndex(of: value.dpi) ?? 0)
         fontMingLiu.selectItem(at: cyderFontTargetIndex(value.fontMingLiuTarget))

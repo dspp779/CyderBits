@@ -64,7 +64,7 @@ enum CyderAcceptedSettings {
             guard let number = version as? NSNumber,
                   String(cString: number.objCType) != "c",
                   number.doubleValue.rounded() == number.doubleValue,
-                  (1...13).contains(number.intValue) else { return false }
+                  (1...14).contains(number.intValue) else { return false }
         }
         return true
     }

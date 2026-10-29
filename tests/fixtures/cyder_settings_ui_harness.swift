@@ -20,6 +20,18 @@ func views(_ root: NSView) -> [NSView] {
     }
     visit(root); return result
 }
+func renderScrollingUI(_ window: NSWindow, name: String, tab: String? = nil) throws {
+    guard let folder = ProcessInfo.processInfo.environment["CYDER_SCROLL_UI_RENDER_DIR"],
+          let content = window.contentView else { return }
+    if let tab, let tabs = views(content).compactMap({ $0 as? NSTabView }).first,
+       let item = tabs.tabViewItems.first(where: { $0.label == tab }) { tabs.selectTabViewItem(item) }
+    content.layoutSubtreeIfNeeded()
+    if let bitmap = content.bitmapImageRepForCachingDisplay(in: content.bounds) {
+        content.cacheDisplay(in: content.bounds, to: bitmap)
+        try FileManager.default.createDirectory(atPath: folder, withIntermediateDirectories: true)
+        try bitmap.representation(using: .png, properties: [:])!.write(to: URL(fileURLWithPath: folder).appendingPathComponent(name + ".png"))
+    }
+}
 let root = URL(fileURLWithPath: CommandLine.arguments[1])
 try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
 let settingsURL = root.appendingPathComponent("settings.json")
@@ -88,15 +100,61 @@ let gameControls = views(options.window!.contentView!)
 diagnosticState = { "game: " + gameControls.compactMap { ($0 as? NSTextField)?.stringValue }.joined(separator: " | ") }
 let saveButton = gameControls.first { $0.identifier?.rawValue == "game-settings-save" } as! NSButton
 let gameRetina = gameControls.first { $0.identifier?.rawValue == "game-settings-retina" } as! NSSwitch
+let gameScrolling = gameControls.first { $0.identifier?.rawValue == "game-settings-scrolling" } as! NSPopUpButton
+check(gameScrolling.itemTitles == CyderScrolling.gameTitles)
 pump { saveButton.isEnabled && gameRetina.isEnabled }
+check(gameControls.contains { ($0 as? NSTextField)?.stringValue.contains("同一 prefix 內同名 EXE") == true })
+try renderScrollingUI(options.window!, name: "game-scrolling")
 var savedEvents = 0
 options.onSettingsChanged = { savedEvents += 1 }
 gameRetina.state = .on
+check(gameScrolling.indexOfSelectedItem == 0)
+gameScrolling.selectItem(at: 2)
 saveButton.performClick(nil)
 pump { savedEvents == 1 }
 let perGame = try CyderSettingsStore.readValidated(at: settingsURL)
 check(perGame.perProfile[game.id]?.retinaMode == true && !perGame.retinaMode,
              "game edit lost global preferences")
+check(perGame.perProfile[game.id]?.scrolling == .traditional && perGame.scrolling == .traditional,
+      "per-game scrolling edit lost global preferences")
+// Re-open and verify the saved menu selection, then exercise every choice
+// through the actual Apply action without starting Wine.
+for (index, expected): (Int, CyderScrolling?) in [(3, .precise), (1, .unmanaged), (0, nil)] {
+    let reopened = CyderGameSettingsWindowController(game: game, independent: true, settingsAccess: gameAccess)
+    reopened.showWindow(nil)
+    let reopenedViews = views(reopened.window!.contentView!)
+    let popup = reopenedViews.first { $0.identifier?.rawValue == "game-settings-scrolling" } as! NSPopUpButton
+    let apply = reopenedViews.first { $0.identifier?.rawValue == "game-settings-save" } as! NSButton
+    pump { apply.isEnabled && popup.isEnabled }
+    if index == 3 { check(popup.indexOfSelectedItem == 2, "persisted scrolling choice not loaded") }
+    var completed = false; reopened.onSettingsChanged = { completed = true }
+    popup.selectItem(at: index); apply.performClick(nil)
+    pump { completed }
+    let persisted = try CyderSettingsStore.readValidated(at: settingsURL)
+    check(persisted.perProfile[game.id]?.scrolling == expected)
+    reopened.close()
+}
+// A separate preferences view tests global scrolling changes while the
+// application reports a running game: save only, no live registry apply.
+let scrollAccess = CyderSettingsAccess(url: settingsURL)
+let scrollPreferences = CyderSettingsWindowController(settingsAccess: scrollAccess)
+scrollPreferences.hasRunningExes = { true }
+var scrollingRegistryApplies = 0
+scrollPreferences.onImmediateSave = { _ in scrollingRegistryApplies += 1; return true }
+scrollPreferences.showWindow(nil)
+let scrollingViews = views(scrollPreferences.window!.contentView!)
+let globalScrolling = scrollingViews.first { $0.identifier?.rawValue == "settings-scrolling" } as! NSSwitch
+pump { globalScrolling.isEnabled }
+check(globalScrolling.state == .off, "precise scrolling should default off")
+for (state, expected) in [(NSControl.StateValue.on, CyderScrolling.precise), (.off, .traditional)] {
+    globalScrolling.state = state
+    check(globalScrolling.sendAction(globalScrolling.action!, to: globalScrolling.target))
+    pump { (try? CyderSettingsStore.readValidated(at: settingsURL).scrolling) == expected }
+}
+check(scrollingRegistryApplies == 0, "scrolling preference edited a live prefix")
+check(scrollingViews.contains { ($0 as? NSTextField)?.stringValue == "開啟可能會捲動過快。" })
+try renderScrollingUI(scrollPreferences.window!, name: "global-scrolling", tab: "輸入")
+scrollPreferences.close(); scrollAccess.quiesce()
 // A late successful physical write may persist, but closing the window must
 // prevent its callback from closing a later modal or claiming a new UI success.
 let saveGate = DispatchSemaphore(value: 0), saveLock = NSLock()

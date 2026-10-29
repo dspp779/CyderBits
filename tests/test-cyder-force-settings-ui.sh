@@ -100,6 +100,8 @@ assert_contains "$ui" "清理除錯記錄…" "diagnostics tab should expose deb
 assert_contains "$ui" "⚠ 除錯記錄可能快速佔用大量磁碟空間" "diagnostics tab should show a high-visibility storage warning"
 assert_contains "$ui" "打開遊戲庫" "general settings should expose the game library at the top"
 assert_contains "$ui" "關閉所有 Wine 程序" "general settings should expose stop-all Wine"
+assert_contains "$ui" 'private let scrolling = NSSwitch()' "precise scrolling should use a switch"
+assert_contains "$ui" 'row("精準捲動", scrolling)' "input tab should label the precise scrolling switch"
 assert_contains "$ui" "打開下載頁面" "missing GPTK install should offer Apple download page"
 assert_contains "$ui" 'installGptkButton.title = "安裝 GPTK…"' "GPTK install button should use a short label"
 assert_contains "$ui" "chooseGptkCandidate" "GPTK install should let the user pick among mounted volumes"
@@ -354,8 +356,12 @@ if [[ "$library_ui" == *"CYDERBITS // GAME LIBRARY"* || "$library_ui" == *"NSSpl
   echo "ASSERT failed: game library should not retain the branded header or a persistent settings pane" >&2
   exit 1
 fi
-assert_contains "$common" "EXE launches never run a Wine registry client" "active prefixes should defer launch-time registry settings"
-assert_contains "$common" "Wine registry client is reserved" "Wine registry writes should be reserved for the explicit full-apply action"
+assert_contains "$common" "EXE launches never run a Wine registry client" "shared display/font settings must defer registry clients on active prefixes"
+assert_contains "$common" "Wine registry client is reserved" "shared display/font registry clients remain reserved for explicit full apply"
+assert_contains "$ui" "makeInputTab()" "preferences should expose scrolling defaults"
+assert_contains "$library_ui" 'row("滾輪相容", scrolling' "game options should expose scrolling overrides"
+assert_contains "$library_ui" "同一 prefix 內同名 EXE 會共用滾輪設定" "scrolling scope warning must be visible"
+assert_contains "$common" 'cyder_apply_scrolling_for_exe' "explicit EXE scrolling preferences use the separate backed-up launch path"
 assert_contains "$common" 'CYDER_SESSION_GUARD:-0' "shell game launches should not enable the optional session guard by default"
 apply_prefix_region="$(sed -n '/if [[ -n "$APPLY_SETTINGS_PREFIX" ]]/,/if [[ -n "$SESSION_ACTION" ]]/p' "$ROOT/scripts/cyder_launcher.sh")"
 if [[ "$apply_prefix_region" == *"cyder_profile_has_live_sessions"* || "$apply_prefix_region" == *"Cannot apply settings while this bottle is running"* ]]; then

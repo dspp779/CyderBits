@@ -717,7 +717,8 @@ cyder_load_saved_settings() {
   # here used to replace Retina=0/DPI=96 with the global Retina preference.
   local keep_msync=0 keep_esync=0 keep_retina=0 keep_dpi=0
   local keep_mingliu=0 keep_songti=0 keep_smoothing=0 keep_power=0 keep_diagnostics=0
-  local keep_maplestory_wz_cache=0 keep_wine_locale=0
+  local keep_maplestory_wz_cache=0 keep_wine_locale=0 keep_scrolling=0
+  case "${CYDER_SCROLLING_PREFERENCE-}" in unmanaged|traditional|precise) keep_scrolling=1 ;; esac
   case "${CYDER_MSYNC-}" in 0|1) keep_msync=1 ;; esac
   case "${CYDER_ESYNC-}" in 0|1) keep_esync=1 ;; esac
   case "${CYDER_RETINA_MODE-}" in 0|1) keep_retina=1 ;; esac
@@ -749,10 +750,15 @@ cyder_load_saved_settings() {
   export CYDER_WINE_DIAGNOSTICS="${CYDER_WINE_DIAGNOSTICS:-quiet}"
   export CYDER_MAPLESTORY_FILE_CACHE_PREFERENCE="${CYDER_MAPLESTORY_FILE_CACHE_PREFERENCE:-1}"
   export CYDER_WINE_LOCALE="${CYDER_WINE_LOCALE:-system}"
+  export CYDER_SCROLLING_PREFERENCE="${CYDER_SCROLLING_PREFERENCE:-traditional}"
   [[ -f "$settings" ]] || return 0
   command -v plutil >/dev/null 2>&1 || return 0
 
   local value
+  if [[ "$keep_scrolling" -eq 0 ]]; then
+    value="$(plutil -extract scrolling raw -o - "$settings" 2>/dev/null || true)"
+    case "$value" in traditional|precise) export CYDER_SCROLLING_PREFERENCE="$value" ;; unmanaged) export CYDER_SCROLLING_PREFERENCE=traditional ;; esac
+  fi
   if [[ "$keep_msync" -eq 0 ]]; then
     value="$(plutil -extract msync raw -o - "$settings" 2>/dev/null || true)"
     case "$value" in true) export CYDER_MSYNC=1 ;; false) export CYDER_MSYNC=0 ;; esac
@@ -2441,6 +2447,7 @@ cyder_game_environment_key_is_allowed() {
   case "$key" in
     BASH_ENV|ENV|IFS|PATH|HOME|TMPDIR|SHELLOPTS|BASHOPTS|CDPATH|GLOBIGNORE) return 1 ;;
     DYLD_*|LD_*) return 1 ;;
+    CYDER_SCROLLING_PREFERENCE) return 1 ;;
     WINEPREFIX|WINESERVER|WINEARCH|WINEDEBUG|CX_ROOT|CX_BOTTLE|CX_APPLEGPTK_LIBD3DSHARED_PATH) return 1 ;;
     CYDER_SUPPORT|CYDER_RUNTIME_ROOT|CYDER_ENGINES|CYDER_ENGINE_NAME|CYDER_ENGINE_SRC|CYDER_SCRIPTS|CYDER_APP|CYDER_MAPLESTORY_FILE_CACHE|CYDER_MAPLESTORY_FILE_CACHE_PREFERENCE) return 1 ;;
     CYDER_WINE_*|CYDER_SESSION_*|CYDER_DIAGNOSTIC_*|CYDER_TEST_*|CYDER_EXECUTION_*|CYDER_RESULT_FILE|CYDER_PROGRESS_FILE) return 1 ;;
@@ -2755,6 +2762,7 @@ cyder_load_game_settings() {
           case "$key" in
             msync) case "$value" in true) export CYDER_MSYNC=1 ;; false) export CYDER_MSYNC=0 ;; esac ;;
             esync) case "$value" in true) export CYDER_ESYNC=1 ;; false) export CYDER_ESYNC=0 ;; esac ;;
+            scrolling) case "$value" in unmanaged|traditional|precise) export CYDER_SCROLLING_PREFERENCE="$value" ;; esac ;;
             retinaMode) case "$value" in true) export CYDER_RETINA_MODE=1 ;; false) export CYDER_RETINA_MODE=0 ;; esac ;;
             dpi) [[ "$value" =~ ^[0-9]+$ ]] && (( value >= 72 && value <= 480 )) && export CYDER_DPI="$value" || true ;;
             fontMingLiuTarget) cyder_font_target_is_valid "$value" && export CYDER_FONT_MINGLIU_TARGET="$value" || true ;;
@@ -2782,7 +2790,7 @@ cyder_load_game_settings() {
           esac
           ;;
         environment)
-          cyder_game_environment_key_is_allowed "$key" && export "$key=$value"
+          if cyder_game_environment_key_is_allowed "$key"; then export "$key=$value"; fi
           ;;
         argument)
           CYDER_GAME_ARGUMENTS+=("$key")
@@ -2790,7 +2798,7 @@ cyder_load_game_settings() {
       esac
     done < <(/usr/bin/ruby -rjson -e '
       rule = JSON.parse(STDIN.read)
-      %w[msync esync retinaMode dpi fontMingLiuTarget fontSongtiTarget fontPreset fontSmoothing powerMode graphicsBackend dxvkFrameRate].each do |key|
+      %w[msync esync scrolling retinaMode dpi fontMingLiuTarget fontSongtiTarget fontPreset fontSmoothing powerMode graphicsBackend dxvkFrameRate].each do |key|
         puts "setting\t#{key}\t#{rule[key]}" if rule.key?(key) && !rule[key].nil?
       end
       (rule["environment"] || {}).each { |key, value| puts "environment\t#{key}\t#{value}" }
@@ -2798,6 +2806,8 @@ cyder_load_game_settings() {
     ' <<<"$game_json")
   else
     local value
+    value="$(/usr/bin/plutil -extract scrolling raw -o - - 2>/dev/null <<<"$game_json" || true)"
+    case "$value" in unmanaged|traditional|precise) export CYDER_SCROLLING_PREFERENCE="$value" ;; esac
     value="$(/usr/bin/plutil -extract msync raw -o - - 2>/dev/null <<<"$game_json" || true)"
     case "$value" in true) export CYDER_MSYNC=1 ;; false) export CYDER_MSYNC=0 ;; esac
     value="$(/usr/bin/plutil -extract esync raw -o - - 2>/dev/null <<<"$game_json" || true)"
@@ -3312,6 +3322,26 @@ cyder_bounded_wine_log() {
   ' -- "$log_file" "$max_bytes"
 }
 
+# Apply only a known EXE basename. A global Cyder preference is a default
+# for launches, not permission to mutate Wine's prefix-wide Mac Driver value.
+cyder_apply_scrolling_for_exe() {
+  local wine_bin="$1" prefix="$2" exe="$3"
+  local mode="${CYDER_SCROLLING_PREFERENCE:-unmanaged}"
+  local helper="${CYDER_SCRIPTS:-$CYDER_COMMON_DIR}/cyder-scrolling.rb"
+  case "$(basename "$exe" | tr '[:upper:]' '[:lower:]')" in *.exe) ;; *) return 0 ;; esac
+  case "$mode" in unmanaged)
+    # Unmanaged launches without a saved override need no registry client.
+    [[ -d "$prefix/.cyder-scrolling" || -e "$prefix/.cyder-maplestory-scrolling" ]] || return 0
+    mode=restore ;; traditional|precise) ;; *) echo "Invalid scrolling preference" >&2; return 2 ;; esac
+  if [[ ! -f "$helper" ]]; then
+    [[ "$mode" == restore ]] && return 0
+    echo "Cyder scrolling helper is missing" >&2
+    return 2
+  fi
+  WINEPREFIX="$prefix" WINE_INSTALL="$(cd "$(dirname "$wine_bin")/.." && pwd -P)" \
+    CYDER_EXECUTION_FINAL=0 /usr/bin/ruby "$helper" "$mode" "$(basename "$exe")" >/dev/null
+}
+
 cyder_run_wine_exe() {
   local wine_bin="$1"
   local exe="$2"
@@ -3451,6 +3481,11 @@ cyder_run_wine_exe() {
     fi
   fi
   cyder_exec_game() {
+    # Run after sync/session setup, before the one-use final handoff. Registry
+    # failures abort this launch instead of silently using a different mode.
+    if [[ "$target_kind" == exe ]]; then
+      cyder_apply_scrolling_for_exe "$wine_bin" "$prefix" "$exe" || return $?
+    fi
     # Only the final game call consumes the owner's one-use native handoff.
     # Prefix preparation and standalone CLI calls keep their existing paths.
     export CYDER_EXECUTION_FINAL=1

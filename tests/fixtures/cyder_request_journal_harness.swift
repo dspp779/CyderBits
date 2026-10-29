@@ -192,7 +192,10 @@ let legacyRecords = value(wait { migration.open(completion: $0) })
 precondition(legacyRecords[0].settingsSnapshot == nil && legacyRecords[0].phase == .awaitingUserResume)
 precondition(value(wait { migration.resume(id: legacyID, completion: $0) }).settingsSnapshot == snapshotB)
 closeJournal(migration)
-for bad in ["[]", "{\"schemaVersion\":14}", "{\"schemaVersion\":true}", "{\"schemaVersion\":1.5}"] {
+for schema in 1...14 {
+    precondition(CyderAcceptedSettings.isValid(Data("{\"schemaVersion\":\(schema)}".utf8)))
+}
+for bad in ["[]", "{\"schemaVersion\":15}", "{\"schemaVersion\":true}", "{\"schemaVersion\":1.5}"] {
     precondition(!CyderAcceptedSettings.isValid(Data(bad.utf8)))
 }
 try FileManager.default.removeItem(at: settingsURL)

@@ -506,6 +506,7 @@ final class CyderGameSettingsWindowController: NSWindowController, NSWindowDeleg
     private let fontMingLiu = NSPopUpButton()
     private let fontSongti = NSPopUpButton()
     private let smoothing = NSPopUpButton()
+    private let scrolling = NSPopUpButton()
     private let environment = CyderPlaceholderTextView()
     private let arguments = CyderPlaceholderTextView()
     private let tabs = NSTabView()
@@ -600,6 +601,7 @@ final class CyderGameSettingsWindowController: NSWindowController, NSWindowDeleg
         // Checked = force Retina + 192 DPI; unchecked = follow global preferences.
         retina.state = rule?.retinaMode == true ? .on : .off
         graphicsBackend.selectItem(at: graphicsBackendIndex(rule?.graphicsBackend))
+        scrolling.selectItem(at: rule?.scrolling.map { $0.menuIndex + 1 } ?? 0)
         refreshGraphicsControls()
         fontMingLiu.selectItem(at: cyderFontTargetIndex(mingLiuValue))
         fontSongti.selectItem(at: cyderFontTargetIndex(songtiValue))
@@ -656,6 +658,8 @@ final class CyderGameSettingsWindowController: NSWindowController, NSWindowDeleg
         for popup in [fontMingLiu, fontSongti] {
             popup.addItems(withTitles: cyderFontTargetTitles)
         }
+        scrolling.identifier = NSUserInterfaceItemIdentifier("game-settings-scrolling")
+        scrolling.addItems(withTitles: CyderScrolling.gameTitles)
         smoothing.addItems(withTitles: ["關閉", "灰階", "ClearType RGB"])
         for textView in [environment, arguments] {
             textView.isRichText = false
@@ -699,6 +703,10 @@ final class CyderGameSettingsWindowController: NSWindowController, NSWindowDeleg
     }
 
     private func makeGeneralTab() -> NSTabViewItem {
+        let scrollingScope = NSTextField(wrappingLabelWithString: "同一 prefix 內同名 EXE 會共用滾輪設定；變更需重新啟動遊戲。")
+        scrollingScope.font = .systemFont(ofSize: 11)
+        scrollingScope.textColor = .secondaryLabelColor
+        scrollingScope.widthAnchor.constraint(equalToConstant: 460).isActive = true
         let rows: [NSView] = [
             row(
                 "環境變數",
@@ -716,7 +724,9 @@ final class CyderGameSettingsWindowController: NSWindowController, NSWindowDeleg
                 information: "開啟時強制 Retina Mode 與 192 DPI；關閉則跟隨偏好設定。"
             ),
             row("自訂字體", customizeFonts, information: "開啟後會出現「字體」分頁；關閉則跟隨偏好設定。"),
+            row("滾輪相容", scrolling, information: "選「跟隨全域設定」使用偏好設定的精準捲動開關；預設關閉，使用傳統捲動。傳統捲動可用於新楓之谷等遊戲；精準捲動保留細緻 delta。不自動套用會在下次啟動前還原 Cyder 保存的原值。同一 prefix 內同名 EXE 會共用設定；不同設定請使用獨立遊戲環境。需重新啟動遊戲生效。"),
             row("圖形轉譯", graphicsBackend, information: "選「跟隨全域」會使用 Cyder 偏好設定的圖形後端。"),
+            scrollingScope,
             removeProfileButton,
         ]
         settingViews.append(contentsOf: rows)
@@ -837,7 +847,7 @@ final class CyderGameSettingsWindowController: NSWindowController, NSWindowDeleg
     }
 
     private func setControlsEnabled(_ enabled: Bool) {
-        [customizeFonts, retina, graphicsBackend, fontMingLiu, fontSongti, smoothing].forEach {
+        [customizeFonts, retina, graphicsBackend, fontMingLiu, fontSongti, smoothing, scrolling].forEach {
             $0.isEnabled = enabled
         }
         environment.isEditable = enabled
@@ -917,6 +927,7 @@ final class CyderGameSettingsWindowController: NSWindowController, NSWindowDeleg
             rule.fontSongtiTarget = nil
             rule.fontSmoothing = nil
         }
+        rule.scrolling = CyderScrolling.gameSelection(scrolling.indexOfSelectedItem)
         rule.graphicsBackend = graphicsBackendOverride
         rule.dxvkFrameRate = nil
         rule.environment = parseEnvironment(environment.string)

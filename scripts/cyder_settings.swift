@@ -368,6 +368,30 @@ struct CyderResolvedGraphics {
     var dxvkFrameRate: CyderDxvkFrameRate
 }
 
+/// Cyder launch preference; never changes Wine's prefix-wide scrolling default.
+enum CyderScrolling: String, Codable, CaseIterable {
+    case unmanaged, traditional, precise
+
+    var title: String {
+        switch self {
+        case .unmanaged: return "不自動套用"
+        case .traditional: return "傳統捲動"
+        case .precise: return "精準捲動"
+        }
+    }
+    static func sanitized(_ raw: String?) -> CyderScrolling? {
+        raw.flatMap(CyderScrolling.init(rawValue:))
+    }
+    static func resolved(global: CyderScrolling, game: CyderScrolling?) -> CyderScrolling {
+        game ?? global
+    }
+    static var gameTitles: [String] { ["跟隨全域設定"] + allCases.map(\.title) }
+    static func gameSelection(_ index: Int) -> CyderScrolling? {
+        allCases.indices.contains(index - 1) ? allCases[index - 1] : nil
+    }
+    var menuIndex: Int { Self.allCases.firstIndex(of: self) ?? 0 }
+}
+
 struct CyderExecutableSettings: Codable {
     var arguments: [String] = []
     var environment: [String: String] = [:]
@@ -381,11 +405,12 @@ struct CyderExecutableSettings: Codable {
     var powerMode: String?
     var graphicsBackend: CyderGraphicsBackend?
     var dxvkFrameRate: CyderDxvkFrameRate?
+    var scrolling: CyderScrolling?
 
     enum CodingKeys: String, CodingKey {
         case arguments, environment, msync, esync, retinaMode, dpi
         case fontMingLiuTarget, fontSongtiTarget, fontSmoothing, powerMode
-        case graphicsBackend, dxvkFrameRate
+        case graphicsBackend, dxvkFrameRate, scrolling
         case fontPreset
     }
 
@@ -403,7 +428,8 @@ struct CyderExecutableSettings: Codable {
         fontSmoothing: String? = nil,
         powerMode: String? = nil,
         graphicsBackend: CyderGraphicsBackend? = nil,
-        dxvkFrameRate: CyderDxvkFrameRate? = nil
+        dxvkFrameRate: CyderDxvkFrameRate? = nil,
+        scrolling: CyderScrolling? = nil
     ) {
         self.arguments = arguments
         self.environment = environment
@@ -417,12 +443,14 @@ struct CyderExecutableSettings: Codable {
         self.powerMode = powerMode
         self.graphicsBackend = graphicsBackend
         self.dxvkFrameRate = dxvkFrameRate
+        self.scrolling = scrolling
     }
 
     init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
         arguments = try values.decodeIfPresent([String].self, forKey: .arguments) ?? []
         environment = try values.decodeIfPresent([String: String].self, forKey: .environment) ?? [:]
+        scrolling = CyderScrolling.sanitized(try values.decodeIfPresent(String.self, forKey: .scrolling))
         msync = try values.decodeIfPresent(Bool.self, forKey: .msync)
         esync = try values.decodeIfPresent(Bool.self, forKey: .esync)
         retinaMode = try values.decodeIfPresent(Bool.self, forKey: .retinaMode)
@@ -463,10 +491,12 @@ struct CyderExecutableSettings: Codable {
         try container.encodeIfPresent(powerMode, forKey: .powerMode)
         try container.encodeIfPresent(graphicsBackend, forKey: .graphicsBackend)
         try container.encodeIfPresent(dxvkFrameRate, forKey: .dxvkFrameRate)
+        try container.encodeIfPresent(scrolling, forKey: .scrolling)
     }
 }
 
 struct CyderSettings: Codable {
+    // Schema 14 adds the precise-scrolling switch and per-game overrides.
     // Schema 13 adds the global MoltenVK dual-variant preference. Schema 12 adds
     // the global Wine locale preference. Schema 11 adds the MapleStory WZ cache preference.
     // Schema 10 removes the experimental dxvk2 graphics backend. Schema 9 added
@@ -475,7 +505,7 @@ struct CyderSettings: Codable {
     // Schema 7 adds wineDiagnostics. Schema 6 adds dxvkHudFrametimes. Schema 5 adds graphicsHud.
     // Schema 4 adds graphics backend and DXVK frame rate. Schema 3 adds profile-keyed overrides. Keep perExecutable as a
     // legacy basename fallback; never infer a profile from a basename.
-    var schemaVersion = 13
+    var schemaVersion = 14
     var revision = 0
     /// Wall-clock time of the most recent effective settings change. Kept in
     /// settings.json so the state and its provenance travel together.
@@ -490,6 +520,7 @@ struct CyderSettings: Codable {
     var fontMingLiuTarget = "songti"
     var fontSongtiTarget = "songti"
     var fontSmoothing = "cleartype-rgb"
+    var scrolling: CyderScrolling = .traditional
     var graphicsBackend: CyderGraphicsBackend = CyderProduct.defaultGraphicsBackend
     var dxvkFrameRate: CyderDxvkFrameRate = .sixty
     var graphicsHud: CyderGraphicsHud = .off
@@ -499,7 +530,7 @@ struct CyderSettings: Codable {
     var wineLocale: CyderWineLocale = .system
     /// Enable MapleStory-only read-ahead for read-only WZ/MS files.
     var maplestoryWZCache = true
-    /// Dual-variant MoltenVK preference (`1.4.2` \| `1.2.10`). macOS &lt; 12 forces 1.2.10.
+    /// Dual-variant MoltenVK preference (`1.4.2` \| `1.2.10`). macOS &lt; 12 prefers 1.2.10; launch validates actual Mach-O minOS.
     var moltenvkVariant: CyderMoltenvkVariant = CyderMoltenvkVariant.hostDefault
     var perExecutable: [String: CyderExecutableSettings] = [:]
     var perProfile: [String: CyderExecutableSettings] = [:]
@@ -512,7 +543,7 @@ struct CyderSettings: Codable {
         case graphicsBackend, dxvkFrameRate, graphicsHud, dxvkHudFrametimes, wineDiagnostics
         case wineLocale
         case maplestoryWZCache
-        case moltenvkVariant
+        case moltenvkVariant, scrolling
         case perExecutable, perProfile
         case fontPreset
     }
@@ -537,10 +568,10 @@ struct CyderSettings: Codable {
     init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
         let version = try values.decodeIfPresent(Int.self, forKey: .schemaVersion) ?? 1
-        guard version <= 13 else { throw DecodingError.dataCorruptedError(
+        guard version <= 14 else { throw DecodingError.dataCorruptedError(
             forKey: .schemaVersion, in: values, debugDescription: "unsupported settings schema \(version)"
         ) }
-        schemaVersion = 13
+        schemaVersion = 14
         revision = try values.decodeIfPresent(Int.self, forKey: .revision) ?? 0
         updatedAt = try values.decodeIfPresent(String.self, forKey: .updatedAt)
         lastModified = try values.decodeIfPresent([String: String].self, forKey: .lastModified) ?? [:]
@@ -575,6 +606,8 @@ struct CyderSettings: Codable {
         wineLocale = Self.sanitizedWineLocale(
             try values.decodeIfPresent(String.self, forKey: .wineLocale)
         )
+        // Global UI is a switch: old unmanaged/absent values migrate to off (N).
+        scrolling = CyderScrolling.sanitized(try values.decodeIfPresent(String.self, forKey: .scrolling)) == .precise ? .precise : .traditional
         maplestoryWZCache = try values.decodeIfPresent(Bool.self, forKey: .maplestoryWZCache) ?? true
         moltenvkVariant = CyderMoltenvkVariant.sanitized(
             try values.decodeIfPresent(String.self, forKey: .moltenvkVariant)
@@ -621,6 +654,7 @@ struct CyderSettings: Codable {
         try container.encode(wineLocale, forKey: .wineLocale)
         try container.encode(maplestoryWZCache, forKey: .maplestoryWZCache)
         try container.encode(moltenvkVariant, forKey: .moltenvkVariant)
+        try container.encode(scrolling, forKey: .scrolling)
         try container.encode(perExecutable, forKey: .perExecutable)
         try container.encode(perProfile, forKey: .perProfile)
     }
@@ -900,6 +934,7 @@ struct CyderSettings: Codable {
         ]
         // Explicit advanced override: cxcompatdb canonicalizes and validates
         // the directory, PE machine, builtin signature and dependencies.
+        if value == "CYDER_SCROLLING_PREFERENCE" { return false }
         if value == "CYDER_GRAPHICS_BACKEND_PATH" { return true }
         if exactReserved.contains(value) { return false }
         return !["DYLD_", "LD_", "CYDER_WINE_", "CYDER_SESSION_", "CYDER_DIAGNOSTIC_", "CYDER_TEST_", "CYDER_GRAPHICS_", "CYDER_EXECUTION_"]
@@ -973,6 +1008,7 @@ struct CyderSettings: Codable {
         mark("wineDiagnostics", before.wineDiagnostics.rawValue != after.wineDiagnostics.rawValue)
         mark("wineLocale", before.wineLocale.rawValue != after.wineLocale.rawValue)
         mark("maplestoryWZCache", before.maplestoryWZCache != after.maplestoryWZCache)
+        mark("scrolling", before.scrolling != after.scrolling)
         mark("moltenvkVariant", before.moltenvkVariant.rawValue != after.moltenvkVariant.rawValue)
 
         let profileIDs = Set(before.perProfile.keys).union(after.perProfile.keys)
@@ -1016,7 +1052,7 @@ final class CyderSettingsStore {
         do {
             let data = try Data(contentsOf: url)
             let decoded = try JSONDecoder().decode(CyderSettings.self, from: data)
-            guard decoded.schemaVersion <= 13 else {
+            guard decoded.schemaVersion <= 14 else {
                 CyderDiagnostics.shared.warning("unsupported settings schema=\(decoded.schemaVersion); using defaults")
                 value = .defaults
                 return
@@ -1063,7 +1099,7 @@ final class CyderSettingsStore {
         CyderDiagnostics.shared.enter(.settingsSave)
         var next = value
         work(&next)
-        next.schemaVersion = 13
+        next.schemaVersion = 14
         next.moltenvkVariant = CyderMoltenvkVariant.sanitized(next.moltenvkVariant.rawValue)
         next.perProfile = next.perProfile.reduce(into: [:]) { result, item in
             guard CyderSettings.isValidProfileID(item.key) else { return }
@@ -1134,6 +1170,7 @@ final class CyderSettingsStore {
             "CYDER_POWER_MODE": "normal",
             "CYDER_WINE_DIAGNOSTICS": value.wineDiagnostics.rawValue,
             "CYDER_WINE_LOCALE": value.wineLocale.unixLocale ?? "system",
+            "CYDER_SCROLLING_PREFERENCE": value.scrolling.rawValue,
             "CYDER_MOLTENVK_VARIANT_PREFERENCE": value.moltenvkVariant.rawValue,
         ]
     }
@@ -1186,6 +1223,7 @@ final class CyderSettingsStore {
             if let v = rule.powerMode { result["CYDER_POWER_MODE"] = v == "energySaving" ? "background" : "normal" }
             result.merge(rule.environment.filter { CyderSettings.isValidEnvironmentKey($0.key) }) { _, override in override }
         }
+        result["CYDER_SCROLLING_PREFERENCE"] = CyderScrolling.resolved(global: value.scrolling, game: rule?.scrolling).rawValue
         // Apply after per-game env so DXMT_CONFIG keys merge instead of clobber.
         CyderSettings.applyGraphicsFrameLimiter(
             &result, backend: runtimeBackend, rate: graphics.dxvkFrameRate

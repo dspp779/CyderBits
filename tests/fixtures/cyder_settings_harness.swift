@@ -4,9 +4,92 @@ import Foundation
 struct CyderSettingsHarness {
     static func main() throws {
         let path = URL(fileURLWithPath: CommandLine.arguments[1])
+        // Global switch defaults off (N); profile unmanaged remains explicit restore.
+        let legacyScrolling = try JSONDecoder().decode(CyderSettings.self, from: Data(#"{"schemaVersion":13}"#.utf8))
+        precondition(legacyScrolling.scrolling == .traditional)
+        let oldOptOut = try JSONDecoder().decode(CyderSettings.self, from: Data(#"{"scrolling":"unmanaged","perExecutable":{"game.exe":{"scrolling":"unmanaged"}}}"#.utf8))
+        precondition(oldOptOut.scrolling == .traditional)
+        precondition(oldOptOut.perExecutable["game.exe"]?.scrolling == .unmanaged)
+        let invalidScrolling = try JSONDecoder().decode(CyderSettings.self, from: Data(#"{"scrolling":"unknown","perExecutable":{"game.exe":{"scrolling":"unknown"}}}"#.utf8))
+        precondition(invalidScrolling.scrolling == .traditional)
+        precondition(invalidScrolling.perExecutable["game.exe"]?.scrolling == nil)
+        precondition(CyderScrolling.gameTitles == ["跟隨全域設定", "不自動套用", "傳統捲動", "精準捲動"])
+        let scrollPath = path.appendingPathExtension("scrolling")
+        let scrollStore = CyderSettingsStore(url: scrollPath)
+        precondition(scrollStore.environment["CYDER_SCROLLING_PREFERENCE"] == "traditional")
+        for global: CyderScrolling in [.traditional, .precise] {
+            for choice: CyderScrolling? in [nil, .unmanaged, .traditional, .precise] {
+                try scrollStore.update { settings in
+                    settings.scrolling = global
+                    settings.perExecutable["MapleStory.exe"] = CyderExecutableSettings(scrolling: choice)
+                }
+                let expected = (choice ?? global).rawValue
+                let env = scrollStore.environment(profileID: nil, legacyBasename: "MapleStory.exe")
+                precondition(env["CYDER_SCROLLING_PREFERENCE"] == expected)
+                let persisted = CyderSettingsStore(url: scrollPath)
+                precondition(persisted.value.scrolling == global)
+                precondition(persisted.value.perExecutable["MapleStory.exe"]?.scrolling == choice)
+                precondition(persisted.environment(profileID: nil, legacyBasename: "OtherGame.exe")["CYDER_SCROLLING_PREFERENCE"] == global.rawValue)
+            }
+        }
+        let scrollBefore = scrollStore.value
+        var scrollAfter = scrollBefore
+        scrollAfter.scrolling = .traditional
+        let scrollPatch = CyderSettingsPatch(before: scrollBefore, after: scrollAfter)
+        var scrollConcurrent = scrollBefore
+        scrollConcurrent.dpi = 144
+        try scrollPatch.apply(to: &scrollConcurrent)
+        precondition(scrollConcurrent.scrolling == .traditional && scrollConcurrent.dpi == 144)
+        precondition(CyderSettings.changedMetadataKeys(from: scrollBefore, to: scrollAfter).contains("global.scrolling"))
+        precondition(!CyderSettings.isValidEnvironmentKey("CYDER_SCROLLING_PREFERENCE"))
+        let scrollingSnapshot = try CyderSettingsStore.acceptedSnapshot(JSONEncoder().encode(scrollConcurrent))
+        let acceptedScrolling = try JSONDecoder().decode(CyderSettings.self, from: scrollingSnapshot)
+        precondition(acceptedScrolling.scrolling == .traditional)
+        // Cross-component regression: real default/explicit model snapshots
+        // must survive the journal's durable acceptance, not just JSON decoding.
+        func waitFor<T>(_ begin: (@escaping (T) -> Void) -> Void) -> T {
+            let semaphore = DispatchSemaphore(value: 0)
+            var result: T?
+            begin { result = $0; semaphore.signal() }
+            precondition(semaphore.wait(timeout: .now() + 10) == .success)
+            return result!
+        }
+        let acceptanceRoot = path.deletingLastPathComponent().appendingPathComponent("acceptance")
+        try FileManager.default.createDirectory(at: acceptanceRoot, withIntermediateDirectories: true)
+        let livePreferences = acceptanceRoot.appendingPathComponent("settings.json")
+        let acceptedJournal = CyderRequestJournal(directory: acceptanceRoot.appendingPathComponent("journal"),
+            delivery: DispatchQueue(label: "test.settings-acceptance"), captureSettings: {
+                try CyderSettingsStore.acceptedSnapshot(CyderAcceptedSettings.capture(at: livePreferences))
+            })
+        _ = try waitFor { acceptedJournal.open(completion: $0) }.get()
+        let acceptedNamespace = waitFor { acceptedJournal.namespace(completion: $0) }!
+        let loginPayload = CyderRequestPayload(files: ["/isolated/MapleStory.exe"],
+            arguments: ["login.example.invalid", "8484", "BeanFun", "fake-token", "fake-account"], urls: [], showUI: false)
+        // New installation: no settings.json. Normalization still emits schema 14.
+        let firstRequest = try waitFor {
+            acceptedJournal.submit(id: CyderRequestJournal.makeID(namespace: acceptedNamespace), payload: loginPayload, completion: $0)
+        }.get()
+        precondition(firstRequest.phase == .queued && firstRequest.settingsSnapshot != nil)
+        let firstSettings = try JSONDecoder().decode(CyderSettings.self, from: firstRequest.settingsSnapshot!)
+        precondition(firstSettings.scrolling == .traditional && firstSettings.schemaVersion == 14)
+        var configured = firstSettings
+        configured.perExecutable["MapleStory.exe"] = CyderExecutableSettings(scrolling: .traditional)
+        try JSONEncoder().encode(configured).write(to: livePreferences)
+        let savedRequest = try waitFor {
+            acceptedJournal.submit(id: CyderRequestJournal.makeID(namespace: acceptedNamespace), payload: loginPayload, completion: $0)
+        }.get()
+        let savedSettings = try JSONDecoder().decode(CyderSettings.self, from: savedRequest.settingsSnapshot!)
+        precondition(savedSettings.perExecutable["MapleStory.exe"]?.scrolling == .traditional)
+        precondition(savedRequest.payload?.arguments == loginPayload.arguments)
+        let dispatched = try waitFor { acceptedJournal.authorizeDispatch(id: savedRequest.id, completion: $0) }.get()
+        precondition(dispatched.phase == .dispatching && dispatched.settingsSnapshot == savedRequest.settingsSnapshot)
+        precondition(!CyderAcceptedSettings.isValid(Data(#"{"schemaVersion":15}"#.utf8)))
+        let journalClosed = DispatchSemaphore(value: 0)
+        acceptedJournal.close { journalClosed.signal() }
+        precondition(journalClosed.wait(timeout: .now() + 10) == .success)
         let store = CyderSettingsStore(url: path)
         let profileID = "profile-0123456789abcdef01234567"
-        precondition(store.value.schemaVersion == 13)
+        precondition(store.value.schemaVersion == 14)
         precondition(store.value.graphicsBackend == .default)
         precondition(store.value.dxvkFrameRate == .sixty)
         precondition(store.value.graphicsHud == .off)
@@ -35,7 +118,7 @@ struct CyderSettingsHarness {
 
         let normalized = try CyderSettingsStore.acceptedSnapshot(Data("{}".utf8))
         let normalizedObject = try JSONSerialization.jsonObject(with: normalized) as! [String: Any]
-        precondition(normalizedObject["schemaVersion"] as? Int == 13)
+        precondition(normalizedObject["schemaVersion"] as? Int == 14)
         precondition(normalizedObject["dpi"] as? Int == 96)
         precondition(normalizedObject["fontMingLiuTarget"] as? String != nil)
         do {
@@ -78,7 +161,7 @@ struct CyderSettingsHarness {
         let environment = profile["environment"] as! [String: Any]
         precondition(environment["NOT VALID"] == nil)
         let reloaded = CyderSettingsStore(url: path)
-        precondition(reloaded.value.schemaVersion == 13)
+        precondition(reloaded.value.schemaVersion == 14)
         precondition(!reloaded.value.maplestoryWZCache)
         precondition(reloaded.value.revision == 1)
 

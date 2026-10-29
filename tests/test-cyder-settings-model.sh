@@ -17,7 +17,7 @@ assert_contains "$common" 'mingliu|songti|pingfang' "common should only accept s
 assert_contains "$settings" 'var retinaMode = false' "Retina should default off"
 assert_contains "$settings" 'var dpi = 96' "DPI should default to 96"
 assert_contains "$settings" 'var graphicsHud: CyderGraphicsHud = .off' "graphics HUD should default off"
-assert_contains "$settings" 'schemaVersion = 13' "schema version 13"
+assert_contains "$settings" 'schemaVersion = 14' "schema version 14"
 assert_contains "$settings" 'enum CyderMoltenvkVariant' "settings should define MoltenVK variant"
 assert_contains "$settings" 'moltenvkVariant' "settings should store moltenvkVariant"
 assert_contains "$settings" 'CYDER_MOLTENVK_VARIANT_PREFERENCE' "global environment should export MoltenVK preference"

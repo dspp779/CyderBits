@@ -21,6 +21,7 @@ swiftc -O -module-cache-path "$CACHE" \
   "$ROOT/scripts/cyder_paths.swift" \
   "$ROOT/scripts/cyder_gptk.swift" \
   "$ROOT/scripts/cyder_settings.swift" \
+  "$ROOT/scripts/cyder_request_journal.swift" \
   "$ROOT/tests/fixtures/cyder_settings_diagnostics_stub.swift" \
   "$ROOT/tests/fixtures/cyder_settings_harness.swift" \
   -o "$BIN"
