@@ -38,13 +38,13 @@ assert_not_contains "$ui" 'CyderWinetricksComponent(title: ".NET Framework' \
 assert_contains "$ui" 'CyderWinetricksComponent(title: "Visual Basic 6 Runtime"' \
   "VB6 runtime should remain available through Winetricks"
 assert_contains "$ui" "onImmediateSave" "controls should expose immediate save"
-assert_contains "$ui" "guard saveControls(persistDeferredSettings: !running) else" \
+assert_contains "$ui" "guard await saveControls(persistDeferredSettings: !running, revision: revision, needsPrefixApply: requiresPrefixApply), settingsRevision == revision else" \
   "control changes should save immediate fields while preserving deferred settings"
 assert_contains "$ui" "makeGraphicsTab()" "preferences should provide a graphics tab"
 assert_contains "$ui" "圖形轉譯" "graphics tab should expose a backend selector"
 assert_contains "$ui" "限制幀率" "graphics tab should expose DXVK frame-rate choices"
-assert_contains "$ui" "CyderGptk.scanEvaluationVolumes()" "graphics tab should scan mounted GPTK evaluation volumes"
-assert_contains "$ui" "CyderGptk.removeRuntimeInstall()" "graphics tab should remove a locally installed GPTK runtime"
+assert_contains "$ui" "settingsAccess.performWork(CyderGptk.scanEvaluationVolumes)" "graphics tab should scan mounted GPTK evaluation volumes"
+assert_contains "$ui" "performRuntimeMaintenance(CyderGptk.removeRuntimeInstall)" "graphics tab should remove a locally installed GPTK runtime"
 assert_contains "$ui" "需要 macOS 14+" "graphics tab should explain the D3DMetal macOS requirement"
 assert_contains "$ui" "canSelectD3DMetal" "D3DMetal should stay disabled without GPTK"
 assert_contains "$ui" 'return ["預設", "D3DMetal", "DXMT", "DXVK", "WineD3D"]' \
@@ -61,8 +61,8 @@ assert_contains "$ui" "showGptkControls = supportsD3DMetalOS" \
   "GPTK install UI must stay hidden below macOS 14"
 assert_contains "$ui" "CyderGraphicsCapabilities.current(engineRoot: CyderPaths.engine)" \
   "prefs DXMT gating should probe the installed engine"
-assert_contains "$library_ui" "CyderGraphicsCapabilities.current(engineRoot: CyderPaths.engine)" \
-  "game DXMT gating should probe the installed engine"
+assert_contains "$library_ui" "presentation.hasDxmt" \
+  "game DXMT gating should use background-loaded engine capabilities"
 assert_contains "$ui" "supportsDxmtOS" "DXMT should have its own OS gate distinct from D3DMetal"
 assert_contains "$ui" "ProcessInfo.processInfo.operatingSystemVersion.majorVersion >= 15" \
   "DXMT OS gate must require macOS 15+, not D3DMetal's 14+"
@@ -104,7 +104,7 @@ assert_contains "$ui" "打開下載頁面" "missing GPTK install should offer Ap
 assert_contains "$ui" 'installGptkButton.title = "安裝 GPTK…"' "GPTK install button should use a short label"
 assert_contains "$ui" "chooseGptkCandidate" "GPTK install should let the user pick among mounted volumes"
 assert_contains "$ui" "CyderGptk.activeInfo()" "graphics tab should show the active GPTK source and version"
-assert_contains "$ui" "CyderGptk.syncEngineLink()" "graphics tab should refresh engine GPTK symlink"
+assert_not_contains "$ui" "CyderGptk.syncEngineLink()" "preferences presentation must not mutate the engine GPTK symlink"
 assert_contains "$(cat "$ROOT/scripts/cyder_gptk.swift")" "Cyder 已安裝" "installed GPTK should win and show version in status"
 assert_contains "$ui" '["60", "120", "144", "不限制"]' \
   "frame-rate menu should offer 60/120/144 and unlimited"
@@ -186,7 +186,7 @@ assert_contains "$ui" 'saveImmediately(registrySetting: "font-songti", deferredC
   "Songti popup should fast-apply songti family"
 assert_contains "$library_ui" '細明體取代' "game settings should label MingLiU replacement"
 assert_contains "$library_ui" '宋體取代' "game settings should label Songti replacement"
-assert_contains "$library_ui" "private final class CyderGameSettingsWindowController" "game-specific options should open in a dedicated settings window"
+assert_contains "$library_ui" "final class CyderGameSettingsWindowController" "game-specific options should open in a dedicated settings window"
 assert_not_contains "$library_ui" 'row("同步機制", syncMode)' "game options should not expose synchronization"
 assert_not_contains "$library_ui" 'row("能源模式"' "game options should not expose power mode"
 assert_contains "$library_ui" '"高解析度"' "game options should expose a high-resolution switch"
@@ -217,7 +217,7 @@ assert_contains "$ui" '"CYDER_RETINA_MODE"' \
 assert_contains "$app" "--install-winetricks" "Winetricks installs should use the unattended launcher path"
 assert_contains "$ui" "private func retinaChanged()" "Retina toggle should have a dedicated DPI synchronization handler"
 assert_contains "$ui" "let targetDPI = retina.state == .on ? 192 : 96" "global Retina toggle should suggest 192 or 96 DPI"
-assert_contains "$library_ui" "private final class CyderGameSettingsWindowController" "game-specific options should open in a dedicated settings window"
+assert_contains "$library_ui" "final class CyderGameSettingsWindowController" "game-specific options should open in a dedicated settings window"
 assert_contains "$library_ui" 'return ["跟隨全域", "預設", "D3DMetal", "DXMT", "DXVK", "WineD3D"]' \
   "game override menus include only supported backends"
 assert_not_contains "$library_ui" 'DXVK 2' \
@@ -362,4 +362,5 @@ if [[ "$apply_prefix_region" == *"cyder_profile_has_live_sessions"* || "$apply_p
   echo "ASSERT failed: settings-only apply must not block on another running game" >&2
   exit 1
 fi
+
 echo "PASS test-cyder-force-settings-ui"
