@@ -369,4 +369,10 @@ if [[ "$apply_prefix_region" == *"cyder_profile_has_live_sessions"* || "$apply_p
   exit 1
 fi
 
+acceptance_failure="$(sed -n '/private func presentLaunchAcceptanceFailure()/,/^    }/p' "$ROOT/scripts/cyder_app_main.swift")"
+assert_contains "$acceptance_failure" 'hideSetup()' "rejected requests must dismiss launch progress"
+assert_contains "$acceptance_failure" 'finishLaunchIngress()' "rejected requests must clear status-item launch state"
+assert_contains "$acceptance_failure" 'showAlert(' "rejected requests must report failure rather than wait forever"
+assert_not_contains "$app" 'open-files rejected raw=' "non-executable login arguments must not be persisted in logs"
+
 echo "PASS test-cyder-force-settings-ui"

@@ -538,8 +538,10 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         CyderDiagnostics.shared.info(
             "open-files received=\(filenames.count) executable=\(executableFiles.count) bundle=\(Bundle.main.bundlePath)"
         )
-        if executableFiles.isEmpty, let raw = filenames.first, !raw.isEmpty {
-            CyderDiagnostics.shared.info("open-files rejected raw=\(raw)")
+        if executableFiles.isEmpty, !filenames.isEmpty {
+            // LaunchServices may report trailing login arguments as document
+            // candidates. Do not persist their contents in diagnostic logs.
+            CyderDiagnostics.shared.info("open-files rejected non-executable count=\(filenames.count)")
         }
         guard !executableFiles.isEmpty else { application.reply(toOpenOrPrint: .failure); return }
         if !instanceReady || !isPrimaryInstance {
@@ -548,8 +550,9 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             return
         }
         presentExternalLaunchStarting()
-        instanceCoordinator.submit(.init(files: executableFiles, arguments: pendingLaunchArguments, urls: [], showUI: false)) { accepted in
+        instanceCoordinator.submit(.init(files: executableFiles, arguments: pendingLaunchArguments, urls: [], showUI: false)) { [weak self] accepted in
             application.reply(toOpenOrPrint: accepted ? .success : .failure)
+            if !accepted { self?.presentLaunchAcceptanceFailure() }
         }
     }
 
@@ -779,6 +782,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
                         NSApp.reply(toOpenOrPrint: accepted ? .success : .failure)
                         self.pendingOpenReplies -= 1
                     }
+                    if !accepted { self.presentLaunchAcceptanceFailure() }
                 }
             }
             return
@@ -1238,7 +1242,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         guard !quitTransaction else { return }
         guard let authorization else {
             instanceCoordinator.submit(.init(files: executableFiles, arguments: arguments, urls: [], showUI: false)) { [weak self] accepted in
-                if !accepted { self?.hideSetup() }
+                if !accepted { self?.presentLaunchAcceptanceFailure() }
             }
             return
         }
@@ -2804,7 +2808,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         guard !uris.isEmpty, !quitTransaction else { return }
         guard let authorization else {
             instanceCoordinator.submit(.init(files: [], arguments: nil, urls: uris, showUI: false)) { [weak self] accepted in
-                if !accepted { self?.hideSetup() }
+                if !accepted { self?.presentLaunchAcceptanceFailure() }
             }
             return
         }
@@ -2812,6 +2816,14 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         for uri in uris {
             prepareQueuedLaunch(QueuedLaunch(executable: uri, arguments: nil, isURI: true, authorization: authorization))
         }
+    }
+
+    private func presentLaunchAcceptanceFailure() {
+        guard !quitTransaction else { return }
+        hideSetup()
+        statusItemController.finishLaunchIngress()
+        CyderDiagnostics.shared.warning("launch request rejected before durable acceptance; no executable dispatched")
+        showAlert("無法開始啟動", "Cyder 無法保存啟動要求或確認設定；程式尚未執行。請查看診斷記錄，再重新取得登入資訊後啟動。")
     }
 
     private func presentExternalLaunchStarting() {
