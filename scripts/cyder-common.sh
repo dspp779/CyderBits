@@ -1134,6 +1134,53 @@ cyder_link_gptk_into_engine() {
   cyder_gptk_root_is_valid "$link"
 }
 
+# GStreamer's compiled-in paths still point at the media build prefix after
+# engine relocation. Configure the bundled stack for this launch and its Wine
+# children, independently of the selected D3D backend.
+cyder_apply_media_launch_environment() {
+  local engine_root="$1" plugins="$1/lib/wine/gstreamer-1.0"
+  local scanner="$1/libexec/gstreamer-1.0/gst-plugin-scanner"
+  # Remove only values previously supplied by Cyder. Explicit caller changes
+  # survive a second launch or an engine switch in the same shell.
+  if [[ -n "${CYDER_MEDIA_PLUGIN_DIR:-}" ]]; then
+    [[ "${GST_PLUGIN_PATH_1_0-}" != "$CYDER_MEDIA_PLUGIN_DIR" ]] || unset GST_PLUGIN_PATH_1_0
+    [[ "${GST_PLUGIN_SYSTEM_PATH_1_0-}" != "$CYDER_MEDIA_PLUGIN_DIR" ]] || unset GST_PLUGIN_SYSTEM_PATH_1_0
+  fi
+  if [[ -n "${CYDER_MEDIA_SCANNER:-}" && "${GST_PLUGIN_SCANNER-}" == "$CYDER_MEDIA_SCANNER" ]]; then
+    unset GST_PLUGIN_SCANNER
+  fi
+  if [[ -n "${CYDER_MEDIA_REGISTRY:-}" && "${GST_REGISTRY_1_0-}" == "$CYDER_MEDIA_REGISTRY" ]]; then
+    unset GST_REGISTRY_1_0
+  fi
+  unset CYDER_MEDIA_PLUGIN_DIR CYDER_MEDIA_SCANNER CYDER_MEDIA_REGISTRY
+  export CYDER_MEDIA_STATUS=unavailable
+  # Respect external stacks, including intentional empty search paths and
+  # GStreamer's unversioned aliases. Do not mix their plugins with our scanner.
+  if [[ "${GST_PLUGIN_PATH_1_0+x}${GST_PLUGIN_SYSTEM_PATH_1_0+x}${GST_PLUGIN_SCANNER_1_0+x}${GST_PLUGIN_SCANNER+x}${GST_PLUGIN_PATH+x}${GST_PLUGIN_SYSTEM_PATH+x}" == *x* ]]; then
+    export CYDER_MEDIA_STATUS=external
+    return 0
+  fi
+  # Old/minimal engines remain launchable without a bundled media stack.
+  [[ -d "$plugins" && -x "$scanner" && -f "$engine_root/lib/wine/x86_64-unix/libgstreamer-1.0.0.dylib" ]] || return 0
+  export GST_PLUGIN_PATH_1_0="$plugins" GST_PLUGIN_SYSTEM_PATH_1_0="$plugins"
+  export GST_PLUGIN_SCANNER="$scanner"
+  export CYDER_MEDIA_PLUGIN_DIR="$plugins" CYDER_MEDIA_SCANNER="$scanner"
+  export CYDER_MEDIA_STATUS=bundled
+  if [[ "${GST_REGISTRY_1_0+x}${GST_REGISTRY+x}" != *x* ]]; then
+    local identity cache_dir version=""
+    [[ ! -f "$engine_root/version" ]] || version="$(head -n 1 "$engine_root/version")"
+    identity="$(printf '%s\n' "$engine_root" "$version" x86_64 | /usr/bin/cksum | awk '{print $1}')"
+    cache_dir="${CYDER_SUPPORT:-$HOME/Library/Application Support/Cyder}/Caches/gstreamer"
+    if mkdir -p "$cache_dir" && [[ -w "$cache_dir" ]]; then
+      export GST_REGISTRY_1_0="$cache_dir/registry-x86_64-$identity.bin"
+      export CYDER_MEDIA_REGISTRY="$GST_REGISTRY_1_0"
+    else
+      # Plugin discovery still works using GStreamer's default cache policy.
+      export CYDER_MEDIA_STATUS=bundled-default-cache
+    fi
+  fi
+}
+
 cyder_apply_gptk_launch_environment() {
   local engine_root="$1" gptk_root=""
   # Do not retain stale paths inherited from a parent process when GPTK was
@@ -3432,6 +3479,7 @@ cyder_run_wine_exe() {
   local engine_root canonical_prefix engine_version ntdll_sha256="unavailable"
   engine_root="$(cd "$(dirname "$wine_bin")/.." && pwd -P)"
   canonical_prefix="$(cd "$prefix" 2>/dev/null && pwd -P || printf '%s' "$prefix")"
+  cyder_apply_media_launch_environment "$engine_root"
   cyder_apply_moltenvk_variant_from_preference "$engine_root" || return $?
   cyder_apply_gptk_launch_environment "$engine_root" || return $?
   if [[ -f "$prefix/cxbottle.conf" ]] || cyder_wine_is_crossover_frontend "$wine_bin"; then
@@ -3610,6 +3658,10 @@ cyder_run_wine_exe() {
     echo "Graphics preference: ${CYDER_GRAPHICS_PREFERENCE:-default}"
     echo "Graphics backend: ${CYDER_GRAPHICS_BACKEND:-default}"
     echo "GPTK root: ${CYDER_GPTK_ROOT:-<unset>}"
+    echo "Media runtime: ${CYDER_MEDIA_STATUS:-unavailable}"
+    echo "Bundled media plugins: ${CYDER_MEDIA_PLUGIN_DIR:-<not selected>}"
+    echo "Bundled media scanner: ${CYDER_MEDIA_SCANNER:-<not selected>}"
+    echo "Private media registry: ${CYDER_MEDIA_REGISTRY:-<caller or default>}"
     echo "DXVK frame rate: ${DXVK_FRAME_RATE:-<unset>}"
     echo "DXMT config: ${DXMT_CONFIG:-<unset>}"
     echo "DXVK HUD: ${DXVK_HUD:-<unset>}"

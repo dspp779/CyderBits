@@ -331,6 +331,46 @@ bash tests/test-cyder-graphics-prepend.sh
 (cd /Users/jjc/cyder-wine-engine && bash tests/run.sh)
 ```
 
+## 9. 搬移後的媒體 runtime
+
+`cyder_apply_media_launch_environment` 在一般遊戲／啟動器啟動前，依實際
+`engine_root` 設定程序環境，讓 launcher 建立的遊戲子程序一併繼承：
+
+| 變數 | 引擎內位置 |
+|------|------------|
+| `GST_PLUGIN_PATH_1_0`、`GST_PLUGIN_SYSTEM_PATH_1_0` | `lib/wine/gstreamer-1.0` |
+| `GST_PLUGIN_SCANNER` | `libexec/gstreamer-1.0/gst-plugin-scanner` |
+| `GST_REGISTRY_1_0` | Cyder support 下 `Caches/gstreamer/registry-x86_64-<identity>.bin` |
+
+GStreamer 的編譯預設仍可能指向建置機的 media install；打包時修正 dylib
+依賴不會同步修正這些外掛探索路徑。此設定與 DXMT／DXVK／D3DMetal 的選擇無關，
+不修改系統全域環境、bottle 設定或遊戲二進位檔。
+
+只有引擎包含媒體 library、外掛目錄及可執行 scanner 時才啟用。缺少這些元件的
+舊／minimal 引擎仍可啟動。明確指定的外部外掛／scanner 設定（包含空值與
+unversioned aliases）會保留，不混用 bundled scanner；獨立指定 registry 也會保留。
+快取 identity 依引擎路徑、版本與架構區隔；重複呼叫會清除之前由 Cyder 管理的值，
+不清除呼叫者修改的值。快取目錄不可寫入時，保留外掛設定並使用 GStreamer 預設快取。
+啟用啟動紀錄時可查看 `Media runtime`、bundled plugins／scanner 與 private registry。
+
+相關問題：[繁中賽馬娘登入背景空白 #11](https://github.com/dspp779/CyderBits/issues/11)。
+2026-10-29–30 的本機對照使用 Cyder012、M4／macOS 27.2、遊戲 2.18.6-10300：
+DXMT 0.80 與 GPTK 4.0b3 在未指定媒體路徑時均為登入白底，指定路徑後均恢復背景影片；
+GPTK 另已進入培育並顯示速度訓練動畫。這不代表原回報者的 M3 Pro／macOS 27.0
+環境或完整比賽、所有首頁內容皆已驗證，也不應將登入白底推論為主要 3D 渲染失敗。
+上游 DXMT v0.73 的登入影片修復不能取代此處的媒體外掛探索設定。
+
+不需遊戲的回歸測試：
+
+```bash
+bash tests/test-cyder-media-environment.sh
+```
+
+測試涵蓋搬移、中文與空白路徑、引擎切換、自訂設定，以及 launcher 子程序環境繼承。
+發行前仍應對最終搬移後的引擎補做實際影片解碼／轉換測試；factory 存在或檔案齊全
+本身不等於所有媒體格式均可播放。現有 full-video 未啟用 libav，`avdec_h264` 缺少
+不能單獨判定 H.264 播放失敗；應同時確認可用的 `vtdec` 路徑。
+
 ## 相關文件
 
 - [圖形後端（使用者選項）](cyder-graphics-backends.zh-TW.md)
