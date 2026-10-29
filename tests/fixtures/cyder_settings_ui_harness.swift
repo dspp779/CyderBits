@@ -52,7 +52,6 @@ let access = CyderSettingsAccess(url: settingsURL, deadline: 0.05, read: { url i
 let started = ProcessInfo.processInfo.systemUptime
 let preferences = CyderSettingsWindowController(settingsAccess: access)
 preferences.hasRunningExes = { false }
-var browseCount = 0; preferences.onOpenGameLibrary = { browseCount += 1 }
 var applied = 0
 preferences.onImmediateSave = { _ in applied += 1; return true }
 preferences.showWindow(nil)
@@ -61,9 +60,12 @@ let controls = views(preferences.window!.contentView!)
 diagnosticState = { "applied=\(applied); " + controls.compactMap { ($0 as? NSTextField)?.stringValue }.joined(separator: " | ") }
 let retina = controls.first { $0.identifier?.rawValue == "settings-retina" } as! NSSwitch
 check(!retina.isEnabled)
-let browse = controls.compactMap { $0 as? NSButton }.first { $0.title == "打開遊戲庫…" }!
-browse.performClick(nil)
-check(browseCount == 1, "loading settings disabled independent navigation")
+check(!controls.contains { ($0 as? NSButton)?.title == "打開遊戲庫…" }, "preferences still exposes the library button")
+let settingsTabs = controls.compactMap { $0 as? NSTabView }.first!
+let generalViews = views(settingsTabs.tabViewItems.first { $0.label == "一般" }!.view!)
+let advancedViews = views(settingsTabs.tabViewItems.first { $0.label == "進階" }!.view!)
+check(!generalViews.contains { ($0 as? NSButton)?.title == "關閉所有 Windows 程序" })
+check(advancedViews.contains { ($0 as? NSButton)?.title == "關閉所有 Windows 程序" }, "stop action missing from advanced tab")
 for _ in 0..<40 { preferences.prepareForDisplay() }
 var ticked = false; DispatchQueue.main.async { ticked = true }
 pump { ticked && controls.contains { ($0 as? NSTextField)?.stringValue.contains("讀取尚未確認") == true } }

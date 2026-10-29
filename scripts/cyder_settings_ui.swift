@@ -52,7 +52,6 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate,
     var onApplyWhileRunning: ((_ draftEnvironment: [String: String]) async -> Bool)?
     var onRebuild: (() -> Void)?
     var onCreateProfile: ((URL) -> Void)?
-    var onOpenGameLibrary: (() -> Void)?
     var onOpenWinetricks: (([String]) -> Void)?
     var onExportLastGameLog: (() -> Void)?
     var onCleanDebugLogs: (() -> Void)?
@@ -249,12 +248,6 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate,
         syncMode.action = #selector(syncModeChanged)
         configureNote(syncModeDescription)
         updateSyncModeDescription()
-        let gameLibrary = NSButton(title: "打開遊戲庫…", target: self, action: #selector(openGameLibrary))
-        gameLibrary.bezelStyle = .rounded
-        stopAllWineButton.title = "關閉所有 Wine 程序"
-        stopAllWineButton.bezelStyle = .rounded
-        stopAllWineButton.target = self
-        stopAllWineButton.action = #selector(stopAllWine)
         engineVersion.font = .systemFont(ofSize: 11)
         engineVersion.textColor = .secondaryLabelColor
         engineVersion.alignment = .left
@@ -268,10 +261,6 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate,
         wineLocale.target = self
         wineLocale.action = #selector(wineLocaleChanged)
         return tab("一般", rows: [
-            gameLibrary,
-            note("加入 Windows 遊戲、直接啟動，或管理每個遊戲的獨立 Wine prefix 與設定。"),
-            stopAllWineButton,
-            note("對目前 Cyder 使用的 Wine 環境執行 wineserver -k，並等待程序結束。"),
             row("同步機制", syncMode),
             syncModeDescription,
             row("Windows 語系", wineLocale),
@@ -291,10 +280,6 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate,
         stack.spacing = 8
         stack.widthAnchor.constraint(equalToConstant: 470).isActive = true
         return stack
-    }
-
-    @objc private func openGameLibrary() {
-        onOpenGameLibrary?()
     }
 
     @objc private func openWinetricks() {
@@ -459,7 +444,12 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate,
         winetricks.bezelStyle = .rounded
         maplestoryWZCache.target = self
         maplestoryWZCache.action = #selector(maplestoryWZCacheChanged)
+        stopAllWineButton.title = "關閉所有 Windows 程序"
+        stopAllWineButton.bezelStyle = .rounded
+        stopAllWineButton.target = self
+        stopAllWineButton.action = #selector(stopAllWine)
         return tab("進階", rows: [
+            stopAllWineButton,
             rebuild,
             note("重新建立執行 Windows 遊戲所需的環境。遊戲檔案不會刪除，但已安裝的 Windows 元件與自訂設定需要重新套用。"),
             winetricks,
@@ -769,7 +759,7 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate,
         func visit(_ view: NSView) {
             guard visited.insert(ObjectIdentifier(view)).inserted else { return }
             if let control = view as? NSControl, control !== status, control !== retrySettingsButton {
-                let navigation: [Selector] = [#selector(openGameLibrary), #selector(exportLastGameLog), #selector(cleanDebugLogs), #selector(stopAllWine)]
+                let navigation: [Selector] = [#selector(exportLastGameLog), #selector(cleanDebugLogs), #selector(stopAllWine)]
                 control.isEnabled = control.action.map { navigation.contains($0) } == true || enabled
             }
             for child in view.subviews { visit(child) }
@@ -892,7 +882,7 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate,
 
     private func showDeferredSettingsNotice() {
         applyButton.isHidden = false
-        status.stringValue = "待套用：同步機制、高解析度、字體設定。請關閉所有 Wine 程序後按「套用設定」。"
+        status.stringValue = "待套用：同步機制、高解析度、字體設定。請關閉所有 Windows 程序後按「套用設定」。"
         status.textColor = .systemOrange
         status.font = .boldSystemFont(ofSize: 11)
     }
@@ -974,7 +964,7 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate,
         prefixApplyPending = false
         isDirty = false
         applyButton.isHidden = true
-        setNormalStatus("設定已儲存；關閉所有 Wine 程序後重新啟動才會生效。")
+        setNormalStatus("設定已儲存；關閉所有 Windows 程序後重新啟動才會生效。")
     }
 
     private func draftApplyEnvironment() -> [String: String] {
@@ -1111,14 +1101,14 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate,
 
     @objc private func stopAllWine() {
         let alert = NSAlert()
-        alert.messageText = "關閉所有 Wine 程序？"
+        alert.messageText = "關閉所有 Windows 程序？"
         alert.informativeText = "會結束目前 Cyder 使用的 Wine 環境中所有遊戲與相關程序。"
         alert.alertStyle = .warning
         alert.addButton(withTitle: "關閉")
         alert.addButton(withTitle: "取消")
         guard alert.runModal() == .alertFirstButtonReturn else { return }
         stopAllWineButton.isEnabled = false
-        status.stringValue = "正在關閉 Wine 程序…"
+        status.stringValue = "正在關閉 Windows 程序…"
         status.textColor = .secondaryLabelColor
         Task { @MainActor [weak self] in
             guard let self else { return }

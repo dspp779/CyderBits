@@ -229,9 +229,6 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         controller.onCreateProfile = { [weak self] executable in
             self?.createIndependentProfile(for: executable)
         }
-        controller.onOpenGameLibrary = { [weak self] in
-            self?.showGameLibrary()
-        }
         controller.onOpenWinetricks = { [weak self] verbs in
             self?.installWinetricks(verbs)
         }

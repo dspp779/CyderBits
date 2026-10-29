@@ -37,3 +37,5 @@ docs/games/
 ```
 
 目前既有的詳細研究文件仍位於 `docs/bluecg-*.md`；子目錄提供按問題分類的穩定入口，避免複製兩份容易失真的長篇內容。
+
+- [新楓之谷滾輪相容設定](maplestory-scrolling-compatibility.zh-TW.md) — Issue #9；EXE AppDefaults 自願啟用與還原、離線回歸及待實機驗收項目。
