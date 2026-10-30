@@ -211,6 +211,8 @@ cp "$SCRIPT_DIR/cyder-apply-settings.sh" "$RES/ogom-scripts/"
 cp "$SCRIPT_DIR/cyder-edit-user-reg.sh" "$RES/ogom-scripts/"
 cp "$SCRIPT_DIR/cyder-maplestory-scrolling.rb" "$RES/ogom-scripts/"
 cp "$SCRIPT_DIR/cyder-scrolling.rb" "$RES/ogom-scripts/"
+cp "$SCRIPT_DIR/cyder-component-check.sh" "$RES/ogom-scripts/"
+cp "$SCRIPT_DIR/cyder-component-integrity.rb" "$RES/ogom-scripts/"
 cp "$SCRIPT_DIR/cyder-winetricks.sh" "$RES/ogom-scripts/"
 cp "$SCRIPT_DIR/cyder-recipe.sh" "$RES/ogom-scripts/"
 cp "$SCRIPT_DIR/cyder-cnc-ddraw.sh" "$RES/ogom-scripts/"
@@ -295,6 +297,8 @@ else
 fi
 rsync -a "$OGOM/tools/libarchive/" "$RES/addons/libarchive/"
 
+/usr/bin/ruby "$SCRIPT_DIR/build-component-manifests.rb" "$RES"
+
 echo "==> Building universal MacOS/Cyder (arm64 + x86_64)"
 SWIFT_BUILD_DIR="$(mktemp -d "${TMPDIR:-/tmp}/cyder-swift.XXXXXX")"
 SWIFT_SOURCES=(
@@ -314,6 +318,7 @@ SWIFT_SOURCES=(
   "$SCRIPT_DIR/cyder_launch_context.swift"
   "$SCRIPT_DIR/cyder_setup_progress.swift"
   "$SCRIPT_DIR/cyder_process_runner.swift"
+  "$SCRIPT_DIR/cyder_component_diagnostics.swift"
   "$SCRIPT_DIR/cyder_operation_gate.swift"
   "$SCRIPT_DIR/cyder_launch_preparation.swift"
   "$SCRIPT_DIR/cyder_launch_observer.swift"

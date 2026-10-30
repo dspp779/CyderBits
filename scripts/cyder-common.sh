@@ -18,6 +18,12 @@ if [[ -f "$_graphics_sh" ]]; then
 fi
 unset _graphics_sh
 
+_integrity_sh="$CYDER_COMMON_DIR/cyder-component-check.sh"
+if [[ -f "$_integrity_sh" ]]; then
+  source "$_integrity_sh"
+fi
+unset _integrity_sh
+
 _migrate_graphics_sh="$CYDER_COMMON_DIR/cyder-migrate-graphics-prefix.sh"
 if [[ -f "$_migrate_graphics_sh" ]]; then
   # shellcheck source=cyder-migrate-graphics-prefix.sh
@@ -1839,6 +1845,7 @@ cyder_ensure_shared_engine() {
     printf '%s\n' "$bundled_sha" >"$dest/.cyder-engine-artifact-sha256"
   fi
   cyder_apply_moltenvk_variant_from_preference "$dest" || exit 1
+  if declare -F cyder_check_components >/dev/null; then cyder_check_components engine full; fi
   echo "$dest"
 }
 
@@ -3528,6 +3535,7 @@ cyder_run_wine_exe() {
       rm -f "$lifecycle_file" "${lifecycle_file}.tmp"
     fi
   fi
+  if declare -F cyder_check_components >/dev/null; then cyder_check_components all quick; fi
   cyder_exec_game() {
     # Run after sync/session setup, before the one-use final handoff. Registry
     # failures abort this launch instead of silently using a different mode.

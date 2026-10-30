@@ -38,6 +38,7 @@ private enum CyderLaunchIntent: Equatable {
 }
 
 final class CyderAppDelegate: NSObject, NSApplicationDelegate {
+    private var componentDiagnosticsController: CyderComponentDiagnosticsController?
     private let operationGate = CyderOperationGate()
     private let launchPreparation = CyderLaunchPreparation<CyderOperationGate.Scope?>()
     private var diagnosticsOperationInProgress = false
@@ -235,6 +236,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         controller.onExportLastGameLog = { [weak self] in
             self?.exportLastGameLog()
         }
+        controller.onInspectComponents = { [weak self] in self?.showComponentDiagnostics() }
         controller.onCleanDebugLogs = { [weak self] in
             self?.cleanDebugLogs()
         }
@@ -898,6 +900,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         quitTransaction = true
         diagnosticsPresentation = nil
         setupProgress.invalidate()
+        componentDiagnosticsController?.close()
         existingLibraryController?.quiesce()
         CyderGameIconStore.shared.quiesce()
         if isPrimaryInstance {
@@ -1089,6 +1092,17 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
                 completion(result)
             }
         }
+    }
+
+    private func showComponentDiagnostics() {
+        if componentDiagnosticsController == nil {
+            let controller = CyderComponentDiagnosticsController()
+            controller.onClose = { [weak self] in self?.componentDiagnosticsController = nil }
+            componentDiagnosticsController = controller
+        }
+        componentDiagnosticsController?.showWindow(nil)
+        componentDiagnosticsController?.window?.makeKeyAndOrderFront(nil)
+        componentDiagnosticsController?.runScan()
     }
 
     private func cleanDebugLogs() { Task { @MainActor in await cleanDebugLogsAsync() } }

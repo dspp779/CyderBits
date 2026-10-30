@@ -4,6 +4,10 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+if [[ -f "$SCRIPT_DIR/cyder-component-check.sh" ]]; then
+  source "$SCRIPT_DIR/cyder-component-check.sh"
+fi
+
 cyder_graphics_find_zstd() {
   local candidate
   local -a candidates=("${CYDER_ZSTD:-}")
@@ -113,6 +117,7 @@ cyder_install_graphics_payload() {
     rm -rf "$target"
     mv "$staging/$name" "$target"
     rmdir "$staging" 2>/dev/null || true
+    if declare -F cyder_check_components >/dev/null; then cyder_check_components "$name" full; fi
   fi
 
   temp_link="$graphics_dir/.current-$name.$$"

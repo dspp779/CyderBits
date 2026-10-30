@@ -54,6 +54,7 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate,
     var onCreateProfile: ((URL) -> Void)?
     var onOpenWinetricks: (([String]) -> Void)?
     var onExportLastGameLog: (() -> Void)?
+    var onInspectComponents: (() -> Void)?
     var onCleanDebugLogs: (() -> Void)?
     var onScanURIHandlers: ((_ completion: @escaping (CyderURIHandlerRecord?, Bool) -> Void) -> Void)?
     var onEnableURIHandler: ((_ record: CyderURIHandlerRecord) -> Bool)?
@@ -674,6 +675,8 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate,
         diagnosticsWarning.font = .boldSystemFont(ofSize: 12)
         diagnosticsWarning.isHidden = true
 
+        let inspect = NSButton(title: "檢查執行元件…", target: self, action: #selector(inspectComponents))
+        inspect.bezelStyle = .rounded
         let export = NSButton(title: "匯出上次遊戲記錄…", target: self, action: #selector(exportLastGameLog))
         export.bezelStyle = .rounded
         let cleanup = NSButton(title: "清理除錯記錄…", target: self, action: #selector(cleanDebugLogs))
@@ -682,6 +685,8 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate,
             row("Wine 診斷記錄", wineDiagnostics),
             diagnosticsWarning,
             note("「安靜」不開啟 Wine trace，啟動失敗仍會由程序退出碼判斷；「只記錄錯誤」適合一般排障；「等待與凍結追蹤」用於重現卡住／凍結；「完整堆疊追蹤」僅供短時間重現 exception／unwind 問題。"),
+            inspect,
+            note("背景唯讀檢查 Wine、DXVK 與 DXMT 的逐檔清單；可取消，不會自動修復。"),
             export,
             note("只複製上次遊戲啟動的 Wine log；其他初始化或啟動錯誤可直接複製錯誤對話框中的診斷資訊。"),
             cleanup,
@@ -759,7 +764,7 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate,
         func visit(_ view: NSView) {
             guard visited.insert(ObjectIdentifier(view)).inserted else { return }
             if let control = view as? NSControl, control !== status, control !== retrySettingsButton {
-                let navigation: [Selector] = [#selector(exportLastGameLog), #selector(cleanDebugLogs), #selector(stopAllWine)]
+                let navigation: [Selector] = [#selector(inspectComponents), #selector(exportLastGameLog), #selector(cleanDebugLogs), #selector(stopAllWine)]
                 control.isEnabled = control.action.map { navigation.contains($0) } == true || enabled
             }
             for child in view.subviews { visit(child) }
@@ -1094,6 +1099,8 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate,
     @objc private func exportLastGameLog() {
         onExportLastGameLog?()
     }
+
+    @objc private func inspectComponents() { onInspectComponents?() }
 
     @objc private func cleanDebugLogs() {
         onCleanDebugLogs?()

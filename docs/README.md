@@ -10,6 +10,7 @@
 |------|------|
 | [release-pipeline.zh-TW.md](release-pipeline.zh-TW.md) | **測試／正式通道**、引擎 pin、`release-cyder.sh`、檢查清單 |
 | [release-signing.zh-TW.md](release-signing.zh-TW.md) | Developer ID 匯入、notary profile、手做公證步驟 |
+| [component-integrity.zh-TW.md](component-integrity.zh-TW.md) | 逐檔元件清單、唯讀完整性診斷、信任邊界與離線測試 |
 
 | 版本 | 文件 | 重點 |
 |------|------|------|
