@@ -90,6 +90,31 @@ cyder_graphics_verify_archive() {
   }
 }
 
+# Signed App builds use publisher manifests, never an arbitrary graphics override.
+cyder_graphics_app_resources() {
+  if [[ -n "${CYDER_RESOURCES:-}" ]]; then printf '%s\n' "$CYDER_RESOURCES"; return 0; fi
+  if [[ -n "${CYDER_APP:-}" ]]; then printf '%s/Contents/Resources\n' "$CYDER_APP"; return 0; fi
+  if [[ "$(basename "$SCRIPT_DIR")" == ogom-scripts ]]; then dirname "$SCRIPT_DIR"; return 0; fi
+  return 1
+}
+
+cyder_update_signed_dxmt() {
+  local resources="$1" runtime="$2" engines="$3" prefix="$4" helper
+  helper="$(dirname "$resources")/MacOS/CyderSwift"
+  [[ -n "$prefix" ]] || prefix="$runtime/.unused-prefix"
+  if [[ "${CYDER_EXECUTION_RUNTIME_MUTATION:-}" == 1 || "${CYDER_EXECUTION_RUNTIME_MUTATION:-}" == 0 ]]; then
+    /usr/bin/ruby "$resources/ogom-scripts/cyder-graphics-update.rb" apply \
+      --resources "$resources" --runtime "$runtime" --engine "$engines/${CYDER_ENGINE_NAME:-wine-x86_64}" --prefix "$prefix" >&2
+  elif [[ -n "${CYDER_EXECUTION_OWNER_TICKET:-}" ]]; then
+    echo "DXMT update deferred: global runtime scope required; retry when Windows is idle." >&2
+    return 75
+  else
+    [[ -x "$helper" ]] || { echo "DXMT update deferred: native guard unavailable" >&2; return 75; }
+    "$helper" --graphics-update-guard "${CYDER_SUPPORT:-$HOME/Library/Application Support/Cyder}/execution-owners" \
+      "$resources" "$runtime" "$engines/${CYDER_ENGINE_NAME:-wine-x86_64}" "$prefix" >&2
+  fi
+}
+
 cyder_install_graphics_payload() {
   local source_dir="$1" runtime_root="$2" name="$3"
   local graphics_dir version archive target current temp_link staging
@@ -257,6 +282,13 @@ cyder_graphics_link_engine_and_winemetal() {
   engine="$engines_root/${CYDER_ENGINE_NAME:-wine-x86_64}"
   prefix="${3:-${CYDER_SHARED_PREFIX:-}}"
 
+  local app_resources
+  if app_resources="$(cyder_graphics_app_resources)"; then
+    cyder_update_signed_dxmt "$app_resources" "$runtime_root" "$engines_root" "$prefix" || return $?
+    mkdir -p "$engine/lib" "$engines_root"
+    cyder_replace_engine_graphics_link "$engine/lib/dxvk" "$runtime_root/graphics/current-dxvk" "$engine" "$engines_root"
+    return 0
+  fi
   mkdir -p "$engine/lib" "$engines_root"
   cyder_replace_engine_graphics_link \
     "$engine/lib/dxvk" "$runtime_root/graphics/current-dxvk" "$engine" "$engines_root"
@@ -273,6 +305,14 @@ cyder_ensure_graphics() {
   engine="$engines_root/${CYDER_ENGINE_NAME:-wine-x86_64}"
   prefix="${1:-${CYDER_SHARED_PREFIX:-}}"
 
+  local app_resources
+  if app_resources="$(cyder_graphics_app_resources)"; then
+    cyder_update_signed_dxmt "$app_resources" "$runtime_root" "$engines_root" "$prefix" || return $?
+    cyder_install_graphics_payload "$source_dir" "$runtime_root" dxvk || return $?
+    mkdir -p "$engine/lib" "$engines_root"
+    cyder_replace_engine_graphics_link "$engine/lib/dxvk" "$runtime_root/graphics/current-dxvk" "$engine" "$engines_root"
+    return 0
+  fi
   cyder_install_graphics_payload "$source_dir" "$runtime_root" dxvk
   cyder_install_graphics_payload "$source_dir" "$runtime_root" dxmt
   cyder_graphics_link_engine_and_winemetal "$runtime_root" "$engines_root" "$prefix"

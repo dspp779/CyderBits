@@ -70,3 +70,5 @@ bash tests/test-pack-engine-dxmt-gate.sh              # engine repo
 以上未執行真實 Developer ID 新簽署；相關正向簽署測試使用 fixture，正式證書／公證／遊戲／防毒仍依前述條件實機驗收。
 
 後續已真正產生 Developer ID DXMT 與 Cyder 本機測試包，完成 native／App／ZIP 往返驗章與隔離診斷；結果見 [2026-10-30 實際建置紀錄](build-records/dxmt-developer-id-test-20261030.md)。沒有公證或發布，遊戲與防毒實機驗收仍待使用者執行。
+
+再後續的 [DXMT 0.80 同版更新政策](dxmt-digest-update.zh-TW.md) 已將顯示版號與內部封存識別分離：顯示維持 0.80，更新以 digest／簽章政策判斷，使用中或驗證不明時延後。該文記錄新測試版與離線驗收範圍；先前紀錄的 suffix 是內部封存追溯資訊。

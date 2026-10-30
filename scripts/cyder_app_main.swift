@@ -1276,7 +1276,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             } else { return nil }
             guard let snapshot = launch.authorization?.settingsSnapshot,
                   let acceptedSettings = try? JSONDecoder().decode(CyderSettings.self, from: snapshot) else { return nil }
-            return CyderGptk.launchNeedsGlobalScope() || acceptedSettings.moltenvkVariant.launchNeedsGlobalScope()
+            return CyderGraphicsRuntime.needsGlobalScope || CyderGptk.launchNeedsGlobalScope() || acceptedSettings.moltenvkVariant.launchNeedsGlobalScope()
                 ? .allEnvironments : scope
         }) { [weak self] outcome in
             guard let self else { return }
@@ -1531,7 +1531,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
                 return failure(
                     code: "CYD-GFX-001",
                     stage: .engineExtraction,
-                    summary: "準備圖形元件時發生問題。",
+                    summary: graphics.status == 75 ? "圖形元件更新已延後。請關閉 Windows 程序後重試；驗證不明時會保留既有元件。" : "準備圖形元件時發生問題。",
                     result: graphics
                 )
             }
@@ -1723,7 +1723,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func graphicsPayloadNeedsInstall(context: CyderLaunchContext) -> Bool {
-        graphicsVersionNeedsInstall(name: "dxvk", context: context)
+        CyderGraphicsRuntime.needsGlobalScope || graphicsVersionNeedsInstall(name: "dxvk", context: context)
             || graphicsVersionNeedsInstall(name: "dxmt", context: context)
     }
 
@@ -2555,7 +2555,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         if isLaunch {
             let accepted = authorization?.settingsSnapshot.flatMap { try? JSONDecoder().decode(CyderSettings.self, from: $0) }
             if lease?.scope == .allEnvironments || (lease == nil &&
-                (CyderGptk.launchNeedsGlobalScope() || (accepted?.moltenvkVariant.launchNeedsGlobalScope() ?? false))) {
+                (CyderGraphicsRuntime.needsGlobalScope || CyderGptk.launchNeedsGlobalScope() || (accepted?.moltenvkVariant.launchNeedsGlobalScope() ?? false))) {
                 scope = .allEnvironments
             }
         }
@@ -2936,6 +2936,10 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
 @main
 struct CyderMain {
     static func main() {
+        if ["--graphics-runtime-state", "--graphics-update-guard"].contains(CommandLine.arguments.dropFirst().first ?? "") {
+            DispatchQueue.global(qos: .utility).async { exit(CyderGraphicsRuntime.run(arguments: CommandLine.arguments)) }
+            dispatchMain()
+        }
         if CommandLine.arguments.dropFirst().first == "--environment-state" {
             DispatchQueue.global(qos: .utility).async {
                 exit(CyderEnvironmentCommand.run(arguments: CommandLine.arguments))
