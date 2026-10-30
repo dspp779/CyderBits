@@ -1,0 +1,4 @@
+interface:
+  display_name: "Wine 遊戲相容性測試"
+  short_description: "操作 macOS Wine 視窗，進行可還原的遊戲相容性對照與媒體診斷"
+  default_prompt: "請用 $wine-game-compat-testing 操作指定 Wine 遊戲，重現問題並整理有證據支持的相容性結果。"
