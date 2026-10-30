@@ -16,6 +16,13 @@ CYDER_VERSION_FILE="$SCRIPT_DIR/../config/cyder-app-version.txt"
 CYDER_APP_VERSION="${CYDER_APP_VERSION:-$(tr -d '[:space:]' <"$CYDER_VERSION_FILE")}"
 # Release identity by default; export SIGN_IDENTITY=- for an unsigned local build.
 SIGN_IDENTITY="${SIGN_IDENTITY:-Developer ID Application: Chun Ho Kwok (3U9565WWM2)}"
+# Developer-ID builds consume signed graphics revisions, even outside the wrapper.
+if [[ "$SIGN_IDENTITY" != "-" ]]; then
+  export CYDER_GRAPHICS_CHANNEL=release
+elif [[ "${CYDER_GRAPHICS_CHANNEL:-test}" == release ]]; then
+  echo "release graphics require a Developer ID App build" >&2
+  exit 1
+fi
 if [[ "$SIGN_IDENTITY" == "-" ]]; then
   TIMESTAMP_FLAG="--timestamp=none"
 else
@@ -262,7 +269,7 @@ chmod +x "$RES/tools/cabextract/cabextract"
 source "$SCRIPT_DIR/cyder-copy-engine-artifact.sh"
 
 copy_engine_artifact_into_app "$SCRIPT_DIR" "$RES" "$OGOM"
-GRAPHICS_ARTIFACTS="$OGOM/dist/artifacts/graphics"
+GRAPHICS_ARTIFACTS="${CYDER_GRAPHICS_ARTIFACTS_DIR:-$OGOM/dist/artifacts/graphics}"
 if [[ -f "$GRAPHICS_ARTIFACTS/dxvk-version.txt" \
    && -f "$GRAPHICS_ARTIFACTS/dxmt-version.txt" \
    && -f "$GRAPHICS_ARTIFACTS/dxvk-artifact-sha256.txt" \
@@ -282,7 +289,7 @@ else
     echo "==> Warning: $message" >&2
   else
     echo "$message" >&2
-    echo "Pack graphics first (scripts/pack-graphics-payloads.sh) or set CYDER_ALLOW_MISSING_GRAPHICS=1 for local experiments." >&2
+    echo "Pack graphics in cyder-wine-engine and set CYDER_GRAPHICS_ARTIFACTS_DIR; CYDER_ALLOW_MISSING_GRAPHICS=1 is test-only." >&2
     exit 1
   fi
 fi
