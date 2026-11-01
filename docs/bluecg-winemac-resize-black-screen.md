@@ -1,5 +1,7 @@
 # BlueCG 視窗縮放黑屏與 winemac.drv 實驗紀錄
 
+> **2026-11-01 縮放補測：** [registry／DDRAW／字體根因實測](games/bluecg/scaling-root-cause-2026-11-01.zh-TW.md) 已在指定客戶端觀測到 `bluecg.dll` 自行指定 `COLORONCOLOR` 的最終視窗拉伸。本文歷史段落所述 WineD3D 軟體 blit 缺少 `WINED3D_TEXF_LINEAR`，不代表 Win32 GDI 的 `HALFTONE` 無法工作；兩條路徑須分開。本次未對遊戲套用 HALFTONE 修補。
+
 > **狀態：已解決（A6 final，2026-07-13）**
 > `patches/a6-final-same-view-backing-sync.patch` 已在 `CX26.2.0-W11-Cyder003` 通過 BlueCG Retina+DPI 的拖曳縮放、Alt+Enter、最小化／還原驗收。以下仍保留原始調查、A1–A5 失敗邊界與可用 fallback。
 > 驗證遊戲：**水藍魔力（BlueCG）** — DirectDraw、PE32、視窗模式。
