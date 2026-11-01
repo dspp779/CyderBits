@@ -65,7 +65,7 @@
 
 ## 晶片功率比較
 
-按完整區間長度加權的平均 ± 標準差，單位 W；標準差除以完整取樣總時間，表示窗口內波動，不是平均值的信賴區間。
+按完整區間長度加權的平均 ± 標準差，單位 W；以完整取樣總時間作變異數分母，表示窗口內波動，不是平均值的信賴區間。
 
 | 組別 | CPU | GPU | ANE | Combined CPU＋GPU＋ANE | 完整樣本 | 覆蓋秒數 | 有 counter 警告樣本 |
 |---|---:|---:|---:|---:|---:|---:|---:|
@@ -119,6 +119,6 @@ GPU 方案需另外處理最終 DIB 上傳、線性 sampler、視窗呈現及同
 
 完整 `tests/run.sh` 在既有 media-toolchain 整合測試停止：macOS 27 CLT 的 `libxcrun` 缺 x86_64 slice。另以單次 DEVELOPER_DIR 指向已安裝 Xcode 重試，仍因尚未接受 Xcode license 而停止，未代為接受授權或更改系統設定。GL profiling runtime control 未指定建置 runtime 時為 skip。這不是完整 configure／build／release 驗收；未為了讓測試通過而更改系統工具鏈。
 
-所有測試遊戲均正常關閉，prefix wineserver 已等待退出；registry 精確還原，遊戲核心與啟動器 INI 未變。防休眠只使用本輪有時限的程序，完成後停止。使用者啟動的兩小時 powermetrics 保留完整輸出，可在原 Terminal 按 Ctrl+C 停止；不改 sudo 或系統休眠政策。已另外封存含三組完整窗口的原始功率輸出，公開 evidence 只附 SHA-256 與彙總，不公開其他程序的完整紀錄。
+所有測試遊戲均正常關閉，prefix wineserver 已等待退出；registry 精確還原，遊戲核心與啟動器 INI 未變。防休眠只使用本輪有時限的程序，完成後停止。使用者已在原 Terminal 按 Ctrl+C 停止 powermetrics，並核對該採集程序已退出；完整輸出保留，不改 sudo 或系統休眠政策。已另外封存含三組完整窗口的原始功率輸出，公開 evidence 只附 SHA-256 與彙總，不公開其他程序的完整紀錄。
 
 相關：[原始縮放根因](scaling-root-cause-2026-11-01.zh-TW.md)。

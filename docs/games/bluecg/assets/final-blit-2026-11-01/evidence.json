@@ -739,7 +739,9 @@
     "no_production_runtime_modified": true,
     "no_compatdb_rule_added": true,
     "wake_assertion_stopped": true,
-    "new_power_file_present": true
+    "new_power_file_present": true,
+    "power_collector_stopped": true,
+    "power_collector_stop_verified_epoch": 1793548312.5795178
   },
   "power_capture": {
     "full_private_snapshot_sha256": "1be182ed38a97f78f51679fdd06af5393c10edc5bea6ff6aee48db047c3c9be0",
