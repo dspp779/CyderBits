@@ -2,6 +2,8 @@
 
 日期：2026-11-01，Asia/Taipei。追蹤 [CyderBits #15](https://github.com/dspp779/CyderBits/issues/15)；實驗引擎見 [Draft PR #7](https://github.com/dspp779/cyder-wine-engine/pull/7)。
 
+後續已完成 [2026-11-02 GPU 線性三路對照](gpu-linear-2026-11-02.zh-TW.md)。本頁保留前一天的 HALFTONE 數據，兩輪功率不混算。
+
 ## 結論
 
 在本次 BlueCG 單開、GDI、1100×791 client 的實際遊戲中，將最後整張 bitmap 的 `COLORONCOLOR` 改為 `HALFTONE`，**能讓底部選單的階梯邊緣變柔和，但文字與 UI 也會變模糊，且增加 CPU 成本**。關閉開關後，五個選單按鈕的 45,080 個原生像素與首輪完全一致。
