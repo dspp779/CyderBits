@@ -114,7 +114,7 @@ def main():
     p.add_argument('--list', action='store_true', help='list identities and rectangles; never guess a frame stream')
     p.add_argument('--surface')
     p.add_argument('--thread', type=int)
-    p.add_argument('--api', type=int, choices=(0, 1, 2), default=0, help='0=DirectDraw, 1=BitBlt, 2=StretchBlt')
+    p.add_argument('--api', type=int, choices=(0, 1, 2, 3), default=0, help='0=DirectDraw, 1=BitBlt, 2=StretchBlt, 3=GPU final bitmap')
     p.add_argument('--rect', help='LEFT,TOP,WIDTH,HEIGHT')
     p.add_argument('--output', type=Path)
     a = p.parse_args()
