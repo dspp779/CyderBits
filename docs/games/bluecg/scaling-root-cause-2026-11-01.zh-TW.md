@@ -174,4 +174,4 @@ i686-w64-mingw32-clang -O2 -Wall -Wextra -Werror \
 - 更換 renderer 仍可能影響 CPU，但它與這段 bitmap 的最終採樣模式是兩個變因。本頁根因定位輪不提供 HALFTONE 的能耗結論；後續實驗另見下方連結。
 - 所有七組已正常退出；遊戲與合成探針 prefix 的 registry 依原始備份逐檔還原，啟動器 INI 與核心 hash 已核對。沒有寫正式 shared bottle、修改其他遊戲設定或建立 CompatDB 規則。
 
-後續已完成 **只針對 BlueCG 最後整張視窗 bitmap blit 的 HALFTONE 實際遊戲對照**，包含畫質、逐程序 CPU、晶片功率與提交間隔，見 [HALFTONE 畫質與成本實測](final-blit-halftone-2026-11-01.zh-TW.md)。GPU 線性呈現尚未實作。維持 1:1 或等比整數倍率可減少不均勻像素複製，但不會讓點採樣本身變成平滑插值。本次沒有加入全域 GDI 濾鏡或遊戲修補。
+後續已完成 **只針對 BlueCG 最後整張視窗 bitmap blit 的 HALFTONE 實際遊戲對照**，包含畫質、逐程序 CPU、晶片功率與提交間隔，見 [HALFTONE 畫質與成本實測](final-blit-halftone-2026-11-01.zh-TW.md)。本頁根因定位當時尚未實作 GPU 線性呈現；後續結果見 [GPU 單開](gpu-linear-2026-11-02.zh-TW.md)、[GPU 三開](triple-gpu-2026-11-02.zh-TW.md) 與 [cnc-ddraw 格式／平滑對照](cnc-ddraw-2026-11-02.zh-TW.md)，目前產品與實驗狀態統一見 [BlueCG 索引](README.md)。維持 1:1 或等比整數倍率可減少不均勻像素複製，但不會讓點採樣本身變成平滑插值。本次沒有加入全域 GDI 濾鏡或遊戲修補。

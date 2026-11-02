@@ -205,7 +205,7 @@ Retina、DPI、字體與部分 registry 是共用 wineserver／bottle 狀態，�
 
 | 遊戲 | 建議客制設定／依賴 | 現況與重要性 |
 |---|---|---|
-| BlueCG | DirectDraw／GDI、現行 A6 same-view backing；MIDI 先記錄 log | 主要驗證基準；resize 已解決，`dmsynth underrun` 根因未定 |
+| BlueCG | 保留既有產品設定；HALFTONE／GPU helper／CNC 仍為隔離實驗 | [報告與狀態索引](games/bluecg/README.md)：歷史 A6 resize 已驗收；原生全螢幕、產品整合與 `dmsynth underrun` 仍有缺口 |
 | 皮卡丘打排球 | MSync／ESync 關閉；runtime 實體路徑不可含空白 | 已知 workaround；適合用來守住 loader／sync 回歸 |
 | 台版新楓之谷 V280 | OEM engine／clean prefix、CP950、`RAW_AUDIO_PARSE=1`、EXE cwd、CitrusGate OTP | OEM25 已實玩；CX26 port 尚未完成正式畫面 gate |
 | 新楓之谷 Classic | MSync + DXVK 或 D3DMetal；追蹤 GRAP／NGS 程序 | 可玩但離場 livelock／殘留程序是 P0 |
