@@ -106,3 +106,12 @@ P3-01 決策應更新為：**引擎端一次簽署即可涵蓋此處的等內容
 依預算與現有證據，先不購買 Windows code-signing 憑證。引擎分支 `codex/issue-12-pe-release-signing` 已將新 Authenticode gate 改為明確選用：`CYDER_PE_SIGNING=off` 預設不要求憑證，Apple Developer ID／公證與既有完整性流程照常；只有 `required` 才啟用完整的 PE 簽署與失敗停止檢查。兩種模式都保留上游 PE 原簽章，strip 不會改寫已帶 certificate table 的 PE。未選用時不宣稱 Authenticode 憑證鏈或時間戳已驗證。
 
 本分支的 runtime／prefix 診斷不變；合法未簽 PE 仍可符合 manifest，來源不明的不同副本仍為 unknown，缺檔不推定為防毒刪除。P0-01 優先補精確 hash、建置與隔離證據，P0-02 保留已補強診斷，P3-01 留待有必要時再做受控配對驗證；一般受控修復尚未完成。未購買憑證、未變更防毒設定、未更新正式 runtime。
+
+## PR #20 review 修正（2026-11-02）
+
+- **P2：合法大型 registry 被拒絕。** 原本重用 8 MiB manifest 上限讀整份 system.reg，會讓已安裝軟體的大型 prefix 直接 unknown。現在只讀最多 64 KiB 的 registry header、遇第一個 section 就停止判讀架構，並核對讀取前後身分；超出 header 預算、讀取中變更或架構不明仍為 unknown。新增 >8 MiB body 案例，正常與缺檔均能得到正確結果。
+- **P2：選擇連結在檢查期間切換卻回報正常。** 引擎 root 別名可能在 snapshot 後改指向，原程式驗舊 canonical engine 的內容，卻將指向新目標的 prefix link 視為 ok。現在對接受的引擎別名於驗證前後核對其 canonical 目標，並核對指定 prefix 別名在整次檢查後是否仍選擇同一環境；改變時 unknown，理由為 engine_selection_changed／prefix_selection_changed，不跟隨外部檔案作內容比對。
+- **P2：prefix 開始前逾時會丟失既有結果。** 原外層 tick 會使整份報告回到空 components；現在保留已完成的 runtime 報告，對未開始的 prefix 附 timeout unknown，已確認的缺檔仍使整體為 mismatch。
+- 新增四個離線回歸均先重現再修正：大型 registry、引擎別名切換、prefix 別名切換、runtime 缺檔後預算耗盡。仍不消除檢查後再被更動的競態，也不代表實際 loader／防毒驗收。
+
+Review 後驗證：prefix 15 cases／48 assertions、既有 component 23 cases／120 assertions，合計 38 cases／168 assertions 全部通過；hook 與 AppKit 背景／取消／重啟／deadline／輸出上限 fixtures 通過，差異格式檢查通過。沒有重跑遊戲或防毒實機測試。

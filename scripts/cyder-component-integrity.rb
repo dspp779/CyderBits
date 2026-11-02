@@ -509,11 +509,31 @@ module CyderIntegrity
     {'component' => expected_source['component'], 'status' => 'unknown', 'reason' => 'invalid_or_unavailable_inventory'}
   end
 
+  # Architecture is in the registry header, not its potentially large body.
+  def self.prefix_architecture(prefix, deadline)
+    tick(deadline)
+    path = locate(prefix, 'system.reg')
+    File.open(path, File::RDONLY | File::NOFOLLOW | File::NONBLOCK) do |file|
+      before = file.stat
+      raise Unknown, 'invalid_registry_file' unless before.file?
+      bytes = file.read(65536) || ''.b
+      tick(deadline)
+      lines = bytes.lines
+      section = lines.index { |line| line.start_with?('[') }
+      raise Unknown, 'registry_header_too_large' if !section && before.size > bytes.bytesize
+      header = section ? lines[0...section] : lines
+      raise Unknown, 'registry_changed' unless identity(before) == identity(file.stat) &&
+        identity(before) == identity(File.lstat(path))
+      header.select { |line| line.start_with?('#arch=') }.map(&:strip).uniq
+    end
+  end
+
   # Compare only known Wine PE names, using the publisher-bound runtime inventory.
   # A byte match proves equivalence, not which installer produced a prefix file.
   # Different physical files may be legitimate native DLLs / another Wine version.
   def self.scan_prefix(bytes, prefix, engine, expected_sha, source, depth, deadline)
     report = {'component' => 'prefix', 'prefix' => prefix, 'depth' => depth}
+    tick(deadline)
     raise SourceMismatch, 'manifest_digest_mismatch' unless Digest::SHA256.hexdigest(bytes) == expected_sha
     manifest = JSON.parse(bytes)
     raise SourceMismatch, 'component_source_mismatch' unless source['component'] == 'engine' && manifest['source'] == source
@@ -521,12 +541,12 @@ module CyderIntegrity
     raise Unknown, 'invalid_manifest' unless manifest['schemaVersion'] == VERSION && rows.is_a?(Array) && (1..MAX_FILES).include?(rows.length)
     paths = rows.map { |r| safe_relative(r.fetch('path')) }
     raise Unknown, 'duplicate_manifest_path' unless paths.uniq.length == paths.length
+    prefix_alias = File.expand_path(prefix)
     prefix = File.realpath(prefix)
     engine_alias = File.expand_path(engine)
     engine = File.realpath(engine)
     # Architecture is layout evidence only, never a provenance/trust marker.
-    registry = read_small(locate(prefix, 'system.reg'))
-    arch = registry.lines.select { |line| line.start_with?('#arch=') }.map(&:strip).uniq
+    arch = prefix_architecture(prefix, deadline)
     mapping = case arch
               when ['#arch=win64'] then {'x86_64' => 'system32', 'i386' => 'syswow64'}
               when ['#arch=win32'] then {'i386' => 'system32'}
@@ -550,6 +570,7 @@ module CyderIntegrity
         before = File.lstat(path)
         if before.symlink?
           evidence['kind'] = 'symlink'
+          raise Unknown, 'engine_selection_changed' unless File.realpath(engine_alias) == engine
           target = File.readlink(path)
           # Never follow an arbitrary external link, linked parent, or chain.
           expected = locate(engine, row['path'])
@@ -574,8 +595,9 @@ module CyderIntegrity
           evidence.merge!('status' => 'unknown', 'reason' => 'prefix_source_unverified')
         end
         raise Unknown, 'file_changed_during_check' unless identity(File.lstat(path)) == identity(before)
-        if before.symlink? && File.readlink(path) != target
-          raise Unknown, 'file_changed_during_check'
+        if before.symlink?
+          raise Unknown, 'file_changed_during_check' if File.readlink(path) != target
+          raise Unknown, 'engine_selection_changed' unless File.realpath(engine_alias) == engine
         end
       rescue Errno::ENOENT
         evidence.merge!('status' => 'missing', 'reason' => 'expected_prefix_file_absent')
@@ -588,6 +610,7 @@ module CyderIntegrity
       end
       files << evidence
     end
+    raise Unknown, 'prefix_selection_changed' unless File.realpath(prefix_alias) == prefix
     report.merge('status' => files.any? { |r| r['status'] == 'missing' || r['status'] == 'content_mismatch' } ? 'mismatch' :
                    (files.all? { |r| r['status'] == 'ok' } ? 'ok' : 'unknown'),
                  'files' => files, 'checked' => files.length, 'inventoryCount' => selected.length, 'bytesRead' => bytes_read,
@@ -663,8 +686,10 @@ module CyderIntegrity
     if names.include?('engine')
       spec = index['components']['engine']
       prefixes.each do |prefix|
-        tick(deadline)
-        reports << if spec
+        # Keep completed runtime evidence when the shared budget is exhausted.
+        reports << if now >= deadline
+          {'component' => 'prefix', 'prefix' => prefix, 'status' => 'unknown', 'reason' => 'timeout'}
+        elsif spec
           bytes = read_small(locate(resources, 'component-manifests/engine.json'))
           scan_prefix(bytes, prefix, engine, spec['manifestSHA256'], spec['source'], depth, deadline)
         else
