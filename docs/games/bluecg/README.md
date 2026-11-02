@@ -9,6 +9,7 @@ BlueCG 是本專案的主要 DirectDraw PE32 驗證遊戲。
 | 放大筆畫不均／階梯感 | 已定位指定核心的 COLORONCOLOR 最終 bitmap 拉伸；16 組初始化與 7 組遊戲對照 | [registry／DDRAW／字體根因實測](scaling-root-cause-2026-11-01.zh-TW.md) |
 | 最終 bitmap 平滑取樣 | 單開 GDI HALFTONE：邊緣較柔和但模糊，CPU 與晶片功率成本已實測 | [畫質與成本比較](final-blit-halftone-2026-11-01.zh-TW.md) |
 | GPU 線性平滑取樣 | 單開 GDI 四組對照：近似 HALFTONE 字體畫質，CPU 與晶片功率成本降低 | [GPU 畫質、CPU、功率與提交間隔](gpu-linear-2026-11-02.zh-TW.md) |
+| 三開 GPU 線性取樣 | 四組逐程序／功率／提交間隔與12次生命週期檢查；含戶外場景漂移限制 | [三開完整比較與字體裁圖](triple-gpu-2026-11-02.zh-TW.md) |
 | 顯示／視窗 resize 黑屏 | **已由 A6 final patch 解決**（BlueCG 專用 engine） | [問題總覽與解法矩陣](../../bluecg-winemac-resize-black-screen.md) |
 | runtime 比較 | A6 為目前正式方案；A2、A4 保留作對照／fallback | [runtime comparison](../../bluecg-winemac-runtime-comparison.md) |
 | A6 engine artifact | 現行 Cyder：`CX26.3.0-W11-Cyder008`；首版驗收 artifact 為 `CX26.2.0-W11-Cyder003` | [artifact 與重現方式](../../bluecg-winemac-a6-engine.md) |
