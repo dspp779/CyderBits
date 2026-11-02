@@ -1,0 +1,8 @@
+case,renderer,native_ddraw,font_smoothing,font_intermediate_pixels,bottom_rgb_mae,bottom_different_pixels,system_rgb_mae,setter_core_offset,blit_core_offset
+cause-gl-builtin,gl,False,1,1765,0.0,0,0.0,0xb1a18,0xb1aaa
+cause-gdi-builtin,gdi/no3d,False,1,1765,0.0,0,0.0,0xb1a18,0xb1aaa
+cause-four-builtin,gdi/no3d,False,1,1765,0.0,0,0.0,0xb1a18,0xb1aaa
+cause-gl-native,gl,True,1,1765,0.0,0,0.0,0xb1a18,0xb1aaa
+cause-gdi-native,gdi/no3d,True,1,1765,0.0,0,0.0,0xb1a18,0xb1aaa
+cause-aaoff-builtin,gl,False,0,0,0.0,0,0.0,0xb1a18,0xb1aaa
+cause-gl-restore,gl,False,1,1765,0.0,0,0.0,0xb1a18,0xb1aaa
