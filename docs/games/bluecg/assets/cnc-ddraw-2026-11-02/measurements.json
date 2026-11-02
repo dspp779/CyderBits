@@ -1,0 +1,140 @@
+{
+  "source_tag": "v7.1.0.0",
+  "cases": [
+    {
+      "phase": "cnc-release-nearest",
+      "resize": "windows_pid=468\nclient=1100x791 iconic=0 gpu_children=0 visible=0 foreground_parent=1\n",
+      "announcement_cancel_score": 72.85820716173997,
+      "minimize": "windows_pid=468\nclient=0x0 iconic=1 gpu_children=0 visible=0 foreground_parent=1\n",
+      "restore": "windows_pid=468\nclient=1100x791 iconic=0 gpu_children=0 visible=0 foreground_parent=0\n",
+      "status_panel_score": 0.0,
+      "shader": "Nearest neighbor",
+      "official_release_dll": true,
+      "normal_exit": true,
+      "game_payload_hashes_unchanged": true
+    },
+    {
+      "phase": "cnc-release-bilinear",
+      "resize": "client=1100x791",
+      "minimize": "iconic=1",
+      "restore": "client=1100x791",
+      "shader": "Bilinear",
+      "status_panel_score_raw": 9.138255411255411,
+      "status_panel_score": 1.9076709956709956,
+      "status_panel_negative_score": 62.26541991341991,
+      "status_verified_manual": true,
+      "raw_pixel_comparator_rejected_filter_difference": true,
+      "official_release_dll": true,
+      "normal_exit": true,
+      "game_payload_hashes_unchanged": true
+    },
+    {
+      "phase": "cnc-release-bicubic",
+      "resize": "windows_pid=468\nclient=1100x791 iconic=0 gpu_children=0 visible=0 foreground_parent=1\n",
+      "announcement_cancel_score": 72.13962989665946,
+      "minimize": "windows_pid=468\nclient=0x0 iconic=1 gpu_children=0 visible=0 foreground_parent=1\n",
+      "restore": "windows_pid=468\nclient=1100x791 iconic=0 gpu_children=0 visible=0 foreground_parent=0\n",
+      "status_panel_score_raw": 8.354000000000001,
+      "status_panel_score": 1.8516580086580088,
+      "shader": "Bicubic",
+      "official_release_dll": true,
+      "normal_exit": true,
+      "game_payload_hashes_unchanged": true
+    },
+    {
+      "phase": "cnc-release-colormatched-r2",
+      "resize": "windows_pid=468\nclient=1100x791 iconic=0 gpu_children=0 visible=0 foreground_parent=1\n",
+      "announcement_cancel_score": 68.37202595529921,
+      "minimize": "windows_pid=468\nclient=0x0 iconic=1 gpu_children=0 visible=0 foreground_parent=1\n",
+      "restore": "windows_pid=468\nclient=1100x791 iconic=0 gpu_children=0 visible=0 foreground_parent=0\n",
+      "status_panel_score_raw": 8.971645021645022,
+      "status_panel_score": 1.950961038961039,
+      "shader": "Shaders\\interpolation\\bluecg-capture-bilinear.glsl",
+      "official_release_dll": true,
+      "normal_exit": true,
+      "game_payload_hashes_unchanged": true
+    }
+  ],
+  "diagnostic32": {
+    "actual_dll_sha256": "17b726d36a2341c404ddef3c8aad9645632a554bb2d6047e6adedeb83b98ea2c",
+    "format_requests": {
+      "bpp=0 masks=00000000,00000000,00000000": 4,
+      "bpp=32 masks=00ff0000,0000ff00,000000ff": 4099
+    },
+    "actual_surfaces": {
+      "961x721@32": 6,
+      "64x48@32": 4096
+    },
+    "render_res": [
+      "961x721 (viewport res=961x721, x=0, y=0)",
+      "1100x791 (viewport res=1100x791, x=0, y=0)",
+      "1024x769 (viewport res=1024x768, x=0, y=0)",
+      "1100x791 (viewport res=1100x791, x=0, y=0)",
+      "1100x791 (viewport res=1100x791, x=0, y=0)"
+    ],
+    "input_api_hits": {
+      "GetCursorPos": 820
+    },
+    "log_sha256": {
+      "cnc-ddraw-bluecg-1.log": "c5a40717bef0da8e5f90726545df3b1a1be198dee1e75ba65d20f68f389f6cfa",
+      "cnc-ddraw-bluecg-3.log": "a42c3857dea67244d730ea6ddc12ac36f3e25d7f2eaaab5ee6fac8cc5da324ce",
+      "cnc-ddraw-bluecg-2.log": "8d1f5d4a5a8a8dac280e1612eb1268b66b2a5590bf15cdc7e23a45040b6367dc"
+    }
+  },
+  "shader_reference": {
+    "icc_sha256": "49429d4dd70f439f6fa47a298e5ffbd280375d2cbd18708b1e05a34aafe5d219",
+    "gamma": [
+      1.80078125,
+      1.80078125,
+      1.80078125
+    ],
+    "matrix": [
+      [
+        0.9747567602661368,
+        0.027177961614195216,
+        -0.0021093551561161966
+      ],
+      [
+        -0.01998106678961836,
+        1.0542883935391487,
+        -0.03420624851721525
+      ],
+      [
+        0.0016821099009835666,
+        0.0015268088519869612,
+        0.9964850894190727
+      ]
+    ],
+    "reference": {
+      "colors": 5169,
+      "max_channel_error": 1,
+      "mean_channel_error": 0.00967305088024763
+    },
+    "shader_sha256": "f99a089f42917e31bd5890da255d67cc1b15ffb7d2ee1068099ea998864aa78a"
+  },
+  "live_color": {
+    "mae": 0.03880105401844532,
+    "max": 2,
+    "pixels": 40480
+  },
+  "restoration": {
+    "restored_files": [
+      "user.reg",
+      "system.reg",
+      "userdef.reg",
+      "BlueLauncher.ini",
+      "DDRAW.dll",
+      "EasyLogin_common_args_tc.dat"
+    ],
+    "registry_exact": true,
+    "launcher_ini_exact": true,
+    "launcher_common_args_exact": true,
+    "official_ddraw_exact": true,
+    "game_payload_hashes_unchanged": true,
+    "added_shader_files_removed": 15,
+    "added_ddraw_ini_removed": true,
+    "task_games_and_launcher_exited": true,
+    "no_production_runtime_changed": true,
+    "no_compatdb_or_other_game_settings_changed": true
+  }
+}
