@@ -1,6 +1,6 @@
 # 執行元件清單與唯讀診斷（Issue #12 / P0-02）
 
-本階段只檢查 Cyder 隨附的 Wine、DXVK、DXMT。診斷不執行被檢查的二進位、不啟動 Wine、不寫入 prefix、registry、遊戲、元件或設定，也不下載、移除、重新簽署或修復檔案。既有安裝流程中的解壓、簽署與圖形連結行為不因本功能改變。
+本階段檢查 Cyder 隨附的 Wine、DXVK、DXMT，並可比較指定 prefix 的關鍵 Wine PE 副本。2026-11-02 的範圍與判定補強見 [Issue #12 prefix 完整性複查](issue-12-prefix-integrity.zh-TW.md)；下方 2026-10-30 數字為原階段量測。診斷不執行被檢查的二進位、不啟動 Wine、不寫入 prefix、registry、遊戲、元件或設定，也不下載、移除、重新簽署或修復檔案。既有安裝流程中的解壓、簽署與圖形連結行為不因本功能改變。
 
 ## 已實作的路徑
 
@@ -44,6 +44,7 @@ Mach-O 使用 `codesign --verify --strict`；此階段不把所有葉節點強�
 ## 離線回歸
 
 ```bash
+/usr/bin/ruby tests/test-cyder-prefix-integrity.rb
 /usr/bin/ruby tests/test-cyder-component-integrity.rb
 bash tests/test-cyder-component-hooks.sh
 bash tests/test-cyder-component-diagnostics.sh

@@ -3535,7 +3535,7 @@ cyder_run_wine_exe() {
       rm -f "$lifecycle_file" "${lifecycle_file}.tmp"
     fi
   fi
-  if declare -F cyder_check_components >/dev/null; then cyder_check_components all quick; fi
+  if declare -F cyder_check_components >/dev/null; then cyder_check_components all quick "$prefix"; fi
   cyder_exec_game() {
     # Run after sync/session setup, before the one-use final handoff. Registry
     # failures abort this launch instead of silently using a different mode.

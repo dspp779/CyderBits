@@ -14,11 +14,12 @@ final class CyderComponentDiagnosticsController: NSWindowController, NSWindowDel
     private let runtime: URL
     private let budget: TimeInterval
     private let engine: URL
+    private let prefix: URL
     var diagnosticText: String { text.string }
     var isChecking: Bool { operation != nil }
 
-    init(resources: URL? = Bundle.main.resourceURL, runtime: URL = CyderPaths.runtimeRoot, engine: URL = CyderPaths.engine, budget: TimeInterval = 60) {
-        self.resources = resources; self.runtime = runtime; self.engine = engine; self.budget = min(300, max(0.1, budget))
+    init(resources: URL? = Bundle.main.resourceURL, runtime: URL = CyderPaths.runtimeRoot, engine: URL = CyderPaths.engine, budget: TimeInterval = 60, prefix: URL = CyderPaths.sharedBottle) {
+        self.prefix = prefix; self.resources = resources; self.runtime = runtime; self.engine = engine; self.budget = min(300, max(0.1, budget))
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 720, height: 480),
                               styleMask: [.titled, .closable, .resizable], backing: .buffered, defer: false)
         window.title = "執行元件完整性診斷"
@@ -38,7 +39,7 @@ final class CyderComponentDiagnosticsController: NSWindowController, NSWindowDel
         cancel.target = self; cancel.action = #selector(cancelScan)
         let buttons = NSStackView(views: [start, cancel])
         buttons.spacing = 12
-        let note = NSTextField(wrappingLabelWithString: "唯讀檢查 Wine、DXVK 與 DXMT；不掃描遊戲、不修復、不更改登錄值。最多 60 秒。缺檔不代表已證實遭防毒軟體移除。")
+        let note = NSTextField(wrappingLabelWithString: "唯讀檢查 Wine、DXVK、DXMT 與目前環境的關鍵 Windows 元件；不掃描遊戲、不修復、不更改登錄值。最多 60 秒。缺檔不代表已證實遭防毒軟體移除。")
         let stack = NSStackView(views: [note, scroll, buttons])
         stack.orientation = .vertical; stack.alignment = .leading; stack.spacing = 12
         stack.translatesAutoresizingMaskIntoConstraints = false
@@ -64,7 +65,7 @@ final class CyderComponentDiagnosticsController: NSWindowController, NSWindowDel
         process.executableURL = URL(fileURLWithPath: "/usr/bin/ruby")
         process.arguments = [resources.appendingPathComponent("ogom-scripts/cyder-component-integrity.rb").path,
             "check", "--resources", resources.path, "--runtime", runtime.path,
-            "--engine", engine.path, "--depth", "full", "--budget", String(budget)]
+            "--engine", engine.path, "--bottle", prefix.path, "--depth", "full", "--budget", String(budget)]
         process.standardOutput = pipe
         process.standardError = FileHandle.nullDevice
         process.standardInput = FileHandle.nullDevice
@@ -123,10 +124,14 @@ final class CyderComponentDiagnosticsController: NSWindowController, NSWindowDel
             lines.append("\n\(component["component"] as? String ?? "?") \(component["version"] as? String ?? "")：\(label(component["status"]))")
             lines.append("已檢查 \(component["checked"] ?? 0) / \(component["inventoryCount"] ?? "?") 項；\(component["bytesRead"] ?? 0) bytes；\(component["elapsedMs"] ?? 0) ms")
             if let reason = component["reason"] { lines.append("原因：\(reason)") }
+            if let prefix = component["prefix"] { lines.append("環境：\(prefix)") }
             let issues = (component["files"] as? [[String: Any]] ?? []).filter { ($0["status"] as? String) != "ok" || ($0["signaturePolicy"] as? String) == "upstream-unsigned" }
             for file in issues.prefix(200) {
                 let state = (file["signaturePolicy"] as? String) == "upstream-unsigned" ? "上游原件未簽署（符合精確來源例外）" : label(file["status"])
                 lines.append("\(state)：\(file["path"] as? String ?? "?")")
+                if let reason = file["reason"] as? String {
+                    lines.append(reason == "prefix_source_unverified" ? "來源無法確認：可能是其他版本或原生 DLL，未判定為損壞。" : "原因：\(reason)")
+                }
             }
             if issues.count > 200 { lines.append("另有 \(issues.count - 200) 項差異未顯示。") }
         }
