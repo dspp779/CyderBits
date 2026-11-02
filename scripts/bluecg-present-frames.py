@@ -136,7 +136,7 @@ def main():
         summary, intervals = extract(meta, rows, a.start_epoch, a.end_epoch, a.surface, a.thread, rect, a.api)
         summary['source_sha256'] = hashlib.sha256(text.encode()).hexdigest()
         with a.output.open('x', newline='') as out:
-            writer = csv.writer(out)
+            writer = csv.writer(out, lineterminator='\n')
             writer.writerow(['frame_ms', 'end_qpc', 'api_duration_ms'])
             for interval, row in intervals:
                 writer.writerow([f'{interval:.6f}', row['end_qpc'], f"{(row['end_qpc']-row['begin_qpc'])*1000/meta['frequency']:.6f}"])
