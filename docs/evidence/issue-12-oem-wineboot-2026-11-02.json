@@ -1,0 +1,563 @@
+{
+  "source": "official Cyder OEM 0.10.0",
+  "wineboot": {
+    "engine": "OEM 25.0.1.38865",
+    "prefix": "prefix-oem-native",
+    "nativeLoader": true,
+    "command": [
+      "wineloader",
+      "wineboot",
+      "-i"
+    ],
+    "exitCode": 0,
+    "server-k": 0,
+    "server-w": 0,
+    "elapsedSeconds": 21.985
+  },
+  "revocation": "not checked; osslsigncode -ignore-crl (verifier-only option)",
+  "architectures": {
+    "i386": {
+      "directory": "syswow64",
+      "counts": {
+        "enginePE": 825,
+        "engineWithCertificateTable": 809,
+        "prefixCompared": 723,
+        "prefixSymlink": 0,
+        "prefixPhysicalFile": 723,
+        "equalSHA256": 723,
+        "prefixWithCertificateTable": 719,
+        "prefixMissingFromDirectSystemDirectory": 102
+      },
+      "targetedFiles": [
+        {
+          "name": "bcrypt.dll",
+          "source": {
+            "size": 93776,
+            "sha256": "7c611a709287d40b351127c7125010b7bbad572238b6591d66db921c7e992570",
+            "certificateTablePresent": true,
+            "certificateSHA256": "35a6e8a6bd48fa7a1bac5b4d3802be329ef632e05bf1062989429f1d1ff0592d",
+            "symlink": false
+          },
+          "prefix": {
+            "size": 93776,
+            "sha256": "7c611a709287d40b351127c7125010b7bbad572238b6591d66db921c7e992570",
+            "certificateTablePresent": true,
+            "certificateSHA256": "35a6e8a6bd48fa7a1bac5b4d3802be329ef632e05bf1062989429f1d1ff0592d",
+            "symlink": false
+          },
+          "identicalBytes": true,
+          "sourceOfflineVerifyExit": 0,
+          "sourceVerified": true,
+          "prefixOfflineVerifyExit": 0,
+          "prefixVerified": true
+        },
+        {
+          "name": "control.exe",
+          "source": {
+            "size": 36416,
+            "sha256": "3216375d63f15c4b0f3983adc8e578e4a85023505c6e352240d327a7914e01bc",
+            "certificateTablePresent": true,
+            "certificateSHA256": "5e9f079e19c9ee14dbe9ded1d160ef42c090c40225cb54625b2a1fa4e8848b69",
+            "symlink": false
+          },
+          "prefix": {
+            "size": 36416,
+            "sha256": "3216375d63f15c4b0f3983adc8e578e4a85023505c6e352240d327a7914e01bc",
+            "certificateTablePresent": true,
+            "certificateSHA256": "5e9f079e19c9ee14dbe9ded1d160ef42c090c40225cb54625b2a1fa4e8848b69",
+            "symlink": false
+          },
+          "identicalBytes": true,
+          "sourceOfflineVerifyExit": 0,
+          "sourceVerified": true,
+          "prefixOfflineVerifyExit": 0,
+          "prefixVerified": true
+        },
+        {
+          "name": "crypt32.dll",
+          "source": {
+            "size": 814672,
+            "sha256": "d751ec61221f5c53cb71a83b70478b99c1069d695e15e1b1636a3250321ab02a",
+            "certificateTablePresent": true,
+            "certificateSHA256": "61d4bc04304ac01d6d87335fa6ebda870d2f86e585b773ab9b924815bd910489",
+            "symlink": false
+          },
+          "prefix": {
+            "size": 814672,
+            "sha256": "d751ec61221f5c53cb71a83b70478b99c1069d695e15e1b1636a3250321ab02a",
+            "certificateTablePresent": true,
+            "certificateSHA256": "61d4bc04304ac01d6d87335fa6ebda870d2f86e585b773ab9b924815bd910489",
+            "symlink": false
+          },
+          "identicalBytes": true,
+          "sourceOfflineVerifyExit": 0,
+          "sourceVerified": true,
+          "prefixOfflineVerifyExit": 0,
+          "prefixVerified": true
+        },
+        {
+          "name": "msidb.exe",
+          "source": {
+            "size": 44608,
+            "sha256": "4080b7dcd8bb698824f8c505882ffbe02049f10628869cfe19d02a3ff82d839c",
+            "certificateTablePresent": true,
+            "certificateSHA256": "15bb47ed29e77bb15c69507ccea7eb44a950d8f78e1f9afc7a9d2b144c80f3ce",
+            "symlink": false
+          },
+          "prefix": {
+            "size": 44608,
+            "sha256": "4080b7dcd8bb698824f8c505882ffbe02049f10628869cfe19d02a3ff82d839c",
+            "certificateTablePresent": true,
+            "certificateSHA256": "15bb47ed29e77bb15c69507ccea7eb44a950d8f78e1f9afc7a9d2b144c80f3ce",
+            "symlink": false
+          },
+          "identicalBytes": true,
+          "sourceOfflineVerifyExit": 0,
+          "sourceVerified": true,
+          "prefixOfflineVerifyExit": 0,
+          "prefixVerified": true
+        },
+        {
+          "name": "mspatcha.dll",
+          "source": {
+            "size": 65104,
+            "sha256": "7e421ca610a078ed176dc2707f8ebf53e752711d253badf635ab6345842183a4",
+            "certificateTablePresent": true,
+            "certificateSHA256": "fed3111ffc69aa04bbcd800cc84c9bcbff3421182a6db7a49b99dde5d85c90a1",
+            "symlink": false
+          },
+          "prefix": {
+            "size": 65104,
+            "sha256": "7e421ca610a078ed176dc2707f8ebf53e752711d253badf635ab6345842183a4",
+            "certificateTablePresent": true,
+            "certificateSHA256": "fed3111ffc69aa04bbcd800cc84c9bcbff3421182a6db7a49b99dde5d85c90a1",
+            "symlink": false
+          },
+          "identicalBytes": true,
+          "sourceOfflineVerifyExit": 0,
+          "sourceVerified": true,
+          "prefixOfflineVerifyExit": 0,
+          "prefixVerified": true
+        },
+        {
+          "name": "ncrypt.dll",
+          "source": {
+            "size": 61008,
+            "sha256": "2faa5c105d2d922939bc9188d24f79634cb61ca546319fbdb4744579250880f3",
+            "certificateTablePresent": true,
+            "certificateSHA256": "63f52957f2d5f327b50ab9ac7a86d460865b91caa3b1b458726e6b0c6c55ebc5",
+            "symlink": false
+          },
+          "prefix": {
+            "size": 61008,
+            "sha256": "2faa5c105d2d922939bc9188d24f79634cb61ca546319fbdb4744579250880f3",
+            "certificateTablePresent": true,
+            "certificateSHA256": "63f52957f2d5f327b50ab9ac7a86d460865b91caa3b1b458726e6b0c6c55ebc5",
+            "symlink": false
+          },
+          "identicalBytes": true,
+          "sourceOfflineVerifyExit": 0,
+          "sourceVerified": true,
+          "prefixOfflineVerifyExit": 0,
+          "prefixVerified": true
+        },
+        {
+          "name": "rasapi32.dll",
+          "source": {
+            "size": 56912,
+            "sha256": "ad928c4b8f2463208723ae3c039b075868f2149b3b6f37a0ad6db82043b78bbd",
+            "certificateTablePresent": true,
+            "certificateSHA256": "e97181749bd50c4f4262fffadcde2ed1cb56a60e36c77e1a330292d8046f489e",
+            "symlink": false
+          },
+          "prefix": {
+            "size": 56912,
+            "sha256": "ad928c4b8f2463208723ae3c039b075868f2149b3b6f37a0ad6db82043b78bbd",
+            "certificateTablePresent": true,
+            "certificateSHA256": "e97181749bd50c4f4262fffadcde2ed1cb56a60e36c77e1a330292d8046f489e",
+            "symlink": false
+          },
+          "identicalBytes": true,
+          "sourceOfflineVerifyExit": 0,
+          "sourceVerified": true,
+          "prefixOfflineVerifyExit": 0,
+          "prefixVerified": true
+        },
+        {
+          "name": "wevtapi.dll",
+          "source": {
+            "size": 48720,
+            "sha256": "9b769ce3cc00db3a6f90641c765f5d8c4493fd5dd955c7d2f3d2dd06a32b2e44",
+            "certificateTablePresent": true,
+            "certificateSHA256": "bfef69599b7b3dab3022027ba297a556435c8fb7fe6e0b9abf0c87c060bd45ef",
+            "symlink": false
+          },
+          "prefix": {
+            "size": 48720,
+            "sha256": "9b769ce3cc00db3a6f90641c765f5d8c4493fd5dd955c7d2f3d2dd06a32b2e44",
+            "certificateTablePresent": true,
+            "certificateSHA256": "bfef69599b7b3dab3022027ba297a556435c8fb7fe6e0b9abf0c87c060bd45ef",
+            "symlink": false
+          },
+          "identicalBytes": true,
+          "sourceOfflineVerifyExit": 0,
+          "sourceVerified": true,
+          "prefixOfflineVerifyExit": 0,
+          "prefixVerified": true
+        },
+        {
+          "name": "winemapi.dll",
+          "source": {
+            "size": 52816,
+            "sha256": "2c6ba07c00c60ebca252f890f87a84e53c8aceaaea3273ea9059fa30cf37052a",
+            "certificateTablePresent": true,
+            "certificateSHA256": "1c876ae7e89f1630bc16f39e4972ab4109df3b1c21eae3e24e66e9a98706812e",
+            "symlink": false
+          },
+          "prefix": {
+            "size": 52816,
+            "sha256": "2c6ba07c00c60ebca252f890f87a84e53c8aceaaea3273ea9059fa30cf37052a",
+            "certificateTablePresent": true,
+            "certificateSHA256": "1c876ae7e89f1630bc16f39e4972ab4109df3b1c21eae3e24e66e9a98706812e",
+            "symlink": false
+          },
+          "identicalBytes": true,
+          "sourceOfflineVerifyExit": 0,
+          "sourceVerified": true,
+          "prefixOfflineVerifyExit": 0,
+          "prefixVerified": true
+        },
+        {
+          "name": "wintrust.dll",
+          "source": {
+            "size": 155216,
+            "sha256": "1dc0ff6c349d11c59fbe245f6b506f27f332f56900052ae3e0dd5c5f22d2132a",
+            "certificateTablePresent": true,
+            "certificateSHA256": "5cd66964fa689865770bbbe73325118788a352bad6f5f4d2f6c090e5698deb09",
+            "symlink": false
+          },
+          "prefix": {
+            "size": 155216,
+            "sha256": "1dc0ff6c349d11c59fbe245f6b506f27f332f56900052ae3e0dd5c5f22d2132a",
+            "certificateTablePresent": true,
+            "certificateSHA256": "5cd66964fa689865770bbbe73325118788a352bad6f5f4d2f6c090e5698deb09",
+            "symlink": false
+          },
+          "identicalBytes": true,
+          "sourceOfflineVerifyExit": 0,
+          "sourceVerified": true,
+          "prefixOfflineVerifyExit": 0,
+          "prefixVerified": true
+        },
+        {
+          "name": "xinput9_1_0.dll",
+          "source": {
+            "size": 73296,
+            "sha256": "ad12376119eabd9d3c78254665afd65458ae49c976e85b0a3fe7e50b894c6994",
+            "certificateTablePresent": true,
+            "certificateSHA256": "72886416ca34a06e429439c42d6473aad3c6a559e3452c6dbf6aa9c0447e01dc",
+            "symlink": false
+          },
+          "prefix": {
+            "size": 73296,
+            "sha256": "ad12376119eabd9d3c78254665afd65458ae49c976e85b0a3fe7e50b894c6994",
+            "certificateTablePresent": true,
+            "certificateSHA256": "72886416ca34a06e429439c42d6473aad3c6a559e3452c6dbf6aa9c0447e01dc",
+            "symlink": false
+          },
+          "identicalBytes": true,
+          "sourceOfflineVerifyExit": 0,
+          "sourceVerified": true,
+          "prefixOfflineVerifyExit": 0,
+          "prefixVerified": true
+        }
+      ]
+    },
+    "x86_64": {
+      "directory": "system32",
+      "counts": {
+        "enginePE": 766,
+        "engineWithCertificateTable": 762,
+        "prefixCompared": 718,
+        "prefixSymlink": 0,
+        "prefixPhysicalFile": 718,
+        "equalSHA256": 718,
+        "prefixWithCertificateTable": 714,
+        "prefixMissingFromDirectSystemDirectory": 48
+      },
+      "targetedFiles": [
+        {
+          "name": "bcrypt.dll",
+          "source": {
+            "size": 106064,
+            "sha256": "13168a1b02a7a6be9c0d8f48458e140d68dc36b62ccf86018cf6a6d6900795a5",
+            "certificateTablePresent": true,
+            "certificateSHA256": "4cea97433b0805423e49d96fd8887782932803df82e3f2564c7bae4bcf9ffa5b",
+            "symlink": false
+          },
+          "prefix": {
+            "size": 106064,
+            "sha256": "13168a1b02a7a6be9c0d8f48458e140d68dc36b62ccf86018cf6a6d6900795a5",
+            "certificateTablePresent": true,
+            "certificateSHA256": "4cea97433b0805423e49d96fd8887782932803df82e3f2564c7bae4bcf9ffa5b",
+            "symlink": false
+          },
+          "identicalBytes": true,
+          "sourceOfflineVerifyExit": 0,
+          "sourceVerified": true,
+          "prefixOfflineVerifyExit": 0,
+          "prefixVerified": true
+        },
+        {
+          "name": "control.exe",
+          "source": {
+            "size": 40512,
+            "sha256": "8874f35d259a9d2e424913c6f0c3798659d4b1e9db67ef5d5212185c5a7db791",
+            "certificateTablePresent": true,
+            "certificateSHA256": "abdfd1b2768010ae395541dc6e93ecdbeddf8a57f6211e96cf66c99266cc0a31",
+            "symlink": false
+          },
+          "prefix": {
+            "size": 40512,
+            "sha256": "8874f35d259a9d2e424913c6f0c3798659d4b1e9db67ef5d5212185c5a7db791",
+            "certificateTablePresent": true,
+            "certificateSHA256": "abdfd1b2768010ae395541dc6e93ecdbeddf8a57f6211e96cf66c99266cc0a31",
+            "symlink": false
+          },
+          "identicalBytes": true,
+          "sourceOfflineVerifyExit": 0,
+          "sourceVerified": true,
+          "prefixOfflineVerifyExit": 0,
+          "prefixVerified": true
+        },
+        {
+          "name": "crypt32.dll",
+          "source": {
+            "size": 847440,
+            "sha256": "b8e6f37e2162ec4bc584abe9fd60beffcd79298cd651635ef1686c1105783f21",
+            "certificateTablePresent": true,
+            "certificateSHA256": "16d41046c5448745ee4add09607b9988f367bdbfc1c15a5691e73ffc9bc57d3e",
+            "symlink": false
+          },
+          "prefix": {
+            "size": 847440,
+            "sha256": "b8e6f37e2162ec4bc584abe9fd60beffcd79298cd651635ef1686c1105783f21",
+            "certificateTablePresent": true,
+            "certificateSHA256": "16d41046c5448745ee4add09607b9988f367bdbfc1c15a5691e73ffc9bc57d3e",
+            "symlink": false
+          },
+          "identicalBytes": true,
+          "sourceOfflineVerifyExit": 0,
+          "sourceVerified": true,
+          "prefixOfflineVerifyExit": 0,
+          "prefixVerified": true
+        },
+        {
+          "name": "msidb.exe",
+          "source": {
+            "size": 52800,
+            "sha256": "7e216f782c136c6985843088fa1c40036a4f12f14d24becb09e4b4d2784f1b10",
+            "certificateTablePresent": true,
+            "certificateSHA256": "0887b92720f8b93e0b8f1360e3163dbecce70da19ba696ec7c68e6e6684c3673",
+            "symlink": false
+          },
+          "prefix": {
+            "size": 52800,
+            "sha256": "7e216f782c136c6985843088fa1c40036a4f12f14d24becb09e4b4d2784f1b10",
+            "certificateTablePresent": true,
+            "certificateSHA256": "0887b92720f8b93e0b8f1360e3163dbecce70da19ba696ec7c68e6e6684c3673",
+            "symlink": false
+          },
+          "identicalBytes": true,
+          "sourceOfflineVerifyExit": 0,
+          "sourceVerified": true,
+          "prefixOfflineVerifyExit": 0,
+          "prefixVerified": true
+        },
+        {
+          "name": "mspatcha.dll",
+          "source": {
+            "size": 73280,
+            "sha256": "9446590987ec6e186e98307093af721a51a4c406011b8a05420bb1b32451a7b7",
+            "certificateTablePresent": true,
+            "certificateSHA256": "929bdb60896fae1d3c086a7bce731dc2511b3d6bf2a59e79cd8516e5aa91106b",
+            "symlink": false
+          },
+          "prefix": {
+            "size": 73280,
+            "sha256": "9446590987ec6e186e98307093af721a51a4c406011b8a05420bb1b32451a7b7",
+            "certificateTablePresent": true,
+            "certificateSHA256": "929bdb60896fae1d3c086a7bce731dc2511b3d6bf2a59e79cd8516e5aa91106b",
+            "symlink": false
+          },
+          "identicalBytes": true,
+          "sourceOfflineVerifyExit": 0,
+          "sourceVerified": true,
+          "prefixOfflineVerifyExit": 0,
+          "prefixVerified": true
+        },
+        {
+          "name": "ncrypt.dll",
+          "source": {
+            "size": 69200,
+            "sha256": "fe0ba9057c975b791688285729112c0e36d28b28a49d83e50ae55ed00e0f9a73",
+            "certificateTablePresent": true,
+            "certificateSHA256": "c957dafa6c8c3f71f60580b27f77304ae92c5fd3cafcf1bc0d7ac03bdf2194b6",
+            "symlink": false
+          },
+          "prefix": {
+            "size": 69200,
+            "sha256": "fe0ba9057c975b791688285729112c0e36d28b28a49d83e50ae55ed00e0f9a73",
+            "certificateTablePresent": true,
+            "certificateSHA256": "c957dafa6c8c3f71f60580b27f77304ae92c5fd3cafcf1bc0d7ac03bdf2194b6",
+            "symlink": false
+          },
+          "identicalBytes": true,
+          "sourceOfflineVerifyExit": 0,
+          "sourceVerified": true,
+          "prefixOfflineVerifyExit": 0,
+          "prefixVerified": true
+        },
+        {
+          "name": "rasapi32.dll",
+          "source": {
+            "size": 65104,
+            "sha256": "0e4ba2b2144a5a354525830dc7ae0a37bf67813f5ec570f3b66b9d73a7dc5635",
+            "certificateTablePresent": true,
+            "certificateSHA256": "ca326c6b27855b85664f69f089732a11ce93253363efc772c08e93a75b9cfdc3",
+            "symlink": false
+          },
+          "prefix": {
+            "size": 65104,
+            "sha256": "0e4ba2b2144a5a354525830dc7ae0a37bf67813f5ec570f3b66b9d73a7dc5635",
+            "certificateTablePresent": true,
+            "certificateSHA256": "ca326c6b27855b85664f69f089732a11ce93253363efc772c08e93a75b9cfdc3",
+            "symlink": false
+          },
+          "identicalBytes": true,
+          "sourceOfflineVerifyExit": 0,
+          "sourceVerified": true,
+          "prefixOfflineVerifyExit": 0,
+          "prefixVerified": true
+        },
+        {
+          "name": "wevtapi.dll",
+          "source": {
+            "size": 56912,
+            "sha256": "71d973e92f445d6b85e2a230ffda2a07a7c66e3a13a5e586f5040fe5c46abab8",
+            "certificateTablePresent": true,
+            "certificateSHA256": "a46d298246c18ced7b71739e634eee267bc15e5433fba95f05b95dd32444c496",
+            "symlink": false
+          },
+          "prefix": {
+            "size": 56912,
+            "sha256": "71d973e92f445d6b85e2a230ffda2a07a7c66e3a13a5e586f5040fe5c46abab8",
+            "certificateTablePresent": true,
+            "certificateSHA256": "a46d298246c18ced7b71739e634eee267bc15e5433fba95f05b95dd32444c496",
+            "symlink": false
+          },
+          "identicalBytes": true,
+          "sourceOfflineVerifyExit": 0,
+          "sourceVerified": true,
+          "prefixOfflineVerifyExit": 0,
+          "prefixVerified": true
+        },
+        {
+          "name": "winemapi.dll",
+          "source": {
+            "size": 56896,
+            "sha256": "31886721a374c34ee1a1351ac1a7f1c384de693c3f4fc7676e40c5b2cf3559d8",
+            "certificateTablePresent": true,
+            "certificateSHA256": "7506d8ed6d0c911de5c5416d1674832bc9df82cc6a6595cbd46927930eacc6d7",
+            "symlink": false
+          },
+          "prefix": {
+            "size": 56896,
+            "sha256": "31886721a374c34ee1a1351ac1a7f1c384de693c3f4fc7676e40c5b2cf3559d8",
+            "certificateTablePresent": true,
+            "certificateSHA256": "7506d8ed6d0c911de5c5416d1674832bc9df82cc6a6595cbd46927930eacc6d7",
+            "symlink": false
+          },
+          "identicalBytes": true,
+          "sourceOfflineVerifyExit": 0,
+          "sourceVerified": true,
+          "prefixOfflineVerifyExit": 0,
+          "prefixVerified": true
+        },
+        {
+          "name": "wintrust.dll",
+          "source": {
+            "size": 167504,
+            "sha256": "df442923671d0375db1c208a5effd0a7268b7e0dd01fc9dfb0efb6f288af6300",
+            "certificateTablePresent": true,
+            "certificateSHA256": "033cc8bee686c993f1ca0fea807df82c6e2bc2e1af5f29c81353bd5f33baad32",
+            "symlink": false
+          },
+          "prefix": {
+            "size": 167504,
+            "sha256": "df442923671d0375db1c208a5effd0a7268b7e0dd01fc9dfb0efb6f288af6300",
+            "certificateTablePresent": true,
+            "certificateSHA256": "033cc8bee686c993f1ca0fea807df82c6e2bc2e1af5f29c81353bd5f33baad32",
+            "symlink": false
+          },
+          "identicalBytes": true,
+          "sourceOfflineVerifyExit": 0,
+          "sourceVerified": true,
+          "prefixOfflineVerifyExit": 0,
+          "prefixVerified": true
+        },
+        {
+          "name": "xinput9_1_0.dll",
+          "source": {
+            "size": 77376,
+            "sha256": "165aa0fa18a63b021f5484190806b2d91df762c7324a9a14c1197749d2f1ec88",
+            "certificateTablePresent": true,
+            "certificateSHA256": "a35beeef8e00c59ff532af2a6187984917de7931267a3c776a3ebf1b72aa6523",
+            "symlink": false
+          },
+          "prefix": {
+            "size": 77376,
+            "sha256": "165aa0fa18a63b021f5484190806b2d91df762c7324a9a14c1197749d2f1ec88",
+            "certificateTablePresent": true,
+            "certificateSHA256": "a35beeef8e00c59ff532af2a6187984917de7931267a3c776a3ebf1b72aa6523",
+            "symlink": false
+          },
+          "identicalBytes": true,
+          "sourceOfflineVerifyExit": 0,
+          "sourceVerified": true,
+          "prefixOfflineVerifyExit": 0,
+          "prefixVerified": true
+        }
+      ]
+    }
+  },
+  "date": "2026-11-02",
+  "platform": {
+    "macOS": "27.2",
+    "architecture": "arm64",
+    "execution": "x86_64 via Rosetta"
+  },
+  "releaseURL": "https://github.com/dspp779/CyderBits/releases/tag/v0.10.0",
+  "releaseAsset": "Cyder-maplestory-oem25-0.10.0.zip",
+  "releaseAssetSHA256": "3ed4a8361380beff533fd1fd07afdcaed3195ceba3d9971acb4dacbf58a3acab",
+  "engineArchiveSHA256": "31a479395b8d5fc95567240bb3e9387a3fa292776f0572b450926e74d7a744ac",
+  "archiveMatchesBundledDigest": true,
+  "verifier": {
+    "name": "osslsigncode",
+    "version": "2.12",
+    "sourceURL": "https://github.com/mtrojnar/osslsigncode/releases/tag/2.12",
+    "sourceArchiveSHA256": "6c0a2ac937d4c5a49afcba107a8d97622aa84b6ac1508df913fe6e3d4831d82e",
+    "flags": [
+      "verify",
+      "-ignore-crl",
+      "-CAfile",
+      "system Homebrew OpenSSL CA bundle"
+    ],
+    "caBundleSHA256": "f356a97fb33148de963979b5b164c0b8de13c5bfe0ffe913ef68208d6364a419"
+  },
+  "antivirus": {
+    "BitdefenderTested": false,
+    "reason": "No Bitdefender app, launch daemon or matching process found; no install or security setting changes made."
+  },
+  "scope": "PE entries in engine architecture directories compared by identical basename in system32/syswow64. Other install locations are not classified as missing/corrupt."
+}

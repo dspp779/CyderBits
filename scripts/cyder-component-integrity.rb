@@ -18,6 +18,11 @@ module CyderIntegrity
     'fileSHA256' => '3d50d7f39c64778c71d0af2fce1cde818d09ffbce7c4f7b8ae24ae1df567c0ca'
   }.freeze
 
+  # Issue #12 evidence plus the reported trust-load dependency chain. Bounded scope.
+  PREFIX_CRITICAL = %w[ntdll.dll kernel32.dll kernelbase.dll bcrypt.dll crypt32.dll wintrust.dll
+                       mspatcha.dll xinput9_1_0.dll control.exe ncrypt.dll msidb.exe rasapi32.dll
+                       wevtapi.dll winemapi.dll].freeze
+
   CHUNK = 128 * 1024
   MAX_MANIFEST = 8 * 1024 * 1024
   MAX_FILES = 20000
@@ -159,6 +164,7 @@ module CyderIntegrity
   end
 
   def self.critical?(path)
+    return true if path.match(/\Alib\/wine\/(i386|x86_64)-windows\//) && PREFIX_CRITICAL.include?(File.basename(path))
     !!(path.match(/\A(?:version|engine-manifest\.json|cyder-graphics-provenance\.json|bin\/(wine|wine64|wineloader|wineserver))\z/) ||
        path.match(/\/(ntdll|kernel32|kernelbase|winemac|d3d11|dxgi|winemetal)\.(dll|so)\z/))
   end
@@ -418,7 +424,7 @@ module CyderIntegrity
     root = File.realpath(root)
     result = []
     bytes_read = 0
-    selected = depth == 'quick' ? rows.select { |r| r['critical'] == true } : rows
+    selected = depth == 'quick' ? rows.select { |r| r['critical'] == true || critical?(r['path']) } : rows
     raise Unknown, 'no_critical_inventory' if selected.empty?
     selected.each do |row|
       tick(deadline)
@@ -503,6 +509,122 @@ module CyderIntegrity
     {'component' => expected_source['component'], 'status' => 'unknown', 'reason' => 'invalid_or_unavailable_inventory'}
   end
 
+  # Architecture is in the registry header, not its potentially large body.
+  def self.prefix_architecture(prefix, deadline)
+    tick(deadline)
+    path = locate(prefix, 'system.reg')
+    File.open(path, File::RDONLY | File::NOFOLLOW | File::NONBLOCK) do |file|
+      before = file.stat
+      raise Unknown, 'invalid_registry_file' unless before.file?
+      bytes = file.read(65536) || ''.b
+      tick(deadline)
+      lines = bytes.lines
+      section = lines.index { |line| line.start_with?('[') }
+      raise Unknown, 'registry_header_too_large' if !section && before.size > bytes.bytesize
+      header = section ? lines[0...section] : lines
+      raise Unknown, 'registry_changed' unless identity(before) == identity(file.stat) &&
+        identity(before) == identity(File.lstat(path))
+      header.select { |line| line.start_with?('#arch=') }.map(&:strip).uniq
+    end
+  end
+
+  # Compare only known Wine PE names, using the publisher-bound runtime inventory.
+  # A byte match proves equivalence, not which installer produced a prefix file.
+  # Different physical files may be legitimate native DLLs / another Wine version.
+  def self.scan_prefix(bytes, prefix, engine, expected_sha, source, depth, deadline)
+    report = {'component' => 'prefix', 'prefix' => prefix, 'depth' => depth}
+    tick(deadline)
+    raise SourceMismatch, 'manifest_digest_mismatch' unless Digest::SHA256.hexdigest(bytes) == expected_sha
+    manifest = JSON.parse(bytes)
+    raise SourceMismatch, 'component_source_mismatch' unless source['component'] == 'engine' && manifest['source'] == source
+    rows = manifest['files']
+    raise Unknown, 'invalid_manifest' unless manifest['schemaVersion'] == VERSION && rows.is_a?(Array) && (1..MAX_FILES).include?(rows.length)
+    paths = rows.map { |r| safe_relative(r.fetch('path')) }
+    raise Unknown, 'duplicate_manifest_path' unless paths.uniq.length == paths.length
+    prefix_alias = File.expand_path(prefix)
+    prefix = File.realpath(prefix)
+    engine_alias = File.expand_path(engine)
+    engine = File.realpath(engine)
+    # Architecture is layout evidence only, never a provenance/trust marker.
+    arch = prefix_architecture(prefix, deadline)
+    mapping = case arch
+              when ['#arch=win64'] then {'x86_64' => 'system32', 'i386' => 'syswow64'}
+              when ['#arch=win32'] then {'i386' => 'system32'}
+              else raise Unknown, 'prefix_architecture_unknown'
+              end
+    selected = rows.select do |row|
+      match = row['path'].match(/\Alib\/wine\/(i386|x86_64)-windows\/([^\/]+)\z/)
+      match && mapping[match[1]] && PREFIX_CRITICAL.include?(match[2]) &&
+        row['kind'] == 'file' && row['format'] == 'PE'
+    end
+    raise Unknown, 'prefix_inventory_unavailable' if selected.empty?
+    files = []
+    bytes_read = 0
+    selected.each do |row|
+      tick(deadline)
+      architecture = row['path'].split('/')[2].sub('-windows', '')
+      relative = "drive_c/windows/#{mapping.fetch(architecture)}/#{File.basename(row['path'])}"
+      evidence = {'path' => relative, 'runtimePath' => row['path']}
+      begin
+        path = locate(prefix, relative)
+        before = File.lstat(path)
+        if before.symlink?
+          evidence['kind'] = 'symlink'
+          raise Unknown, 'engine_selection_changed' unless File.realpath(engine_alias) == engine
+          target = File.readlink(path)
+          # Never follow an arbitrary external link, linked parent, or chain.
+          expected = locate(engine, row['path'])
+          unless [expected, File.join(engine_alias, row['path'])].include?(File.expand_path(target, File.dirname(path)))
+            raise Unknown, 'prefix_source_unverified'
+          end
+          check_root = engine
+          check_row = row
+        else
+          evidence['kind'] = 'file'
+          raise Unknown, 'unexpected_file_type' unless before.file?
+          check_root = prefix
+          check_row = row.merge('path' => relative)
+        end
+        projected = JSON.generate(manifest.merge('files' => [check_row]))
+        checked = scan(projected, check_root, Digest::SHA256.hexdigest(projected), source, 'full', deadline)
+        bytes_read += checked['bytesRead'].to_i
+        result = (checked['files'] || []).first
+        raise Unknown, checked['reason'] || 'prefix_source_unverified' unless result
+        evidence.merge!(result.reject { |key, _| key == 'path' })
+        if evidence['status'] == 'content_mismatch' && !before.symlink?
+          evidence.merge!('status' => 'unknown', 'reason' => 'prefix_source_unverified')
+        end
+        raise Unknown, 'file_changed_during_check' unless identity(File.lstat(path)) == identity(before)
+        if before.symlink?
+          raise Unknown, 'file_changed_during_check' if File.readlink(path) != target
+          raise Unknown, 'engine_selection_changed' unless File.realpath(engine_alias) == engine
+        end
+      rescue Errno::ENOENT
+        evidence.merge!('status' => 'missing', 'reason' => 'expected_prefix_file_absent')
+      rescue Expired, Cancelled
+        raise
+      rescue Unknown => e
+        evidence.merge!('status' => 'unknown', 'reason' => e.message)
+      rescue SystemCallError, IOError
+        evidence.merge!('status' => 'unknown', 'reason' => 'unreadable_or_changed')
+      end
+      files << evidence
+    end
+    raise Unknown, 'prefix_selection_changed' unless File.realpath(prefix_alias) == prefix
+    report.merge('status' => files.any? { |r| r['status'] == 'missing' || r['status'] == 'content_mismatch' } ? 'mismatch' :
+                   (files.all? { |r| r['status'] == 'ok' } ? 'ok' : 'unknown'),
+                 'files' => files, 'checked' => files.length, 'inventoryCount' => selected.length, 'bytesRead' => bytes_read,
+                 'notice' => 'Selected Wine PE comparison only; differing copies have unverified provenance. Not loader or antivirus evidence.')
+  rescue SourceMismatch => e
+    report.merge('status' => 'source_mismatch', 'reason' => e.message)
+  rescue Expired, Cancelled => e
+    report.merge('status' => 'unknown', 'reason' => e.is_a?(Expired) ? 'timeout' : 'cancelled', 'files' => files || [])
+  rescue Unknown => e
+    report.merge('status' => 'unknown', 'reason' => e.message)
+  rescue SystemCallError, IOError, JSON::ParserError, KeyError, TypeError
+    report.merge('status' => 'unknown', 'reason' => 'prefix_or_inventory_unavailable')
+  end
+
   def self.bundle_trust(resources, deadline)
     resources = File.realpath(resources)
     app = File.dirname(File.dirname(resources))
@@ -535,7 +657,7 @@ module CyderIntegrity
     target
   end
 
-  def self.diagnose(resources, runtime, engine, component, depth, budget)
+  def self.diagnose(resources, runtime, engine, component, depth, budget, prefixes = [])
     deadline = now + budget
     resources = bundle_trust(resources, deadline)
     index = JSON.parse(read_small(locate(resources, 'component-manifests/index.json'), 65536))
@@ -561,6 +683,20 @@ module CyderIntegrity
         scan(bytes, root, spec['manifestSHA256'], spec['source'], depth, deadline)
       end
     end
+    if names.include?('engine')
+      spec = index['components']['engine']
+      prefixes.each do |prefix|
+        # Keep completed runtime evidence when the shared budget is exhausted.
+        reports << if now >= deadline
+          {'component' => 'prefix', 'prefix' => prefix, 'status' => 'unknown', 'reason' => 'timeout'}
+        elsif spec
+          bytes = read_small(locate(resources, 'component-manifests/engine.json'))
+          scan_prefix(bytes, prefix, engine, spec['manifestSHA256'], spec['source'], depth, deadline)
+        else
+          {'component' => 'prefix', 'prefix' => prefix, 'status' => 'unknown', 'reason' => 'inventory_not_shipped'}
+        end
+      end
+    end
     {'schemaVersion' => VERSION, 'trust' => 'verified-publisher', 'depth' => depth,
      'status' => reports.all? { |r| r['status'] == 'ok' } ? 'ok' : (reports.any? { |r| %w[mismatch missing source_mismatch].include?(r['status']) } ? 'mismatch' : 'unknown'),
      'components' => reports, 'notice' => 'Read-only integrity evidence; not antivirus or game acceptance.'}
@@ -582,6 +718,7 @@ if __FILE__ == $PROGRAM_NAME
     action = ARGV.shift
     OptionParser.new do |p|
       %w[resources runtime engine archive sha256 prefix component version zstd depth output].each { |key| p.on("--#{key} VALUE") { |v| options[key] = v } }
+      p.on('--bottle PATH') { |v| (options['bottles'] ||= []) << v }
       p.on('--summary') { options['summary'] = true }
       p.on('--budget SECONDS', Float) { |v| options['budget'] = v }
     end.parse!
@@ -595,7 +732,7 @@ if __FILE__ == $PROGRAM_NAME
         %w[all engine dxvk dxmt].include?(options['component']) && options['budget'] > 0 && options['budget'] <= 300
       Signal.trap('TERM') { raise CyderIntegrity::Cancelled }
       Signal.trap('INT') { raise CyderIntegrity::Cancelled }
-      result = CyderIntegrity.diagnose(*%w[resources runtime engine component depth budget].map { |k| options.fetch(k) })
+      result = CyderIntegrity.diagnose(*%w[resources runtime engine component depth budget].map { |k| options.fetch(k) }, options.fetch('bottles', []))
       if options['summary']
         (result['components'] || []).each do |component|
           files = component.delete('files') || []
