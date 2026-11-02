@@ -2,6 +2,8 @@
 
 日期：2026-11-02，Asia/Taipei。追蹤 [CyderBits #15](https://github.com/dspp779/CyderBits/issues/15)。引擎：[Draft PR #8](https://github.com/dspp779/cyder-wine-engine/pull/8)，commit `5be3824`；提交區間分析器：`a98b707`。
 
+後續三開結果見 [三開比較與生命週期驗證](triple-gpu-2026-11-02.zh-TW.md)；兩輪功率分開，三開戶外場景有漂移限制。
+
 ## 結論
 
 **這台 M4、單開 GDI 與本次放大場景下，GPU 線性採樣原型能以接近 HALFTONE 的底部文字畫質，降低平滑放大的 CPU 與晶片估計功率。** GPU 組遊戲 CPU 平均 41.18%、Combined 2.045 W；HALFTONE 為 73.99%、5.722 W，分別降低 **44.3%** 與 **64.3%**。
