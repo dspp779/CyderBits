@@ -67,7 +67,7 @@
 |------|------|
 | [games/compatibility-matrix.md](games/compatibility-matrix.md) | 📋 **遊戲相容性矩陣**：所有已測試單機與線上遊戲狀態、參數與 workaround 總表 |
 | [games/](games/README.md) | 依遊戲與問題類型的總入口 |
-| [games/bluecg/](games/bluecg/README.md) | BlueCG 顯示、runtime、MIDI 問題索引；A6 resize 已解決 |
+| [games/bluecg/](games/bluecg/README.md) | BlueCG 縮放根因、單／三開 HALFTONE／GPU 成本、cnc-ddraw 色深／色彩／無邊框與官方 ☰ 選單；含實驗／產品狀態及未完成項目 |
 | [games/bluecg/audio/midi-underrun.md](games/bluecg/audio/midi-underrun.md) | `dmsynth underrun` 的觀察、判定與診斷計畫 |
 | [games/pikachu-volleyball/](games/pikachu-volleyball/README.md) | 皮卡丘排球的 MSync／ESync 與 runtime 路徑空白問題 |
 

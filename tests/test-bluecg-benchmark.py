@@ -56,6 +56,7 @@ class BenchmarkTest(unittest.TestCase):
                  patch.object(bench.time, 'sleep'):
                 bench.sample(args)
             self.assertIn('game,42,2.000,100.00', args.output.read_text())
+            self.assertNotIn(b'\r', args.output.read_bytes())
             args.output = Path(tmp) / 'reuse.csv'
             with patch.object(bench, 'snapshot', side_effect=[(10, 'old'), (12, 'new')]), \
                  patch.object(bench.time, 'monotonic', side_effect=[0, 0, 0, 2]), \

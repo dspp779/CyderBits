@@ -1,0 +1,92 @@
+[
+  {
+    "phase": "cnc-release-nearest",
+    "source": "restored.png",
+    "rect": [
+      220,
+      1594,
+      1200,
+      1640
+    ],
+    "source_size": [
+      2200,
+      1646
+    ]
+  },
+  {
+    "phase": "cnc-release-bilinear",
+    "source": "restored.png",
+    "rect": [
+      220,
+      1594,
+      1200,
+      1640
+    ],
+    "source_size": [
+      2200,
+      1646
+    ]
+  },
+  {
+    "phase": "cnc-release-bicubic",
+    "source": "restored.png",
+    "rect": [
+      220,
+      1594,
+      1200,
+      1640
+    ],
+    "source_size": [
+      2200,
+      1646
+    ]
+  },
+  {
+    "asset": "default16-corruption.png",
+    "phase": "cnc-opengl-windowed-debug",
+    "source": "after-warning-wait.png",
+    "rect": [
+      50,
+      100,
+      900,
+      650
+    ],
+    "source_size": [
+      1922,
+      1506
+    ]
+  },
+  {
+    "asset": "color-comparison.png",
+    "sources": [
+      "cnc-builtin-baseline/unscaled.png",
+      "cnc-release-nearest/world-unscaled.png",
+      "cnc-release-colormatched-r2/world-unscaled.png"
+    ],
+    "rect": [
+      220,
+      1458,
+      1100,
+      1504
+    ],
+    "source_size": [
+      1922,
+      1506
+    ]
+  },
+  {
+    "asset": "colormatched-enlarged-font.png",
+    "phase": "cnc-release-colormatched-r2",
+    "source": "restored.png",
+    "rect": [
+      220,
+      1594,
+      1200,
+      1640
+    ],
+    "source_size": [
+      2200,
+      1646
+    ]
+  }
+]
