@@ -1,0 +1,857 @@
+{
+  "cases": [
+    {
+      "case": "cnc-fullscreen-bilinear",
+      "shader": "Bilinear",
+      "official_release_dll": true,
+      "alt_enter_round_trips": 3,
+      "fullscreen_minimize_restore": 3,
+      "windowed_minimize_restore": 1,
+      "status_click_fullscreen": true,
+      "system_click_fullscreen": true,
+      "status_click_after_return": true,
+      "normal_exit_from": "windowed",
+      "normal_exit": true,
+      "initial_bounds": {
+        "Height": 753,
+        "Width": 961,
+        "X": 260,
+        "Y": 48
+      },
+      "rounds": [
+        {
+          "round": 2,
+          "status_positive_score": 0.0,
+          "status_negative_score": 76.32036064007643,
+          "fullscreen_bounds": {
+            "Height": 946,
+            "Width": 1680,
+            "X": 0,
+            "Y": 0
+          },
+          "restored_bounds": {
+            "Height": 946,
+            "Width": 1680,
+            "X": 0,
+            "Y": 0
+          },
+          "returned_bounds": {
+            "Height": 753,
+            "Width": 961,
+            "X": 260,
+            "Y": 48
+          }
+        },
+        {
+          "round": 3,
+          "status_positive_score": 0.0,
+          "status_negative_score": 76.264679563729,
+          "fullscreen_bounds": {
+            "Height": 946,
+            "Width": 1680,
+            "X": 0,
+            "Y": 0
+          },
+          "restored_bounds": {
+            "Height": 946,
+            "Width": 1680,
+            "X": 0,
+            "Y": 0
+          },
+          "returned_bounds": {
+            "Height": 753,
+            "Width": 961,
+            "X": 260,
+            "Y": 48
+          }
+        }
+      ],
+      "return_fonts": {
+        "1": {
+          "mae": 0.0,
+          "max": 0,
+          "roi": [
+            220,
+            1464,
+            1100,
+            1500
+          ],
+          "pixels": 31680
+        },
+        "2": {
+          "mae": 0.0,
+          "max": 0,
+          "roi": [
+            220,
+            1464,
+            1100,
+            1500
+          ],
+          "pixels": 31680
+        },
+        "3": {
+          "mae": 0.0,
+          "max": 0,
+          "roi": [
+            220,
+            1464,
+            1100,
+            1500
+          ],
+          "pixels": 31680
+        }
+      },
+      "full_screen_points": [
+        1680,
+        945
+      ],
+      "window_client_points": [
+        1680,
+        946
+      ],
+      "viewport_points": [
+        1260,
+        945
+      ],
+      "letterbox_points": [
+        210,
+        210
+      ],
+      "padding_rows_offscreen": 1,
+      "padding_rows_offscreen_are_black": true,
+      "geometry": [
+        {
+          "label": "fullscreen-1",
+          "native_bounds": {
+            "Height": 946,
+            "Width": 1680,
+            "X": 0,
+            "Y": 0
+          },
+          "png_size": [
+            3360,
+            1892
+          ],
+          "content_bbox_pixels": [
+            420,
+            0,
+            2940,
+            1890
+          ],
+          "last_two_rows_black": true
+        },
+        {
+          "label": "fullscreen-2",
+          "native_bounds": {
+            "Height": 946,
+            "Width": 1680,
+            "X": 0,
+            "Y": 0
+          },
+          "png_size": [
+            3360,
+            1892
+          ],
+          "content_bbox_pixels": [
+            420,
+            0,
+            2940,
+            1890
+          ],
+          "last_two_rows_black": true
+        },
+        {
+          "label": "fullscreen-3",
+          "native_bounds": {
+            "Height": 946,
+            "Width": 1680,
+            "X": 0,
+            "Y": 0
+          },
+          "png_size": [
+            3360,
+            1892
+          ],
+          "content_bbox_pixels": [
+            420,
+            0,
+            2940,
+            1890
+          ],
+          "last_two_rows_black": true
+        },
+        {
+          "label": "fullscreen-restored-1",
+          "native_bounds": {
+            "Height": 946,
+            "Width": 1680,
+            "X": 0,
+            "Y": 0
+          },
+          "png_size": [
+            3360,
+            1892
+          ],
+          "content_bbox_pixels": [
+            420,
+            0,
+            2940,
+            1890
+          ],
+          "last_two_rows_black": true
+        },
+        {
+          "label": "fullscreen-restored-2",
+          "native_bounds": {
+            "Height": 946,
+            "Width": 1680,
+            "X": 0,
+            "Y": 0
+          },
+          "png_size": [
+            3360,
+            1892
+          ],
+          "content_bbox_pixels": [
+            420,
+            0,
+            2940,
+            1890
+          ],
+          "last_two_rows_black": true
+        },
+        {
+          "label": "fullscreen-restored-3",
+          "native_bounds": {
+            "Height": 946,
+            "Width": 1680,
+            "X": 0,
+            "Y": 0
+          },
+          "png_size": [
+            3360,
+            1892
+          ],
+          "content_bbox_pixels": [
+            420,
+            0,
+            2940,
+            1890
+          ],
+          "last_two_rows_black": true
+        },
+        {
+          "label": "fullscreen-status-closed-2",
+          "native_bounds": {
+            "Height": 946,
+            "Width": 1680,
+            "X": 0,
+            "Y": 0
+          },
+          "png_size": [
+            3360,
+            1892
+          ],
+          "content_bbox_pixels": [
+            420,
+            0,
+            2940,
+            1890
+          ],
+          "last_two_rows_black": true
+        },
+        {
+          "label": "fullscreen-status-closed-3",
+          "native_bounds": {
+            "Height": 946,
+            "Width": 1680,
+            "X": 0,
+            "Y": 0
+          },
+          "png_size": [
+            3360,
+            1892
+          ],
+          "content_bbox_pixels": [
+            420,
+            0,
+            2940,
+            1890
+          ],
+          "last_two_rows_black": true
+        },
+        {
+          "label": "fullscreen-status-closed",
+          "native_bounds": {
+            "Height": 946,
+            "Width": 1680,
+            "X": 0,
+            "Y": 0
+          },
+          "png_size": [
+            3360,
+            1892
+          ],
+          "content_bbox_pixels": [
+            420,
+            0,
+            2940,
+            1890
+          ],
+          "last_two_rows_black": true
+        },
+        {
+          "label": "fullscreen-status-open-2",
+          "native_bounds": {
+            "Height": 946,
+            "Width": 1680,
+            "X": 0,
+            "Y": 0
+          },
+          "png_size": [
+            3360,
+            1892
+          ],
+          "content_bbox_pixels": [
+            420,
+            0,
+            2940,
+            1890
+          ],
+          "last_two_rows_black": true
+        },
+        {
+          "label": "fullscreen-status-open-3",
+          "native_bounds": {
+            "Height": 946,
+            "Width": 1680,
+            "X": 0,
+            "Y": 0
+          },
+          "png_size": [
+            3360,
+            1892
+          ],
+          "content_bbox_pixels": [
+            420,
+            0,
+            2940,
+            1890
+          ],
+          "last_two_rows_black": true
+        },
+        {
+          "label": "fullscreen-status-open-verified",
+          "native_bounds": {
+            "Height": 946,
+            "Width": 1680,
+            "X": 0,
+            "Y": 0
+          },
+          "png_size": [
+            3360,
+            1892
+          ],
+          "content_bbox_pixels": [
+            420,
+            0,
+            2940,
+            1890
+          ],
+          "last_two_rows_black": true
+        },
+        {
+          "label": "fullscreen-status-open",
+          "native_bounds": {
+            "Height": 946,
+            "Width": 1680,
+            "X": 0,
+            "Y": 0
+          },
+          "png_size": [
+            3360,
+            1892
+          ],
+          "content_bbox_pixels": [
+            420,
+            0,
+            2940,
+            1890
+          ],
+          "last_two_rows_black": true
+        },
+        {
+          "label": "fullscreen-system-closed",
+          "native_bounds": {
+            "Height": 946,
+            "Width": 1680,
+            "X": 0,
+            "Y": 0
+          },
+          "png_size": [
+            3360,
+            1892
+          ],
+          "content_bbox_pixels": [
+            420,
+            0,
+            2940,
+            1890
+          ],
+          "last_two_rows_black": true
+        },
+        {
+          "label": "fullscreen-system-open",
+          "native_bounds": {
+            "Height": 946,
+            "Width": 1680,
+            "X": 0,
+            "Y": 0
+          },
+          "png_size": [
+            3360,
+            1892
+          ],
+          "content_bbox_pixels": [
+            420,
+            0,
+            2940,
+            1890
+          ],
+          "last_two_rows_black": true
+        },
+        {
+          "label": "windowed-before",
+          "native_bounds": {
+            "Height": 753,
+            "Width": 961,
+            "X": 260,
+            "Y": 48
+          },
+          "png_size": [
+            1922,
+            1506
+          ]
+        },
+        {
+          "label": "windowed-restored-final",
+          "native_bounds": {
+            "Height": 753,
+            "Width": 961,
+            "X": 260,
+            "Y": 48
+          },
+          "png_size": [
+            1922,
+            1506
+          ]
+        },
+        {
+          "label": "windowed-return-1",
+          "native_bounds": {
+            "Height": 753,
+            "Width": 961,
+            "X": 260,
+            "Y": 48
+          },
+          "png_size": [
+            1922,
+            1506
+          ]
+        },
+        {
+          "label": "windowed-return-2",
+          "native_bounds": {
+            "Height": 753,
+            "Width": 961,
+            "X": 260,
+            "Y": 48
+          },
+          "png_size": [
+            1922,
+            1506
+          ]
+        },
+        {
+          "label": "windowed-return-3",
+          "native_bounds": {
+            "Height": 753,
+            "Width": 961,
+            "X": 260,
+            "Y": 48
+          },
+          "png_size": [
+            1922,
+            1506
+          ]
+        },
+        {
+          "label": "windowed-status-open-final",
+          "native_bounds": {
+            "Height": 753,
+            "Width": 961,
+            "X": 260,
+            "Y": 48
+          },
+          "png_size": [
+            1922,
+            1506
+          ]
+        }
+      ],
+      "configuration": {
+        "renderer": "opengl",
+        "override": {
+          "windowed": "true",
+          "fullscreen": "false",
+          "width": "0",
+          "height": "0",
+          "renderer": "opengl",
+          "shader": "Bilinear",
+          "savesettings": "0",
+          "devmode": "true",
+          "maxfps": "60",
+          "fake_mode": "961x721x32",
+          "posx": "260",
+          "posy": "80",
+          "game_handles_close": "true",
+          "maintas": "true",
+          "boxing": "false",
+          "adjmouse": "true",
+          "toggle_borderless": "true",
+          "toggle_upscaled": "false"
+        },
+        "dll_sha256": "85e0f7d530dfda134793a57cb3e76b0287dcc96892ee57162dd68f47283b03a9"
+      },
+      "module_evidence": {
+        "native_ddraw_load_confirmed": true,
+        "official_dll_sha256": "85e0f7d530dfda134793a57cb3e76b0287dcc96892ee57162dd68f47283b03a9"
+      }
+    },
+    {
+      "case": "cnc-fullscreen-colormatched",
+      "shader": "Shaders\\interpolation\\bluecg-capture-bilinear.glsl",
+      "official_release_dll": true,
+      "alt_enter_round_trips": 1,
+      "additional_fullscreen_entry": 1,
+      "fullscreen_minimize_restore": 2,
+      "status_click_fullscreen": true,
+      "system_click_fullscreen": true,
+      "status_click_after_return": true,
+      "normal_exit_from": "fullscreen",
+      "normal_exit": true,
+      "standard_exit_dialog_screenshot": true,
+      "return_fonts": {
+        "roi": [
+          220,
+          1464,
+          1100,
+          1500
+        ],
+        "pixels": 31680,
+        "mae": 0.0,
+        "max": 0
+      },
+      "panel_scores": {
+        "restored_panel_positive": 0.0,
+        "closed_panel_negative": 58.21063928031208
+      },
+      "full_screen_points": [
+        1680,
+        945
+      ],
+      "window_client_points": [
+        1680,
+        946
+      ],
+      "viewport_points": [
+        1260,
+        945
+      ],
+      "letterbox_points": [
+        210,
+        210
+      ],
+      "initial_bounds": {
+        "Height": 753,
+        "Width": 961,
+        "X": 260,
+        "Y": 48
+      },
+      "geometry": [
+        {
+          "label": "fullscreen-1",
+          "native_bounds": {
+            "Height": 946,
+            "Width": 1680,
+            "X": 0,
+            "Y": 0
+          },
+          "png_size": [
+            3360,
+            1892
+          ],
+          "content_bbox_pixels": [
+            420,
+            0,
+            2940,
+            1890
+          ],
+          "last_two_rows_black": true
+        },
+        {
+          "label": "fullscreen-2",
+          "native_bounds": {
+            "Height": 946,
+            "Width": 1680,
+            "X": 0,
+            "Y": 0
+          },
+          "png_size": [
+            3360,
+            1892
+          ],
+          "content_bbox_pixels": [
+            420,
+            0,
+            2940,
+            1890
+          ],
+          "last_two_rows_black": true
+        },
+        {
+          "label": "fullscreen-restored-1",
+          "native_bounds": {
+            "Height": 946,
+            "Width": 1680,
+            "X": 0,
+            "Y": 0
+          },
+          "png_size": [
+            3360,
+            1892
+          ],
+          "content_bbox_pixels": [
+            420,
+            0,
+            2940,
+            1890
+          ],
+          "last_two_rows_black": true
+        },
+        {
+          "label": "fullscreen-restored-2",
+          "native_bounds": {
+            "Height": 946,
+            "Width": 1680,
+            "X": 0,
+            "Y": 0
+          },
+          "png_size": [
+            3360,
+            1892
+          ],
+          "content_bbox_pixels": [
+            420,
+            0,
+            2940,
+            1890
+          ],
+          "last_two_rows_black": true
+        },
+        {
+          "label": "fullscreen-status-closed",
+          "native_bounds": {
+            "Height": 946,
+            "Width": 1680,
+            "X": 0,
+            "Y": 0
+          },
+          "png_size": [
+            3360,
+            1892
+          ],
+          "content_bbox_pixels": [
+            420,
+            0,
+            2940,
+            1890
+          ],
+          "last_two_rows_black": true
+        },
+        {
+          "label": "fullscreen-status-open",
+          "native_bounds": {
+            "Height": 946,
+            "Width": 1680,
+            "X": 0,
+            "Y": 0
+          },
+          "png_size": [
+            3360,
+            1892
+          ],
+          "content_bbox_pixels": [
+            420,
+            0,
+            2940,
+            1890
+          ],
+          "last_two_rows_black": true
+        },
+        {
+          "label": "fullscreen-system-closed",
+          "native_bounds": {
+            "Height": 946,
+            "Width": 1680,
+            "X": 0,
+            "Y": 0
+          },
+          "png_size": [
+            3360,
+            1892
+          ],
+          "content_bbox_pixels": [
+            420,
+            0,
+            2940,
+            1890
+          ],
+          "last_two_rows_black": true
+        },
+        {
+          "label": "fullscreen-system-open",
+          "native_bounds": {
+            "Height": 946,
+            "Width": 1680,
+            "X": 0,
+            "Y": 0
+          },
+          "png_size": [
+            3360,
+            1892
+          ],
+          "content_bbox_pixels": [
+            420,
+            0,
+            2940,
+            1890
+          ],
+          "last_two_rows_black": true
+        },
+        {
+          "label": "windowed-before",
+          "native_bounds": {
+            "Height": 753,
+            "Width": 961,
+            "X": 260,
+            "Y": 48
+          },
+          "png_size": [
+            1922,
+            1506
+          ]
+        },
+        {
+          "label": "windowed-return-1",
+          "native_bounds": {
+            "Height": 753,
+            "Width": 961,
+            "X": 260,
+            "Y": 48
+          },
+          "png_size": [
+            1922,
+            1506
+          ]
+        },
+        {
+          "label": "windowed-status-closed",
+          "native_bounds": {
+            "Height": 753,
+            "Width": 961,
+            "X": 260,
+            "Y": 48
+          },
+          "png_size": [
+            1922,
+            1506
+          ]
+        },
+        {
+          "label": "windowed-status-open",
+          "native_bounds": {
+            "Height": 753,
+            "Width": 961,
+            "X": 260,
+            "Y": 48
+          },
+          "png_size": [
+            1922,
+            1506
+          ]
+        }
+      ],
+      "configuration": {
+        "renderer": "opengl",
+        "override": {
+          "windowed": "true",
+          "fullscreen": "false",
+          "width": "0",
+          "height": "0",
+          "renderer": "opengl",
+          "shader": "Shaders\\interpolation\\bluecg-capture-bilinear.glsl",
+          "savesettings": "0",
+          "devmode": "true",
+          "maxfps": "60",
+          "fake_mode": "961x721x32",
+          "posx": "260",
+          "posy": "80",
+          "game_handles_close": "true",
+          "maintas": "true",
+          "boxing": "false",
+          "adjmouse": "true",
+          "toggle_borderless": "true",
+          "toggle_upscaled": "false"
+        },
+        "dll_sha256": "85e0f7d530dfda134793a57cb3e76b0287dcc96892ee57162dd68f47283b03a9"
+      },
+      "module_evidence": {
+        "native_ddraw_load_confirmed": true,
+        "official_dll_sha256": "85e0f7d530dfda134793a57cb3e76b0287dcc96892ee57162dd68f47283b03a9"
+      }
+    }
+  ],
+  "display": {
+    "logical_points": [
+      1680,
+      945
+    ],
+    "backing_scale": 2,
+    "screen_capture_pixels": [
+      3360,
+      1890
+    ],
+    "display_count": 1
+  },
+  "restoration": {
+    "restored_files": [
+      "user.reg",
+      "system.reg",
+      "userdef.reg",
+      "DDRAW.dll",
+      "BlueLauncher.ini",
+      "EasyLogin_common_args_tc.dat"
+    ],
+    "registry_exact": true,
+    "launcher_ini_exact": true,
+    "launcher_common_args_exact": true,
+    "official_ddraw_exact": true,
+    "game_payload_hashes_unchanged": true,
+    "added_shader_files_removed": 15,
+    "added_ddraw_ini_removed": true,
+    "task_games_and_launcher_exited": true,
+    "no_production_runtime_changed": true,
+    "no_compatdb_or_other_game_settings_changed": true
+  }
+}

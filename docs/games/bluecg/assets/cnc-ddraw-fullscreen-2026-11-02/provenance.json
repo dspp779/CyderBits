@@ -1,0 +1,83 @@
+[
+  {
+    "asset": "bilinear-full-display.png",
+    "case": "cnc-fullscreen-bilinear",
+    "source": "fullscreen-display-1.png",
+    "original_sha256": "5e6304293290f63996d27743c2e7aaad8abf66c638989c9c814a9b5d8b3250c4",
+    "edits": []
+  },
+  {
+    "asset": "bilinear-status-fullscreen-redacted.png",
+    "case": "cnc-fullscreen-bilinear",
+    "source": "fullscreen-status-open-verified.png",
+    "redactions": [
+      [
+        625,
+        267,
+        1050,
+        319
+      ]
+    ],
+    "edits": [
+      "character-name redaction only"
+    ]
+  },
+  {
+    "asset": "bilinear-windowed-return-redacted.png",
+    "case": "cnc-fullscreen-bilinear",
+    "source": "windowed-return-3.png",
+    "redactions": [
+      [
+        0,
+        0,
+        1921,
+        63
+      ]
+    ],
+    "edits": [
+      "native title-bar redaction only"
+    ]
+  },
+  {
+    "asset": "colormatched-full-display.png",
+    "case": "cnc-fullscreen-colormatched",
+    "source": "fullscreen-display-2.png",
+    "original_sha256": "70e8b96c74553294aae6518dae96aafe50153a9283d1eab8c0b507fb7c45d60b",
+    "edits": []
+  },
+  {
+    "asset": "colormatched-fullscreen-exit-dialog.png",
+    "case": "cnc-fullscreen-colormatched",
+    "source": "fullscreen-exit-dialog.png",
+    "original_sha256": "961d0e1548a913421129001117b8ceac6903dc7d1bae74a87a2723fe63dfd1b1",
+    "edits": []
+  },
+  {
+    "asset": "fullscreen-fonts.png",
+    "case": "cnc-fullscreen-bilinear",
+    "source": "fullscreen-1.png",
+    "crop": [
+      640,
+      1836,
+      1940,
+      1888
+    ],
+    "edits": [
+      "crop and label; no resampling"
+    ]
+  },
+  {
+    "asset": "fullscreen-fonts.png",
+    "case": "cnc-fullscreen-colormatched",
+    "source": "fullscreen-2.png",
+    "crop": [
+      640,
+      1836,
+      1940,
+      1888
+    ],
+    "edits": [
+      "crop and label; no resampling"
+    ]
+  }
+]
