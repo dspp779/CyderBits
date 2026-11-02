@@ -37,7 +37,7 @@ def load(text):
             row['api'] = 0
             if kind == 'GDI':
                 row.update({k: int(raw[k]) for k in ('api', 'src_width', 'src_height', 'stretch_mode', 'rop')})
-                if row['api'] not in (1, 2):
+                if row['api'] not in (1, 2, 3):
                     raise ValueError('unknown GDI operation')
             if not re.fullmatch(r'(?:0x)?[0-9a-fA-F]+', row['surface']):
                 raise ValueError('invalid surface identity')
@@ -86,7 +86,7 @@ def extract(meta, rows, start, end, surface, thread, rect, api=0):
     api_ms = [(r['end_qpc']-r['begin_qpc'])*1000/meta['frequency'] for r in selected]
     rank = lambda p: values[math.ceil(p*len(values))-1]
     duration = sum(intervals)/1000
-    scope = 'GDI window blit' if meta['capture_kind'] == 'GDI' else 'DirectDraw primary update'
+    scope = ('GPU final-bitmap' if api == 3 else 'GDI window blit') if meta['capture_kind'] == 'GDI' else 'DirectDraw primary update'
     summary = dict(scope=f'successful {scope} API submissions; not GPU completion or scanout',
                    capture_kind=meta['capture_kind'], api=api,
                    windows_pid=meta['windows_pid'], surface=surface, thread_id=thread, rectangle=list(rect),
@@ -99,6 +99,8 @@ def extract(meta, rows, start, end, surface, thread, rect, api=0):
                    api_median_ms=statistics.median(api_ms), api_max_ms=max(api_ms))
     if meta['capture_kind'] == 'GDI':
         row = selected[0]
+        summary['presentation_backend'] = 'gpu-helper' if api == 3 else 'gdi'
+        if api == 3: summary['stretch_mode_semantics'] = 'caller DC state; actual GPU sampler must be verified separately'
         summary.update(source_dimensions=[row['src_width'], row['src_height']],
                        stretch_mode=row['stretch_mode'], rop_hex=f"0x{row['rop']:08x}")
     return summary, list(zip(intervals, selected[1:]))
@@ -112,7 +114,7 @@ def main():
     p.add_argument('--list', action='store_true', help='list identities and rectangles; never guess a frame stream')
     p.add_argument('--surface')
     p.add_argument('--thread', type=int)
-    p.add_argument('--api', type=int, choices=(0, 1, 2), default=0, help='0=DirectDraw, 1=BitBlt, 2=StretchBlt')
+    p.add_argument('--api', type=int, choices=(0, 1, 2, 3), default=0, help='0=DirectDraw, 1=BitBlt, 2=StretchBlt, 3=GPU final bitmap')
     p.add_argument('--rect', help='LEFT,TOP,WIDTH,HEIGHT')
     p.add_argument('--output', type=Path)
     a = p.parse_args()

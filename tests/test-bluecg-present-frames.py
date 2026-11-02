@@ -1,4 +1,8 @@
 import importlib.util
+import json
+import subprocess
+import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -47,6 +51,31 @@ class FramesTest(unittest.TestCase):
         self.assertEqual(summary['source_dimensions'], [960,720])
         rows[-1]['stretch_mode'] = 4
         with self.assertRaisesRegex(ValueError, 'stretch mode'):
+            frames.extract(meta, rows, 100, 100.12, 'abc', 7, (0,0,960,720), 2)
+
+
+    def test_gpu_submissions_are_separate_and_do_not_claim_a_gdi_filter(self):
+        lines = self.capture().replace('CYDER_DDRAW_PROFILE', 'CYDER_GDI_PROFILE').splitlines()
+        lines[1] += ',api,src_width,src_height,stretch_mode,rop'
+        for i in range(2, len(lines)):
+            lines[i] += ',3,961,721,3,13369376'
+        meta, rows = frames.load('\n'.join(lines)+'\n')
+        summary, _ = frames.extract(meta, rows, 100, 100.12, 'abc', 7, (0,0,960,720), 3)
+        self.assertEqual(summary['presentation_backend'], 'gpu-helper')
+        self.assertIn('actual GPU sampler', summary['stretch_mode_semantics'])
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder)
+            (path/'capture.csv').write_text('\n'.join(lines)+'\n')
+            result = subprocess.run([
+                sys.executable, str(Path(__file__).resolve().parents[1]/'scripts/bluecg-present-frames.py'),
+                str(path/'capture.csv'), '--start-epoch', '100', '--end-epoch', '100.12',
+                '--surface', 'abc', '--thread', '7', '--rect', '0,0,960,720',
+                '--api', '3', '--output', str(path/'frames.csv')], capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(json.loads(result.stdout)['presentation_backend'], 'gpu-helper')
+            self.assertEqual(len((path/'frames.csv').read_text().splitlines()), 4)
+
+        with self.assertRaisesRegex(ValueError, 'fewer than two'):
             frames.extract(meta, rows, 100, 100.12, 'abc', 7, (0,0,960,720), 2)
 
 
