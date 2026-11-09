@@ -2946,15 +2946,20 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             }
         }
 
+        let execution = CyderProcessRunner.LauncherExecution(preparationOnly: preparationOnly,
+            isLaunch: isLaunch, isObservation: isObservation,
+            isStop: args.contains("--stop-prefix") || args.contains("--stop-all"))
         let started = ProcessInfo.processInfo.systemUptime
+        if preparationOnly, let deadline = execution.deadline {
+            CyderDiagnostics.shared.info("operation=\(operation) preparation_budget_ms=\(Int(deadline * 1000))")
+        }
         onMainThread { activeProcessOperations += 1 }
         transferredLease = true
         retainedEnvironmentPreparation?.executorStarted()
         let gate = operationGate
         let transportToRemove = handoffCleanupURL
         let outcome = await processRunner.run(process: process,
-            policy: isLaunch ? .launch : (isObservation ? .observation : .mutation),
-            deadline: isLaunch ? 30 : (isObservation ? 5 : ((args.contains("--stop-prefix") || args.contains("--stop-all")) ? 15 : nil)), output: handle,
+            policy: execution.policy, deadline: execution.deadline, output: handle,
             onSpawn: onSpawn, onRelease: { [weak self] in
                 if let transportToRemove { try? FileManager.default.removeItem(at: transportToRemove) }
                 if !preparationOnly, retainedEnvironmentPreparation == nil, let acquired { gate.release(acquired) }
