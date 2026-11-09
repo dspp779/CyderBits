@@ -62,7 +62,8 @@ class CyderGraphicsUpdate
   def probe
     return @probe_input.call if @probe_input
     helper = File.join(File.dirname(@resources), 'MacOS', 'CyderSwift')
-    _, text, status = C.command([helper, '--graphics-runtime-state', File.dirname(@engine)], @deadline)
+    _, text, status = C.command([helper, '--graphics-runtime-state', File.dirname(@engine), @prefix,
+                               File.join(@engine, 'bin/wineserver')], @deadline)
     return :idle if status == 10 && text.strip == 'cyder-graphics-v1 idle'
     return :busy if status == 0 && text.strip == 'cyder-graphics-v1 busy'
     :unknown
@@ -215,6 +216,10 @@ class CyderGraphicsUpdate
     end
   rescue Deferred => e
     {'status' => 'deferred', 'reason' => e.message}
+  rescue C::Unknown => e
+    reasons = %w[publisher_unverified system_signature_verifier_unavailable]
+    reason = reasons.include?(e.message) ? e.message : 'verification_or_io_unknown'
+    {'status' => 'deferred', 'reason' => reason}
   rescue StandardError
     {'status' => 'deferred', 'reason' => 'verification_or_io_unknown'}
   end

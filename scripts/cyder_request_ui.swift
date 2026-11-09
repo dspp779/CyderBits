@@ -8,7 +8,8 @@ struct CyderRequestRow: Equatable {
     let canCancel: Bool
     var canResend = false
     var canWithdraw = false
-    static func project(_ records: [CyderRequestJournal.Record], outbox: [CyderOutboxNotice] = []) -> [Self] {
+    static func project(_ records: [CyderRequestJournal.Record], outbox: [CyderOutboxNotice] = [],
+                        presentedLaunches: Set<String> = []) -> [Self] {
         let accepted: [Self] = records.compactMap { record in
             guard record.children == nil else { return nil }
             let detail: String
@@ -17,7 +18,9 @@ struct CyderRequestRow: Equatable {
             case .awaitingUserResume:
                 detail = record.outcome?.hasPrefix("scope-") == true
                     ? "環境暫時無法確認；尚未派送，可稍後繼續" : "上次尚未啟動"
-            case .dispatching, .observing: detail = "正在啟動；已無法取消派送"
+            case .dispatching, .observing:
+                detail = record.launchID.map(presentedLaunches.contains) == true
+                    ? "已顯示程式視窗，正在確認互動狀態" : "正在啟動；已無法取消派送"
             case .uncertain: detail = "啟動結果尚未確認；不會自動重試"
             case .failed: detail = "啟動未完成；可查看診斷記錄"
             case .completed, .cancelled: return nil
@@ -42,6 +45,9 @@ struct CyderRequestRow: Equatable {
         let waiting = rows.filter(\.canResume).count
         if records.contains(where: { $0.phase == .awaitingUserResume && $0.outcome?.hasPrefix("scope-") == true }) {
             return "\(waiting) 個項目尚未啟動 · 查看要求"
+        }
+        if waiting == 0, !records.contains(where: { [.queued, .dispatching, .observing].contains($0.phase) && $0.children == nil }) {
+            return "\(rows.count) 筆啟動結果待查看"
         }
         return waiting > 0 ? "上次有 \(waiting) 個項目尚未啟動 · 查看要求" : "\(rows.count) 個啟動要求 · 查看狀態"
     }
@@ -71,9 +77,10 @@ final class CyderRequestWindowController: NSWindowController, NSWindowDelegate, 
         window.minSize = NSSize(width: 560, height: 260); window.center()
         build()
     }
-    func update(_ records: [CyderRequestJournal.Record], outbox: [CyderOutboxNotice] = []) {
+    func update(_ records: [CyderRequestJournal.Record], outbox: [CyderOutboxNotice] = [],
+                presentedLaunches: Set<String> = []) {
         precondition(Thread.isMainThread)
-        rows = CyderRequestRow.project(records, outbox: outbox)
+        rows = CyderRequestRow.project(records, outbox: outbox, presentedLaunches: presentedLaunches)
         table.reloadData()
         if rows.isEmpty { feedback.stringValue = "沒有等待處理的啟動要求。" }
     }

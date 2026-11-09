@@ -76,7 +76,7 @@ assert_contains "$status_source" 'func markLaunchStarted()' \
   "external launches must install the menu-bar item before Wine has a PID"
 assert_contains "$app_source" 'presentExternalLaunchStarting()' \
   "URI and Finder EXE launches must show starting UI immediately"
-assert_contains "$app_source" 'showSetup("正在啟動程式…")' \
+assert_contains "$app_source" 'showSetup("正在啟動程式…", passive: true)' \
   "program launches must show a starting progress panel"
 assert_contains "$(cat "$ROOT/scripts/cyder_launch_support.swift")" 'setActivationPolicy(dockVisible ? .regular : .accessory)' \
   "game library and Preferences must appear in the Dock and Cmd-Tab"
@@ -94,7 +94,7 @@ assert_contains "$app_source" 'instanceCoordinator.submit(' \
   "a resident Cyder process must accept later Finder EXE requests"
 
 wrapper_source="$(cat "$ROOT/scripts/cyder-macos-wrapper.sh")"
-assert_contains "$wrapper_source" 'cyder_exec_cyder_swift "$SELF/CyderSwift" "$exe" "${game_args[@]}"' \
+assert_contains "$wrapper_source" 'cyder_exec_cyder_swift "$SELF/CyderSwift" "${document_args[@]}"' \
   "macOS 11 explicit EXE launches must enter the native lifecycle agent"
 assert_contains "$wrapper_source" 'Catalina deliberately retains the shell-only fallback' \
   "Catalina must keep the existing Bash-only behavior"

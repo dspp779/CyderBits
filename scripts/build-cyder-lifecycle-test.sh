@@ -56,6 +56,7 @@ for folder in ['support','runtime']:
 wrapper=app/'Contents/MacOS/Cyder'
 wrapper.write_text('#!/bin/bash\n'
     +'export CYDER_SUPPORT='+shlex.quote(str(out/'support'))+'\n'
+    +'export CYDER_DOWNLOADS='+shlex.quote(str(out/'support'/'downloads'))+'\n'
     +'export CYDER_RUNTIME_ROOT='+shlex.quote(str(out/'runtime'))+'\n'
     +'export CYDER_BUNDLE_ID='+shlex.quote(identity)+'\n'
     +'exec "$(dirname "$0")/CyderSwift" "$@"\n')
@@ -66,7 +67,9 @@ PY
 APP="$TEST_ROOT/build/Cyder.app"
 codesign --force --deep --sign - --timestamp=none "$APP" > "$TEST_ROOT/sign.log" 2>&1
 codesign --verify --deep --strict --verbose=2 "$APP" >> "$TEST_ROOT/sign.log" 2>&1
-lipo "$APP/Contents/MacOS/CyderSwift" -verify_arch arm64 x86_64
+for arch in arm64 x86_64; do
+  /usr/bin/lipo "$APP/Contents/MacOS/CyderSwift" -verify_arch "$arch"
+done
 python3 - <<'PY'
 import hashlib,json,os,subprocess
 from pathlib import Path

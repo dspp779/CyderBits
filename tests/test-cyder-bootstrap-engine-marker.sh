@@ -56,6 +56,8 @@ export CYDER_TEST_WINEBOOT_LOG="$TMP/wineboot.log"
 
 source "$ROOT/scripts/cyder-common.sh"
 cyder_wine_locale_exports() { :; }
+# Fixture-only prefix ownership; do not inspect host Wine processes.
+cyder_has_running_prefix() { return 1; }
 
 support="$TMP/support"
 export CYDER_SUPPORT="$support" CYDER_SHARED_PREFIX="$support/bottles/shared" CYDER_SCRIPTS="$TMP/scripts"
@@ -86,6 +88,35 @@ assert_not_contains "$out" 'Replacing incomplete bottle' \
 assert test -f "$CYDER_SHARED_PREFIX/user-mutation"
 assert_contains "$(cat "$CYDER_BOOTSTRAP_MARKER")" 'engine=CX26.3.0-W11-Cyder012' \
   "marker must update to new engine after -u"
+
+# Same engine with a legacy or missing marker: the newly routed native prepare
+# must use the existing in-place update and preserve user data.
+for marker_kind in legacy missing; do
+  if [[ "$marker_kind" == legacy ]]; then
+    printf 'revision=1\n' >"$CYDER_BOOTSTRAP_MARKER"
+  else
+    rm "$CYDER_BOOTSTRAP_MARKER"
+  fi
+  printf 'preserve-this-content\n' >"$CYDER_SHARED_PREFIX/user-mutation"
+  : >"$CYDER_TEST_WINEBOOT_LOG"
+  out="$(cyder_bootstrap_shared_prefix "$TMP/engine/bin/wine" "$TMP/engine" 2>&1)"
+  assert_contains "$(cat "$CYDER_TEST_WINEBOOT_LOG")" '-u' "$marker_kind marker must update in place"
+  assert_not_contains "$out" 'Replacing incomplete bottle' "$marker_kind marker must not replace data"
+  assert_eq "$(cat "$CYDER_SHARED_PREFIX/user-mutation")" 'preserve-this-content' "user contents survive $marker_kind update"
+  assert_contains "$(cat "$CYDER_BOOTSTRAP_MARKER")" 'engine=CX26.3.0-W11-Cyder012' "repair stamps current engine"
+done
+
+# Routing an old stamp does not bypass the original busy protection.
+printf 'revision=1\n' >"$CYDER_BOOTSTRAP_MARKER"
+cyder_has_running_prefix() { return 0; }
+: >"$CYDER_TEST_WINEBOOT_LOG"
+busy_status=0
+cyder_bootstrap_shared_prefix "$TMP/engine/bin/wine" "$TMP/engine" >/dev/null 2>&1 || busy_status=$?
+assert_eq "$busy_status" 75 "busy prefix must refuse update"
+assert_eq "$(cat "$CYDER_TEST_WINEBOOT_LOG")" '' "busy prefix must not run fixture wineboot"
+assert_eq "$(cat "$CYDER_BOOTSTRAP_MARKER")" 'revision=1' "busy prefix marker remains unchanged"
+assert_eq "$(cat "$CYDER_SHARED_PREFIX/user-mutation")" 'preserve-this-content' "busy prefix data remains unchanged"
+cyder_has_running_prefix() { return 1; }
 
 # Truly incomplete (no system.reg): replace path may wipe mutations.
 rm -f "$CYDER_SHARED_PREFIX/system.reg"

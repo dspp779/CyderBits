@@ -211,6 +211,14 @@ private final class CyderInformationButton: NSButton {
     }
 }
 
+/// CGColor caches one resolved value; resolve it in this view's drawing appearance.
+private func refreshCyderWindowBackground(_ view: NSView?) {
+    guard let view else { return }
+    view.effectiveAppearance.performAsCurrentDrawingAppearance {
+        view.layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
+    }
+}
+
 /// A small root view is used because layer-backed colors resolve once when
 /// assigned. Re-apply them when macOS changes the effective appearance so a
 /// live light/dark switch never needs a relaunch.
@@ -219,7 +227,7 @@ private final class CyderAppearanceView: NSView {
 
     override func viewDidChangeEffectiveAppearance() {
         super.viewDidChangeEffectiveAppearance()
-        layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
+        refreshCyderWindowBackground(self)
         onAppearanceChanged?()
     }
 }
@@ -228,6 +236,13 @@ private final class CyderGameTileView: NSView {
     var onClick: (() -> Void)?
     var onDoubleClick: (() -> Void)?
     var onContextMenu: (() -> NSMenu?)?
+    var isInteractionEnabled = true {
+        didSet {
+            alphaValue = isInteractionEnabled ? 1 : 0.45
+            setAccessibilityEnabled(isInteractionEnabled)
+            if !isInteractionEnabled { isHovered = false }
+        }
+    }
     var isTileSelected = false { didSet { needsDisplay = true } }
     private var isHovered = false { didSet { needsDisplay = true } }
     private var trackingAreaRef: NSTrackingArea?
@@ -274,7 +289,7 @@ private final class CyderGameTileView: NSView {
         trackingAreaRef = area
     }
 
-    override func mouseEntered(with event: NSEvent) { isHovered = true }
+    override func mouseEntered(with event: NSEvent) { if isInteractionEnabled { isHovered = true } }
     override func mouseExited(with event: NSEvent) { isHovered = false }
 
     func resetInteractionState() {
@@ -282,16 +297,24 @@ private final class CyderGameTileView: NSView {
         isTileSelected = false
     }
 
+    override func accessibilityPerformPress() -> Bool {
+        guard isInteractionEnabled, let onClick else { return false }
+        onClick()
+        return true
+    }
+
     override func mouseDown(with event: NSEvent) {
-        if event.clickCount >= 2 {
+        guard isInteractionEnabled else { return }
+        if event.clickCount == 2 {
             onDoubleClick?()
-        } else {
+        } else if event.clickCount == 1 {
             onClick?()
         }
     }
 
     override func menu(for event: NSEvent) -> NSMenu? {
-        onContextMenu?() ?? super.menu(for: event)
+        guard isInteractionEnabled else { return nil }
+        return onContextMenu?() ?? super.menu(for: event)
     }
 
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
@@ -311,6 +334,8 @@ final class CyderGameTileItem: NSCollectionViewItem {
     override func loadView() {
         let tile = CyderGameTileView(frame: NSRect(x: 0, y: 0, width: 96, height: 114))
         view = tile
+        tile.setAccessibilityElement(true)
+        tile.setAccessibilityRole(.button)
 
         icon.imageScaling = .scaleProportionallyUpOrDown
         icon.translatesAutoresizingMaskIntoConstraints = false
@@ -362,11 +387,14 @@ final class CyderGameTileItem: NSCollectionViewItem {
         }
     }
 
-    func configure(record: CyderGameRecord, independent: Bool, image: NSImage?) {
+    func configure(record: CyderGameRecord, independent: Bool, readOnly: Bool, image: NSImage?) {
         tile.resetInteractionState()
         icon.image = image
         icon.toolTip = record.executablePath
         nameLabel.stringValue = record.displayName
+        tile.setAccessibilityLabel(record.displayName)
+        tile.setAccessibilityHelp(readOnly ? "唯讀遊戲庫，可選取遊戲" : "選取遊戲以顯示啟動與選項按鈕")
+        tile.setAccessibilityValue(isSelected ? "已選取" : "")
         nameLabel.textColor = .labelColor
         nameLabel.font = .systemFont(ofSize: 11, weight: independent ? .semibold : .regular)
         status.stringValue = independent ? "獨立設定" : ""
@@ -375,6 +403,8 @@ final class CyderGameTileItem: NSCollectionViewItem {
         tile.isTileSelected = isSelected
     }
 
+    func setInteractionEnabled(_ enabled: Bool) { tile.isInteractionEnabled = enabled }
+
     override func prepareForReuse() {
         super.prepareForReuse()
         if isViewLoaded { tile.resetInteractionState() }
@@ -382,8 +412,27 @@ final class CyderGameTileItem: NSCollectionViewItem {
 
     override var isSelected: Bool {
         didSet {
-            if isViewLoaded { tile.isTileSelected = isSelected }
+            if isViewLoaded {
+                tile.isTileSelected = isSelected
+                tile.setAccessibilityValue(isSelected ? "已選取" : "")
+            }
         }
+    }
+}
+
+private final class CyderLibraryCollectionView: NSCollectionView {
+    var isInteractionEnabled = true
+    override var acceptsFirstResponder: Bool { isInteractionEnabled }
+    var onLaunchSelection: (() -> Void)?
+
+    override func keyDown(with event: NSEvent) {
+        guard isInteractionEnabled else { return }
+        let modifiers = event.modifierFlags.intersection([.command, .control, .shift, .option])
+        if (event.keyCode == 36 || event.keyCode == 76), modifiers.isEmpty {
+            if !event.isARepeat { onLaunchSelection?() }
+            return
+        }
+        super.keyDown(with: event)
     }
 }
 
@@ -397,6 +446,40 @@ private final class CyderFiveColumnGridLayout: NSCollectionViewLayout {
     private let rowSpacing: CGFloat = 6
     private var attributes: [IndexPath: NSCollectionViewLayoutAttributes] = [:]
     private var contentSize = NSSize.zero
+    private weak var observedViewport: NSClipView?
+    private var viewportObserver: NSObjectProtocol?
+    private var observedViewportWidth: CGFloat?
+
+    deinit {
+        if let viewportObserver { NotificationCenter.default.removeObserver(viewportObserver) }
+    }
+
+    private func availableWidth(for collectionView: NSCollectionView) -> CGFloat {
+        let viewport = collectionView.enclosingScrollView?.contentView
+        if observedViewport !== viewport {
+            if let viewportObserver { NotificationCenter.default.removeObserver(viewportObserver) }
+            viewportObserver = nil
+            observedViewport = viewport
+            observedViewportWidth = viewport?.bounds.width
+            if let viewport {
+                viewport.postsBoundsChangedNotifications = true
+                viewportObserver = NotificationCenter.default.addObserver(
+                    forName: NSView.boundsDidChangeNotification, object: viewport, queue: nil
+                ) { [weak self, weak viewport] _ in
+                    guard let self, let viewport,
+                          self.collectionView?.enclosingScrollView?.contentView === viewport else { return }
+                    let width = viewport.bounds.width
+                    guard width != self.observedViewportWidth else { return }
+                    self.observedViewportWidth = width
+                    self.invalidateLayout()
+                }
+            }
+        }
+        // The document width is an output of this layout, not the available width.
+        // Before attachment (or before a positive viewport exists), retain the old fallback.
+        if let width = viewport?.bounds.width, width.isFinite, width > 0 { return width }
+        return collectionView.bounds.width
+    }
 
     override func prepare() {
         super.prepare()
@@ -406,13 +489,14 @@ private final class CyderFiveColumnGridLayout: NSCollectionViewLayout {
             return
         }
 
+        let availableWidth = availableWidth(for: collectionView)
         let itemCount = collectionView.numberOfItems(inSection: 0)
         guard itemCount > 0 else {
-            contentSize = NSSize(width: collectionView.bounds.width, height: 0)
+            contentSize = NSSize(width: availableWidth, height: 0)
             return
         }
 
-        let width = max(collectionView.bounds.width, horizontalPadding * 2 + 5)
+        let width = max(availableWidth, horizontalPadding * 2 + 5)
         let columnWidth = max(1, (width - horizontalPadding * 2) / 5)
         let rowCount = Int(ceil(Double(itemCount) / 5.0))
         for row in 0..<rowCount {
@@ -451,7 +535,9 @@ private final class CyderFiveColumnGridLayout: NSCollectionViewLayout {
         attributes[indexPath]
     }
 
-    override func shouldInvalidateLayout(forBoundsChange newBounds: NSRect) -> Bool { true }
+    override func shouldInvalidateLayout(forBoundsChange newBounds: NSRect) -> Bool {
+        newBounds.width != collectionView?.bounds.width
+    }
 }
 
 /// A dedicated macOS window for per-game launch settings. It keeps advanced
@@ -482,10 +568,228 @@ private final class CyderPlaceholderTextView: NSTextView {
     }
 }
 
+/// DirectDraw actions save immediately; the other display controls use Apply.
+private final class CyderDirectDrawOptions: NSObject {
+    let detail = NSTextField(wrappingLabelWithString: "正在檢查 DirectDraw…")
+    let action = NSButton()
+    let restore = NSButton()
+    let refresh = NSButton()
+    let explanation = NSTextField(wrappingLabelWithString: "")
+    private let filter = NSPopUpButton()
+    private let frameRate = NSPopUpButton()
+    var onBusy: ((Bool) -> Void)?
+    var canMutate: (() -> Bool)?
+    var selectedBackend: (() -> CyderGraphicsBackend?)?
+    private let executable: URL
+    private var mode = ""
+    private var legacyMode = ""
+    private var engineCapability: String?
+    private var detailMessage = ""
+    private(set) var busy = false
+    private var operationInFlight = false
+    private var operationID: UUID?
+    private var observationGeneration = UUID()
+
+    init(executable: URL) {
+        self.executable = executable
+        super.init()
+        for (button, title, selector) in [
+            (action, "啟用 cnc-ddraw", #selector(performAction)),
+            (restore, "停用 cnc-ddraw", #selector(restoreOriginal)),
+            (refresh, "重新檢查", #selector(reload))
+        ] {
+            button.title = title
+            button.bezelStyle = .rounded
+            button.target = self
+            button.action = selector
+        }
+        action.identifier = NSUserInterfaceItemIdentifier("game-cnc-action")
+        restore.identifier = NSUserInterfaceItemIdentifier("game-cnc-restore")
+        filter.identifier = NSUserInterfaceItemIdentifier("game-cnc-filter")
+        frameRate.identifier = NSUserInterfaceItemIdentifier("game-cnc-frame-rate")
+        filter.setAccessibilityLabel("縮放方式")
+        frameRate.setAccessibilityLabel("畫面更新上限")
+        filter.addItems(withTitles: ["平滑（雙線性）", "銳利（最近鄰）"])
+        frameRate.addItems(withTitles: ["30", "60", "120", "144", "240"])
+        frameRate.selectItem(withTitle: "60")
+        for control in [filter, frameRate] {
+            control.target = self
+            control.action = #selector(settingsChanged)
+            control.isEnabled = false
+        }
+        detail.font = .systemFont(ofSize: 13, weight: .medium)
+        explanation.font = .systemFont(ofSize: 12)
+        explanation.textColor = .secondaryLabelColor
+        for label in [detail, explanation] {
+            label.widthAnchor.constraint(lessThanOrEqualToConstant: 465).isActive = true
+            label.isSelectable = true
+        }
+        action.isEnabled = false
+        restore.isHidden = true
+    }
+
+    private func optionRow(_ title: String, _ control: NSView) -> NSView {
+        let label = NSTextField(labelWithString: title)
+        label.font = .systemFont(ofSize: 12)
+        label.widthAnchor.constraint(equalToConstant: 112).isActive = true
+        let row = NSStackView(views: [label, control])
+        row.alignment = .centerY
+        row.spacing = 10
+        return row
+    }
+
+    var rows: [NSView] {
+        let bar = NSStackView(views: [action, restore, refresh])
+        bar.spacing = 8
+        return [detail, explanation, optionRow("縮放方式", filter),
+                optionRow("畫面更新上限", frameRate), bar]
+    }
+
+    private func update(_ state: [String: Any]) {
+        mode = state["mode"] as? String ?? ""
+        legacyMode = state["legacyMode"] as? String ?? ""
+        if let capability = state["capability"] as? String { engineCapability = capability }
+        let settings = state["settings"] as? [String: Any] ?? [:]
+        filter.selectItem(at: settings["filter"] as? String == "nearest" ? 1 : 0)
+        let rate = String((settings["maxfps"] as? NSNumber)?.intValue ?? 60)
+        if frameRate.item(withTitle: rate) == nil { frameRate.addItem(withTitle: rate) }
+        frameRate.selectItem(withTitle: rate)
+        detailMessage = "適用 32 位元 DirectDraw 遊戲，請選「預設」或 WineD3D。cnc-ddraw 變更立即儲存，下次啟動生效；現有視窗不變。"
+        restore.isHidden = mode != "on" && !(mode == "legacy" && legacyMode != "off")
+        restore.title = mode == "legacy" ? "還原舊版 DLL" : "停用 cnc-ddraw"
+        action.isEnabled = true
+        switch mode {
+        case "on":
+            detail.stringValue = "cnc-ddraw \(state["version"] as? String ?? "") 已啟用"
+            action.title = "驗證／更新"
+        case "off":
+            detail.stringValue = "使用原遊戲的 DirectDraw"
+            action.title = "啟用 cnc-ddraw"
+        case "legacy":
+            if legacyMode == "off" {
+                detail.stringValue = "舊版 DLL 已還原，可改用啟動時載入"
+                action.title = "啟用 cnc-ddraw"
+            } else if legacyMode == "recovery" {
+                detail.stringValue = "舊版 DLL 切換尚未完成"
+                action.title = "修復上次切換"
+                restore.isHidden = true
+            } else {
+                detail.stringValue = "此遊戲使用舊版 DLL 安裝方式"
+                action.title = "啟用 cnc-ddraw"
+                action.isEnabled = false
+            }
+            detailMessage = "先關閉這個遊戲及其啟動器，再還原舊版 DLL。備份與遊戲資料會保留，之後可使用新的啟動設定。"
+        default:
+            detail.stringValue = "無法確認 DirectDraw 狀態"
+            action.isEnabled = false
+        }
+        if engineCapability == "unavailable", mode != "legacy" {
+            detailMessage = "目前引擎尚不支援這項啟動設定，請先更新引擎。 " + detailMessage
+        }
+        // Every helper request disables this button; a confirmed state must
+        // restore its availability as well as its visibility.
+        restore.isEnabled = !restore.isHidden
+        let editable = mode == "on" || mode == "off" || (mode == "legacy" && legacyMode == "off")
+        filter.isEnabled = editable
+        frameRate.isEnabled = editable
+        refreshBackend()
+    }
+
+    var rendererConflict: String? {
+        let enabled = mode == "on" || (mode == "legacy" && ["on", "outdated"].contains(legacyMode))
+        guard enabled, let backend = selectedBackend?(),
+              backend != .default, backend != .wined3d else { return nil }
+        return "目前選用的 " + backend.rawValue + " 與 cnc-ddraw 互斥。請在「顯示」選取「預設」或 WineD3D，或先停用 cnc-ddraw。"
+    }
+
+    func refreshBackend() {
+        guard !mode.isEmpty else { return }
+        explanation.stringValue = rendererConflict ?? detailMessage
+    }
+
+    @objc private func settingsChanged() {
+        if mode == "on" { performAction(); return }
+        refreshBackend()
+    }
+
+    @objc func reload() {
+        run("status", argument: CyderPaths.engine.path) { [weak self] in self?.update($0) }
+    }
+
+    func cancelPendingRead() {
+        guard !busy else { return }
+        observationGeneration = UUID()
+        if let operationID { CyderDirectDrawOperations.shared.cancelRead(operationID) }
+        operationID = nil
+        operationInFlight = false
+    }
+
+    @objc private func restoreOriginal() {
+        run(mode == "legacy" ? "restore" : "disable", mutating: true) { [weak self] in self?.update($0) }
+    }
+
+    @objc private func performAction() {
+        if mode == "legacy" && legacyMode == "recovery" {
+            run("recover", mutating: true) { [weak self] in self?.update($0) }
+            return
+        }
+        if let backend = selectedBackend?(), backend != .default, backend != .wined3d {
+            detail.stringValue = "請先在「顯示」選取「預設」或 WineD3D，再啟用 cnc-ddraw。"
+            return
+        }
+        let settings: [String: Any] = [
+            "filter": filter.indexOfSelectedItem == 1 ? "nearest" : "bilinear",
+            "maxfps": Int(frameRate.titleOfSelectedItem ?? "60") ?? 60
+        ]
+        guard let data = try? JSONSerialization.data(withJSONObject: settings, options: [.sortedKeys]),
+              let argument = String(data: data, encoding: .utf8) else { return }
+        run("enable", argument: argument, mutating: true) { [weak self] in self?.update($0) }
+    }
+
+    private func run(_ command: String, argument: String? = nil, mutating: Bool = false,
+                     completion: @escaping ([String: Any]) -> Void) {
+        guard !operationInFlight else { return }
+        if mutating && canMutate?() == false {
+            detail.stringValue = "請等遊戲設定讀取或儲存完成，再試一次。"
+            return
+        }
+        operationInFlight = true
+        busy = mutating
+        if mutating { onBusy?(true) }
+        [action, restore, refresh].forEach { $0.isEnabled = false }
+        filter.isEnabled = false
+        frameRate.isEnabled = false
+        detail.stringValue = mutating ? "正在儲存 DirectDraw 設定…" : "正在檢查 DirectDraw…"
+        observationGeneration = UUID()
+        let generation = observationGeneration
+        operationID = CyderDirectDrawOperations.shared.run(command, executable: executable, argument: argument) { [weak self] update in
+            guard let self, self.observationGeneration == generation else { return }
+            switch update {
+            case .stillRunning:
+                self.detail.stringValue = "DirectDraw 作業仍在進行，尚未確認結果。"
+                self.explanation.stringValue = "請等目前操作結束後再變更設定。"
+            case .completed(let result):
+                self.operationID = nil
+                self.operationInFlight = false
+                self.busy = false
+                if mutating { self.onBusy?(false) }
+                self.refresh.isEnabled = true
+                switch result {
+                case .success(let value): completion(value)
+                case .failure(let error):
+                    self.detail.stringValue = error.localizedDescription
+                    self.explanation.stringValue = "目前設定尚未確認，請排除問題後重新檢查。"
+                }
+            }
+        }
+    }
+}
+
 final class CyderGameSettingsWindowController: NSWindowController, NSWindowDelegate {
     var onLaunch: ((URL, CyderExecutableSettings) -> Void)?
     var onRemoveProfile: ((URL, @escaping (Bool) -> Void) -> Void)?
     var onSettingsChanged: (() -> Void)?
+    private lazy var directDraw = CyderDirectDrawOptions(executable: game.executableURL)
 
     private let game: CyderGameRecord
     private var settingsValue = CyderSettings(fontMingLiuTarget: "songti")
@@ -547,8 +851,11 @@ final class CyderGameSettingsWindowController: NSWindowController, NSWindowDeleg
 
     required init?(coder: NSCoder) { nil }
 
+    func windowShouldClose(_ sender: NSWindow) -> Bool { !directDraw.busy }
+
     func windowWillClose(_ notification: Notification) {
         settingsViewGeneration = UUID()
+        directDraw.cancelPendingRead()
         if NSApp.modalWindow === window {
             NSApp.stopModal(withCode: .cancel)
         }
@@ -622,7 +929,7 @@ final class CyderGameSettingsWindowController: NSWindowController, NSWindowDeleg
     private func buildUI() {
         guard let content = window?.contentView else { return }
         content.wantsLayer = true
-        content.layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
+        refreshCyderWindowBackground(content)
         if let appearanceRoot = content as? CyderAppearanceView {
             appearanceRoot.onAppearanceChanged = { [weak self] in self?.refreshAppearance() }
         }
@@ -651,6 +958,8 @@ final class CyderGameSettingsWindowController: NSWindowController, NSWindowDeleg
         confirmButton.action = #selector(confirmSettings)
 
         graphicsBackend.addItems(withTitles: graphicsBackendTitles)
+        // Availability comes from the loaded graphics capabilities, not action validation.
+        graphicsBackend.menu?.autoenablesItems = false
         updateD3DMetalMenuItemAvailability()
         updateDxmtMenuItemAvailability()
         graphicsBackend.target = self
@@ -676,6 +985,23 @@ final class CyderGameSettingsWindowController: NSWindowController, NSWindowDeleg
 
         tabs.translatesAutoresizingMaskIntoConstraints = false
         tabs.addTabViewItem(makeGeneralTab())
+        tabs.addTabViewItem(makeDisplayTab())
+        directDraw.canMutate = { [weak self] in
+            guard let self else { return false }
+            return self.settingsReady && !self.settingsInFlight
+        }
+        directDraw.selectedBackend = { [weak self] in
+            guard let self, self.settingsReady else { return nil }
+            return self.graphicsBackendOverride ?? self.settingsValue.graphicsBackend
+        }
+        directDraw.onBusy = { [weak self] busy in
+            guard let self else { return }
+            self.launchButton.isEnabled = !busy && self.executableAvailable
+            self.confirmButton.isEnabled = !busy && self.settingsReady
+            self.cancelButton.isEnabled = !busy
+            self.removeProfileButton.isEnabled = !busy && self.independent
+        }
+        directDraw.reload()
         fontsTab = makeFontsTab()
 
         let buttonBar = NSStackView(views: [launchButton, launchHint, NSView(), cancelButton, confirmButton])
@@ -718,19 +1044,26 @@ final class CyderGameSettingsWindowController: NSWindowController, NSWindowDeleg
                 multilineInput(arguments),
                 information: "直接接在遊戲執行指令後；以空白分隔參數，含空白的參數可用引號包住。可換行書寫，換行視同空白。"
             ),
-            row(
-                "高解析度",
-                retina,
-                information: "開啟時強制 Retina Mode 與 192 DPI；關閉則跟隨偏好設定。"
-            ),
             row("自訂字體", customizeFonts, information: "開啟後會出現「字體」分頁；關閉則跟隨偏好設定。"),
             row("滾輪相容", scrolling, information: "選「跟隨全域設定」使用偏好設定的精準捲動開關；預設關閉，使用傳統捲動。傳統捲動可用於新楓之谷等遊戲；精準捲動保留細緻 delta。不自動套用會在下次啟動前還原 Cyder 保存的原值。同一 prefix 內同名 EXE 會共用設定；不同設定請使用獨立遊戲環境。需重新啟動遊戲生效。"),
-            row("圖形轉譯", graphicsBackend, information: "選「跟隨全域」會使用 Cyder 偏好設定的圖形後端。"),
             scrollingScope,
             removeProfileButton,
         ]
         settingViews.append(contentsOf: rows)
         return tab("一般", rows: rows)
+    }
+
+    private func makeDisplayTab() -> NSTabViewItem {
+        let displayRows: [NSView] = [
+            row(
+                "高解析度",
+                retina,
+                information: "開啟時強制 Retina Mode 與 192 DPI；關閉則跟隨偏好設定。"
+            ),
+            row("圖形轉譯", graphicsBackend, information: "選「跟隨全域」會使用 Cyder 偏好設定的圖形後端。"),
+        ]
+        settingViews.append(contentsOf: displayRows)
+        return tab("顯示", rows: displayRows + directDraw.rows)
     }
 
     private func makeFontsTab() -> NSTabViewItem {
@@ -797,7 +1130,7 @@ final class CyderGameSettingsWindowController: NSWindowController, NSWindowDeleg
     }
 
     private func refreshAppearance() {
-        window?.contentView?.layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
+        refreshCyderWindowBackground(window?.contentView)
         window?.contentView?.needsDisplay = true
     }
 
@@ -856,14 +1189,18 @@ final class CyderGameSettingsWindowController: NSWindowController, NSWindowDeleg
     }
 
     @objc private func launchGame() {
-        guard settingsReady, executableAvailable, !settingsInFlight else { return }
+        guard settingsReady, executableAvailable, !settingsInFlight, !directDraw.busy else { return }
+        if let conflict = directDraw.rendererConflict {
+            showAlert(title: "圖形轉譯設定互斥", message: conflict)
+            return
+        }
         // Testing is intentionally non-destructive: keep the draft window
         // open so the user can compare, adjust, and test again before Apply.
         onLaunch?(game.executableURL, currentRule())
     }
 
     @objc private func removeProfile() {
-        guard settingsReady, independent, !settingsInFlight else { return }
+        guard settingsReady, independent, !settingsInFlight, !directDraw.busy else { return }
         let alert = NSAlert()
         alert.messageText = "移除「\(game.displayName)」的獨立設定？"
         alert.informativeText = "這會刪除專屬的 Windows 環境；遊戲檔案與遊戲庫項目不會刪除。"
@@ -892,6 +1229,7 @@ final class CyderGameSettingsWindowController: NSWindowController, NSWindowDeleg
     }
 
     @objc private func cancelSettings() {
+        guard !directDraw.busy else { return }
         stopModal(.cancel)
     }
 
@@ -900,6 +1238,7 @@ final class CyderGameSettingsWindowController: NSWindowController, NSWindowDeleg
     }
 
     private func stopModal(_ response: NSApplication.ModalResponse) {
+        directDraw.cancelPendingRead()
         if NSApp.modalWindow === window {
             NSApp.stopModal(withCode: response)
         }
@@ -1085,7 +1424,11 @@ final class CyderGameSettingsWindowController: NSWindowController, NSWindowDeleg
     }
 
     private func persistRule() {
-        guard settingsReady, !settingsInFlight else { return }
+        guard settingsReady, !settingsInFlight, !directDraw.busy else { return }
+        if let conflict = directDraw.rendererConflict {
+            showAlert(title: "圖形轉譯設定互斥", message: conflict)
+            return
+        }
         var draft = settingsValue
         draft.perProfile[game.id] = currentRule()
         let patch = CyderSettingsPatch(before: settingsValue, after: draft)
@@ -1213,6 +1556,7 @@ final class CyderGameSettingsWindowController: NSWindowController, NSWindowDeleg
     }
 
     private func refreshGraphicsControls() {
+        directDraw.refreshBackend()
         updateD3DMetalMenuItemAvailability()
         updateDxmtMenuItemAvailability()
         updateDxvkMenuItemAvailability()
@@ -1227,11 +1571,10 @@ final class CyderGameSettingsWindowController: NSWindowController, NSWindowDeleg
     }
 }
 
-final class CyderGameLibraryWindowController: NSWindowController, NSWindowDelegate, NSCollectionViewDataSource {
+final class CyderGameLibraryWindowController: NSWindowController, NSWindowDelegate, NSCollectionViewDataSource, NSCollectionViewDelegate {
     var onLaunch: ((URL, CyderExecutableSettings?) -> Void)?
     var onRemoveProfile: ((URL, @escaping (Bool) -> Void) -> Void)?
     var onOpenPreferences: (() -> Void)?
-    var onOpenRequests: (() -> Void)?
     var onPrepareEnvironment: (() -> Void)?
     var onClose: (() -> Void)?
 
@@ -1241,22 +1584,72 @@ final class CyderGameLibraryWindowController: NSWindowController, NSWindowDelega
     private var readOnly = false
     private var hasSnapshot = false
     private let loadStatus = NSTextField(labelWithString: "")
-    private let environmentStatus = NSTextField(labelWithString: "首次遊玩可先準備 Windows 環境")
+    private let environmentStatus = NSTextField(wrappingLabelWithString: "正在確認環境狀態…")
     private let environmentButton = NSButton()
+    private let environmentProgress = NSProgressIndicator()
+    private let environmentControls = NSStackView()
+    private var environmentState = CyderEnvironmentReadinessObserver.State.checking
     private let recoveryNotice = NSStackView()
     private var recoveryHeight: NSLayoutConstraint?
 
-    func updateEnvironmentStatus(_ text: String, busy: Bool) {
-        environmentStatus.stringValue = text
-        environmentButton.isEnabled = !busy
+    private var environmentBusy: Bool {
+        guard !readOnly else { return false }
+        switch environmentState { case .checking, .preparing, .current(.notPrepared): return true; default: return false }
+    }
+    private var canInteract: Bool { !environmentBusy && !isQuiescing }
+    private var canMutate: Bool { canInteract && !readOnly }
+
+    func updateEnvironmentState(_ state: CyderEnvironmentReadinessObserver.State) {
+        environmentState = state
+        let presentation = state.initialization
+        let progressMessage = state == .current(.notPrepared) ? "正在初始化環境…" : presentation.message
+        environmentStatus.stringValue = readOnly ? "目前僅可瀏覽；啟動與修改暫不可用" : (progressMessage ?? "")
+        environmentStatus.isHidden = !readOnly && progressMessage == nil
+        environmentStatus.toolTip = environmentStatus.stringValue
+        let engineUpdate = state == .current(.needsUpdate)
+        environmentButton.title = engineUpdate ? "有可用的引擎更新" : (state == .current(.needsBootstrapUpdate) ? "完成環境準備" : "重新檢查")
+        if case .failed = state { environmentButton.title = "重試" }
+        environmentButton.isBordered = !engineUpdate
+        environmentButton.contentTintColor = engineUpdate ? .systemYellow : nil
+        environmentButton.isHidden = readOnly || !presentation.showsButton || environmentBusy
+        environmentButton.isEnabled = canMutate && presentation.canInitialize
+        environmentProgress.isHidden = readOnly || !environmentBusy
+        if environmentBusy && !readOnly { environmentProgress.startAnimation(nil) }
+        else { environmentProgress.stopAnimation(nil) }
+        environmentControls.isHidden = !readOnly && progressMessage == nil && !presentation.showsButton
+        refreshInteractionAvailability()
+    }
+
+    private func refreshInteractionAvailability() {
+        toolbarPreferencesButton.isEnabled = canMutate
+        toolbarRefreshButton.isEnabled = canInteract && !loader.isBusy
+        toolbarAddButton.isEnabled = canMutate && !loader.isBusy
+        emptyAddButton.isEnabled = canMutate && !loader.isBusy
+        selectionOptionsButton.isEnabled = canMutate && selectedGame != nil
+        selectionLaunchButton.isEnabled = canMutate && selectedGame != nil
+        collectionView.isSelectable = canInteract
+        collectionView.isInteractionEnabled = canInteract
+        collectionView.visibleItems().forEach { ($0 as? CyderGameTileItem)?.setInteractionEnabled(canInteract) }
+        recoveryNotice.subviews.compactMap { $0 as? NSControl }.forEach { $0.isEnabled = canInteract }
     }
     func showRecoveryNotice() { recoveryNotice.isHidden = false; recoveryHeight?.constant = 28 }
-    @objc private func dismissRecoveryNotice() { recoveryNotice.isHidden = true; recoveryHeight?.constant = 0 }
-    @objc private func openRecoveryLogs() { NSWorkspace.shared.open(CyderPaths.support.appendingPathComponent("Logs")) }
-    @objc private func prepareEnvironment() { if !readOnly { onPrepareEnvironment?() } }
+    @objc private func dismissRecoveryNotice() { guard canInteract else { return }; recoveryNotice.isHidden = true; recoveryHeight?.constant = 0 }
+    @objc private func openRecoveryLogs() { guard canInteract else { return }; NSWorkspace.shared.open(CyderPaths.support.appendingPathComponent("Logs")) }
+    @objc private func prepareEnvironment() {
+        guard canMutate, environmentState.initialization.canInitialize,
+              let onPrepareEnvironment else { return }
+        // Disable synchronously, before the owner starts its asynchronous work.
+        updateEnvironmentState(.preparing(environmentState == .current(.needsUpdate) ? "正在更新引擎…" : "正在初始化環境…"))
+        onPrepareEnvironment()
+    }
 
     private let iconStore = CyderGameIconStore.shared
-    private let collectionView = NSCollectionView()
+    private let collectionView = CyderLibraryCollectionView()
+    private let selectionRow = NSStackView()
+    private let selectionTitle = NSTextField(labelWithString: "")
+    private let selectionOptionsButton = NSButton()
+    private let selectionLaunchButton = NSButton()
+    private let emptyAddButton = NSButton()
     private let emptyState = NSStackView()
     private var games: [CyderGameRecord] = []
     private var selectedGameID: String?
@@ -1276,26 +1669,22 @@ final class CyderGameLibraryWindowController: NSWindowController, NSWindowDelega
     private let toolbarPreferencesButton = NSButton()
     private let toolbarRefreshButton = NSButton()
     private let toolbarAddButton = NSButton()
-    private let requestSummary = NSButton()
-    private var requestSummaryHeight: NSLayoutConstraint?
-
-    func updateRequestSummary(_ text: String) {
-        requestSummary.title = text
-        requestSummary.isHidden = text.isEmpty
-        requestSummaryHeight?.constant = text.isEmpty ? 0 : 32
-        requestSummary.setAccessibilityLabel(text)
+    private let activityStatus = NSTextField(labelWithString: "")
+    func updateProgramActivity(_ summary: String) {
+        activityStatus.stringValue = summary.replacingOccurrences(of: " · ", with: "\n")
+        activityStatus.toolTip = summary
+        activityStatus.setAccessibilityLabel("Windows 程式狀態，" + summary)
     }
-    @objc private func openRequests() { onOpenRequests?() }
-
     convenience init(loader: CyderLibraryLoader? = nil, readOnly: Bool = false) {
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 500, height: 420),
-            styleMask: [.titled, .closable, .fullSizeContentView],
+            styleMask: [.titled, .closable, .resizable, .fullSizeContentView],
             backing: .buffered,
             defer: false
         )
         self.init(window: window)
         self.readOnly = readOnly
+        window.contentMinSize = NSSize(width: 500, height: 320)
         let loader = loader ?? CyderLibraryLoader(readOnly: readOnly)
         self.loader = loader
         loader.onUpdate = { [weak self] update in self?.apply(update) }
@@ -1309,11 +1698,10 @@ final class CyderGameLibraryWindowController: NSWindowController, NSWindowDelega
         window.contentView = appearanceRoot
         buildUI()
         if readOnly {
-            environmentStatus.stringValue = "目前僅可瀏覽；啟動與修改暫不可用"
-            environmentButton.isEnabled = false
             toolbarPreferencesButton.isEnabled = false
             toolbarAddButton.isEnabled = false
         }
+        updateEnvironmentState(environmentState)
     }
 
     func windowWillClose(_ notification: Notification) {
@@ -1325,6 +1713,8 @@ final class CyderGameLibraryWindowController: NSWindowController, NSWindowDelega
 
     func quiesce() {
         isQuiescing = true
+        updateEnvironmentState(environmentState)
+        updateSelectionRow()
         revealPresentation = nil; installPresentation = nil
         loader.quiesce()
     }
@@ -1343,9 +1733,8 @@ final class CyderGameLibraryWindowController: NSWindowController, NSWindowDelega
             loadStatus.stringValue = ""
             ensureGameIcons()
         }
-        toolbarRefreshButton.isEnabled = !loader.isBusy
-        toolbarAddButton.isEnabled = !readOnly && !loader.isBusy
         reloadGrid()
+        refreshInteractionAvailability()
     }
 
     /// Re-run extract after Wine bootstrap so tiles that opened during first-run
@@ -1358,14 +1747,14 @@ final class CyderGameLibraryWindowController: NSWindowController, NSWindowDelega
     private func ensureGameIcons() {
         guard !readOnly else { return }
         iconStore.ensureExtracted(games: games) { [weak self] in
-            self?.collectionView.reloadData()
+            self?.reloadGrid()
         }
     }
 
     private func buildUI() {
         guard let window, let content = window.contentView else { return }
         content.wantsLayer = true
-        content.layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
+        refreshCyderWindowBackground(content)
         if let appearanceRoot = content as? CyderAppearanceView {
             appearanceRoot.onAppearanceChanged = { [weak self] in self?.refreshAppearance() }
         }
@@ -1409,16 +1798,12 @@ final class CyderGameLibraryWindowController: NSWindowController, NSWindowDelega
         let emptyDescription = NSTextField(labelWithString: "選擇 EXE 即可開始遊玩")
         emptyDescription.font = .systemFont(ofSize: 12)
         emptyDescription.textColor = .secondaryLabelColor
-        let emptyButton = NSButton(
-            title: "加入遊戲",
-            image: NSImage(systemSymbolName: "plus", accessibilityDescription: "加入遊戲") ?? NSImage(),
-            target: self,
-            action: #selector(addGame)
-        )
-        emptyButton.isEnabled = !readOnly
-        emptyButton.imagePosition = .imageLeading
-        emptyButton.bezelStyle = .rounded
-        emptyState.setViews([emptyIcon, emptyTitle, emptyDescription, emptyButton], in: .top)
+        emptyAddButton.title = "加入遊戲"
+        emptyAddButton.image = NSImage(systemSymbolName: "plus", accessibilityDescription: "加入遊戲")
+        emptyAddButton.target = self; emptyAddButton.action = #selector(addGame)
+        emptyAddButton.imagePosition = .imageLeading
+        emptyAddButton.bezelStyle = .rounded
+        emptyState.setViews([emptyIcon, emptyTitle, emptyDescription, emptyAddButton], in: .top)
         emptyState.orientation = .vertical
         emptyState.alignment = .centerX
         emptyState.spacing = 9
@@ -1429,16 +1814,44 @@ final class CyderGameLibraryWindowController: NSWindowController, NSWindowDelega
         loadStatus.textColor = .secondaryLabelColor
         loadStatus.translatesAutoresizingMaskIntoConstraints = false
         content.addSubview(loadStatus)
+
+        selectionOptionsButton.title = "遊戲選項…"
+        selectionOptionsButton.target = self; selectionOptionsButton.action = #selector(openSettingsForSelectedGame)
+        selectionLaunchButton.title = "啟動遊戲"
+        selectionLaunchButton.target = self; selectionLaunchButton.action = #selector(launchSelection)
+        selectionTitle.font = .systemFont(ofSize: 13, weight: .semibold)
+        selectionTitle.lineBreakMode = .byTruncatingTail
+        selectionTitle.alignment = .right
+        selectionTitle.translatesAutoresizingMaskIntoConstraints = false
+        content.addSubview(selectionTitle)
+        selectionRow.setViews([selectionOptionsButton, selectionLaunchButton], in: .trailing)
+        selectionRow.spacing = 8
+        selectionRow.translatesAutoresizingMaskIntoConstraints = false
+        content.addSubview(selectionRow)
         environmentStatus.font = .systemFont(ofSize: 11)
         environmentStatus.textColor = .secondaryLabelColor
+        environmentStatus.maximumNumberOfLines = 2
         environmentStatus.lineBreakMode = .byTruncatingTail
-        environmentButton.title = "準備 Windows 環境"
+        environmentStatus.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         environmentButton.target = self; environmentButton.action = #selector(prepareEnvironment)
         environmentButton.bezelStyle = .rounded
-        let environmentRow = NSStackView(views: [environmentStatus, environmentButton])
-        environmentRow.orientation = .horizontal; environmentRow.spacing = 8
-        environmentRow.translatesAutoresizingMaskIntoConstraints = false
-        content.addSubview(environmentRow)
+        environmentButton.font = .systemFont(ofSize: 11)
+        environmentProgress.style = .spinning
+        environmentProgress.controlSize = .small
+        environmentProgress.setAccessibilityLabel("正在準備 Windows 環境")
+        environmentProgress.widthAnchor.constraint(equalToConstant: 16).isActive = true
+        environmentProgress.heightAnchor.constraint(equalToConstant: 16).isActive = true
+        environmentControls.setViews([environmentProgress, environmentStatus, environmentButton], in: .leading)
+        environmentControls.orientation = .horizontal; environmentControls.spacing = 6
+        environmentControls.translatesAutoresizingMaskIntoConstraints = false
+        content.addSubview(environmentControls)
+        activityStatus.font = .monospacedDigitSystemFont(ofSize: 10, weight: .medium)
+        activityStatus.textColor = .secondaryLabelColor
+        activityStatus.alignment = .center
+        activityStatus.maximumNumberOfLines = 2
+        activityStatus.lineBreakMode = .byTruncatingTail
+        activityStatus.translatesAutoresizingMaskIntoConstraints = false
+        content.addSubview(activityStatus)
         let recoveryLogs = NSButton(title: "上次未正常結束 · 查看記錄", target: self, action: #selector(openRecoveryLogs))
         recoveryLogs.bezelStyle = .rounded
         let dismissRecovery = NSButton(title: "關閉提示", target: self, action: #selector(dismissRecoveryNotice))
@@ -1450,18 +1863,10 @@ final class CyderGameLibraryWindowController: NSWindowController, NSWindowDelega
         content.addSubview(recoveryNotice)
         content.addSubview(scroll)
         content.addSubview(emptyState)
-        requestSummary.target = self; requestSummary.action = #selector(openRequests)
-        requestSummary.bezelStyle = .rounded; requestSummary.isHidden = true
-        requestSummary.translatesAutoresizingMaskIntoConstraints = false; content.addSubview(requestSummary)
-        requestSummaryHeight = requestSummary.heightAnchor.constraint(equalToConstant: 0)
         NSLayoutConstraint.activate([
-            requestSummary.topAnchor.constraint(equalTo: content.topAnchor, constant: 32),
-            requestSummary.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 12),
-            requestSummary.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -12),
-            requestSummaryHeight!,
             scroll.leadingAnchor.constraint(equalTo: content.leadingAnchor),
             scroll.trailingAnchor.constraint(equalTo: content.trailingAnchor),
-            recoveryNotice.topAnchor.constraint(equalTo: requestSummary.bottomAnchor),
+            recoveryNotice.topAnchor.constraint(equalTo: content.topAnchor, constant: 32),
             recoveryNotice.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 12),
             recoveryNotice.trailingAnchor.constraint(lessThanOrEqualTo: content.trailingAnchor, constant: -12),
             recoveryHeight!,
@@ -1469,10 +1874,22 @@ final class CyderGameLibraryWindowController: NSWindowController, NSWindowDelega
             scroll.bottomAnchor.constraint(equalTo: loadStatus.topAnchor, constant: -4),
             loadStatus.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 12),
             loadStatus.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -12),
-            loadStatus.bottomAnchor.constraint(equalTo: environmentRow.topAnchor, constant: -4),
-            environmentRow.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 12),
-            environmentRow.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -12),
-            environmentRow.bottomAnchor.constraint(equalTo: content.bottomAnchor, constant: -8),
+            loadStatus.bottomAnchor.constraint(equalTo: selectionTitle.topAnchor, constant: -4),
+            selectionTitle.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 12),
+            selectionTitle.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -12),
+            selectionTitle.bottomAnchor.constraint(equalTo: selectionRow.topAnchor, constant: -4),
+            selectionTitle.heightAnchor.constraint(equalToConstant: 18),
+            selectionRow.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -12),
+            selectionRow.bottomAnchor.constraint(equalTo: content.bottomAnchor, constant: -8),
+            selectionRow.heightAnchor.constraint(equalToConstant: 28),
+            activityStatus.centerXAnchor.constraint(equalTo: content.centerXAnchor),
+            activityStatus.centerYAnchor.constraint(equalTo: selectionRow.centerYAnchor),
+            activityStatus.widthAnchor.constraint(lessThanOrEqualToConstant: 140),
+            activityStatus.trailingAnchor.constraint(lessThanOrEqualTo: selectionRow.leadingAnchor, constant: -6),
+            environmentControls.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 12),
+            environmentControls.trailingAnchor.constraint(lessThanOrEqualTo: activityStatus.leadingAnchor, constant: -6),
+            environmentControls.centerYAnchor.constraint(equalTo: selectionRow.centerYAnchor),
+            environmentControls.heightAnchor.constraint(lessThanOrEqualToConstant: 32),
             emptyState.centerXAnchor.constraint(equalTo: scroll.centerXAnchor),
             emptyState.centerYAnchor.constraint(equalTo: scroll.centerYAnchor),
             emptyState.leadingAnchor.constraint(greaterThanOrEqualTo: scroll.leadingAnchor, constant: 20),
@@ -1484,12 +1901,22 @@ final class CyderGameLibraryWindowController: NSWindowController, NSWindowDelega
         collectionView.isSelectable = true
         collectionView.backgroundColors = [.clear]
         collectionView.dataSource = self
+        collectionView.delegate = self
+        collectionView.setAccessibilityLabel("遊戲庫")
+        collectionView.onLaunchSelection = { [weak self] in self?.launchSelection() }
         collectionView.register(CyderGameTileItem.self, forItemWithIdentifier: NSUserInterfaceItemIdentifier("CyderGameTileItem"))
         collectionView.collectionViewLayout = CyderFiveColumnGridLayout()
     }
 
     private func reloadGrid() {
+        let selectedID = selectedGameID
         collectionView.reloadData()
+        if let index = games.firstIndex(where: { $0.id == selectedID }) {
+            selectGame(games[index])
+        } else {
+            selectedGameID = nil
+            updateSelectionRow()
+        }
         let isEmpty = games.isEmpty
         emptyState.isHidden = !isEmpty || !hasSnapshot
         collectionView.isHidden = isEmpty
@@ -1500,7 +1927,7 @@ final class CyderGameLibraryWindowController: NSWindowController, NSWindowDelega
     }
 
     private func refreshAppearance() {
-        window?.contentView?.layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
+        refreshCyderWindowBackground(window?.contentView)
         collectionView.needsDisplay = true
         collectionView.visibleItems().forEach { $0.view.needsDisplay = true }
     }
@@ -1513,28 +1940,53 @@ final class CyderGameLibraryWindowController: NSWindowController, NSWindowDelega
         let identifier = NSUserInterfaceItemIdentifier("CyderGameTileItem")
         let item = collectionView.makeItem(withIdentifier: identifier, for: indexPath) as! CyderGameTileItem
         let game = games[indexPath.item]
-        item.onClick = { [weak self] in self?.selectGame(game) }
+        item.onClick = { [weak self] in
+            guard let self, self.canInteract else { return }
+            self.selectGame(game)
+            self.window?.makeFirstResponder(self.collectionView)
+        }
         item.onDoubleClick = { [weak self] in self?.launch(game) }
         item.onContextMenu = { [weak self] in self?.contextMenu(for: game) }
         // image(for:) returns a PE logo or a neutral placeholder — never the
         // macOS generic EXE document icon — and schedules extraction when needed.
-        item.configure(record: game, independent: independentIDs.contains(game.id), image: readOnly ? (NSImage(systemSymbolName: "gamecontroller.fill", accessibilityDescription: nil) ?? NSImage()) : iconStore.image(for: game))
+        item.configure(record: game, independent: independentIDs.contains(game.id), readOnly: readOnly, image: readOnly ? (NSImage(systemSymbolName: "gamecontroller.fill", accessibilityDescription: nil) ?? NSImage()) : iconStore.image(for: game))
+        item.setInteractionEnabled(canInteract)
         item.isSelected = game.id == selectedGameID
         return item
     }
 
     private func selectGame(_ game: CyderGameRecord) {
-        guard selectedGameID != game.id else { return }
+        guard canInteract, let index = games.firstIndex(where: { $0.id == game.id }) else { return }
+        let paths: Set<IndexPath> = [IndexPath(item: index, section: 0)]
+        if collectionView.selectionIndexPaths != paths { collectionView.selectionIndexPaths = paths }
         selectedGameID = game.id
-        for item in collectionView.visibleItems() {
-            guard let tileItem = item as? CyderGameTileItem,
-                  let indexPath = collectionView.indexPath(for: item),
-                  indexPath.item < games.count else { continue }
-            tileItem.isSelected = games[indexPath.item].id == game.id
-        }
+        updateSelectionRow()
+    }
+
+    func collectionView(_ collectionView: NSCollectionView, didSelectItemsAt indexPaths: Set<IndexPath>) {
+        guard canInteract, let path = indexPaths.first, games.indices.contains(path.item) else { return }
+        selectedGameID = games[path.item].id
+        updateSelectionRow()
+    }
+
+    func collectionView(_ collectionView: NSCollectionView, didDeselectItemsAt indexPaths: Set<IndexPath>) {
+        guard canInteract, collectionView.selectionIndexPaths.isEmpty else { return }
+        selectedGameID = nil
+        updateSelectionRow()
+    }
+
+    private func updateSelectionRow() {
+        selectionTitle.stringValue = selectedGame?.displayName ?? ""
+        selectionTitle.toolTip = selectedGame?.displayName
+        refreshInteractionAvailability()
+    }
+
+    @objc private func launchSelection() {
+        if let game = selectedGame { launch(game) }
     }
 
     private func contextMenu(for game: CyderGameRecord) -> NSMenu {
+        guard canInteract else { return NSMenu() }
         selectGame(game)
         let menu = NSMenu()
         menu.autoenablesItems = false
@@ -1543,13 +1995,13 @@ final class CyderGameLibraryWindowController: NSWindowController, NSWindowDelega
             : "加入 macOS 應用程式"
         let macApp = menu.addItem(withTitle: macAppTitle, action: #selector(installMacAppForSelectedGame), keyEquivalent: "")
         macApp.target = self
-        macApp.isEnabled = !readOnly && !isQuiescing && !macLauncherInstallInProgress
+        macApp.isEnabled = canMutate && !macLauncherInstallInProgress
         let options = menu.addItem(withTitle: "選項", action: #selector(openSettingsForSelectedGame), keyEquivalent: "")
         options.target = self
-        options.isEnabled = !readOnly
+        options.isEnabled = canMutate
         let reveal = menu.addItem(withTitle: "顯示於 Finder", action: #selector(revealSelectedGameInFinder), keyEquivalent: "")
         reveal.target = self
-        reveal.isEnabled = !isQuiescing && !revealInProgress
+        reveal.isEnabled = canInteract && !revealInProgress
         return menu
     }
 
@@ -1570,14 +2022,14 @@ final class CyderGameLibraryWindowController: NSWindowController, NSWindowDelega
     }
 
     @objc private func openPreferences() {
-        guard !readOnly else { return }
+        guard canMutate else { return }
         onOpenPreferences?()
     }
 
-    @objc private func refreshLibrary() { prepareForDisplay() }
+    @objc private func refreshLibrary() { guard canInteract else { return }; prepareForDisplay() }
 
     @objc private func addGame() {
-        guard !readOnly, !loader.isBusy else { return }
+        guard canMutate, !loader.isBusy else { return }
         let panel = NSOpenPanel()
         panel.title = "加入遊戲"
         panel.message = "選擇 Windows 遊戲執行檔 (.exe)"
@@ -1588,24 +2040,25 @@ final class CyderGameLibraryWindowController: NSWindowController, NSWindowDelega
         if #available(macOS 11.0, *), let exeType = UTType(filenameExtension: "exe") {
             panel.allowedContentTypes = [exeType, .data]
         }
-        guard panel.runModal() == .OK, let url = panel.url else { return }
+        guard panel.runModal() == .OK, canMutate, let url = panel.url else { return }
         loader.request(.add(url))
     }
 
     private func launch(_ game: CyderGameRecord) {
-        guard !readOnly else { return }
+        guard canMutate, games.contains(where: { $0.id == game.id }) else { return }
         // The accepted launch path performs file validation off AppKit.
         onLaunch?(game.executableURL, nil)
     }
 
     @objc private func openSettingsForSelectedGame() {
-        guard !readOnly, let game = selectedGame else { return }
+        guard canMutate, let game = selectedGame else { return }
         let controller = CyderGameSettingsWindowController(game: game, independent: independentIDs.contains(game.id))
         controller.onLaunch = { [weak self] executable, settings in
-            self?.onLaunch?(executable, settings)
+            guard let self, self.canMutate else { return }
+            self.onLaunch?(executable, settings)
         }
         controller.onRemoveProfile = { [weak self] executable, completion in
-            guard let self else { completion(false); return }
+            guard let self, self.canMutate else { completion(false); return }
             self.onRemoveProfile?(executable) { succeeded in
                 completion(succeeded)
                 if succeeded { self.prepareForDisplay() }
@@ -1634,7 +2087,7 @@ final class CyderGameLibraryWindowController: NSWindowController, NSWindowDelega
     }
 
     @objc private func revealSelectedGameInFinder() {
-        guard !isQuiescing, !revealInProgress, let game = selectedGame else { return }
+        guard canInteract, !revealInProgress, let game = selectedGame else { return }
         let url = game.executableURL
         let presentation = UUID(), exists = fileExists
         revealInProgress = true; revealPresentation = presentation
@@ -1650,7 +2103,7 @@ final class CyderGameLibraryWindowController: NSWindowController, NSWindowDelega
                 self.revealInProgress = false
                 guard self.revealPresentation == presentation, !self.isQuiescing else { return }
                 self.revealPresentation = nil
-                guard self.window?.isVisible == true, self.selectedGameID == game.id else { return }
+                guard self.canInteract, self.window?.isVisible == true, self.selectedGameID == game.id else { return }
                 if available { self.loadStatus.stringValue = ""; self.revealInFinder([url]) }
                 else { self.loadStatus.stringValue = "找不到遊戲：這個 EXE 已不在原本的位置" }
             }
@@ -1658,7 +2111,7 @@ final class CyderGameLibraryWindowController: NSWindowController, NSWindowDelega
     }
 
     @objc private func installMacAppForSelectedGame() {
-        guard !readOnly, !isQuiescing, let game = selectedGame, !macLauncherInstallInProgress else { return }
+        guard canMutate, let game = selectedGame, !macLauncherInstallInProgress else { return }
         macLauncherInstallInProgress = true
         let updating = game.macAppPath != nil
         let presentation = UUID()

@@ -63,6 +63,7 @@ let loader = CyderLibraryLoader(deadline: 0.05, read: { _ in
 })
 let start = ProcessInfo.processInfo.systemUptime
 let controller = CyderGameLibraryWindowController(loader: loader)
+controller.updateEnvironmentState(.current(.ready))
 controller.showWindow(nil)
 controller.prepareForDisplay()
 precondition(ProcessInfo.processInfo.systemUptime - start < 1, "window creation waited for data")
@@ -72,8 +73,10 @@ controller.onPrepareEnvironment = { prepare += 1 }
 let buttons = views(controller.window!.contentView!.superview!).compactMap { $0 as? NSButton }
 let preferencesButton = buttons.first { $0.toolTip == "偏好設定" }!
 preferencesButton.performClick(nil)
-let environmentButton = buttons.first { $0.title == "準備 Windows 環境" }!
+controller.updateEnvironmentState(.current(.unknown))
+let environmentButton = buttons.first { $0.title == "重新檢查" }!
 environmentButton.performClick(nil)
+controller.updateEnvironmentState(.current(.ready))
 precondition(preferences == 1 && prepare == 1)
 for _ in 0..<50 { controller.prepareForDisplay() }
 var tick = false
@@ -88,7 +91,7 @@ let dismiss = views(controller.window!.contentView!).compactMap { $0 as? NSButto
 dismiss.performClick(nil)
 precondition(dismiss.superview!.isHidden)
 if let path = ProcessInfo.processInfo.environment["CYDER_TEST_RENDER"] {
-    controller.updateRequestSummary("1 個項目尚未啟動 · 查看要求")
+    controller.updateEnvironmentState(.current(.needsUpdate))
     controller.showRecoveryNotice()
     controller.window!.contentView!.layoutSubtreeIfNeeded()
     let view = controller.window!.contentView!
@@ -117,11 +120,12 @@ readonlyController.onOpenPreferences = { forbiddenActions += 1 }
 readonlyController.showWindow(nil); readonlyController.prepareForDisplay()
 pump { !readonlyLoader.isBusy }
 let readonlyButtons = views(readonlyController.window!.contentView!.superview!).compactMap { $0 as? NSButton }
-for button in readonlyButtons where button.title == "準備 Windows 環境" || button.toolTip == "偏好設定" || button.toolTip == "加入遊戲" {
+for button in readonlyButtons where button.title == "重新檢查" || button.toolTip == "偏好設定" || button.toolTip == "加入遊戲" {
     precondition(!button.isEnabled); button.performClick(nil)
 }
 let collection = views(readonlyController.window!.contentView!).compactMap { $0 as? NSCollectionView }.first!
 let tile = readonlyController.collectionView(collection, itemForRepresentedObjectAt: IndexPath(item: 0, section: 0)) as! CyderGameTileItem
+precondition(tile.view.accessibilityHelp()?.contains("唯讀") == true)
 tile.onDoubleClick?()
 guard let context = tile.onContextMenu?() else { fputs("FAIL missing read-only context menu\n", stderr); exit(1) }
 precondition(context.items[0].isEnabled == false && context.items[1].isEnabled == false)
@@ -141,15 +145,106 @@ DispatchQueue.global().asyncAfter(deadline: .now() + 15) {
     fputs("FAIL: file-action fixture deadline\n", stderr); _exit(79)
 }
 let fileController = CyderGameLibraryWindowController(loader: fileLoader)
+fileController.updateEnvironmentState(.current(.ready))
 fileController.fileActionDeadline = 0.05
 fileController.showWindow(nil); fileController.prepareForDisplay()
 pump { !fileLoader.isBusy }
 let fileCollection = views(fileController.window!.contentView!).compactMap { $0 as? NSCollectionView }.first!
 let fileTile = fileController.collectionView(fileCollection, itemForRepresentedObjectAt: IndexPath(item: 0, section: 0)) as! CyderGameTileItem
 let otherTile = fileController.collectionView(fileCollection, itemForRepresentedObjectAt: IndexPath(item: 1, section: 0)) as! CyderGameTileItem
+// VoiceOver, mouse and native keyboard selection must agree on the game that Return launches.
+var launched: [URL] = []
+fileController.onLaunch = { url, _ in launched.append(url) }
+precondition(otherTile.view.accessibilityLabel() == otherGame.displayName)
+precondition(otherTile.view.accessibilityPerformPress())
+precondition(fileCollection.selectionIndexPaths == [IndexPath(item: 1, section: 0)])
+func pressReturn(repeated: Bool) {
+    let event = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [],
+                                timestamp: 0, windowNumber: fileController.window!.windowNumber,
+                                context: nil, characters: "\r", charactersIgnoringModifiers: "\r",
+                                isARepeat: repeated, keyCode: 36)!
+    fileCollection.keyDown(with: event)
+}
+pressReturn(repeated: false)
+pressReturn(repeated: true)
+precondition(launched == [otherGame.executableURL])
+fileController.prepareForDisplay()
+pump { !fileLoader.isBusy }
+precondition(fileCollection.selectionIndexPaths == [IndexPath(item: 1, section: 0)])
+let launchButton = views(fileController.window!.contentView!).compactMap { $0 as? NSButton }.first { $0.title == "啟動遊戲" }!
+fileTile.onClick?()
+launchButton.performClick(nil)
+precondition(launched == [otherGame.executableURL, fileGame.executableURL])
+for count in 1...3 {
+    let event = NSEvent.mouseEvent(with: .leftMouseDown, location: .zero, modifierFlags: [],
+                                 timestamp: 0, windowNumber: fileController.window!.windowNumber,
+                                 context: nil, eventNumber: count, clickCount: count, pressure: 1)!
+    otherTile.view.mouseDown(with: event)
+}
+precondition(launched == [otherGame.executableURL, fileGame.executableURL, otherGame.executableURL],
+             "triple-click accepted two launches")
+print("PASS selection: native index, AX press, Return repeat suppression, visible primary action, refresh keeps selected ID")
+// Real AppKit events and previously-created menus cannot bypass preparation.
+let beforeBlocked = launched.count
+var updateRequests = 0, forbiddenPreferences = 0
+fileController.onPrepareEnvironment = { updateRequests += 1 }
+fileController.onOpenPreferences = { forbiddenPreferences += 1 }
+fileController.updateEnvironmentState(.current(.notPrepared))
+precondition(!fileCollection.isSelectable, "fresh environment was interactive before automatic preparation admission")
+let pendingButtons = views(fileController.window!.contentView!.superview!).compactMap { $0 as? NSButton }
+precondition(pendingButtons.filter { $0.title == "初始化環境" }.allSatisfy { $0.isHidden })
+precondition(pendingButtons.filter { ["遊戲選項…", "啟動遊戲"].contains($0.title) }.allSatisfy { !$0.isEnabled })
+precondition(views(fileController.window!.contentView!).compactMap { $0 as? NSProgressIndicator }.contains { !$0.isHidden })
+fileController.updateEnvironmentState(.current(.needsUpdate))
+let allFileButtons = views(fileController.window!.contentView!.superview!).compactMap { $0 as? NSButton }
+let updateLink = allFileButtons.first { $0.title == "有可用的引擎更新" }!
+precondition(!updateLink.isBordered && updateLink.isEnabled && updateLink.contentTintColor == .systemYellow)
+let staleMenu = fileTile.onContextMenu!()!
+updateLink.performClick(nil)
+precondition(updateRequests == 1)
+for button in allFileButtons where ["偏好設定", "重新整理遊戲庫", "加入遊戲"].contains(button.toolTip ?? "") || ["遊戲選項…", "啟動遊戲"].contains(button.title) {
+    precondition(!button.isEnabled, "busy library left a command enabled")
+    // sendAction deliberately bypasses disabled-button dispatch.
+    if let action = button.action { NSApp.sendAction(action, to: button.target, from: button) }
+}
+pressReturn(repeated: false)
+fileTile.onClick?(); fileTile.onDoubleClick?()
+for index in staleMenu.items.indices { staleMenu.performActionForItem(at: index) }
+precondition(launched.count == beforeBlocked && forbiddenPreferences == 0 && updateRequests == 1)
+precondition(!fileCollection.isSelectable)
+precondition(fileTile.onContextMenu!()!.items.isEmpty)
+fileController.window!.contentView!.layoutSubtreeIfNeeded()
+for visible in fileCollection.visibleItems() {
+    precondition(!visible.view.accessibilityPerformPress(), "disabled icon accepted accessibility press")
+}
+precondition(views(fileController.window!.contentView!).compactMap { $0 as? NSProgressIndicator }.contains { !$0.isHidden })
+fileController.updateEnvironmentState(.failed("fixture update failed; manual retry"))
+let retryUpdate = allFileButtons.first { $0.title == "重試" }!
+precondition(retryUpdate.isEnabled)
+retryUpdate.performClick(nil)
+precondition(updateRequests == 2)
+fileController.updateEnvironmentState(.current(.ready))
+precondition(launchButton.isEnabled && fileCollection.isSelectable)
+pressReturn(repeated: false)
+precondition(launched.count == beforeBlocked + 1, "success did not restore launch interaction")
+// The selected name stays in its own row; counter center never follows it.
+fileController.updateProgramActivity("執行中 123 · 啟動器 45")
+fileController.window!.setContentSize(NSSize(width: 500, height: 320))
+let content = fileController.window!.contentView!
+content.layoutSubtreeIfNeeded()
+let activity = views(content).compactMap { $0 as? NSTextField }.first { $0.toolTip == "執行中 123 · 啟動器 45" }!
+let center = activity.convert(activity.bounds, to: content)
+let right = launchButton.convert(launchButton.bounds, to: content)
+precondition(abs(center.midX - content.bounds.midX) < 1 && center.maxX < right.minX)
+precondition(!center.intersects(right), "counter overlaps right launch action")
+print("PASS environment UI: update link, real disabled buttons/targets/menus/keyboard/AX, progress, failed retry, success restore, centered compact footer")
+
+
 func contextAction(_ tile: CyderGameTileItem, _ title: String) {
     let menu = tile.onContextMenu!()!
-    let index = menu.items.firstIndex(where: { $0.title == title })!
+    guard let index = menu.items.firstIndex(where: { $0.title == title }) else {
+        fputs("FAIL missing context action \(title); menu=\(menu.items.map(\.title))\n", stderr); exit(1)
+    }
     menu.performActionForItem(at: index)
 }
 func fileMessage(_ text: String) -> Bool {
@@ -203,11 +298,14 @@ let quitGate = DispatchSemaphore(value: 0), quitCounter = Counter()
 fileController.fileExists = { _ in quitCounter.increment(); quitGate.wait(); return true }
 contextAction(fileTile, "顯示於 Finder")
 pump { quitCounter.value == 1 }
+let quitMenu = fileTile.onContextMenu!()!
 fileController.quiesce()
 installCompletion?(.success(root.appendingPathComponent("Quit.app")))
 quitGate.signal()
-contextAction(fileTile, "加入 macOS 應用程式")
-contextAction(fileTile, "顯示於 Finder")
+precondition(fileTile.onContextMenu!()!.items.isEmpty, "quiesced library exposed a new menu")
+for item in quitMenu.items {
+    if let action = item.action { NSApp.sendAction(action, to: item.target, from: item) }
+}
 var quitSettled = false
 DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { quitSettled = true }
 pump { quitSettled }

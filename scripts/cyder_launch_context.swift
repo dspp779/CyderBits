@@ -5,6 +5,12 @@ struct CyderLaunchContext {
         resourcePath + "/ogom-scripts/cyder_launcher.sh"
     }
 
+    // Windows looks up environment names without regard to case. Remove every
+    // spelling, including empty aliases, before constructing a launch context.
+    static func withoutDirectDrawEnvironment(_ environment: [String: String]) -> [String: String] {
+        environment.filter { !["CYDER_DDRAW_PATH", "CNC_DDRAW_CONFIG_FILE"].contains($0.key.uppercased()) }
+    }
+
     let launcher: String
     let engineSrc: String
     let engineVersionFile: String
@@ -24,7 +30,9 @@ struct CyderLaunchContext {
         self.engineSrc = engineSrc
         engineVersionFile = resourcePath + "/engine-version.txt"
 
-        var env = ProcessInfo.processInfo.environment
+        var env = Self.withoutDirectDrawEnvironment(ProcessInfo.processInfo.environment)
+        // DirectDraw belongs to the selected game's final launch, never to
+        // the app, prefix setup, or another request inherited from its caller.
         env["CYDER_ENGINE_SRC"] = engineSrc
         env["CYDER_SCRIPTS"] = resourcePath + "/ogom-scripts"
         env["CYDER_LIBARCHIVE_SRC"] = libarchive

@@ -92,8 +92,8 @@ assert_contains "$ui" 'CyderWineLocale.menuCases.map' "locale menu should expose
 assert_contains "$(cat "$ROOT/scripts/cyder_settings.swift")" 'case .system: return "系統"' "locale menu should label follow-system as 系統"
 assert_contains "$(cat "$ROOT/scripts/cyder_settings.swift")" 'detectedSystemLabel' "系統 should annotate the detected macOS language"
 assert_contains "$ui" "系統目前偵測為" "locale help should show the currently detected language"
-assert_contains "$ui" "該 bottle 的 wineserver 結束" \
-  "locale help must say an already-running wineserver keeps the previous code page"
+assert_contains "$ui" "若同一個 Windows 環境仍在運作，變更會在環境完全停止後的下一次啟動生效。" \
+  "locale help must explain that a running environment keeps the previous locale until it stops and starts again"
 assert_contains "$ui" "CyderSyncMode.allCases.map" "sync selector should expose off/MSync/ESync choices"
 assert_contains "$ui" "匯出上次遊戲記錄…" "diagnostics tab should expose last-game export"
 assert_contains "$ui" "清理除錯記錄…" "diagnostics tab should expose debug-log cleanup"
@@ -253,15 +253,15 @@ assert_contains "$library_ui" "truncatesLastVisibleLine = true" "game tile title
 assert_contains "$library_ui" "preferredMaxLayoutWidth" "multiline NSTextField needs a layout width to wrap"
 assert_contains "$library_ui" "styleMask: [.titled, .closable, .fullSizeContentView]" "game library window should not be resizable"
 assert_contains "$library_ui" "window.collectionBehavior.insert(.fullScreenNone)" "game library should not enter full screen"
-assert_contains "$library_ui" 'requestSummary.topAnchor.constraint(equalTo: content.topAnchor, constant: 32)' "request status should begin below the title bar"
-assert_contains "$library_ui" 'requestSummaryHeight?.constant = text.isEmpty ? 0 : 32' "normal launches must not reserve space for an empty recovery notice"
-assert_contains "$library_ui" 'scroll.topAnchor.constraint(equalTo: recoveryNotice.bottomAnchor)' "game content should follow collapsible request and recovery status"
+assert_not_contains "$library_ui" 'requestSummary' "library should not expose a launch-result entry or reserve its space"
+assert_contains "$library_ui" 'recoveryNotice.topAnchor.constraint(equalTo: content.topAnchor, constant: 32)' "recovery notice should begin below the title bar"
+assert_contains "$library_ui" 'scroll.topAnchor.constraint(equalTo: recoveryNotice.bottomAnchor)' "game content should follow the collapsible recovery notice"
 if [[ "$library_ui" == *'addCyderTitlebarBrand(to: window, title: "遊戲庫"'* || "$library_ui" == *'let divider = NSBox()'* ]]; then
   echo "ASSERT failed: game library should not show a title-bar brand or content divider" >&2
   exit 1
 fi
 assert_contains "$ui" "width: 560, height: 380" "preferences should use a compact fixed window"
-assert_contains "$library_ui" "if event.clickCount >= 2" "double-click should launch before selection updates"
+assert_contains "$library_ui" "if event.clickCount == 2" "only the second click of a sequence should launch"
 assert_contains "$library_ui" "collectionView.visibleItems()" "selection should update visible tiles without replacing them mid-click"
 assert_contains "$library_ui" "toolbarAddButton.isHidden = isEmpty" "top add button should hide for an empty library"
 if [[ "$library_ui" == *'toolbarAddButton.title = "加入遊戲"'* ]]; then

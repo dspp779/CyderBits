@@ -120,12 +120,18 @@ done
 # agent so the menu-bar status remains available until the bottle is idle.
 # Catalina deliberately retains the shell-only fallback.
 if [[ -n "$exe" ]]; then
+  # Bash 3.2 treats an empty array as unset with nounset. This vector always
+  # contains the document path; append game arguments only when present.
+  document_args=("$exe")
+  if ((${#game_args[@]} > 0)); then
+    document_args+=("${game_args[@]}")
+  fi
   if cyder_macos_at_least 11 0 && [[ -x "$SELF/CyderSwift" ]] \
      && /usr/bin/file -b "$SELF/CyderSwift" 2>/dev/null | grep -q 'Mach-O'; then
-    cyder_exec_cyder_swift "$SELF/CyderSwift" "$exe" "${game_args[@]}"
+    cyder_exec_cyder_swift "$SELF/CyderSwift" "${document_args[@]}"
   fi
   if ! cyder_macos_at_least 11 0 && ! cyder_catalina_environment_ready; then
-    cyder_start_catalina_bootstrap "$exe" "${game_args[@]}"
+    cyder_start_catalina_bootstrap "${document_args[@]}"
     exit $?
   fi
   lower_exe="$(printf '%s' "$exe" | tr '[:upper:]' '[:lower:]')"

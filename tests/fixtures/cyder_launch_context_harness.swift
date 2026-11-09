@@ -26,6 +26,11 @@ func spin(until predicate: () -> Bool) {
 let root = URL(fileURLWithPath: CommandLine.arguments[1])
 try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
 let resolver = BlockedResolver()
+setenv("CYDER_DDRAW_PATH", "Z:\\unrelated\\ddraw.dll", 1)
+setenv("CNC_DDRAW_CONFIG_FILE", "C:\\unrelated.ini", 1)
+let aliases = ["cyder_ddraw_path", "CyDeR_DdRaW_PaTh", "cnc_ddraw_config_file", "Cnc_Ddraw_Config_File"]
+for (index, name) in aliases.enumerated() { setenv(name, index % 2 == 0 ? "foreign" : "", 1) }
+setenv("GAME_CONTEXT_CONTROL", "preserve", 1)
 var loaded: CyderLaunchContext?
 Task { @MainActor in
     require(Thread.isMainThread, "fixture must call context from main actor")
@@ -44,6 +49,10 @@ let context = loaded!
 require(context.engineSrc == root.path + "/engine-test.tar.zst", "resolved archive")
 require(context.environment["CYDER_ENGINE_SRC"] == context.engineSrc, "environment engine source")
 require(context.environment["WINE_INSTALL"] == context.engineSrc, "Wine source")
+require(context.environment["CYDER_DDRAW_PATH"] == nil, "caller DLL mapping must not leak into another launch")
+require(context.environment["CNC_DDRAW_CONFIG_FILE"] == nil, "caller INI must not leak into prefix helpers")
+require(aliases.allSatisfy { context.environment[$0] == nil }, "case variants and empty aliases must not reach helpers")
+require(context.environment["GAME_CONTEXT_CONTROL"] == "preserve", "unrelated environment remains intact")
 require(context.environment["CYDER_SCRIPTS"] == root.path + "/ogom-scripts", "script location")
 require(context.engineVersionFile == root.path + "/engine-version.txt", "version file path")
 

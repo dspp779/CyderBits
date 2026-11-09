@@ -81,8 +81,8 @@ assert_contains "$build_script" 'python3 "$OGOM/scripts/cyder-compatdb.py" inspe
   "Cyder.app packaging must inspect the bundled runtime CompatDB"
 assert_contains "$build_script" '"$SCRIPT_DIR/cyder-cnc-ddraw.sh" verify' \
   "Cyder.app packaging must verify the pinned cnc-ddraw payload"
-assert_contains "$build_script" 'vendor/cnc-ddraw/7.1.0.0/cnc-ddraw.zip' \
-  "Cyder.app must bundle the pinned offline cnc-ddraw archive"
+assert_contains "$build_script" 'python3 "$SCRIPT_DIR/package-cnc-ddraw.py"' \
+  "Cyder.app must only package the verified cnc-ddraw runtime subset"
 assert_contains "$build_script" '"$RES/licenses/cnc-ddraw-LICENSE"' \
   "Cyder.app must expose the bundled cnc-ddraw MIT license"
 assert_contains "$build_script" 'cp "$SCRIPT_DIR/cyder-recipe.sh" "$RES/ogom-scripts/"' \

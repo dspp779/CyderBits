@@ -55,20 +55,24 @@ final class CyderSetupPanel {
     private let label: NSTextField
     private let detail: NSTextField
 
-    init() {
+    let passive: Bool
+    init(passive: Bool = false) {
+        self.passive = passive
         let width: CGFloat = 420
         let height: CGFloat = 150
         let frame = NSRect(x: 0, y: 0, width: width, height: height)
-        window = NSWindow(
-            contentRect: frame,
-            styleMask: [.titled, .fullSizeContentView],
-            backing: .buffered,
-            defer: false
-        )
+        if passive {
+            window = NSPanel(contentRect: frame, styleMask: [.titled, .fullSizeContentView, .nonactivatingPanel],
+                             backing: .buffered, defer: false)
+            (window as? NSPanel)?.hidesOnDeactivate = false
+        } else {
+            window = NSWindow(contentRect: frame, styleMask: [.titled, .fullSizeContentView],
+                              backing: .buffered, defer: false)
+        }
         window.title = "Cyder"
         window.titlebarAppearsTransparent = true
         window.isReleasedWhenClosed = false
-        window.level = .floating
+        window.level = passive ? .normal : .floating
         window.center()
 
         progress = NSProgressIndicator()
@@ -76,14 +80,15 @@ final class CyderSetupPanel {
         progress.isIndeterminate = true
         progress.controlSize = .regular
         progress.translatesAutoresizingMaskIntoConstraints = false
-        progress.startAnimation(nil)
+        if !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion { progress.startAnimation(nil) }
+        progress.setAccessibilityLabel(passive ? "正在開啟 Windows 程式" : "準備進度")
 
         label = NSTextField(labelWithString: "正在準備…")
         label.font = .systemFont(ofSize: 14)
         label.alignment = .center
         label.translatesAutoresizingMaskIntoConstraints = false
 
-        detail = NSTextField(labelWithString: "請稍候，完成後會自動關閉。")
+        detail = NSTextField(labelWithString: passive ? "可以切換到其他 App。程式視窗出現後，這裡會自動關閉。" : "請稍候，完成後會自動關閉。")
         detail.font = .systemFont(ofSize: 11)
         detail.textColor = .secondaryLabelColor
         detail.alignment = .center
@@ -112,9 +117,13 @@ final class CyderSetupPanel {
     }
 
     func show() {
-        activateCyderUI(dockVisible: false)
-        window.makeKeyAndOrderFront(nil)
-        window.orderFrontRegardless()
+        if passive {
+            window.orderFront(nil)
+        } else {
+            activateCyderUI(dockVisible: false)
+            window.makeKeyAndOrderFront(nil)
+            window.orderFrontRegardless()
+        }
         window.displayIfNeeded()
     }
 
@@ -224,12 +233,19 @@ private func processStartDate(_ pid: Int32) -> Date? {
     )
 }
 
-private func cyderOnscreenWindows() -> [CyderOnscreenWindow] {
+private func cyderOnscreenWindows() -> [CyderOnscreenWindow] { readCyderOnscreenWindows() ?? [] }
+
+func cyderVisibleSurfaces(ownedBy pids: Set<Int32>) -> [Int32: [UInt32]]? {
+    guard let windows = readCyderOnscreenWindows() else { return nil }
+    return Dictionary(grouping: windows.filter { pids.contains($0.pid) }, by: \.pid).mapValues { $0.map(\.windowID) }
+}
+
+private func readCyderOnscreenWindows() -> [CyderOnscreenWindow]? {
     guard let info = CGWindowListCopyWindowInfo(
         [.optionOnScreenOnly, .excludeDesktopElements],
         kCGNullWindowID
     ) as? [[String: Any]] else {
-        return []
+        return nil
     }
     var windows: [CyderOnscreenWindow] = []
     for window in info {
@@ -237,7 +253,7 @@ private func cyderOnscreenWindows() -> [CyderOnscreenWindow] {
         guard pid > 0, let number = window[kCGWindowNumber as String] as? NSNumber,
               number.uint32Value != 0 else { continue }
         let layer = window[kCGWindowLayer as String] as? Int ?? 0
-        guard layer == 0 else { continue }
+        guard layer == 0, (window[kCGWindowAlpha as String] as? NSNumber)?.doubleValue != 0 else { continue }
         let bounds = window[kCGWindowBounds as String] as? NSDictionary
         let width = (bounds?["Width"] as? NSNumber)?.doubleValue ?? 0
         let height = (bounds?["Height"] as? NSNumber)?.doubleValue ?? 0

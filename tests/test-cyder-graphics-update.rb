@@ -71,6 +71,19 @@ class GraphicsUpdateTest < Minitest::Test
     before=snapshot
     assert_equal 'deferred', apply(trusted: false)['status']; assert_equal before,snapshot
   end
+  def test_publisher_and_verifier_failures_preserve_specific_reason_without_mutation
+    before = snapshot
+    %w[publisher_unverified system_signature_verifier_unavailable].each do |reason|
+      C.stub(:bundle_trust, ->(*) { raise C::Unknown, reason }) do
+        assert_equal({'status' => 'deferred', 'reason' => reason}, apply(trusted: false))
+      end
+      assert_equal before, snapshot
+    end
+    C.stub(:bundle_trust, ->(*) { raise C::Unknown, '/private/unexpected/detail' }) do
+      assert_equal 'verification_or_io_unknown', apply(trusted: false)['reason']
+    end
+    assert_equal before, snapshot
+  end
   def test_bad_candidate_keeps_old_files_and_registry
     apply; old=current; configure('B')
     result=apply(extract: lambda { |_, target| FileUtils.cp_r(@payload,File.join(target,'dxmt')); File.write(File.join(target,'dxmt/x86_64-unix/winemetal.so'),'corrupt') })

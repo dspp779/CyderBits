@@ -33,6 +33,26 @@ final class CyderStatusItemController: NSObject, NSMenuDelegate {
     }
 
     var onWindowConfirmed: ((String) -> Void)?
+    var onLaunchWindowPresented: ((String) -> Void)?
+    var onPendingWindowChange: ((Set<String>) -> Void)?
+    private(set) var presentedLaunches = Set<String>()
+    var onActivityChanged: ((CyderLifecycle.ProgramActivity) -> Void)?
+    private var lastActivity: CyderLifecycle.ProgramActivity?
+    private struct LaunchFocus {
+        let origin: Int32
+        var intervening: Set<Int32> = []
+        var launch: String?
+        func permits(_ target: Int32, current: Int32?) -> Bool {
+            guard let current else { return false }
+            let allowed = Set([origin, target, ProcessInfo.processInfo.processIdentifier])
+            return allowed.contains(current) && intervening.isSubset(of: allowed)
+        }
+    }
+    private var launchFocus: LaunchFocus?
+    private var pendingAutomaticFocus: (operation: UUID, intent: LaunchFocus)?
+    private var focusProbeLaunch: String?
+    private var foregroundPID: () -> Int32? = { NSWorkspace.shared.frontmostApplication?.processIdentifier }
+
     var onOpenPreferences: (() -> Void)?
     var onOpenGameLibrary: (() -> Void)?
     var onOpenTaskManager: ((URL) -> Void)?
@@ -72,7 +92,9 @@ final class CyderStatusItemController: NSObject, NSMenuDelegate {
     private lazy var windowAccess = CyderWindowAccess(driver: windowDriver, event: { [weak self] in self?.lifecycleStore.send($0) })
     init(windowDriver: CyderWindowAccess.Driver = .system,
          discoveryDriver: CyderIndependentProcesses.Driver = .system,
-         recoveryInspect: @escaping (Int32) -> CyderProcessEvidence.Presence = CyderProcessEvidence.inspect) {
+         recoveryInspect: @escaping (Int32) -> CyderProcessEvidence.Presence = CyderProcessEvidence.inspect,
+         foregroundPID: @escaping () -> Int32? = { NSWorkspace.shared.frontmostApplication?.processIdentifier }) {
+        self.foregroundPID = foregroundPID
         self.discoveryDriver = discoveryDriver
         self.windowDriver = windowDriver; self.recoveryInspect = recoveryInspect; super.init()
     }
@@ -82,10 +104,30 @@ final class CyderStatusItemController: NSObject, NSMenuDelegate {
         guard !self.isQuiescing else { return }
         for effect in effects {
             if case .restoreObservation(let stamp, let request) = effect { self.installRecovered(request, stamp: stamp) }
-            if case .activateWindow(let stamp, let window, let operation) = effect {
-                self.windowAccess.activate(stamp: stamp, window: window, operation: operation)
+            if case .activateWindow(let stamp, let window, let operation, let automatic) = effect {
+                if automatic {
+                    guard let pending = self.pendingAutomaticFocus, pending.operation == operation else {
+                        self.lifecycleStore.send(.windowActionFinished(operation, .unconfirmed))
+                        continue
+                    }
+                    self.pendingAutomaticFocus = nil
+                    let stillPermitted = { [current = self.foregroundPID] in
+                        pending.intent.permits(window.process.pid, current: current())
+                    }
+                    guard stillPermitted() else {
+                        self.lifecycleStore.send(.windowActionFinished(operation, .unconfirmed))
+                        continue
+                    }
+                    self.windowAccess.activate(stamp: stamp, window: window, operation: operation, foregroundPermitted: stillPermitted)
+                } else {
+                    self.windowAccess.activate(stamp: stamp, window: window, operation: operation)
+                }
             }
-            if case .windowConfirmed(let launch) = effect { self.onWindowConfirmed?(launch) }
+            if case .windowPresented(let launch) = effect { self.onLaunchWindowPresented?(launch) }
+            if case .windowConfirmed(let launch, let process) = effect {
+                self.focusReadyWindow(launch, process: process, snapshot: snapshot)
+                self.onWindowConfirmed?(launch)
+            }
             if case .reconcile(let stamp) = effect { self.onReconcileEnvironment?(stamp) }
             if case .stop(let stamp, let operation) = effect,
                let environment = snapshot.environments[stamp.environment] {
@@ -158,7 +200,71 @@ final class CyderStatusItemController: NSObject, NSMenuDelegate {
     }
 
     func receiveLifecycleEvent(_ event: CyderLifecycle.Event) { lifecycleStore.send(event) }
-    func noteFrontmostApplication(_ pid: Int32) { windowAccess.focusChanged(to: pid) }
+    func noteFrontmostApplication(_ pid: Int32) {
+        if launchFocus != nil { launchFocus?.intervening.insert(pid) }
+        pendingAutomaticFocus?.intent.intervening.insert(pid)
+        windowAccess.focusChanged(to: pid)
+    }
+
+    private func focusReadyWindow(_ launch: String, process: CyderLifecycle.ProcessID, snapshot: CyderLifecycle.Snapshot) {
+        guard let intent = launchFocus, intent.launch == launch else { return }
+        let ready = snapshot.windows.values.filter {
+            $0.id.process == process && $0.id.source == "accessibility" && $0.isProgramWindow && $0.minimized == false
+                && $0.capability == .available && snapshot.processes[process]?.launch == launch
+        }
+        let focused = ready.filter { $0.focused == true }
+        let candidates = focused.isEmpty ? ready : focused
+        launchFocus = nil
+        guard candidates.count == 1, let window = candidates.first,
+              intent.permits(window.id.process.pid, current: foregroundPID()) else { return }
+        // Explicit single-use intent only. A recovered session cannot get here.
+        let operation = UUID()
+        pendingAutomaticFocus = (operation, intent)
+        lifecycleStore.send(.activateWindow(window.id, operation, automatic: true))
+    }
+
+    /// Without Accessibility permission the WindowServer cannot name an AX
+    /// object. Only hand the explicit launch to a verified target application
+    /// when it has exactly one ordinary on-screen surface. This is not proof
+    /// that a splash or loading screen has become interactive.
+    private func considerCooperativeFocus(_ snapshot: CyderLifecycle.Snapshot) {
+        guard let intent = launchFocus, let launch = intent.launch, focusProbeLaunch == nil,
+              snapshot.launches[launch]?.outcome == nil,
+              let candidate = solePresentedTarget(launch, snapshot: snapshot),
+              intent.permits(candidate.pid, current: foregroundPID()) else { return }
+        focusProbeLaunch = launch
+        observationQueue.async { [weak self] in
+            let application = NSRunningApplication(processIdentifier: candidate.pid)
+            let live = CyderProcessEvidence.live(candidate)
+            DispatchQueue.main.async {
+                guard let self, self.focusProbeLaunch == launch else { return }
+                self.focusProbeLaunch = nil
+                guard live, let application, !application.isTerminated, application.activationPolicy == .regular,
+                      !self.isQuiescing, let current = self.launchFocus, current.launch == launch,
+                      self.latestLifecycle.launches[launch]?.outcome == nil,
+                      self.solePresentedTarget(launch, snapshot: self.latestLifecycle) == candidate,
+                      current.permits(candidate.pid, current: self.foregroundPID()) else { return }
+                self.launchFocus = nil
+                guard !application.isActive else { return }
+                if #available(macOS 14, *) {
+                    NSApp.yieldActivation(to: application)
+                    _ = application.activate(from: .current, options: [])
+                } else {
+                    _ = application.activate(options: [])
+                }
+            }
+        }
+    }
+
+    private func solePresentedTarget(_ launch: String, snapshot: CyderLifecycle.Snapshot) -> CyderLifecycle.ProcessID? {
+        let surfaces = snapshot.windows.keys.filter {
+            $0.source == "coregraphics" && snapshot.processes[$0.process]?.launch == launch
+        }
+        guard surfaces.count == 1, let id = surfaces.first?.process, let process = snapshot.processes[id],
+              process.existence == .alive, process.hasPresentedProgram, process.windowCapability == .permissionRequired,
+              let image = process.executableName, snapshot.launches[launch]?.expectsHandoff(image) == true else { return nil }
+        return id
+    }
 
     func beginRecovery() {
         lifecycleStore.send(.restoring(true))
@@ -232,7 +338,23 @@ final class CyderStatusItemController: NSObject, NSMenuDelegate {
         guard !hasLifecycleSnapshot || (snapshot.epoch == latestLifecycle.epoch && snapshot.revision > latestLifecycle.revision) else { return }
         hasLifecycleSnapshot = true
         latestLifecycle = snapshot
+        let activity = snapshot.programActivity
+        if activity != lastActivity {
+            lastActivity = activity
+            onActivityChanged?(activity)
+        }
+        let shown = Set(snapshot.windows.values.compactMap { window -> String? in
+            guard window.isProgramWindow || window.id.source == "coregraphics",
+                  let process = snapshot.processes[window.id.process], let launch = process.launch,
+                  let group = snapshot.launches[launch], group.outcome == nil, process.isUserProgram(in: group) else { return nil }
+            return launch
+        })
+        if shown != presentedLaunches {
+            presentedLaunches = shown
+            onPendingWindowChange?(shown)
+        }
         windowAccess.update(snapshot)
+        considerCooperativeFocus(snapshot)
         recoveryObserver.update(snapshot)
         independentProcesses.update(snapshot)
         let endedScopes = Set(snapshot.environments.values.filter { $0.existence == .exited }.map {
@@ -294,15 +416,27 @@ final class CyderStatusItemController: NSObject, NSMenuDelegate {
         }
         for launch in latestLifecycle.launches.values {
             guard let environment = latestLifecycle.environments[launch.environment], environment.existence != .exited else { continue }
-            let alive = latestLifecycle.processes.values.contains { $0.launch == launch.id && $0.existence == .alive }
-            guard launch.outcome == nil || alive else { continue }
-            let starting = launch.outcome == nil
-            let windowConfirmed = latestLifecycle.windows.values.contains {
-                latestLifecycle.processes[$0.id.process]?.launch == launch.id
-            }
-            rows.append(.init(id: launch.id, name: launch.name, prefix: environment.prefix,
-                state: environment.stop == .executing ? "正在結束 Windows 程序" :
-                    (starting ? "正在啟動" : (windowConfirmed ? "已確認程式視窗" : "執行中；尚未確認視窗")), starting: starting))
+            let members = latestLifecycle.processes.values.filter { $0.launch == launch.id && $0.existence == .alive }
+            guard launch.outcome == nil || !members.isEmpty else { continue }
+            let relevant = Set(members.filter { $0.isUserProgram(in: launch) }.map(\.id))
+            let windows = latestLifecycle.windows.values.filter { relevant.contains($0.id.process) }
+            let windowConfirmed = windows.contains { $0.isProgramWindow }
+            let presented = windows.contains { $0.id.source == "coregraphics" }
+            let starting = launch.outcome == nil && !windowConfirmed && !presented
+            let games = members.filter { $0.hasPresentedProgram && $0.executableName?.lowercased() == "bluecg.exe" }
+            let launcher = members.contains { $0.hasPresentedProgram && $0.executableName?.lowercased() == "bluelauncher.exe" }
+            let name: String
+            if games.count > 1 { name = "BlueCG × \(games.count)" }
+            else { name = games.isEmpty ? launch.name : "BlueCG" }
+            let state: String
+            if environment.stop == .executing { state = "正在結束 Windows 程序" }
+            else if starting { state = "正在啟動" }
+            else if launcher && games.isEmpty { state = "啟動器已開啟" }
+            else if windowConfirmed { state = "已確認程式視窗" }
+            else if presented { state = "已顯示視窗，互動狀態待確認" }
+            else if members.contains(where: { $0.hasPresentedProgram }) { state = "執行中" }
+            else { state = "背景程序，尚未確認視窗" }
+            rows.append(.init(id: launch.id, name: name, prefix: environment.prefix, state: state, starting: starting))
         }
         return rows.sorted {
             let order = $0.name.localizedStandardCompare($1.name)
@@ -323,6 +457,7 @@ final class CyderStatusItemController: NSObject, NSMenuDelegate {
 
     func markLaunchStarted() {
         precondition(Thread.isMainThread)
+        if launchFocus == nil, let pid = foregroundPID() { launchFocus = LaunchFocus(origin: pid) }
         launchIngressPending = true
         publishLegacyWork()
         visualState = .starting
@@ -332,6 +467,7 @@ final class CyderStatusItemController: NSObject, NSMenuDelegate {
 
     func finishLaunchIngress() {
         precondition(Thread.isMainThread)
+        launchFocus = nil
         launchIngressPending = false
         publishLegacyWork()
         refresh()
@@ -510,6 +646,7 @@ final class CyderStatusItemController: NSObject, NSMenuDelegate {
                   [.dispatching, .observing].contains(request.phase), stamp.epoch == lifecycleEpoch else { return }
         }
         sessionVersions[id] = UUID()
+        if stamp != nil { launchFocus?.launch = id }
         launchIngressPending = false
         let name = executableName.trimmingCharacters(in: .whitespacesAndNewlines)
         let display = name.isEmpty ? "Wine" : name
@@ -991,11 +1128,7 @@ final class CyderStatusItemController: NSObject, NSMenuDelegate {
         switch state {
         case .starting: return "Cyder 正在啟動 Windows 環境"
         case .running:
-            let visible = programRows
-            if visible.count == 1, let name = visible.first?.name {
-                return "\(name) 執行中"
-            }
-            return visible.isEmpty ? (latestLifecycle.hasEnvironment ? "Windows 環境狀態" : "Cyder") : "\(visible.count) 個程式執行中"
+            return "Cyder · " + (lastActivity ?? latestLifecycle.programActivity).summary
         case .background: return "Windows 環境仍在執行"
         case .stopping: return "Cyder 正在結束 Windows 程序"
         case .attention: return "Cyder 無法確認背景程序已結束"

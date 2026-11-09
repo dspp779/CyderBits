@@ -47,6 +47,7 @@ Options:
 
 Environment:
   CYDER_APP_VERSION       Same as --version
+  CYDER_APP_BUILD         Optional numeric CFBundleVersion for a candidate build
   CYDER_NOTARY_PROFILE    Same as --notary-profile
   SIGN_IDENTITY           Used on release when --sign-identity is omitted;
                           ignored on test unless --sign-identity is passed
@@ -170,6 +171,14 @@ verify_release_app_contract() {
     echo "Release app version mismatch: expected $CYDER_APP_VERSION, got ${actual_version:-missing}" >&2
     exit 1
   }
+  if [[ -n "${CYDER_APP_BUILD:-}" ]]; then
+    local actual_build
+    actual_build="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$APP/Contents/Info.plist")"
+    [[ "$actual_build" == "$CYDER_APP_BUILD" ]] || {
+      echo "Release app build mismatch: expected $CYDER_APP_BUILD, got $actual_build" >&2
+      exit 1
+    }
+  fi
   /usr/bin/file -b "$swift" | grep -q 'Mach-O' || {
     echo "Release app requires native CyderSwift; shell fallback found." >&2
     exit 1

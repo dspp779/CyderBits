@@ -924,20 +924,22 @@ struct CyderSettings: Codable {
         guard value.range(of: "^[A-Za-z_][A-Za-z0-9_]*$", options: .regularExpression) != nil else {
             return false
         }
+        if ["CYDER_DDRAW_PATH", "CNC_DDRAW_CONFIG_FILE"].contains(value.uppercased()) { return false }
         let exactReserved: Set<String> = [
             "BASH_ENV", "ENV", "IFS", "PATH", "HOME", "TMPDIR", "SHELLOPTS", "BASHOPTS",
             "CDPATH", "GLOBIGNORE", "WINEPREFIX", "WINESERVER", "WINEARCH", "WINEDEBUG",
             "CX_ROOT", "CX_BOTTLE", "CX_APPLEGPTK_LIBD3DSHARED_PATH", "CYDER_SUPPORT",
             "CYDER_RUNTIME_ROOT", "CYDER_ENGINES", "CYDER_ENGINE_NAME", "CYDER_ENGINE_SRC",
-            "CYDER_SCRIPTS", "CYDER_APP", "CYDER_RESULT_FILE", "CYDER_PROGRESS_FILE",
+            "CYDER_SCRIPTS", "CYDER_APP", "CYDER_RESULT_FILE", "CYDER_PROGRESS_FILE", "CYDER_LAUNCH_GROUP",
             "CYDER_GPTK_ROOT", "CYDER_GRAPHICS_BACKENDS_ROOT", "CYDER_GAME_ARGUMENTS", "CYDER_MOLTENVK_VARIANT_PREFERENCE",
+            "CYDER_DDRAW_PATH", "CNC_DDRAW_CONFIG_FILE",
         ]
         // Explicit advanced override: cxcompatdb canonicalizes and validates
         // the directory, PE machine, builtin signature and dependencies.
         if value == "CYDER_SCROLLING_PREFERENCE" { return false }
         if value == "CYDER_GRAPHICS_BACKEND_PATH" { return true }
         if exactReserved.contains(value) { return false }
-        return !["DYLD_", "LD_", "CYDER_WINE_", "CYDER_SESSION_", "CYDER_DIAGNOSTIC_", "CYDER_TEST_", "CYDER_GRAPHICS_", "CYDER_EXECUTION_"]
+        return !["DYLD_", "LD_", "CYDER_WINE_", "CYDER_SESSION_", "CYDER_DIAGNOSTIC_", "CYDER_TEST_", "CYDER_CNC_", "CYDER_GRAPHICS_", "CYDER_EXECUTION_"]
             .contains { value.hasPrefix($0) }
     }
 

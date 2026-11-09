@@ -101,7 +101,7 @@ assert_contains "$support_text" 'func wineRegularAppsLaunched' \
   "launch support must recognize reparented Wine Dock apps"
 assert_contains "$source_text" 'presentExternalLaunchStarting()' \
   "Finder and URI launches must install the menu bar and starting panel immediately"
-assert_contains "$source_text" 'showSetup("正在啟動程式…")' \
+assert_contains "$source_text" 'showSetup("正在啟動程式…", passive: true)' \
   "program launches must show a starting progress panel"
 assert_contains "$support_text" "NSRunningApplication.current.activate" \
   "setup and error panels must explicitly activate Cyder"
@@ -159,9 +159,18 @@ assert_contains "$source_text" "圖形元件尚未準備完成" \
 assert_contains "$source_text" 'CYD-GFX-001' \
   "settings-mode graphics ensure failures remain identifiable"
 preparation="$(sed -n '/private func prepareEnvironmentFromLibrary/,/private func runDocumentLaunch/p' "$ROOT/scripts/cyder_app_main.swift")"
-assert_contains "$preparation" 'updateEnvironmentStatus' \
+assert_contains "$preparation" 'environmentReadiness.recordFailure(failure.summary)' \
   "environment preparation errors must remain in the library"
 assert_not_contains "$preparation" 'NSApp.terminate' \
   "environment preparation errors must not terminate Cyder"
 
+settings_entry="$(sed -n '/@objc private func showSettings()/,/@objc private func showRequests/p' "$ROOT/scripts/cyder_app_main.swift")"
+library_entry="$(sed -n '/@objc private func showGameLibrary()/,/private func launchGameFromLibrary/p' "$ROOT/scripts/cyder_app_main.swift")"
+auto_entry="$(sed -n '/private func prepareEnvironmentAutomaticallyIfNeeded()/,/private func prepareEnvironmentFromLibrary/p' "$ROOT/scripts/cyder_app_main.swift")"
+assert_contains "$settings_entry" 'normalAppEntryVisible = true' "explicit preferences can initialize after an earlier document failure"
+assert_contains "$library_entry" 'normalAppEntryVisible = true' "explicit library creates a normal visible entry"
+assert_not_contains "$auto_entry" '!documentLaunchRequested' "historical document ingress cannot permanently block a later visible entry"
+assert_contains "$auto_entry" 'entry.permitsAutomatic' "automatic initialization must use primary/readonly/visibility/pending/recovery admission"
+assert_contains "$source_text" 'guard finalReadiness == .ready else' "successful helper exits still require actual ready disk state"
+assert_contains "$source_text" 'retainedEnvironmentPreparation?.executorReleased()' "whole-operation lease release must follow real executor release"
 echo "PASS test-cyder-open-files-lifecycle"

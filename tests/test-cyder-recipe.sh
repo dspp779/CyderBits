@@ -34,7 +34,7 @@ assert_contains "$(cat "$TMP/lf2-error")" "CYD-REC-003" \
 
 mkdir -p "$TMP/richman"
 mkdir -p "$TMP/richman-game"
-printf 'test executable\n' >"$TMP/richman-game/rich4.exe"
+python3 "$ROOT/tests/fixtures/make-cnc-pe.py" "$TMP/richman-game/rich4.exe"
 richman_output="$(
   "$ROOT/scripts/cyder-recipe.sh" apply "$RECIPE" richman-4 \
     "$TMP/richman" "$TMP/richman-game/rich4.exe"

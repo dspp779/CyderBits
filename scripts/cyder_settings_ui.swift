@@ -51,6 +51,81 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate,
     /// Live Wine `reg add` with draft env; return true only after registry apply succeeds.
     var onApplyWhileRunning: ((_ draftEnvironment: [String: String]) async -> Bool)?
     var onRebuild: (() -> Void)?
+    var onPrepareEnvironment: (() -> Void)?
+    private var environmentState = CyderEnvironmentReadinessObserver.State.current(.ready)
+    private var baseSettingsControlsEnabled = false
+    private let environmentUpdateRow = NSStackView()
+    private let environmentUpdateLabel = NSTextField(wrappingLabelWithString: "")
+    private let environmentUpdateButton = NSButton()
+    private let environmentProgress = NSProgressIndicator()
+    private var environmentBusy: Bool {
+        switch environmentState { case .preparing, .current(.notPrepared): return true; default: return false }
+    }
+
+    func updateEnvironmentState(_ state: CyderEnvironmentReadinessObserver.State) {
+        let wasBusy = environmentBusy
+        environmentState = state
+        if wasBusy != environmentBusy {
+            setSettingsControlsEnabled(baseSettingsControlsEnabled)
+            if settingsReady {
+                refreshGraphicsControls()
+                setExecutableControlsEnabled(selectedProfileID != nil)
+            }
+        }
+        refreshEnvironmentUpdateUI()
+        enforceEnvironmentLock()
+    }
+
+    /// Refresh runtime facts only. Never reload persisted values over drafts.
+    func environmentPreparationDidFinish() {
+        refreshRuntimePresentation(completionMessage: nil)
+    }
+
+    private func refreshEnvironmentUpdateUI() {
+        let message: String
+        let title: String
+        let visible: Bool
+        switch environmentState {
+        case .current(.needsUpdate):
+            message = "有可用的引擎更新"; title = "更新"; visible = true
+        case .current(.needsBootstrapUpdate):
+            message = "環境準備記錄需要更新"; title = "完成準備"; visible = true
+        case .current(.notPrepared):
+            message = "正在初始化環境…"; title = "重新檢查"; visible = true
+        case .current(.unknown):
+            message = "暫時無法確認環境狀態"; title = "重新檢查"; visible = true
+        case .failed(let reason): message = reason; title = "重試"; visible = true
+        case .preparing(let progress): message = progress; title = "更新"; visible = true
+        case .checking, .current(.ready): message = ""; title = "更新"; visible = false
+        }
+        environmentUpdateRow.isHidden = !visible
+        environmentUpdateLabel.stringValue = message
+        environmentUpdateLabel.toolTip = message
+        environmentUpdateLabel.textColor = environmentState == .current(.needsUpdate) ? .systemYellow : .secondaryLabelColor
+        environmentUpdateButton.title = title
+        environmentUpdateButton.isHidden = environmentBusy
+        environmentUpdateButton.isEnabled = settingsReady && !environmentBusy && environmentState.initialization.canInitialize && maintenanceToken == nil
+        environmentProgress.isHidden = !environmentBusy
+        if environmentBusy { environmentProgress.startAnimation(nil) } else { environmentProgress.stopAnimation(nil) }
+    }
+
+    @objc private func prepareEnvironment() {
+        guard settingsReady, !environmentBusy, maintenanceToken == nil,
+              environmentState.initialization.canInitialize, let onPrepareEnvironment else { return }
+        updateEnvironmentState(.preparing(environmentState == .current(.needsUpdate) ? "正在更新引擎…" : "正在初始化環境…"))
+        onPrepareEnvironment()
+    }
+
+    /// Reapply after background completions, which may update availability.
+    private func enforceEnvironmentLock() {
+        guard environmentBusy, let content = window?.contentView else { return }
+        func visit(_ view: NSView) {
+            if let control = view as? NSControl { control.isEnabled = false }
+            view.subviews.forEach(visit)
+            if let tabs = view as? NSTabView { tabs.tabViewItems.compactMap { $0.view }.forEach(visit) }
+        }
+        visit(content)
+    }
     var onCreateProfile: ((URL) -> Void)?
     var onOpenWinetricks: (([String]) -> Void)?
     var onExportLastGameLog: (() -> Void)?
@@ -254,6 +329,20 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate,
         engineVersion.alignment = .left
         engineVersion.isSelectable = true
         refreshEngineVersionLabel()
+        environmentUpdateLabel.font = .systemFont(ofSize: 11)
+        environmentUpdateLabel.maximumNumberOfLines = 2
+        environmentUpdateLabel.lineBreakMode = .byTruncatingTail
+        environmentUpdateLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        environmentUpdateButton.target = self; environmentUpdateButton.action = #selector(prepareEnvironment)
+        environmentUpdateButton.bezelStyle = .rounded
+        environmentProgress.style = .spinning; environmentProgress.controlSize = .small
+        environmentProgress.setAccessibilityLabel("正在準備 Windows 環境")
+        environmentProgress.widthAnchor.constraint(equalToConstant: 16).isActive = true
+        environmentProgress.heightAnchor.constraint(equalToConstant: 16).isActive = true
+        environmentUpdateRow.setViews([environmentProgress, environmentUpdateLabel, environmentUpdateButton], in: .leading)
+        environmentUpdateRow.orientation = .horizontal; environmentUpdateRow.spacing = 8
+        environmentUpdateRow.widthAnchor.constraint(equalToConstant: 470).isActive = true
+        refreshEnvironmentUpdateUI()
         let engineFooterGap = NSView()
         engineFooterGap.translatesAutoresizingMaskIntoConstraints = false
         engineFooterGap.heightAnchor.constraint(equalToConstant: 16).isActive = true
@@ -265,9 +354,10 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate,
             row("同步機制", syncMode),
             syncModeDescription,
             row("Windows 語系", wineLocale),
-            note("系統目前偵測為\(CyderWineLocale.detectedSystemLabel())。指定語系會在下次啟動 EXE 時生效；若該 bottle 的 wineserver 仍在跑，代碼頁要等該 bottle 的 wineserver 結束後才會更新。"),
+            note("系統目前偵測為\(CyderWineLocale.detectedSystemLabel())。指定語系會在下次啟動 Windows 程式時套用。若同一個 Windows 環境仍在運作，變更會在環境完全停止後的下一次啟動生效。"),
             engineFooterGap,
             engineVersionFooter(),
+            environmentUpdateRow,
         ])
     }
 
@@ -284,6 +374,7 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate,
     }
 
     @objc private func openWinetricks() {
+        guard !environmentBusy else { return }
         let alert = NSAlert()
         alert.messageText = "選擇要安裝的 Windows 元件"
         alert.informativeText = "元件會安裝到 Cyder 的 shared prefix。VC++ Redistributable 與 .NET Desktop Runtime 請下載官方 Windows installer，再直接用 Cyder 開啟；此處保留需要 Wine 專用處理的元件。安裝前請先關閉所有遊戲。"
@@ -380,6 +471,8 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate,
 
     private func makeGraphicsTab() -> NSTabViewItem {
         graphicsBackend.addItems(withTitles: graphicsBackendTitles)
+        // Availability comes from the loaded graphics capabilities, not action validation.
+        graphicsBackend.menu?.autoenablesItems = false
         graphicsBackend.target = self
         graphicsBackend.action = #selector(graphicsBackendChanged)
         updateD3DMetalMenuItemAvailability()
@@ -454,9 +547,9 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate,
             rebuild,
             note("重新建立執行 Windows 遊戲所需的環境。遊戲檔案不會刪除，但已安裝的 Windows 元件與自訂設定需要重新套用。"),
             winetricks,
-            note("以原生選擇器安裝 WMP、Quartz、Devenum、VB6 等元件到 shared prefix。.NET／Wine Mono 不預裝：需要時 Wine 會提示安裝，或手動執行 install-wine-mono.sh。VC++ 與 .NET Desktop Runtime 請用官方 installer。請先關閉所有遊戲。"),
+            note("將 WMP、Quartz、Devenum、VB6 等元件安裝到共用的 Windows 環境。Wine Mono 未預裝，需要時會提示安裝。VC++ 與 .NET Desktop Runtime 請使用官方安裝程式；安裝前請關閉所有遊戲。"),
             row("MapleStory WZ 快取", maplestoryWZCache),
-            note("預設開啟，只對 MapleStory 的唯讀 WZ 小讀取啟用 read-ahead。若遇到資源載入異常，可關閉後重新啟動遊戲。"),
+            note("預設開啟，會預先讀取 MapleStory 的唯讀 WZ 資料。若載入資源異常，可關閉後重新啟動遊戲。"),
         ])
     }
 
@@ -554,11 +647,13 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate,
 
     @available(macOS 11.0, *)
     @objc private func rescanURIHandlers() {
+        guard !environmentBusy else { return }
         beginURIHandlerScan()
     }
 
     @available(macOS 11.0, *)
     private func beginURIHandlerScan() {
+        guard !environmentBusy else { return }
         guard onScanURIHandlers != nil else {
             uriHandlerStatusLabel.stringValue = "Cyder 無法掃描 URI handler。"
             uriHandlerRows = []
@@ -583,8 +678,8 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate,
     private func applyURIHandlerScanResult(record: CyderURIHandlerRecord?, isCyderDefault: Bool) {
         uriHandlerProgress.stopAnimation(nil)
         uriHandlerProgress.isHidden = true
-        uriHandlerTable.isEnabled = true
-        uriHandlerRescanButton.isEnabled = true
+        uriHandlerTable.isEnabled = !environmentBusy
+        uriHandlerRescanButton.isEnabled = !environmentBusy
 
         if let record {
             uriHandlerRows = [CyderURIHandlerRow(record: record, isCyderDefault: isCyderDefault)]
@@ -633,7 +728,7 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate,
 
     @available(macOS 11.0, *)
     func tableView(_ tableView: NSTableView, setObjectValue object: Any?, for tableColumn: NSTableColumn?, row: Int) {
-        guard tableColumn?.identifier.rawValue == "enabled",
+        guard !environmentBusy, tableColumn?.identifier.rawValue == "enabled",
               row < uriHandlerRows.count,
               let wantsEnabled = object as? Bool else { return }
         let record = uriHandlerRows[row].record
@@ -654,7 +749,7 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate,
 
     @available(macOS 11.0, *)
     func tableView(_ tableView: NSTableView, shouldEdit tableColumn: NSTableColumn?, row: Int) -> Bool {
-        guard tableColumn?.identifier.rawValue == "enabled", row < uriHandlerRows.count else { return false }
+        guard !environmentBusy, tableColumn?.identifier.rawValue == "enabled", row < uriHandlerRows.count else { return false }
         let item = uriHandlerRows[row]
         return item.record.isValid || item.isCyderDefault
     }
@@ -729,6 +824,7 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate,
     private func row(_ title: String, _ control: NSView) -> NSView {
         let label = NSTextField(labelWithString: title)
         label.font = .systemFont(ofSize: 13)
+        control.setAccessibilityLabel(title)
         let spacer = NSView()
         let stack = NSStackView(views: [label, spacer, control])
         stack.orientation = .horizontal
@@ -760,12 +856,13 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate,
     }
 
     private func setSettingsControlsEnabled(_ enabled: Bool) {
+        baseSettingsControlsEnabled = enabled
         var visited = Set<ObjectIdentifier>()
         func visit(_ view: NSView) {
             guard visited.insert(ObjectIdentifier(view)).inserted else { return }
             if let control = view as? NSControl, control !== status, control !== retrySettingsButton {
                 let navigation: [Selector] = [#selector(inspectComponents), #selector(exportLastGameLog), #selector(cleanDebugLogs), #selector(stopAllWine)]
-                control.isEnabled = control.action.map { navigation.contains($0) } == true || enabled
+                control.isEnabled = !environmentBusy && (control.action.map { navigation.contains($0) } == true || enabled)
             }
             for child in view.subviews { visit(child) }
             if let tabs = view as? NSTabView {
@@ -773,6 +870,8 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate,
             }
         }
         if let content = window?.contentView { visit(content) }
+        retrySettingsButton.isEnabled = !environmentBusy
+        refreshEnvironmentUpdateUI()
     }
 
     private func reload() {
@@ -869,6 +968,7 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate,
     }
 
     @objc private func retrySettings() {
+        guard !environmentBusy else { return }
         if settingsReady { saveImmediately(registrySetting: "all", deferredChange: true) }
         else { reload() }
     }
@@ -893,7 +993,7 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate,
     }
 
     private func saveImmediately(registrySetting: String? = nil, deferredChange: Bool = false) {
-        guard settingsReady else { return }
+        guard settingsReady, !environmentBusy else { return }
         settingsRevision += 1
         let revision = settingsRevision
         Task { @MainActor [weak self] in
@@ -903,7 +1003,7 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate,
 
     @MainActor private func saveImmediatelyAsync(registrySetting: String?, deferredChange: Bool, revision: Int) async {
         let running = await hasRunningExes?() ?? true
-        guard settingsRevision == revision else { return }
+        guard settingsRevision == revision, !environmentBusy else { return }
         wineIsRunning = running
         if running && deferredChange && deferredSettingsChanged() {
             isDirty = true
@@ -935,6 +1035,7 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate,
     }
 
     @objc private func applyRunningSettings() {
+        guard !environmentBusy else { return }
         guard !explicitApplyInProgress else { return }
         explicitApplyInProgress = true
         settingsRevision += 1
@@ -947,7 +1048,7 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate,
     @MainActor private func applyRunningSettingsAsync(revision: Int) async {
         defer { explicitApplyInProgress = false }
         wineIsRunning = await hasRunningExes?() ?? true
-        guard settingsRevision == revision else { return }
+        guard settingsRevision == revision, !environmentBusy else { return }
         guard wineIsRunning else {
             // Wine exited while the window was open — fall back to immediate save.
             saveImmediately(registrySetting: "all", deferredChange: true)
@@ -989,12 +1090,14 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate,
     }
 
     @objc private func scrollingChanged() {
+        guard !environmentBusy else { return }
         // Save the preference only. The next EXE launch performs the backed-up
         // registry update; do not edit live bottles from the preferences UI.
         saveImmediately()
     }
 
     @objc private func retinaChanged() {
+        guard !environmentBusy else { return }
         // RetinaMode changes the effective coordinate scale.  Offer the
         // matching conventional DPI as a starting point, while leaving the
         // popup enabled so users can immediately choose a custom value.
@@ -1005,14 +1108,17 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate,
     }
 
     @objc private func dpiChanged() {
+        guard !environmentBusy else { return }
         saveImmediately(registrySetting: "dpi", deferredChange: true)
     }
 
     @objc private func smoothingChanged() {
+        guard !environmentBusy else { return }
         saveImmediately(registrySetting: "smoothing", deferredChange: true)
     }
 
     @objc private func graphicsBackendChanged() {
+        guard !environmentBusy else { return }
         let preferred: CyderGraphicsHud = !graphicsBackendValue.usesDxvkTranslation && settingsValue.graphicsHud == .dxvk
             ? .off : settingsValue.graphicsHud
         rebuildGraphicsHudMenu(selecting: preferred)
@@ -1021,6 +1127,7 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate,
     }
 
     @objc private func moltenvkVariantChanged() {
+        guard !environmentBusy else { return }
         saveImmediately()
         // The launcher applies the accepted preference before launching Wine.
         // Changing the UI must not mutate a shared runtime on the AppKit thread.
@@ -1042,19 +1149,23 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate,
     }
 
     @objc private func dxvkFrameRateChanged() {
+        guard !environmentBusy else { return }
         saveImmediately()
     }
 
     @objc private func graphicsHudChanged() {
+        guard !environmentBusy else { return }
         refreshGraphicsControls()
         saveImmediately()
     }
 
     @objc private func dxvkHudFrametimesChanged() {
+        guard !environmentBusy else { return }
         saveImmediately()
     }
 
     @objc private func wineDiagnosticsChanged() {
+        guard !environmentBusy else { return }
         let selected: CyderWineDiagnostics
         switch wineDiagnostics.indexOfSelectedItem {
         case 1: selected = .errors
@@ -1093,20 +1204,27 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate,
     }
 
     @objc private func maplestoryWZCacheChanged() {
+        guard !environmentBusy else { return }
         saveImmediately()
     }
 
     @objc private func exportLastGameLog() {
+        guard !environmentBusy else { return }
         onExportLastGameLog?()
     }
 
-    @objc private func inspectComponents() { onInspectComponents?() }
+    @objc private func inspectComponents() {
+        guard !environmentBusy else { return }
+        onInspectComponents?()
+    }
 
     @objc private func cleanDebugLogs() {
+        guard !environmentBusy else { return }
         onCleanDebugLogs?()
     }
 
     @objc private func stopAllWine() {
+        guard !environmentBusy else { return }
         let alert = NSAlert()
         alert.messageText = "關閉所有 Windows 程序？"
         alert.informativeText = "會結束目前 Cyder 使用的 Wine 環境中所有遊戲與相關程序。"
@@ -1120,7 +1238,7 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate,
         Task { @MainActor [weak self] in
             guard let self else { return }
             let ok = await self.onStopAllWine?() ?? false
-            self.stopAllWineButton.isEnabled = true
+            self.stopAllWineButton.isEnabled = !self.environmentBusy
             self.refreshRunningChrome(persistPendingWhenIdle: ok)
             self.status.stringValue = ok ? "已送出環境停止操作" : "環境停止失敗或尚未確認"
             self.status.textColor = ok ? .secondaryLabelColor : .systemRed
@@ -1132,6 +1250,7 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate,
     )!
 
     @objc private func installGptk() {
+        guard !environmentBusy else { return }
         guard maintenanceToken == nil else { return }
         let generation = UUID(); auxiliaryGeneration = generation
         let revision = settingsRevision
@@ -1211,13 +1330,14 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate,
     }
 
     @objc private func removeGptk() {
+        guard !environmentBusy else { return }
         performRuntimeMaintenance(CyderGptk.removeRuntimeInstall)
     }
 
     /// Holds the same all-environment lease used by launcher mutations until
     /// the real filesystem work returns, even if its UI observation expires.
     func performRuntimeMaintenance(_ work: @escaping () throws -> Void) {
-        guard maintenanceToken == nil else { return }
+        guard !environmentBusy, maintenanceToken == nil else { return }
         let token = UUID(); maintenanceToken = token
         setNormalStatus("正在等待其他環境操作完成…")
         let gate = maintenanceGate
@@ -1253,31 +1373,38 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate,
         }
     }
 
-    private func refreshRuntimePresentation() {
+    private func refreshRuntimePresentation(completionMessage: String? = "圖形元件已更新") {
         let generation = UUID(); auxiliaryGeneration = generation
         settingsAccess.performWork(runtimePresentationReader) { [weak self] update in
             guard let self, self.auxiliaryGeneration == generation else { return }
             switch update {
             case .ready(let presentation):
-                self.presentation = presentation; self.refreshGraphicsControls()
-                self.setNormalStatus("圖形元件已更新")
-            case .unconfirmed: self.setNormalStatus("元件已更新；顯示狀態仍在確認。")
-            case .busy, .failed: self.setNormalStatus("元件已更新；請重新開啟偏好設定以更新顯示。")
+                self.presentation = presentation
+                self.refreshEngineVersionLabel()
+                self.refreshGraphicsControls()
+                self.refreshEnvironmentUpdateUI()
+                if let completionMessage { self.setNormalStatus(completionMessage) }
+            case .unconfirmed:
+                if completionMessage != nil { self.setNormalStatus("元件已更新；顯示狀態仍在確認。") }
+            case .busy, .failed:
+                if completionMessage != nil { self.setNormalStatus("元件已更新；請重新開啟偏好設定以更新顯示。") }
             }
         }
     }
 
     @objc private func wineLocaleChanged() {
+        guard !environmentBusy else { return }
         saveImmediately()
     }
 
     @objc private func syncModeChanged() {
+        guard !environmentBusy else { return }
         updateSyncModeDescription()
         saveImmediately(deferredChange: true)
     }
 
     @MainActor private func saveControls(persistDeferredSettings: Bool = true, revision: Int, needsPrefixApply: Bool = false) async -> Bool {
-        guard settingsReady else { return false }
+        guard settingsReady, !environmentBusy else { return false }
         let dpiValues = [96, 120, 144, 168, 192, 240]
         let smoothingValues = ["off", "grayscale", "cleartype-rgb"]
         var draft = settingsValue
@@ -1357,6 +1484,7 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate,
     }
 
     @objc private func fontMingLiuChanged() {
+        guard !environmentBusy else { return }
         if fontMingLiu.indexOfSelectedItem == 0 {
             let alert = NSAlert()
             alert.messageText = "使用細明體前需要先安裝字型"
@@ -1372,6 +1500,7 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate,
     }
 
     @objc private func fontSongtiChanged() {
+        guard !environmentBusy else { return }
         saveImmediately(registrySetting: "font-songti", deferredChange: true)
     }
 
@@ -1508,7 +1637,7 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate,
         dxvkFrameRate.isHidden = !showFrameRate
         (dxvkFrameRate.superview as? NSStackView)?.isHidden = !showFrameRate
         dxvkHudFrametimes.isHidden = !showDxvkFrametimes
-        dxvkHudFrametimes.isEnabled = enableDxvkFrametimes
+        dxvkHudFrametimes.isEnabled = enableDxvkFrametimes && !environmentBusy
         (dxvkHudFrametimes.superview as? NSStackView)?.isHidden = !showDxvkFrametimes
         graphicsHelp.stringValue = switch backend {
         case .default: "帶入預載的遊戲專屬設定；MapleStory 會依 macOS 版本自動選 DXMT 或 DXVK。"
@@ -1545,6 +1674,7 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate,
     }
 
     @objc private func chooseExecutable() {
+        guard !environmentBusy else { return }
         let panel = NSOpenPanel()
         panel.title = "選擇要套用個別設定的 EXE"
         panel.canChooseFiles = true
@@ -1554,6 +1684,7 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate,
     }
 
     func resolveSelectedExecutable(_ url: URL) {
+        guard !environmentBusy else { return }
         let generation = UUID(); auxiliaryGeneration = generation
         let revision = settingsRevision
         setNormalStatus("正在確認遊戲環境…")
@@ -1592,12 +1723,14 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate,
     }
 
     @objc private func selectConfiguredExecutable() {
+        guard !environmentBusy else { return }
         guard executableList.isEnabled,
               let profileID = executableList.selectedItem?.representedObject as? String else { return }
         loadExecutableSettings(profileID)
     }
 
     @objc private func removeExecutableSettings() {
+        guard !environmentBusy else { return }
         guard let profileID = selectedProfileID else { return }
         let alert = NSAlert()
         alert.messageText = "移除這個遊戲的 Profile 設定？"
@@ -1615,12 +1748,14 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate,
     }
 
     @objc private func executableSettingChanged(deferredChange: Bool = false) {
+        guard !environmentBusy else { return }
         executableRecommendation.selectItem(at: 0)
         captureExecutableSettings()
         saveImmediately(deferredChange: deferredChange)
     }
 
     @objc private func executableRetinaChanged() {
+        guard !environmentBusy else { return }
         let dpiValues = [96, 120, 144, 168, 192, 240]
         let targetDPI = executableRetina.state == .on ? 192 : 96
         executableDpi.selectItem(at: dpiValues.firstIndex(of: targetDPI) ?? 0)
@@ -1628,6 +1763,7 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate,
     }
 
     @objc private func executableFontMingLiuChanged() {
+        guard !environmentBusy else { return }
         if executableFontMingLiu.indexOfSelectedItem == 0 {
             let alert = NSAlert()
             alert.messageText = "使用細明體前需要先安裝字型"
@@ -1647,14 +1783,17 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate,
     }
 
     @objc private func executableFontSongtiChanged() {
+        guard !environmentBusy else { return }
         executableSettingChanged(deferredChange: true)
     }
 
     @objc private func executableSyncModeChanged() {
+        guard !environmentBusy else { return }
         executableSettingChanged(deferredChange: true)
     }
 
     @objc private func applyExecutableRecommendation() {
+        guard !environmentBusy else { return }
         guard let profileID = selectedProfileID else {
             executableRecommendation.selectItem(at: 0)
             return
@@ -1780,7 +1919,7 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate,
             executableList.addItem(withTitle: profileDisplayName(profileRecords[profileID]!))
             executableList.item(at: executableList.numberOfItems - 1)?.representedObject = profileID
         }
-        executableList.isEnabled = true
+        executableList.isEnabled = !environmentBusy
         let selected = preferred.flatMap { ids.contains($0) ? $0 : nil } ?? ids[0]
         loadExecutableSettings(selected)
     }
@@ -1800,17 +1939,17 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate,
     }
 
     private func setExecutableControlsEnabled(_ enabled: Bool) {
-        executableRecommendation.isEnabled = enabled
-        executableSyncMode.isEnabled = enabled
-        executableRetina.isEnabled = enabled
-        executableDpi.isEnabled = enabled
-        executablePowerMode.isEnabled = enabled
-        executableFontMingLiu.isEnabled = enabled
-        executableFontSongti.isEnabled = enabled
-        executableSmoothing.isEnabled = enabled
-        executableEnvironment.isEnabled = enabled
-        executableArguments.isEnabled = enabled
-        removeExecutableButton.isEnabled = enabled
+        executableRecommendation.isEnabled = enabled && !environmentBusy
+        executableSyncMode.isEnabled = enabled && !environmentBusy
+        executableRetina.isEnabled = enabled && !environmentBusy
+        executableDpi.isEnabled = enabled && !environmentBusy
+        executablePowerMode.isEnabled = enabled && !environmentBusy
+        executableFontMingLiu.isEnabled = enabled && !environmentBusy
+        executableFontSongti.isEnabled = enabled && !environmentBusy
+        executableSmoothing.isEnabled = enabled && !environmentBusy
+        executableEnvironment.isEnabled = enabled && !environmentBusy
+        executableArguments.isEnabled = enabled && !environmentBusy
+        removeExecutableButton.isEnabled = enabled && !environmentBusy
         if !enabled {
             executableSyncMode.selectItem(at: CyderSyncMode.off.rawValue)
             executableRetina.state = .off
@@ -1826,6 +1965,7 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate,
     }
 
     @objc private func resetAll() {
+        guard !environmentBusy else { return }
         let alert = NSAlert()
         alert.messageText = "恢復所有進階設定？"
         alert.informativeText = "這不會刪除遊戲所需元件、遊戲或個人檔案。"
@@ -1856,6 +1996,7 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate,
     }
 
     @objc private func rebuildEnvironment() {
+        guard !environmentBusy else { return }
         let alert = NSAlert()
         alert.messageText = "重建 Windows 遊戲環境？"
         alert.informativeText = "遊戲檔案不會刪除，但已安裝的 Windows 元件與自訂設定需要重新套用。"

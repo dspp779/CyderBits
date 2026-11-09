@@ -11,8 +11,14 @@ int main(void) {
     const char *root = getenv("TEST_ROOT");
     if (!root) return 90;
     char path[PATH_MAX];
-    snprintf(path, sizeof(path), "%s/native.entered", root);
+    snprintf(path, sizeof(path), "%s/native.group", root);
     FILE *file = fopen(path, "w");
+    if (!file) return 91;
+    const char *group = getenv("CYDER_LAUNCH_GROUP");
+    if (group) fputs(group, file);
+    fclose(file);
+    snprintf(path, sizeof(path), "%s/native.entered", root);
+    file = fopen(path, "w");
     if (!file) return 91;
 #ifdef __x86_64__
     fprintf(file, "%d x86_64\n", getpid());

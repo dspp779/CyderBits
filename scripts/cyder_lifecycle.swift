@@ -63,6 +63,13 @@ enum CyderLifecycle {
         var deadline: TimeInterval // monotonic; never reset by root exit
         var outcome: Outcome?
         var processes: Set<ProcessID> = []
+        func expectsHandoff(_ executable: String) -> Bool {
+            let target = (name as NSString).deletingPathExtension.lowercased()
+            let client = (executable as NSString).deletingPathExtension.lowercased()
+            // A long-lived broker may inherit an older group's environment.
+            // Unknown reparented programs remain visible, independently scoped.
+            return target == client || (target == "bluelauncher" && client == "bluecg")
+        }
     }
     struct ProcessRecord: Equatable {
         let id: ProcessID
@@ -72,6 +79,20 @@ enum CyderLifecycle {
         var ownership: Ownership?
         var existence: Existence
         var windowCapability: Capability? = nil
+        var executableName: String? = nil
+        var hasPresentedProgram = false
+
+        private static let wineHelpers: Set<String> = ["conhost.exe", "explorer.exe", "plugplay.exe", "rpcss.exe",
+            "rundll32.exe", "services.exe", "start.exe", "werfault.exe", "wineboot.exe",
+            "wineconsole.exe", "winedbg.exe", "winedevice.exe"]
+        func isUserProgram(in launch: Launch?) -> Bool {
+            if ownership == .rootReceipt && executableName == nil { return true }
+            let image = executableName ?? (ownership == nil ? name : "")
+            guard !image.isEmpty && image != "Windows 程序" else { return false }
+            // A deliberately opened built-in may have a user-facing window.
+            if launch?.expectsHandoff(image) == true { return true }
+            return (ownership == .processTree || ownership == nil) && !Self.wineHelpers.contains(image.lowercased())
+        }
     }
     struct Window: Equatable {
         let id: WindowID
@@ -79,6 +100,9 @@ enum CyderLifecycle {
         var capability: Capability
         var minimized: Bool? = nil
         var focused: Bool? = nil
+        // A normal AX window that can receive user interaction. A compositor
+        // surface (including an application's splash) is only visibility evidence.
+        var isProgramWindow = false
     }
     enum WindowResult: String { case shown, windowGone, processEnded, permissionRequired, unsupported, unconfirmed }
     struct WindowAction {
@@ -91,6 +115,20 @@ enum CyderLifecycle {
         let epoch: UUID
         let environment: EnvironmentID
         let generation: UInt64
+    }
+    struct ProgramActivity: Equatable {
+        var running = 0
+        var presented = 0
+        var launchers = 0
+        var checking = false
+        var summary: String {
+            if checking && running == 0 && presented == 0 && launchers == 0 { return "正在確認執行狀態…" }
+            var parts = checking && running == 0 ? ["執行狀態待確認"] : ["執行中 " + String(running)]
+            if checking && running > 0 { parts.append("另有狀態待確認") }
+            if presented > 0 { parts.append("視窗待確認 " + String(presented)) }
+            if launchers > 0 { parts.append("啟動器 " + String(launchers)) }
+            return parts.joined(separator: " · ")
+        }
     }
     struct Snapshot {
         let epoch: UUID
@@ -105,6 +143,26 @@ enum CyderLifecycle {
         let processes: [ProcessID: ProcessRecord]
         let windows: [WindowID: Window]
         let windowAction: WindowAction?
+        // Count each actual window owner once, not launch receipts, history
+        // rows, background Wine services, or each window of a single process.
+        var programActivity: ProgramActivity {
+            var result = ProgramActivity()
+            result.checking = restoring || environments.values.contains { $0.existence == .unconfirmed || ($0.existence == .alive && $0.health == .degraded) }
+            let visible = Set(windows.keys.filter { $0.source == "coregraphics" }.map(\.process))
+            for process in processes.values {
+                guard environments[process.environment]?.existence != .exited, process.isUserProgram(in: process.launch.flatMap { launches[$0] }) else { continue }
+                if process.existence == .unconfirmed && process.hasPresentedProgram { result.checking = true }
+                guard process.existence == .alive else { continue }
+                let name = process.executableName ?? process.name
+                if process.hasPresentedProgram {
+                    if (name as NSString).deletingPathExtension.lowercased() == "bluelauncher" { result.launchers += 1 }
+                    else { result.running += 1 }
+                } else if visible.contains(process.id), process.windowCapability != .available {
+                    result.presented += 1
+                }
+            }
+            return result
+        }
         var hasActiveWork: Bool { restoring || ingressPending || requests.values.contains { $0.phase.isActive }
             || (windowAction != nil && windowAction?.result != .shown) }
         var hasEnvironment: Bool { environments.values.contains { $0.existence != .exited } }
@@ -130,13 +188,13 @@ enum CyderLifecycle {
         case waiterFinished(Stamp, UUID, cancelled: Bool)
         case reconcileStarted(Stamp, UUID)
         case reconciled(Stamp, UUID, Existence, Health)
-        case independentProcess(Stamp, ProcessID, name: String, existence: Existence)
+        case independentProcess(Stamp, ProcessID, name: String, existence: Existence, launchGroup: String? = nil)
         case processObserved(Stamp, ProcessRecord)
         case processExited(Stamp, ProcessID)
         case windowObserved(Stamp, Window)
         case windowClosed(Stamp, WindowID)
         case windowSnapshot(Stamp, ProcessID, source: String, windows: [Window]?, capability: Capability)
-        case activateWindow(WindowID, UUID)
+        case activateWindow(WindowID, UUID, automatic: Bool = false)
         case windowActionProgress(UUID)
         case windowActionFinished(UUID, WindowResult)
         case dismissWindowFeedback(UUID)
@@ -149,8 +207,9 @@ enum CyderLifecycle {
         case reconcile(Stamp)
         case stop(Stamp, UUID)
         case observationCompleted(String, Outcome)
-        case windowConfirmed(String)
-        case activateWindow(Stamp, WindowID, UUID)
+        case windowPresented(String)
+        case windowConfirmed(String, ProcessID)
+        case activateWindow(Stamp, WindowID, UUID, automatic: Bool = false)
         case restoreObservation(Stamp, String)
         case persistQuiescing
         case cancelOwnedObservers
@@ -213,6 +272,43 @@ enum CyderLifecycle {
                 requests[request.id] = request
             }
             return [.observationCompleted(id, outcome)]
+        }
+        private func existingWindowEffects(_ process: ProcessID) -> [Effect] {
+            guard let record = processes[process], record.existence == .alive, let launch = record.launch,
+                  let group = launches[launch], group.outcome == nil, record.isUserProgram(in: group) else { return [] }
+            let observed = windows.values.filter { $0.id.process == process }
+            if observed.contains(where: { $0.isProgramWindow && $0.minimized == false }) {
+                return [.windowConfirmed(launch, process)]
+            }
+            if observed.contains(where: { $0.id.source == "coregraphics" }) { return [.windowPresented(launch)] }
+            return []
+        }
+        private mutating func notePresentation(_ process: ProcessID) {
+            guard let record = processes[process], record.existence == .alive, !record.hasPresentedProgram,
+                  record.isUserProgram(in: record.launch.flatMap { launches[$0] }) else { return }
+            let seen = windows.values.filter { $0.id.process == process }
+            // AX can identify a user-facing window even after minimization.
+            // On systems without AX permission, a visible compositor surface
+            // from the verified target executable proves a running program.
+            // It still cannot confirm the launch or authorize an AX action.
+            let interactive = seen.contains { $0.isProgramWindow }
+            var matchedVisibleImage = false
+            if let image = record.executableName, seen.contains(where: { $0.id.source == "coregraphics" }) {
+                if let launch = record.launch.flatMap({ launches[$0] }) { matchedVisibleImage = launch.expectsHandoff(image) }
+                else { matchedVisibleImage = ["bluecg.exe", "bluelauncher.exe"].contains(image.lowercased()) }
+            }
+            if interactive || matchedVisibleImage { processes[process]?.hasPresentedProgram = true }
+        }
+        private func canReceiveHandoff(_ launch: Launch) -> Bool {
+            if launch.outcome == nil { return true }
+            // A persistent Windows broker can carry a completed launch's
+            // environment into a later game. Once the last user program from
+            // the completed launch has exited, its label cannot claim a new
+            // process. Fresh independent evidence still counts the new game.
+            return launch.processes.contains { id in
+                guard let member = processes[id] else { return false }
+                return member.existence == .alive && member.isUserProgram(in: launch)
+            }
         }
         @discardableResult mutating func reduce(_ event: Event) -> [Effect] {
             guard phase != .terminated else { return [] }
@@ -359,17 +455,40 @@ enum CyderLifecycle {
                     }
                     windows = windows.filter { processes[$0.key.process]?.existence != .exited }
                 }
-            case .independentProcess(let stamp, let id, let name, let existence):
+            case .independentProcess(let stamp, let id, let name, let existence, let group):
                 guard accepts(stamp), id.pid > 0, id.started > 0, !id.boot.isEmpty,
                       existence != .alive || (environments[stamp.environment]?.existence == .alive && environments[stamp.environment]?.health == .healthy),
                       !exitedProcesses.contains(.init(environment: stamp.environment, process: id)),
-                      processes[id].map({ $0.environment == stamp.environment && $0.launch == nil && $0.ownership == nil }) ?? true,
+                      processes[id].map({ $0.environment == stamp.environment }) ?? true,
                       existence == .alive || processes[id] != nil else { return [] }
                 var record = processes[id] ?? .init(id: id, name: name, environment: stamp.environment,
                     launch: nil, ownership: nil, existence: existence)
+                if let owner = record.launch, record.ownership != .explicitHandoff {
+                    // Inventory may refine the executable name of a known
+                    // tree/root but never controls its provenance or lifetime.
+                    guard group == owner, existence == .alive, record.existence == .alive else { return [] }
+                } else if let group, existence == .alive, launchStamps[group] == stamp,
+                          record.launch == nil || record.launch == group,
+                          let launch = launches[group], launch.expectsHandoff(name),
+                          record.launch == group || canReceiveHandoff(launch),
+                          let root = launch.processes.first(where: { processes[$0]?.ownership == .rootReceipt }),
+                          root.boot == id.boot, root.started <= id.started {
+                    // A Wine child can be reparented before a fork watch fires.
+                    // Require the fresh managed-image/scope read, an immutable
+                    // root birth, and the exact current launch, even after exit.
+                    record.launch = group
+                    record.ownership = root == id ? .rootReceipt : .explicitHandoff
+                    launches[group]?.processes.insert(id)
+                } else if record.ownership == .explicitHandoff && existence == .alive && record.launch != group {
+                    return []
+                }
                 record.name = name; record.existence = existence
+                if name != "Windows 程序" { record.executableName = name }
                 if record == processes[id] { return [] }
+                let identityChanged = record.launch != processes[id]?.launch || record.executableName != processes[id]?.executableName
                 processes[id] = record
+                notePresentation(id)
+                if identityChanged { effects = existingWindowEffects(id) }
                 if existence != .alive { windows = windows.filter { $0.key.process != id } }
                 if existence == .exited { exitedProcesses.insert(.init(environment: stamp.environment, process: id)) }
             case .processObserved(let stamp, var process):
@@ -380,9 +499,17 @@ enum CyderLifecycle {
                     process.launch = nil
                     process.ownership = nil
                 }
-                if process.windowCapability == nil { process.windowCapability = processes[process.id]?.windowCapability }
+                let newlyBound = process.launch != nil && processes[process.id]?.launch == nil
+                if let previous = processes[process.id] {
+                    if let owner = previous.launch, owner != process.launch { return [] }
+                    process.windowCapability = process.windowCapability ?? previous.windowCapability
+                    process.executableName = process.executableName ?? previous.executableName
+                    process.hasPresentedProgram = previous.hasPresentedProgram
+                }
                 processes[process.id] = process
                 if let id = process.launch { launches[id]?.processes.insert(process.id) }
+                notePresentation(process.id)
+                if newlyBound { effects = existingWindowEffects(process.id) }
                 if process.existence == .exited {
                     exitedProcesses.insert(.init(environment: stamp.environment, process: process.id))
                     windows = windows.filter { $0.key.process != process.id }
@@ -397,9 +524,8 @@ enum CyderLifecycle {
                       processes[window.id.process]?.existence == .alive,
                       !exitedProcesses.contains(.init(environment: stamp.environment, process: window.id.process)) else { return [] }
                 windows[window.id] = window
-                if let launch = processes[window.id.process]?.launch, launches[launch]?.outcome == nil {
-                    effects.append(.windowConfirmed(launch))
-                }
+                notePresentation(window.id.process)
+                effects = existingWindowEffects(window.id.process)
             case .windowClosed(let stamp, let id):
                 guard accepts(stamp), processes[id.process]?.environment == stamp.environment else { return [] }
                 windows.removeValue(forKey: id)
@@ -410,23 +536,25 @@ enum CyderLifecycle {
                     guard observed.allSatisfy({ $0.id.process == process && $0.id.source == source }),
                           Set(observed.map(\.id)).count == observed.count else { return [] }
                 }
-                processes[process]?.windowCapability = capability
+                if source == "accessibility" { processes[process]?.windowCapability = capability }
                 if let observed {
                     windows = windows.filter { $0.key.process != process || $0.key.source != source }
                     for window in observed { windows[window.id] = window }
+                    notePresentation(process)
+                    if !observed.isEmpty { effects = existingWindowEffects(process) }
                 } else {
                     for id in windows.keys where id.process == process && id.source == source {
                         windows[id]?.capability = capability
                         windows[id]?.focused = nil; windows[id]?.minimized = nil
                     }
                 }
-            case .activateWindow(let id, let operation):
+            case .activateWindow(let id, let operation, let automatic):
                 guard phase == .active else { return [] }
                 if windowAction?.window == id && windowAction?.result == nil { return [] }
                 var action = WindowAction(id: operation, window: id)
                 if let failure = windowFailure(id) { action.result = failure }
                 else if let process = processes[id.process], let stamp = stamp(for: process.environment) {
-                    effects = [.activateWindow(stamp, id, operation)]
+                    effects = [.activateWindow(stamp, id, operation, automatic: automatic)]
                 }
                 windowAction = action
             case .windowActionProgress(let operation):

@@ -1,12 +1,12 @@
 import Foundation
 import Darwin
 
-/// Native scope evidence, never evidence of a launch relationship. All reads
+/// Native scope evidence plus the optional executor-generated launch label. All reads
 /// run off the UI/state queues. No environment/argv dumps are retained or logged.
 enum CyderProcessInventory {
     typealias L = CyderLifecycle
-    struct Metadata: Equatable { let prefix: String; let name: String }
-    struct Match: Equatable { let process: L.ProcessID; let environment: L.EnvironmentID; let name: String }
+    struct Metadata: Equatable { let prefix: String; let name: String; var launchGroup: String? = nil }
+    struct Match: Equatable { let process: L.ProcessID; let environment: L.EnvironmentID; let name: String; var launchGroup: String? = nil }
     struct Reading { let presence: CyderProcessEvidence.Presence; let match: Match? }
     static func pids() -> [Int32] {
         precondition(!Thread.isMainThread)
@@ -41,20 +41,32 @@ enum CyderProcessInventory {
                 if !clean.isEmpty { name = clean }
             }
         }
-        var prefix: String?
+        // Observed Wine procargs can leave a NUL gap after the exact argc
+        // strings. Skip only this boundary, not empty argv entries or an
+        // environment terminator after the first environment string.
+        while offset < bytes.count && bytes[offset] == 0 { offset += 1 }
+        var prefix: String?, group: String?
+        var groupCount = 0
+        let groupKey = Array("CYDER_LAUNCH_GROUP=".utf8)
+        let prefixKey = Array("WINEPREFIX=".utf8)
         var count = 0
         while offset < bytes.count && bytes[offset] != 0 {
             count += 1
             guard count <= 4096, let raw = string() else { return nil }
-            let key = Array("WINEPREFIX=".utf8)
-            if raw.starts(with: key) {
-                guard prefix == nil, let value = String(bytes: raw.dropFirst(key.count), encoding: .utf8),
+            if raw.starts(with: groupKey) {
+                groupCount += 1
+                if let value = String(bytes: raw.dropFirst(groupKey.count), encoding: .utf8), UUID(uuidString: value) != nil {
+                    group = value
+                }
+            }
+            if raw.starts(with: prefixKey) {
+                guard prefix == nil, let value = String(bytes: raw.dropFirst(prefixKey.count), encoding: .utf8),
                       value.hasPrefix("/"), value.utf8.count < 4096 else { return nil }
                 prefix = value
             }
         }
         guard let prefix else { return nil } // CX_BOTTLE alone is not an absolute prefix identity.
-        return .init(prefix: prefix, name: name ?? "Windows 程序")
+        return .init(prefix: prefix, name: name ?? "Windows 程序", launchGroup: groupCount == 1 ? group : nil)
     }
     static func metadata(_ pid: Int32) -> Metadata? {
         precondition(!Thread.isMainThread)
@@ -100,12 +112,13 @@ enum CyderProcessInventory {
               let environment = candidates.first(where: { $0.id == scope }),
               prefixID(environment.prefix) == scope, prefixID(data.prefix) == scope,
               image(pid) == executable, CyderProcessEvidence.live(node.id) else { return .init(presence: presence, match: nil) }
-        return .init(presence: presence, match: .init(process: node.id, environment: scope, name: data.name))
+        return .init(presence: presence, match: .init(process: node.id, environment: scope, name: data.name, launchGroup: data.launchGroup))
     }
 }
 
 /// Bounded discovery supplements native launch trees, including reparented,
-/// headless clients. It can create only independent records, never launch owners.
+/// headless clients. A bare scope, executable name or timestamp does not
+/// establish ownership. The reducer validates a label against an actual root.
 final class CyderIndependentProcesses {
     typealias L = CyderLifecycle
     struct Driver {
@@ -134,7 +147,7 @@ final class CyderIndependentProcesses {
             self.snapshot = snapshot
             guard snapshot.phase == .active else { close(); return }
             let currentScopes = scopes(snapshot)
-            for process in snapshot.processes.values where process.launch == nil && process.existence == .alive {
+            for process in snapshot.processes.values where (process.launch == nil || process.ownership == .explicitHandoff) && process.existence == .alive {
                 if oldScopes[process.environment] != nil, currentScopes[process.environment] == nil,
                    let environment = snapshot.environments[process.environment], environment.existence != .exited {
                     event(.independentProcess(.init(epoch: snapshot.epoch, environment: environment.id, generation: environment.generation),
@@ -172,7 +185,7 @@ final class CyderIndependentProcesses {
         guard !closed, let snapshot, !scopes(snapshot).isEmpty else { return }
         // Inventory omissions never remove a known process. Explicit reads of
         // known births continue even when the inventory is unavailable/truncated.
-        enqueue(snapshot.processes.values.filter { $0.launch == nil && $0.existence != .exited }.map { $0.id.pid })
+        enqueue(snapshot.processes.values.filter { ($0.launch == nil || $0.ownership == .explicitHandoff) && $0.existence != .exited }.map { $0.id.pid })
         schedule()
         guard !inventoryRunning else { return }
         inventoryRunning = true
@@ -216,7 +229,7 @@ final class CyderIndependentProcesses {
     }
     private func unknown(_ pid: Int32, stamps: [L.EnvironmentID: L.Stamp]) {
         guard !closed, let snapshot else { return }
-        for process in snapshot.processes.values where process.id.pid == pid && process.launch == nil && process.existence != .exited {
+        for process in snapshot.processes.values where process.id.pid == pid && (process.launch == nil || process.ownership == .explicitHandoff) && process.existence != .exited {
             if let stamp = stamps[process.environment], scopes(snapshot)[process.environment] == stamp {
                 event(.independentProcess(stamp, process.id, name: process.name, existence: .unconfirmed))
             }
@@ -225,7 +238,7 @@ final class CyderIndependentProcesses {
     private func consume(_ pid: Int32, _ reading: CyderProcessInventory.Reading, stamps: [L.EnvironmentID: L.Stamp]) {
         guard let snapshot else { return }
         let current = scopes(snapshot)
-        for process in snapshot.processes.values where process.id.pid == pid && process.launch == nil && process.existence != .exited {
+        for process in snapshot.processes.values where process.id.pid == pid && (process.launch == nil || process.ownership == .explicitHandoff) && process.existence != .exited {
             guard let stamp = stamps[process.environment], current[process.environment] == stamp else { continue }
             let ended: Bool
             switch reading.presence {
@@ -240,12 +253,12 @@ final class CyderIndependentProcesses {
         }
         if let match = reading.match, case .live(let node) = reading.presence, node.id == match.process,
            let stamp = stamps[match.environment], current[match.environment] == stamp {
-            event(.independentProcess(stamp, match.process, name: match.name, existence: .alive))
+            event(.independentProcess(stamp, match.process, name: match.name, existence: .alive, launchGroup: match.launchGroup))
         }
     }
     private func synchronizeSources() {
         guard driver.observeExits, let snapshot else { return }
-        let live = Set(snapshot.processes.values.filter { $0.launch == nil && $0.existence != .exited }.map(\.id))
+        let live = Set(snapshot.processes.values.filter { ($0.launch == nil || $0.ownership == .explicitHandoff) && $0.existence != .exited }.map(\.id))
         for id in sources.keys where !live.contains(id) { sources.removeValue(forKey: id)?.cancel() }
         for id in live where sources[id] == nil && sources.count < 1024 {
             let source = DispatchSource.makeProcessSource(identifier: id.pid, eventMask: [.exit, .exec], queue: queue)

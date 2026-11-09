@@ -26,6 +26,11 @@ if CommandLine.arguments.count > 2 && CommandLine.arguments[2] == "crash-after-d
     let payload = CyderRequestPayload(files: ["/trusted/crash.exe"], arguments: nil, urls: [], showUI: false)
     _ = value(wait { child.submit(id: id, payload: payload, completion: $0) })
     _ = value(wait { child.authorizeDispatch(id: id, completion: $0) })
+    let queuedID = J.makeID(namespace: namespace)
+    _ = value(wait { child.submit(id: queuedID, payload: payload, completion: $0) })
+    let cancelledID = J.makeID(namespace: namespace)
+    _ = value(wait { child.submit(id: cancelledID, payload: payload, completion: $0) })
+    _ = value(wait { child.cancel(id: cancelledID, digest: payload.digest, completion: $0) })
     _exit(73) // no quiesce, deinit or completion cleanup
 }
 let crashRoot = root.appendingPathComponent("crash-child")
@@ -37,8 +42,19 @@ child.waitUntilExit() // harness only; product never uses this to wait for Wine
 precondition(child.terminationStatus == 73)
 let crashRecovery = J(directory: crashRoot, delivery: delivery)
 let crashRecords = value(wait { crashRecovery.open(completion: $0) })
-precondition(crashRecords.count == 1 && crashRecords[0].phase == .uncertain)
-precondition(wait { crashRecovery.authorizeDispatch(id: crashRecords[0].id, completion: $0) } == .failure(.tooLate))
+precondition(crashRecords.count == 3)
+let crashedDispatch = crashRecords.first { $0.phase == .uncertain }!
+let crashedQueue = crashRecords.first { $0.phase == .awaitingUserResume }!
+let crashedCancel = crashRecords.first { $0.phase == .cancelled }!
+for record in [crashedDispatch, crashedQueue, crashedCancel] {
+    precondition(wait { crashRecovery.authorizeDispatch(id: record.id, completion: $0) } == .failure(.tooLate),
+                 "abrupt owner exit allowed automatic dispatch of retained/cancelled work")
+}
+precondition(wait { crashRecovery.resume(id: crashedDispatch.id, completion: $0) } == .failure(.tooLate))
+precondition(wait { crashRecovery.resume(id: crashedCancel.id, completion: $0) } == .failure(.tooLate))
+precondition(value(wait { crashRecovery.resume(id: crashedQueue.id, completion: $0) }).phase == .queued,
+             "queued work requires explicit resume after abrupt process death")
+print("PASS abrupt subprocess exit: dispatched uncertain, queued awaits explicit resume, cancelled remains terminal; no automatic dispatch")
 closeJournal(crashRecovery)
 
 let payload = CyderRequestPayload(files: ["/trusted/test.exe"], arguments: nil, urls: [], showUI: false)
@@ -69,6 +85,40 @@ let before = J.makeID(namespace: namespace)
 _ = value(wait { journal.cancel(id: before, digest: payload.digest, completion: $0) })
 precondition(value(wait { journal.submit(id: before, payload: payload, completion: $0) }).phase == .cancelled)
 precondition(wait { journal.authorizeDispatch(id: before, completion: $0) } == .failure(.tooLate))
+// Call both real journal APIs concurrently. Exactly one operation may commit;
+// an acknowledged cancellation must prevent every later authorization.
+var cancelWins = 0, dispatchWins = 0
+for _ in 0..<24 {
+    let racingID = J.makeID(namespace: namespace)
+    _ = value(wait { journal.submit(id: racingID, payload: payload, completion: $0) })
+    let start = DispatchSemaphore(value: 0), replied = DispatchSemaphore(value: 0)
+    var cancelResult: Result<J.Record, J.Failure>?
+    var dispatchResult: Result<J.Record, J.Failure>?
+    DispatchQueue.global().async {
+        start.wait()
+        journal.cancel(id: racingID, digest: payload.digest) { cancelResult = $0; replied.signal() }
+    }
+    DispatchQueue.global().async {
+        start.wait()
+        journal.authorizeDispatch(id: racingID) { dispatchResult = $0; replied.signal() }
+    }
+    start.signal(); start.signal()
+    precondition(replied.wait(timeout: .now() + 10) == .success)
+    precondition(replied.wait(timeout: .now() + 10) == .success)
+    switch (cancelResult!, dispatchResult!) {
+    case (.success(let cancelled), .failure(.tooLate)):
+        precondition(cancelled.phase == .cancelled)
+        cancelWins += 1
+    case (.failure(.tooLate), .success(let dispatched)):
+        precondition(dispatched.phase == .dispatching)
+        dispatchWins += 1
+    default: fatalError("cancel/dispatch race committed incompatible results")
+    }
+    precondition(wait { journal.authorizeDispatch(id: racingID, completion: $0) } == .failure(.tooLate))
+}
+precondition(cancelWins + dispatchWins == 24)
+print("PASS concurrent cancel/dispatch: 24 races, exactly one durable winner; cancellation=\(cancelWins), dispatch=\(dispatchWins)")
+
 let queued = J.makeID(namespace: namespace)
 _ = value(wait { journal.submit(id: queued, payload: payload, completion: $0) })
 // An observation deadline does not prove the executor stopped. Preserve the

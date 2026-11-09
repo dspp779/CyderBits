@@ -10,7 +10,7 @@ catalina_bootstrap="$(cat "$ROOT/scripts/cyder-catalina-bootstrap.command")"
 assert test -x "$ROOT/scripts/cyder-catalina-bootstrap.command"
 assert_contains "$wrapper" 'cyder_macos_at_least 11 0' \
   "wrapper must route no-argument macOS 11+ launches to CyderSwift"
-assert_contains "$wrapper" 'cyder_exec_cyder_swift "$SELF/CyderSwift" "$exe" "${game_args[@]}"' \
+assert_contains "$wrapper" 'cyder_exec_cyder_swift "$SELF/CyderSwift" "${document_args[@]}"' \
   "explicit EXE arguments on macOS 11+ must enter the native lifecycle agent"
 assert_contains "$wrapper" 'cyder_exec_cyder_swift "$SELF/CyderSwift" "$@"' \
   "no-argument macOS 11+ launches must exec native CyderSwift"
@@ -88,4 +88,5 @@ cyder_apply_moltenvk_os_floor
 assert_eq "${CYDER_DISABLE_MOLTENVK:-}" "1" "pre-10.15 must set CYDER_DISABLE_MOLTENVK"
 assert_contains "${WINEDLLOVERRIDES:-}" "winevulkan=d" "pre-10.15 must disable winevulkan"
 
+/usr/bin/python3 "$ROOT/tests/test-cyder-macos-wrapper-arguments.py"
 echo "PASS test-cyder-macos-compat"
