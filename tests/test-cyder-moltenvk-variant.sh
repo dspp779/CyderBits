@@ -13,26 +13,33 @@ trap cleanup EXIT
 
 UNIX="$FAKE/lib/wine/x86_64-unix"
 mkdir -p "$UNIX"
-# Empty reals are enough for symlink apply; shim needs the marker string.
-: >"$UNIX/libMoltenVK-1.4.2.dylib"
-: >"$UNIX/libMoltenVK-1.2.10.dylib"
-printf 'cyder-moltenvk-timeline-wait-poll\n' >"$UNIX/libMoltenvk-shim-body.txt"
-# Minimal Mach-O is not required for marker check; stub a file and mock otool via PATH.
-printf 'cyder-moltenvk-timeline-wait-poll\n' >"$UNIX/libMoltenVK.dylib"
-# Provide a fake otool that reports the re-export for the shim.
+# Fixtures are built with the developer toolchain; the code under test must
+# never run it. Every Command Line Tools shim on PATH fails loudly.
+sdk="$(xcrun --sdk macosx --show-sdk-path)"
+CLANG=/usr/bin/clang
 BIN="$FAKE/bin"
 mkdir -p "$BIN"
-cat >"$BIN/otool" <<'EOF'
-#!/usr/bin/env bash
-if [[ "$*" == *libMoltenVK.dylib* ]]; then
-  echo "	@loader_path/libMoltenVK.real.dylib (compatibility version 1.0.0, current version 1.0.0)"
-  exit 0
-fi
-exit 0
-EOF
-chmod +x "$BIN/otool"
-# Prefer system strings(1); ensure otool mock wins.
+for tool in otool strings vtool lipo nm xcrun install_name_tool size; do
+  printf '#!/bin/sh\necho "developer tool invoked: %s" >&2\ntouch "%s/devtool-used"\nexit 99\n' "$tool" "$FAKE" >"$BIN/$tool"
+  chmod +x "$BIN/$tool"
+done
 export PATH="$BIN:/usr/bin:/bin:/usr/sbin:/sbin"
+printf 'int mvk_probe = 1;\n' > "$FAKE/probe.c"
+printf 'const char cyder_marker[] = "cyder-moltenvk-timeline-wait-poll";\nint mvk_shim = 1;\n' > "$FAKE/shim.c"
+build_real() {
+  "$CLANG" -arch x86_64 -isysroot "$sdk" -mmacosx-version-min="$2" \
+    -install_name '@loader_path/libMoltenVK.real.dylib' -dynamiclib "$FAKE/probe.c" -o "$1"
+}
+build_shim() {
+  # Re-export a .real at link time, like the engine wait-poll shim.
+  local dir="$FAKE/link"; mkdir -p "$dir"
+  build_real "$dir/libMoltenVK.real.dylib" 10.15
+  "$CLANG" -arch x86_64 -isysroot "$sdk" -mmacosx-version-min="${2:-10.15}" -dynamiclib "$FAKE/shim.c" \
+    -Wl,-reexport_library,"$dir/libMoltenVK.real.dylib" -o "$1"
+}
+build_real "$UNIX/libMoltenVK-1.4.2.dylib" 12.0
+build_real "$UNIX/libMoltenVK-1.2.10.dylib" 10.15
+build_shim "$UNIX/libMoltenVK.dylib"
 
 CYDER_MOCK_MACOS=11.0
 assert_eq "$(cyder_resolve_moltenvk_variant 1.4.2)" "1.2.10" \
@@ -67,14 +74,7 @@ mkdir -p "$SINGLE/lib/wine/x86_64-unix"
 assert cyder_apply_moltenvk_variant_if_present "$SINGLE" "1.4.2"
 rm -rf "$SINGLE"
 
-# Real Mach-O fixtures: do not mistake a mocked version/name for loadability.
-export PATH=/usr/bin:/bin:/usr/sbin:/sbin
-sdk="$(xcrun --sdk macosx --show-sdk-path)"
-printf 'int mvk_probe = 1;\n' > "$FAKE/probe.c"
-build_real() {
-  /usr/bin/clang -arch x86_64 -isysroot "$sdk" -mmacosx-version-min="$2" \
-    -dynamiclib "$FAKE/probe.c" -o "$1"
-}
+# Real Mach-O fixtures: do not mistake a version/name for loadability.
 build_real "$UNIX/libMoltenVK.dylib" 10.15
 build_real "$UNIX/libMoltenVK-1.4.2.dylib" 12.0
 build_real "$UNIX/libMoltenVK-1.2.10.dylib" 12.0
@@ -108,9 +108,8 @@ rm "$UNIX/libMoltenVK.real.dylib"
 assert cyder_validate_moltenvk_for_backend "$FAKE" dxvk
 # Real re-export shim must not hide a missing dependency behind its 10.15 floor.
 cp "$UNIX/libMoltenVK.dylib" "$FAKE/single.dylib"
-/usr/bin/install_name_tool -id '@loader_path/libMoltenVK.real.dylib' "$UNIX/libMoltenVK-1.2.10.dylib"
 ln -s libMoltenVK-1.2.10.dylib "$UNIX/libMoltenVK.real.dylib"
-/usr/bin/clang -arch x86_64 -isysroot "$sdk" -mmacosx-version-min=10.15 \
+"$CLANG" -arch x86_64 -isysroot "$sdk" -mmacosx-version-min=10.15 \
   -dynamiclib "$FAKE/probe.c" -Wl,-reexport_library,"$UNIX/libMoltenVK.real.dylib" \
   -o "$UNIX/libMoltenVK.dylib"
 assert cyder_validate_moltenvk_for_backend "$FAKE" dxvk
@@ -128,7 +127,7 @@ if cyder_validate_moltenvk_for_backend "$FAKE" dxvk 2>/dev/null; then exit 1; fi
 rm "$UNIX/libMoltenVK.real.dylib"
 printf 'invalid\n' > "$UNIX/libMoltenVK.dylib"
 if cyder_validate_moltenvk_for_backend "$FAKE" dxvk 2>/dev/null; then exit 1; fi
-/usr/bin/clang -arch arm64 -isysroot "$sdk" -mmacosx-version-min=12.0 \
+"$CLANG" -arch arm64 -isysroot "$sdk" -mmacosx-version-min=12.0 \
   -dynamiclib "$FAKE/probe.c" -o "$UNIX/libMoltenVK.dylib"
 CYDER_MOCK_MACOS=13.0
 if cyder_validate_moltenvk_for_backend "$FAKE" dxvk 2>/dev/null; then exit 1; fi
@@ -141,18 +140,22 @@ build_real "$FAKE/old/lib64/libMoltenVK.dylib" 12.0
 if cyder_validate_moltenvk_for_backend "$FAKE/old" dxvk 2>/dev/null; then exit 1; fi
 
 # Old Mach-O load command and patch-level floors are compared correctly.
-(
-  otool() { printf 'cmd LC_VERSION_MIN_MACOSX\nversion 10.15\nsdk 12.0\n'; }
-  CYDER_MOCK_MACOS=11.0
-  assert cyder_moltenvk_check_minos legacy-fixture
-)
-(
-  otool() { printf 'cmd LC_BUILD_VERSION\nminos 12.0.1\nsdk 27.0\n'; }
-  CYDER_MOCK_MACOS=12.0
-  if cyder_moltenvk_check_minos patch-fixture 2>/dev/null; then exit 1; fi
-  CYDER_MOCK_MACOS=12.0.1
-  assert cyder_moltenvk_check_minos patch-fixture
-)
+build_real "$FAKE/legacy.dylib" 10.13
+assert_contains "$(cyder_macho_inspect "$FAKE/legacy.dylib")" 'minos 10.13.0' 'LC_VERSION_MIN_MACOSX is read'
+CYDER_MOCK_MACOS=11.0
+assert cyder_moltenvk_check_minos "$FAKE/legacy.dylib"
+build_real "$FAKE/patch.dylib" 12.0.1
+CYDER_MOCK_MACOS=12.0
+if cyder_moltenvk_check_minos "$FAKE/patch.dylib" 2>/dev/null; then exit 1; fi
+CYDER_MOCK_MACOS=12.0.1
+assert cyder_moltenvk_check_minos "$FAKE/patch.dylib"
+# Universal files select the x86_64 slice; truncated files fail closed.
+"$CLANG" -arch x86_64 -arch arm64 -isysroot "$sdk" -mmacosx-version-min=11.0 -dynamiclib "$FAKE/probe.c" -o "$FAKE/fat.dylib"
+assert_contains "$(cyder_macho_inspect "$FAKE/fat.dylib" x86_64)" 'minos 11.0.0' 'fat x86_64 slice'
+head -c 200 "$FAKE/fat.dylib" > "$FAKE/truncated.dylib"
+if cyder_macho_inspect "$FAKE/truncated.dylib" >/dev/null 2>&1; then exit 1; fi
+assert test ! -e "$FAKE/devtool-used"
+CYDER_MOCK_MACOS=11.0
 
 # Exercise the shared Wine entry point: blocked DXVK never spawns Wine.
 source "$ROOT/scripts/cyder-common.sh"
@@ -185,7 +188,7 @@ fi
 
 settings="$(cat "$ROOT/scripts/cyder_settings.swift")"
 assert_contains "$settings" 'moltenvkVariant' "settings must store moltenvkVariant"
-assert_contains "$settings" 'schemaVersion = 13' "schema must bump to 13"
+assert_contains "$settings" 'schemaVersion = 14' "settings schema must be current"
 assert_contains "$settings" 'var menuTitle: String { rawValue }' \
   "MoltenVK menu titles must be version numbers only"
 assert_not_contains "$settings" 'MoltenVK 1.4.2' \
@@ -198,4 +201,5 @@ assert_contains "$ui" 'showMoltenvk = backend.usesDxvkTranslation' \
 assert_contains "$ui" 'moltenvkVariant.isHidden = !showMoltenvk' \
   "MoltenVK picker visibility must follow DXVK selection"
 
+assert test ! -e "$FAKE/devtool-used"
 echo "PASS test-cyder-moltenvk-variant"

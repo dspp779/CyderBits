@@ -39,6 +39,81 @@ cyder_engine_has_moltenvk_dual_variant() {
   [[ -f "$unix/libMoltenVK-1.4.2.dylib" && -f "$unix/libMoltenVK-1.2.10.dylib" && -f "$unix/libMoltenVK.dylib" ]]
 }
 
+# Read Mach-O load commands without Apple's developer tools (otool, strings,
+# vtool and lipo are Command Line Tools shims on end-user Macs). Uses only
+# /usr/bin/perl, which the launch scripts already require. Prints one
+# "minos X.Y.Z" line (LC_BUILD_VERSION or LC_VERSION_MIN_MACOSX) and one
+# "<load|reexport|weak|lazy|upward> <install name>" line per dylib command for
+# the requested slice. Exits non-zero for non-Mach-O, a missing slice or any
+# out-of-bounds/truncated structure.
+cyder_macho_inspect() {
+  local file="${1:?}" arch="${2:-x86_64}"
+  /usr/bin/perl -e '
+    use strict; use warnings;
+    my ($path, $arch) = @ARGV;
+    my %cpu = (x86_64 => 0x01000007, arm64 => 0x0100000c);
+    defined $cpu{$arch} or die "unsupported arch\n";
+    open(my $fh, "<:raw", $path) or die "unreadable\n";
+    my $size = -s $fh; defined $size or die "unreadable\n";
+    sub rd { my ($fh, $off, $len, $size) = @_;
+      die "truncated\n" if $off < 0 || $len < 0 || $off + $len > $size;
+      seek($fh, $off, 0) or die "seek\n"; my $b = ""; my $n = read($fh, $b, $len);
+      die "truncated\n" unless defined $n && $n == $len; return $b; }
+    my $base = 0; my $len = $size;
+    my $magic = unpack("N", rd($fh, 0, 4, $size));
+    if ($magic == 0xcafebabe || $magic == 0xcafebabf) {
+      my $wide = $magic == 0xcafebabf; my $n = unpack("N", rd($fh, 4, 4, $size));
+      die "bad fat header\n" if $n < 1 || $n > 64;
+      my $entry = $wide ? 32 : 20; my $found = 0;
+      for my $i (0 .. $n - 1) {
+        my $raw = rd($fh, 8 + $i * $entry, $entry, $size);
+        my ($cpu, $off, $sz);
+        if ($wide) { my ($c, undef, $oh, $ol, $sh, $sl) = unpack("N N N N N N", $raw);
+          ($cpu, $off, $sz) = ($c, $oh * 4294967296 + $ol, $sh * 4294967296 + $sl); }
+        else { ($cpu, undef, $off, $sz) = unpack("N N N N", $raw); }
+        next unless $cpu == $cpu{$arch};
+        die "bad slice\n" if $off + $sz > $size || $sz < 32;
+        ($base, $len, $found) = ($off, $sz, 1); last;
+      }
+      die "missing $arch slice\n" unless $found;
+    }
+    my ($m, $cpu, undef, undef, $ncmds, $sizeofcmds) = unpack("V6", rd($fh, $base, 24, $size));
+    die "not a 64-bit Mach-O\n" unless $m == 0xfeedfacf;
+    die "missing $arch slice\n" unless $cpu == $cpu{$arch};
+    die "bad load commands\n" if $ncmds > 4096 || 32 + $sizeofcmds > $len;
+    my $cmds = rd($fh, $base + 32, $sizeofcmds, $size);
+    my %dylib = (0xc => "load", 0x8000001f => "reexport", 0x80000018 => "weak",
+                 0x20 => "lazy", 0x80000023 => "upward");
+    my ($at, $minos) = (0, undef);
+    for (1 .. $ncmds) {
+      die "truncated\n" if $at + 8 > length($cmds);
+      my ($cmd, $cs) = unpack("V V", substr($cmds, $at, 8));
+      die "bad load command\n" if $cs < 8 || $at + $cs > length($cmds);
+      my $body = substr($cmds, $at, $cs);
+      if (($cmd == 0x32 || $cmd == 0x24) && $cs >= 16) {
+        my $v = unpack("V", substr($body, $cmd == 0x32 ? 12 : 8, 4));
+        if ($cmd == 0x24 || unpack("V", substr($body, 8, 4)) == 1) {
+          $minos //= sprintf("%d.%d.%d", $v >> 16, ($v >> 8) & 0xff, $v & 0xff);
+        }
+      } elsif (exists $dylib{$cmd} && $cs >= 24) {
+        my $name_off = unpack("V", substr($body, 8, 4));
+        die "bad dylib name\n" if $name_off < 24 || $name_off >= $cs;
+        my $name = substr($body, $name_off); $name =~ s/\0.*\z//s;
+        print "$dylib{$cmd} $name\n";
+      }
+      $at += $cs;
+    }
+    die "no minimum macOS version\n" unless defined $minos;
+    print "minos $minos\n";
+  ' "$file" "$arch"
+}
+
+cyder_macho_reexports_real() {
+  local out
+  out="$(cyder_macho_inspect "${1:?}" x86_64 2>/dev/null)" || return 1
+  grep -Fxq 'reexport @loader_path/libMoltenVK.real.dylib' <<<"$out"
+}
+
 # sets lib/wine/x86_64-unix/libMoltenVK.real.dylib -> libMoltenVK-$resolved.dylib
 cyder_apply_moltenvk_variant() {
   local engine="${1:?}" pref="${2:?}" unix resolved target
@@ -53,17 +128,17 @@ cyder_apply_moltenvk_variant() {
     echo "missing $unix/libMoltenVK.dylib" >&2
     return 1
   }
-  strings "$unix/libMoltenVK.dylib" | grep -Fq 'cyder-moltenvk-timeline-wait-poll' || {
+  LC_ALL=C grep -Fqa 'cyder-moltenvk-timeline-wait-poll' "$unix/libMoltenVK.dylib" || {
     echo "libMoltenVK.dylib is not the wait-poll shim" >&2
     return 1
   }
-  if ! otool -L "$unix/libMoltenVK.dylib" | grep -Fq '@loader_path/libMoltenVK.real.dylib'; then
+  if ! cyder_macho_reexports_real "$unix/libMoltenVK.dylib"; then
     echo "libMoltenVK.dylib does not re-export libMoltenVK.real.dylib" >&2
     return 1
   fi
   # Refuse double-shim: non-symlink .real must not itself re-export .real.
   if [[ -f "$unix/libMoltenVK.real.dylib" ]] && ! [[ -L "$unix/libMoltenVK.real.dylib" ]]; then
-    if otool -L "$unix/libMoltenVK.real.dylib" | grep -Fq '@loader_path/libMoltenVK.real.dylib'; then
+    if cyder_macho_reexports_real "$unix/libMoltenVK.real.dylib"; then
       echo "libMoltenVK.real.dylib looks like a shim (double-shim)" >&2
       return 1
     fi
@@ -98,12 +173,9 @@ cyder_default_moltenvk_variant_preference() {
 # Inspect the Wine process slice, including older LC_VERSION_MIN_MACOSX dylibs.
 # Fail closed when the file/slice/load command cannot be inspected.
 cyder_moltenvk_check_minos() {
-  local dylib="${1:?}" headers required host
-  headers="$(otool -arch x86_64 -l "$dylib" 2>/dev/null)" || headers=""
-  required="$(printf '%s\n' "$headers" | awk '
-    $1 == "cmd" { legacy = ($2 == "LC_VERSION_MIN_MACOSX") }
-    $1 == "minos" || (legacy && $1 == "version") { print $2; exit }
-  ')"
+  local dylib="${1:?}" info required host
+  info="$(cyder_macho_inspect "$dylib" x86_64 2>/dev/null)" || info=""
+  required="$(sed -n 's/^minos //p' <<<"$info")"
   if [[ ! "$required" =~ ^[0-9]+\.[0-9]+(\.[0-9]+)?$ ]]; then
     echo "DXVK/Vulkan blocked: cannot determine x86_64 Mach-O minOS: $dylib" >&2
     return 1
@@ -133,7 +205,7 @@ cyder_validate_moltenvk_for_backend() {
   real="${shim%/*}/libMoltenVK.real.dylib"
   # Old single-dylib engines have no .real. A shim must have a readable real.
   if [[ -e "$real" || -L "$real" ]] ||
-     otool -L "$shim" 2>/dev/null | grep -Fq '@loader_path/libMoltenVK.real.dylib'; then
+     cyder_macho_reexports_real "$shim"; then
     cyder_moltenvk_check_minos "$real" || return $?
   fi
 }

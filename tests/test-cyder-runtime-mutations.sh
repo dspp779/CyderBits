@@ -16,8 +16,8 @@ touch "$unix/libMoltenVK-1.4.2.dylib" "$unix/libMoltenVK-1.2.10.dylib"
 printf '%s\n' 'cyder-moltenvk-timeline-wait-poll' > "$unix/libMoltenVK.dylib"
 ln -s libMoltenVK-1.4.2.dylib "$unix/libMoltenVK.real.dylib"
 # Only the Mach-O validation tool is a fixture; formal mutation logic is used.
-otool() { printf '%s\n' '@loader_path/libMoltenVK.real.dylib'; }
 source "$SCRIPTS/cyder-common.sh"
+cyder_macho_reexports_real() { [[ "$1" == */libMoltenVK.dylib ]]; }
 cyder_load_saved_settings
 [[ "$CYDER_MOLTENVK_VARIANT_PREFERENCE" == 1.2.10 ]]
 [[ "$(readlink "$unix/libMoltenVK.real.dylib")" == libMoltenVK-1.4.2.dylib ]] || {
