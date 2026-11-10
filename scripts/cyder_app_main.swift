@@ -2322,6 +2322,10 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             presentProtectedGameFolderFailure(failure)
             return .close
         }
+        if let ticket = CyderExecutionOwner.blockingTicket(in: failure.technicalDetails) {
+            presentInterruptedOperation(ticket, failure: failure)
+            return .close
+        }
         var action: CyderFailureAction = .close
         onMainThread {
             let alert = NSAlert()
@@ -2369,6 +2373,43 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             }
         }
         return action
+    }
+
+    /// A launch or maintenance step was refused because an earlier operation
+    /// on the same Windows environment was interrupted and may still be
+    /// changing it. Offer to stop exactly that operation's leftover processes.
+    private func presentInterruptedOperation(_ ticket: UUID, failure: CyderFailure) {
+        let stop: Bool = onMainThread {
+            let alert = NSAlert()
+            alert.messageText = "上一次的操作尚未結束"
+            alert.informativeText = "上一次在這個 Windows 環境的啟動或準備在中途中斷，留下的程序可能仍在修改環境，因此這次沒有執行。\n\n"
+                + "可以等它自行結束後再試，或結束這些殘留程序。若中斷的是一次遊戲啟動，該遊戲也會被關閉。"
+            alert.alertStyle = .warning
+            alert.addButton(withTitle: "結束殘留程序")
+            alert.addButton(withTitle: "稍後再試")
+            alert.addButton(withTitle: "開啟相關記錄")
+            let response = runFrontmostAlert(alert, dockVisible: terminateWhenSettingsClose && !documentLaunchRequested)
+            if response == .alertThirdButtonReturn {
+                NSWorkspace.shared.activateFileViewerSelecting([failure.logURL ?? CyderDiagnostics.shared.sessionLogURL])
+            }
+            return response == .alertFirstButtonReturn
+        }
+        guard stop else { return }
+        let root = CyderPaths.support.appendingPathComponent("execution-owners")
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let result = (try? CyderExecutionOwner.stopLeftovers(root: root, id: ticket)) ?? .stillRunning
+            CyderDiagnostics.shared.info("interrupted operation stop ticket=\(ticket.uuidString) result=\(result)")
+            DispatchQueue.main.async {
+                guard let self, !self.quitTransaction else { return }
+                self.instanceCoordinator.refreshExecutionReceipts()
+                switch result {
+                case .stopped, .nothingLeft, .notFound:
+                    self.showAlert("已結束殘留程序", "這個 Windows 環境已可使用，請再試一次。")
+                case .stillRunning:
+                    self.showAlert("仍有程序在執行", "上一次的操作仍在進行，請等它完成，或從選單停止這個 Windows 環境後再試。")
+                }
+            }
+        }
     }
 
     private func presentProtectedGameFolderFailure(_ failure: CyderFailure) {

@@ -91,9 +91,11 @@ cyder_run_wine_exe "$TEST_ROOT/runtime/bin/wine" "$TEST_ROOT/inert.exe" "$TEST_R
     assert owner.poll() is None and receipt(ticket)['phase'] == 'active'
     assert not (delayed / 'pid').exists() and not (delayed / 'native.entered').exists()
     recover()
-    conflict = start(delayed, reserve(delayed, False), ['/usr/bin/true'])
-    wait(lambda: conflict.poll() is not None, 'same-prefix conflict did not return')
-    assert conflict.returncode == 75
+    # A same-prefix operation now waits for the live owner (bounded) instead
+    # of failing at once; it must not run before that owner hands off.
+    conflict = start(delayed, reserve(delayed, False), ['/usr/bin/touch', str(delayed / 'conflict.ran')])
+    time.sleep(.5)
+    assert conflict.poll() is None and not (delayed / 'conflict.ran').exists(), 'same-prefix conflict bypassed the live owner'
     independent = case('independent')
     other = start(independent, reserve(independent, False), ['/usr/bin/true'])
     wait(lambda: other.poll() is not None, 'independent environment blocked')
@@ -102,6 +104,8 @@ cyder_run_wine_exe "$TEST_ROOT/runtime/bin/wine" "$TEST_ROOT/inert.exe" "$TEST_R
     wait(lambda: (delayed / 'native.entered').exists() and owner.poll() is not None,
          'native spawn handoff did not release the outer owner')
     assert owner.returncode == 0
+    wait(lambda: conflict.poll() is not None, 'waiting same-prefix operation never ran')
+    assert conflict.returncode == 0 and (delayed / 'conflict.ran').exists()
     state = receipt(ticket)
     native_pid, architecture = (delayed / 'native.entered').read_text().split()
     assert architecture == 'x86_64'
@@ -230,14 +234,20 @@ cyder_apply_moltenvk_variant_from_preference "$TEST_ROOT/runtime"
     assert runtime_link.resolve() == (runtime / 'support/runtime/apple_gptk').resolve()
     assert os.readlink(molten_link) == 'libMoltenVK-1.4.2.dylib'
     assert receipt(runtime_ticket)['requiresGlobalScope'] is True and receipt(runtime_ticket)['scope'] is not None
-    runtime_conflict = start(independent, reserve(independent, False), ['/usr/bin/true'])
-    wait(lambda: runtime_conflict.poll() is not None, 'global runtime conflict did not return')
-    assert runtime_conflict.returncode == 75
+    # Another prefix waits for the global (shared-runtime) owner, bounded,
+    # and runs only after that owner hands off.
     recover()
     assert receipt(runtime_ticket)['phase'] == 'active'
+    # (Started after recovery: a new primary revokes prepared tickets of
+    # helpers still waiting for a scope, by design.)
+    runtime_conflict = start(independent, reserve(independent, False), ['/usr/bin/touch', str(independent / 'runtime-conflict.ran')])
+    time.sleep(.5)
+    assert runtime_conflict.poll() is None and not (independent / 'runtime-conflict.ran').exists(), 'global runtime barrier bypassed'
     (runtime / 'log.release').touch()
     wait(lambda: runtime_owner.poll() is not None and (runtime / 'native.entered').exists(), 'global runtime launch did not hand off')
     assert runtime_owner.returncode == 0 and receipt(runtime_ticket)['phase'] == 'handedOff'
+    wait(lambda: runtime_conflict.poll() is not None, 'waiting operation never ran after the global owner')
+    assert runtime_conflict.returncode == 0 and (independent / 'runtime-conflict.ran').exists()
     following_runtime = start(independent, reserve(independent, False), ['/usr/bin/true'])
     wait(lambda: following_runtime.poll() is not None, 'global runtime barrier survived actual owner return')
     assert following_runtime.returncode == 0
@@ -353,13 +363,15 @@ cyder_open_prefix_taskmgr "$TEST_ROOT/runtime/bin/wine" "$TEST_ROOT/prefix"
     assert manager_owner.poll() is None and receipt(manager_ticket)['phase'] == 'active', 'task manager released authority before its final spawn'
     assert not (manager / 'pid').exists() and not (manager / 'native.entered').exists()
     recover()
-    manager_conflict = start(manager, reserve(manager, False), ['/usr/bin/true'])
-    wait(lambda: manager_conflict.poll() is not None, 'task manager scope conflict did not return')
-    assert manager_conflict.returncode == 75
+    manager_conflict = start(manager, reserve(manager, False), ['/usr/bin/touch', str(manager / 'manager-conflict.ran')])
+    time.sleep(.5)
+    assert manager_conflict.poll() is None and not (manager / 'manager-conflict.ran').exists(), 'task manager scope bypassed'
     (manager / 'frontend.release').touch()
     wait(lambda: manager_owner.poll() is not None and (manager / 'native.entered').exists(), 'task manager failed to hand off actual native spawn')
     assert manager_owner.returncode == 0 and receipt(manager_ticket)['phase'] == 'handedOff'
     assert receipt(manager_ticket)['nativeSpawn']['process']['pid'] == int((manager / 'pid').read_text())
+    wait(lambda: manager_conflict.poll() is not None, 'waiting operation never ran after the task manager handed off')
+    assert manager_conflict.returncode == 0 and (manager / 'manager-conflict.ran').exists()
     manager_following = start(manager, reserve(manager, False), ['/usr/bin/true'])
     wait(lambda: manager_following.poll() is not None, 'task manager retained scope for its entire lifetime')
     assert manager_following.returncode == 0

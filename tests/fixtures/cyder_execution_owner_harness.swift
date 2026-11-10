@@ -27,7 +27,12 @@ set -e
 [[ "${!CYDER_EXECUTION_@}" == CYDER_EXECUTION_RUNTIME_MUTATION ]] || exit 91
 [[ "$CYDER_EXECUTION_RUNTIME_MUTATION" == 0 || "$CYDER_EXECUTION_RUNTIME_MUTATION" == 1 ]] || exit 92
 printf 'entered\n' > "$1.entered"
-if [[ "$2" == wait ]]; then
+if [[ "$2" == orphan ]]; then
+  # Leave a process behind in the operation's group, like an interrupted tool.
+  /bin/sleep 60 </dev/null >/dev/null 2>&1 &
+  printf '%s\n' "$!" > "$1.orphan"
+fi
+if [[ "$2" == wait || "$2" == orphan ]]; then
   while [[ ! -f "$1.release" ]]; do sleep 0.02; done
 fi
 printf 'finished\n' > "$1.finished"
@@ -39,7 +44,7 @@ func reserve(_ scope: String?, correlation: CyderExecutionOwner.Correlation? = n
     return try io { try CyderExecutionOwner.prepare(root: ledger, issuer: issuer, scope: path, correlation: correlation,
                                                    requiresGlobalScope: requiresGlobalScope) }
 }
-func start(_ id: UUID, name: String, wait: Bool = false, status: Int = 0) throws -> Process {
+func start(_ id: UUID, name: String, wait: Bool = false, status: Int = 0, mode: String? = nil, stderr: URL? = nil) throws -> Process {
     let p = Process(); p.executableURL = helper
     var environment = ProcessInfo.processInfo.environment
     for key in ["CYDER_EXECUTION_OWNER_ROOT", "CYDER_EXECUTION_OWNER_TICKET", "CYDER_EXECUTION_OWNER_HELPER", "CYDER_EXECUTION_FINAL", "CYDER_EXECUTION_RUNTIME_MUTATION"] {
@@ -47,8 +52,10 @@ func start(_ id: UUID, name: String, wait: Bool = false, status: Int = 0) throws
     }
     p.environment = environment
     p.arguments = ["--execution-owner", ledger.path, id.uuidString, "--", "/bin/bash", script.path,
-                   root.appendingPathComponent(name).path, wait ? "wait" : "quick", String(status), "secret-executor-argv"]
-    p.standardOutput = FileHandle.nullDevice; p.standardError = FileHandle.nullDevice
+                   root.appendingPathComponent(name).path, mode ?? (wait ? "wait" : "quick"), String(status), "secret-executor-argv"]
+    p.standardOutput = FileHandle.nullDevice
+    if let stderr { FileManager.default.createFile(atPath: stderr.path, contents: nil); p.standardError = try FileHandle(forWritingTo: stderr) }
+    else { p.standardError = FileHandle.nullDevice }
     try p.run(); return p
 }
 func exists(_ name: String, _ suffix: String) -> Bool { FileManager.default.fileExists(atPath: root.appendingPathComponent(name + "." + suffix).path) }
@@ -74,27 +81,35 @@ check(activeReceipt.phase == .active && activeReceipt.owner?.pid == owner.proces
 let alias = root.appendingPathComponent("prefix-alias")
 try FileManager.default.createSymbolicLink(at: alias, withDestinationURL: root.appendingPathComponent("prefixes/one"))
 let aliasTicket = try io { try CyderExecutionOwner.prepare(root: ledger, issuer: issuer, scope: alias.path) }
-let aliasAttempt = try start(aliasTicket, name: "alias"); pump { !aliasAttempt.isRunning }
-check(aliasAttempt.terminationStatus == 75 && !exists("alias", "entered"), "prefix alias bypassed directory identity lock")
-let duplicate = try start(active, name: "duplicate"); pump { !duplicate.isRunning }
-check(duplicate.terminationStatus == 75 && !exists("duplicate", "entered"), "duplicate owner spawned")
+// A helper for the same environment (even via a symlink alias) now waits for
+// the live owner instead of failing at once (P0-2), bounded by scopeWait.
+let aliasAttempt = try start(aliasTicket, name: "alias")
+let duplicate = try start(active, name: "duplicate")
 var maintenanceRefused = false
 do { try io { try CyderExecutionOwner.withScope(root: ledger, scope: nil) { try Data().write(to: root.appendingPathComponent("unsafe-maintenance")) } } }
 catch { maintenanceRefused = true }
 check(maintenanceRefused && !FileManager.default.fileExists(atPath: root.appendingPathComponent("unsafe-maintenance").path), "native filesystem mutation bypassed the live cross-process owner")
 let sameTicket = try reserve("one"), otherTicket = try reserve("two"), allTicket = try reserve(nil)
 let same = try start(sameTicket, name: "same"), other = try start(otherTicket, name: "other"), all = try start(allTicket, name: "all")
-pump { !same.isRunning && !other.isRunning && !all.isRunning }
-check(same.terminationStatus == 75 && all.terminationStatus == 75, "cross-process conflicting scope bypassed live owner")
+pump { !other.isRunning }
 check(other.terminationStatus == 0 && exists("other", "finished"), "independent environment was blocked")
+var held = false; DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { held = true }; pump { held }
+check(same.isRunning && all.isRunning && aliasAttempt.isRunning && duplicate.isRunning, "conflicting helpers must wait, not fail")
+check(!exists("same", "entered") && !exists("all", "entered") && !exists("alias", "entered") && !exists("duplicate", "entered"),
+      "cross-process conflicting scope bypassed live owner")
 try Data().write(to: root.appendingPathComponent("active.release")); pump { !owner.isRunning }
+pump { !same.isRunning && !all.isRunning && !aliasAttempt.isRunning && !duplicate.isRunning }
+check(same.terminationStatus == 0 && all.terminationStatus == 0 && aliasAttempt.terminationStatus == 0,
+      "waiting helpers did not run after the owner finished")
+check(duplicate.terminationStatus == 75 && !exists("duplicate", "entered"), "duplicate owner spawned")
 check(owner.terminationStatus == 23 && exists("active", "finished"), "native child result lost")
 let finished = try receipt(active); check(finished.phase == .finished && finished.status == 23, "actual result not persisted")
 check(finished.correlation == nativeCorrelation && finished.issuer == issuer && finished.signalled == false,
       "actual helper lost original correlation or termination reason")
 let again = try start(active, name: "again"); pump { !again.isRunning }
 check(again.terminationStatus == 75 && !exists("again", "entered"), "completed ticket replayed")
-let after = try start(sameTicket, name: "after"); pump { !after.isRunning }
+let afterTicket = try reserve("one")
+let after = try start(afterTicket, name: "after"); pump { !after.isRunning }
 check(after.terminationStatus == 0 && exists("after", "finished"), "scope not released after actual child exit")
 try io { try CyderExecutionOwner.withScope(root: ledger, scope: nil) { try Data().write(to: root.appendingPathComponent("maintenance")) } }
 check(FileManager.default.fileExists(atPath: root.appendingPathComponent("maintenance").path), "finished native owner still blocked filesystem mutation")
@@ -137,6 +152,65 @@ try io { try CyderExecutionOwner.recover(root: ledger) }
 let bootRecovered = try receipt(crashTicket)
 check(bootRecovered.phase == .revoked, "old-boot executor permanently blocked recovery")
 print("PASS injected boot boundary: old uncertain executor revoked without replay")
+
+// P0-2: an interrupted operation releases its environment as soon as nothing
+// it started is still running; there is no reboot or manual cleanup.
+let groupTicket = try reserve("group")
+let groupOwner = try start(groupTicket, name: "group", wait: true)
+pump { exists("group", "entered") }
+pump { (try? receipt(groupTicket).child) != nil }
+let grouped = try receipt(groupTicket)
+check(grouped.group == groupOwner.processIdentifier && getpgid(grouped.child!.pid) == grouped.group,
+      "operation's Bash must run in the helper's recorded process group")
+check(kill(groupOwner.processIdentifier, SIGKILL) == 0, "could not stop group fixture owner"); pump { !groupOwner.isRunning }
+let whileRunning = try start(try reserve("group"), name: "group-blocked", stderr: root.appendingPathComponent("group-blocked.err"))
+pump { !whileRunning.isRunning }
+check(whileRunning.terminationStatus == 75 && !exists("group-blocked", "entered"), "running Bash of an interrupted operation was bypassed")
+let report = try String(contentsOf: root.appendingPathComponent("group-blocked.err"), encoding: .utf8)
+check(report.contains(CyderExecutionOwner.leftoverMarker + groupTicket.uuidString), "blocked launch must name the blocking ticket")
+try Data().write(to: root.appendingPathComponent("group.release")); pump { exists("group", "finished") }
+var drained = false; DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { drained = true }; pump { drained }
+let resumedTicket = try reserve("group")
+let resumed = try start(resumedTicket, name: "group-after"); pump { !resumed.isRunning }
+check(resumed.terminationStatus == 0 && exists("group-after", "finished"), "abandoned operation still blocked after its processes exited")
+let abandoned = try receipt(groupTicket)
+check(abandoned.phase == .revoked && abandoned.resolution == "abandoned", "abandoned ticket not released durably")
+print("PASS interrupted operation: Bash in recorded group, blocks while running, releases itself once the group is empty")
+
+// Leftovers: the helper and Bash are gone but a process of the operation
+// remains. It keeps blocking until the user stops it, then the scope is free.
+let orphanTicket = try reserve("orphan")
+let orphanOwner = try start(orphanTicket, name: "orphan", mode: "orphan")
+pump { exists("orphan", "orphan") }
+let orphanPID = Int32(try String(contentsOf: root.appendingPathComponent("orphan.orphan"), encoding: .utf8)
+    .trimmingCharacters(in: .whitespacesAndNewlines))!
+pump { (try? receipt(orphanTicket).child) != nil }
+let orphanBash = try receipt(orphanTicket).child!.pid
+check(kill(orphanOwner.processIdentifier, SIGKILL) == 0 && kill(orphanBash, SIGKILL) == 0, "could not interrupt orphan fixture")
+pump { !orphanOwner.isRunning }
+try io { try CyderExecutionOwner.recover(root: ledger) }
+let leftover = try receipt(orphanTicket)
+check(leftover.phase == .uncertain, "leftover processes must keep the scope blocked")
+if case .leftovers(let group) = CyderExecutionOwner.remains(leftover) { check(group == leftover.group, "wrong group") }
+else { check(false, "orphaned group member not detected") }
+let orphanBlocked = try start(try reserve("orphan"), name: "orphan-blocked"); pump { !orphanBlocked.isRunning }
+check(orphanBlocked.terminationStatus == 75 && !exists("orphan-blocked", "entered"), "leftover process bypassed")
+let stopped = try io { try CyderExecutionOwner.stopLeftovers(root: ledger, id: orphanTicket, grace: 2) }
+check(stopped == .stopped && kill(orphanPID, 0) != 0, "stop must end exactly the operation's leftover group")
+let terminated = try receipt(orphanTicket)
+check(terminated.resolution == "terminated", "stopped ticket not released durably")
+let orphanAfter = try start(try reserve("orphan"), name: "orphan-after"); pump { !orphanAfter.isRunning }
+check(orphanAfter.terminationStatus == 0 && exists("orphan-after", "finished"), "scope still blocked after stopping leftovers")
+let repeated = try io { try CyderExecutionOwner.stopLeftovers(root: ledger, id: orphanTicket) }
+check(repeated == .nothingLeft, "stop is idempotent")
+// A live helper is never signalled: its owner lock refuses the stop.
+let liveTicket = try reserve("live")
+let liveOwner = try start(liveTicket, name: "live", wait: true); pump { exists("live", "entered") }
+let liveRefused = try io { try CyderExecutionOwner.stopLeftovers(root: ledger, id: liveTicket) }
+check(liveRefused == .stillRunning && liveOwner.isRunning,
+      "stop must refuse an operation whose helper is alive")
+try Data().write(to: root.appendingPathComponent("live.release")); pump { !liveOwner.isRunning }
+print("PASS leftovers: orphaned group blocks, user stop ends only that group and frees the scope, live helpers are never signalled")
 
 // Model a recovered runtime mutation whose outcome is unknown. Its concrete
 // prefix still matters for Wine identity, but its uncertainty blocks all
@@ -212,19 +286,25 @@ let invalidSpawnURL = invalidSpawnRoot.appendingPathComponent(invalidSpawn.id.uu
 let invalidSpawnBytes = Data(String(decoding: try JSONEncoder().encode(invalidSpawn), as: UTF8.self)
     .replacingOccurrences(of: "\"claiming\"", with: "\"unknown-future-state\"").utf8)
 try invalidSpawnBytes.write(to: invalidSpawnURL); chmod(invalidSpawnURL.path, 0o600)
-var rejectedInvalidSpawn = false
-do { _ = try io { try CyderExecutionOwner.snapshot(root: invalidSpawnRoot) } } catch { rejectedInvalidSpawn = true }
+let invalidSnapshot = try io { try CyderExecutionOwner.snapshot(root: invalidSpawnRoot) }
 let preservedInvalidSpawn = try Data(contentsOf: invalidSpawnURL)
-check(rejectedInvalidSpawn && preservedInvalidSpawn == invalidSpawnBytes, "unknown native spawn state was treated as a confirmed handoff")
-print("PASS handoff schema: unknown native spawn proof is rejected and original bytes remain intact")
+check(invalidSnapshot.isEmpty && preservedInvalidSpawn == invalidSpawnBytes, "unknown native spawn state was treated as a confirmed handoff")
+print("PASS handoff schema: unknown native spawn proof is excluded and original bytes remain intact")
 
 let corrupt = ledger.appendingPathComponent(UUID().uuidString + ".json")
 let corruptBytes = Data("broken receipt".utf8)
 try corruptBytes.write(to: corrupt); chmod(corrupt.path, 0o600)
-var refused = false
-do { try io { try CyderExecutionOwner.recover(root: ledger) } } catch { refused = true }
-let preserved = try Data(contentsOf: corrupt)
-check(refused && preserved == corruptBytes, "corrupt receipt overwritten or ignored")
-print("PASS executor recovery corruption: fail closed, original bytes preserved")
+// One corrupt ticket must not leave Cyder unable to coordinate: it is moved
+// aside with its bytes intact and every valid ticket keeps working.
+let quarantined = try io { try CyderExecutionOwner.recover(root: ledger) }
+check(quarantined == [corrupt.lastPathComponent] && !FileManager.default.fileExists(atPath: corrupt.path), "corrupt ticket not moved aside")
+let quarantineDir = ledger.appendingPathComponent("quarantine")
+let moved = try FileManager.default.contentsOfDirectory(atPath: quarantineDir.path)
+check(moved.count == 1 && moved[0].hasPrefix(corrupt.lastPathComponent), "quarantined ticket not kept")
+let movedBytes = try Data(contentsOf: quarantineDir.appendingPathComponent(moved[0]))
+check(movedBytes == corruptBytes, "corrupt bytes changed")
+let afterCorruption = try start(try reserve("after-corruption"), name: "after-corruption"); pump { !afterCorruption.isRunning }
+check(afterCorruption.terminationStatus == 0 && exists("after-corruption", "finished"), "launches stayed blocked after a corrupt ticket")
+print("PASS executor recovery corruption: bad ticket quarantined with original bytes, coordination continues")
 
 } catch { fputs("FAIL executor I/O: \(error)\n", stderr); exit(1) }

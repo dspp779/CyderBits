@@ -73,6 +73,15 @@ enum CyderExecutionOwner {
         /// What the user launched, for showing a game that is still running
         /// after Cyder restarts. Tickets are the only launch state that survives.
         var displayName: String? = nil
+        /// Process group of the operation: the helper makes itself a group
+        /// leader before claiming and runs Bash in that group, so every process
+        /// the operation started (and did not detach) is a member. Recorded
+        /// before anything runs; nil only on tickets from older helpers.
+        var group: Int32? = nil
+        /// Why a ticket that was holding its scope was released without its
+        /// helper, e.g. "abandoned" (nothing from it is still running) or
+        /// "terminated" (the user stopped its leftover processes).
+        var resolution: String? = nil
         var effectiveScope: String? { requiresGlobalScope == true ? nil : scope }
     }
     private final class Directory {
@@ -104,6 +113,15 @@ enum CyderExecutionOwner {
             while true {
                 do { return try lock(name) }
                 catch Failure.busy { usleep(100_000) }
+            }
+        }
+        /// Waits for another helper's operation on the same scope instead of
+        /// failing at once; gives up (busy) after `deadline` seconds.
+        func waitLock(_ name: String, exclusive: Bool, deadline: TimeInterval) throws -> Int32 {
+            let end = ProcessInfo.processInfo.systemUptime + deadline
+            while true {
+                do { return try lock(name, exclusive: exclusive) }
+                catch Failure.busy where ProcessInfo.processInfo.systemUptime < end { usleep(100_000) }
             }
         }
         func names() throws -> [String] {
@@ -140,12 +158,19 @@ enum CyderExecutionOwner {
                   (ticket.schema == 2) == (ticket.requiresGlobalScope == true),
                   name == ticket.id.uuidString + ".json",
                   ticket.correlation?.isValid != false, ticket.handoff?.isValid != false,
-                  (ticket.displayName?.count ?? 0) <= 100,
+                  (ticket.displayName?.count ?? 0) <= 100, ticket.group.map { $0 > 1 } != false,
                   ticket.nativeSpawn?.isValid != false,
                   (ticket.handoff == nil || ticket.scope != nil),
                   (ticket.nativeSpawn == nil || ticket.handoff != nil),
                   (ticket.phase != .handedOff || ticket.nativeSpawn?.phase.hasProcess == true) else { throw Failure.invalid }
             return ticket
+        }
+        /// Moves an unreadable ticket out of the ledger, bytes unchanged, so one
+        /// bad file cannot leave Cyder unable to coordinate (and read-only).
+        func quarantine(_ name: String) throws {
+            if mkdirat(fd, "quarantine", 0o700) != 0, errno != EEXIST { throw Failure.unavailable }
+            let target = "quarantine/" + name + ".\(Int(Date().timeIntervalSince1970))"
+            guard renameat(fd, name, fd, target) == 0, fsync(fd) == 0 else { throw Failure.unavailable }
         }
         func write(_ ticket: Ticket) throws {
             let data = try JSONEncoder().encode(ticket)
@@ -192,11 +217,15 @@ enum CyderExecutionOwner {
         try directory.write(ticket)
         return ticket.id
     }
+    /// Valid tickets only; an unreadable one is skipped here (and moved aside
+    /// by recover at the next start) instead of hiding every other ticket.
     static func snapshot(root: URL) throws -> [Ticket] {
         precondition(!Thread.isMainThread)
         let directory = try Directory(root)
         let serial = try directory.lock("catalog.lock"); defer { Darwin.close(serial) }
-        return try directory.names().map { try directory.read($0) }
+        return try directory.names().compactMap { name in
+            do { return try directory.read(name) } catch Failure.invalid { return nil }
+        }
     }
     /// Correlated results are eligible only after the exact snapshot has been
     /// delivered to the app. Missing tickets cannot execute.
@@ -231,13 +260,18 @@ enum CyderExecutionOwner {
     }
     /// Called before the new primary can issue effects. A helper takes its
     /// scope locks before claiming a ticket, so waiting old helpers are revoked.
-    static func recover(root: URL) throws {
+    /// Returns the names of unreadable tickets it moved to `quarantine/`.
+    @discardableResult
+    static func recover(root: URL) throws -> [String] {
         precondition(!Thread.isMainThread)
         let directory = try Directory(root)
         let serial = try directory.lock("catalog.lock"); defer { Darwin.close(serial) }
         let currentBoot = Birth.current()?.boot
+        var quarantined: [String] = []
         for name in try directory.names() {
-            var ticket = try directory.read(name)
+            var ticket: Ticket
+            do { ticket = try directory.read(name) }
+            catch Failure.invalid { try directory.quarantine(name); quarantined.append(name); continue }
             let ownerLock: Int32
             do { ownerLock = try directory.lock(ticket.id.uuidString + ".lock") }
             catch Failure.busy { continue }
@@ -255,9 +289,149 @@ enum CyderExecutionOwner {
                 ticket.phase = ticket.nativeSpawn?.phase == .exited ? .finished : .handedOff
                 try directory.write(ticket)
             } else if ticket.phase == .active { ticket.phase = .uncertain; try directory.write(ticket) }
+            // Both locks are held here, so the helper is gone: release the
+            // ticket if nothing it started is still running.
+            if ticket.phase.holdsScope, remains(ticket) == .none {
+                ticket.phase = .revoked; ticket.resolution = "abandoned"; try directory.write(ticket)
+            }
         }
+        return quarantined
     }
     private static func overlaps(_ a: String?, _ b: String?) -> Bool { a == nil || b == nil || a == b }
+    // MARK: Unresolved operations (P0-2)
+    //
+    // A ticket that is active or uncertain blocks every overlapping operation,
+    // because its preparation may still be changing the prefix (user.reg,
+    // DLLs, registry imports) or shared runtime links. Once its helper is gone
+    // (its owner lock can be taken), the question is only whether anything the
+    // operation started is still running. The recorded process group answers
+    // that exactly; an operation with no surviving process is released.
+
+    enum Remains: Equatable {
+        /// Bash, the bridge, or an unknown older operation may still be running.
+        case running
+        /// The operation's own processes outlived its helper (orphaned group).
+        case leftovers(group: Int32)
+        /// Nothing from the operation can still be running.
+        case none
+    }
+
+    /// Call only while holding the ticket's owner lock (its helper is gone).
+    static func remains(_ ticket: Ticket, serverRunning: (String) -> Bool = prefixServerRunning) -> Remains {
+        if let child = ticket.child, Birth.current(child.pid, includingZombie: true) == child { return .running }
+        if let bridge = ticket.nativeSpawn?.bridge, Birth.current(bridge.pid, includingZombie: true) == bridge { return .running }
+        if let group = ticket.group {
+            // POSIX never reuses a PID while it is still a process group ID.
+            // A live process with the leader's PID is therefore either the
+            // helper itself or a reuse, which proves the old group is empty.
+            if let owner = ticket.owner, Birth.current(group, includingZombie: true) == owner { return .running }
+            if kill(group, 0) == 0 || errno == EPERM { return .none }
+            if killpg(group, 0) == 0 || errno == EPERM { return .leftovers(group: group) }
+            return .none
+        }
+        // Older helpers recorded no group. Release only with full evidence:
+        // the helper and its Bash are provably gone, the operation was
+        // prefix-scoped (a shared-runtime change has no server to observe),
+        // and that prefix's Wine server has exited.
+        if let owner = ticket.owner, Birth.current(owner.pid, includingZombie: true) == owner { return .running }
+        guard ticket.owner != nil, ticket.child != nil, ticket.effectiveScope != nil,
+              let prefix = ticket.prefix, !serverRunning(prefix) else { return .running }
+        return .none
+    }
+
+    /// Wine's per-prefix server socket: <tmp>/.wine-<uid>/server-<dev>-<ino>/socket.
+    static func prefixServerRunning(_ prefix: String) -> Bool {
+        var info = stat()
+        guard stat(prefix, &info) == 0 else { return false }
+        let leaf = ".wine-\(getuid())/server-\(String(UInt64(UInt32(bitPattern: info.st_dev)), radix: 16))-\(String(info.st_ino, radix: 16))/socket"
+        var roots = ["/tmp"]
+        if let tmp = ProcessInfo.processInfo.environment["TMPDIR"], !tmp.isEmpty { roots.append(tmp) }
+        return roots.contains { root in
+            var socket = stat()
+            return lstat((root as NSString).appendingPathComponent(leaf), &socket) == 0 && socket.st_mode & S_IFMT == S_IFSOCK
+        }
+    }
+
+    /// Releases a scope-holding ticket whose helper is gone and whose
+    /// processes have all exited. Returns true when the ticket no longer holds
+    /// its scope. Never blocks: a held lock means its helper is alive.
+    private static func releaseIfAbandoned(_ directory: Directory, _ name: String) throws -> Bool {
+        let id = String(name.dropLast(5))
+        let owner: Int32
+        do { owner = try directory.lock(id + ".lock") } catch Failure.busy { return false }
+        defer { Darwin.close(owner) }
+        let spawn: Int32
+        do { spawn = try directory.lock(id + ".spawn.lock") } catch Failure.busy { return false }
+        defer { Darwin.close(spawn) }
+        var ticket = try directory.read(name)
+        guard ticket.phase.holdsScope else { return true }
+        guard remains(ticket) == .none else { return false }
+        ticket.phase = .revoked; ticket.resolution = "abandoned"
+        try directory.write(ticket)
+        return true
+    }
+
+    enum StopResult: Equatable { case stopped, nothingLeft, stillRunning, notFound }
+
+    /// User action: stop the processes an interrupted operation left behind,
+    /// then release its scope. Only ever signals the ticket's own orphaned
+    /// group (its helper must be gone and its leader PID unused).
+    static func stopLeftovers(root: URL, id: UUID, grace: TimeInterval = 5) throws -> StopResult {
+        precondition(!Thread.isMainThread)
+        let directory = try Directory(root)
+        let name = id.uuidString + ".json"
+        guard (try? directory.names().contains(name)) == true else { return .notFound }
+        let owner: Int32
+        do { owner = try directory.lock(id.uuidString + ".lock") } catch Failure.busy { return .stillRunning }
+        defer { Darwin.close(owner) }
+        let spawn: Int32
+        do { spawn = try directory.lock(id.uuidString + ".spawn.lock") } catch Failure.busy { return .stillRunning }
+        defer { Darwin.close(spawn) }
+        var ticket = try directory.read(name)
+        guard ticket.phase.holdsScope else { return .nothingLeft }
+        var result = StopResult.nothingLeft
+        if case .leftovers(let group) = remains(ticket) {
+            _ = killpg(group, SIGTERM)
+            let end = ProcessInfo.processInfo.systemUptime + grace
+            while killpg(group, 0) == 0, ProcessInfo.processInfo.systemUptime < end { usleep(100_000) }
+            if killpg(group, 0) == 0 {
+                _ = killpg(group, SIGKILL)
+                let hard = ProcessInfo.processInfo.systemUptime + 2
+                while killpg(group, 0) == 0, ProcessInfo.processInfo.systemUptime < hard { usleep(50_000) }
+            }
+            result = .stopped
+        }
+        guard remains(ticket) == .none else { return .stillRunning }
+        ticket.phase = .revoked; ticket.resolution = result == .stopped ? "terminated" : "abandoned"
+        try directory.write(ticket)
+        return result
+    }
+
+    /// Overlapping scope holders, after releasing the abandoned ones. Prints a
+    /// machine-readable line naming the first remaining holder for the app.
+    private static func blockingTicket(_ directory: Directory, scope: String?, excluding name: String?) throws -> Ticket? {
+        for otherName in try directory.names() where otherName != name {
+            let other = try directory.read(otherName)
+            guard overlaps(scope, other.effectiveScope), other.phase.holdsScope else { continue }
+            if try releaseIfAbandoned(directory, otherName) { continue }
+            return try directory.read(otherName)
+        }
+        return nil
+    }
+    static let leftoverMarker = "CYDER-SCOPE-BLOCKED ticket="
+    /// The blocking ticket named in a helper's output, if a launch or
+    /// maintenance step was refused because of an interrupted operation.
+    static func blockingTicket(in output: String) -> UUID? {
+        guard let range = output.range(of: leftoverMarker, options: .backwards) else { return nil }
+        return UUID(uuidString: String(output[range.upperBound...].prefix(36)))
+    }
+    private static func reportBlocked(_ ticket: Ticket) {
+        fputs("\(leftoverMarker)\(ticket.id.uuidString) group=\(ticket.group.map(String.init) ?? "-")\n", stderr)
+    }
+
+    /// Seconds a helper waits for another helper's operation on its scope.
+    static let scopeWait: TimeInterval = 25 // below the app's 30 s launch observation
+
     /// In-process filesystem mutations use the same cross-process barriers as
     /// native launchers. The lease lasts through actual work, not UI observation.
     static func withScope<T>(root: URL, scope: String?, _ work: () throws -> T) throws -> T {
@@ -273,9 +447,8 @@ enum CyderExecutionOwner {
             prefix = try directory.lock("prefix-" + digest + ".lock")
         }
         defer { if prefix >= 0 { Darwin.close(prefix) } }
-        for name in try directory.names() {
-            let previous = try directory.read(name)
-            guard !overlaps(scope, previous.effectiveScope) || !previous.phase.holdsScope else { throw Failure.uncertain }
+        if let blocker = try blockingTicket(directory, scope: scope, excluding: nil) {
+            reportBlocked(blocker); throw Failure.uncertain
         }
         guard try identify(identity.path).key == scope else { throw Failure.invalid }
         return try work()
@@ -288,12 +461,14 @@ enum CyderExecutionOwner {
             let directory = try Directory(root)
             let name = id.uuidString + ".json"
             var ticket = try directory.read(name)
-            let global = try directory.lock("all-environments.lock", exclusive: ticket.effectiveScope == nil)
+            // Another helper preparing the same scope finishes first; waiting
+            // replaces the former immediate failure, bounded by scopeWait.
+            let global = try directory.waitLock("all-environments.lock", exclusive: ticket.effectiveScope == nil, deadline: scopeWait)
             defer { Darwin.close(global) }
             var scopeLock: Int32 = -1
             if let scope = ticket.scope {
                 let digest = SHA256.hash(data: Data(scope.utf8)).map { String(format: "%02x", $0) }.joined()
-                scopeLock = try directory.lock("prefix-" + digest + ".lock")
+                scopeLock = try directory.waitLock("prefix-" + digest + ".lock", exclusive: true, deadline: scopeWait)
             }
             defer { if scopeLock >= 0 { Darwin.close(scopeLock) } }
             let ownerLock = try directory.lock(id.uuidString + ".lock"); defer { Darwin.close(ownerLock) }
@@ -305,13 +480,16 @@ enum CyderExecutionOwner {
             guard let owner = Birth.current() else { throw Failure.processIdentityUnavailable }
             guard try identify(ticket.prefix).key == ticket.scope else { throw Failure.invalid }
             // An executor crash can leave descendants alive. Absence of its
-            // lock is not permission to bypass an unresolved prior operation.
-            for otherName in try directory.names() where otherName != name {
-                let other = try directory.read(otherName)
-                if overlaps(ticket.effectiveScope, other.effectiveScope), other.phase.holdsScope { throw Failure.uncertain }
+            // lock is not permission to bypass an unresolved prior operation;
+            // only an empty process group is (see remains).
+            if let blocker = try blockingTicket(directory, scope: ticket.effectiveScope, excluding: name) {
+                reportBlocked(blocker); throw Failure.uncertain
             }
+            // Lead a new process group before claiming, so the group exists and
+            // is recorded before anything the operation runs.
+            if getpgrp() != getpid() { _ = setpgid(0, 0) }
+            ticket.group = getpgrp() == getpid() ? getpid() : nil
             ticket.phase = .active; ticket.owner = owner; try directory.write(ticket)
-            let child = Process(); child.executableURL = URL(fileURLWithPath: command[0]); child.arguments = Array(command.dropFirst())
             // Authority is reconstructed from this ticket, never inherited
             // from a parent launch or user-provided game environment.
             var environment = ProcessInfo.processInfo.environment.filter { !$0.key.hasPrefix("CYDER_EXECUTION_") }
@@ -321,10 +499,8 @@ enum CyderExecutionOwner {
                 environment["CYDER_EXECUTION_OWNER_TICKET"] = id.uuidString
                 environment["CYDER_EXECUTION_OWNER_HELPER"] = CommandLine.arguments[0]
             }
-            child.environment = environment
-            child.standardInput = FileHandle.nullDevice
-            child.standardOutput = FileHandle.standardOutput; child.standardError = FileHandle.standardError
-            do { try child.run() }
+            let childPID: Int32
+            do { childPID = try spawnInGroup(command, environment: environment, group: ticket.group) }
             catch { ticket.phase = .finished; ticket.status = 127; try directory.write(ticket); return 127 }
             // If this write fails, keep owning the child and scope until it
             // actually returns; never abandon a running mutation on disk error.
@@ -332,10 +508,10 @@ enum CyderExecutionOwner {
                 let updateLock = try directory.waitLock(id.uuidString + ".spawn.lock")
                 defer { Darwin.close(updateLock) }
                 ticket = try directory.read(name)
-                ticket.child = Birth.current(child.processIdentifier)
+                ticket.child = Birth.current(childPID, includingZombie: true)
                 try directory.write(ticket)
             } catch {}
-            child.waitUntilExit()
+            let exit = waitForChild(childPID) ?? (status: 127, signalled: false)
             let finalLock = try directory.waitLock(id.uuidString + ".spawn.lock")
             defer { Darwin.close(finalLock) }
             ticket = try directory.read(name)
@@ -347,11 +523,11 @@ enum CyderExecutionOwner {
             case .claiming: ticket.phase = .uncertain
             case .exited, .failed, nil: ticket.phase = .finished
             }
-            ticket.status = child.terminationStatus
-            ticket.signalled = child.terminationReason == .uncaughtSignal
+            ticket.status = exit.status
+            ticket.signalled = exit.signalled
             try directory.write(ticket)
-            if ticket.phase == .uncertain || (ticket.handoff != nil && ticket.nativeSpawn == nil && child.terminationStatus == 0) { return 75 }
-            return child.terminationReason == .uncaughtSignal ? 128 + child.terminationStatus : child.terminationStatus
+            if ticket.phase == .uncertain || (ticket.handoff != nil && ticket.nativeSpawn == nil && exit.status == 0) { return 75 }
+            return exit.signalled ? 128 + exit.status : exit.status
         } catch {
             if case Failure.processIdentityUnavailable = error {
                 fputs("Cyder executor cannot verify process identity (same-user proc_pidinfo / kern.bootsessionuuid); host permissions are required.\n", stderr)
@@ -395,6 +571,31 @@ enum CyderExecutionOwner {
         defer { argv.forEach { free($0) }; env.forEach { free($0) } }
         var pid: Int32 = 0
         let error = posix_spawn(&pid, command[0], nil, &attributes, &argv, &env)
+        guard error == 0 else { throw NSError(domain: NSPOSIXErrorDomain, code: Int(error)) }
+        return pid
+    }
+    /// Runs the operation's Bash in the helper's process group (Foundation's
+    /// Process would give it a new group of its own), stdin from /dev/null,
+    /// stdout/stderr inherited.
+    private static func spawnInGroup(_ command: [String], environment: [String: String], group: Int32?) throws -> Int32 {
+        var attributes: posix_spawnattr_t?
+        guard posix_spawnattr_init(&attributes) == 0 else { throw Failure.unavailable }
+        defer { posix_spawnattr_destroy(&attributes) }
+        var flags = Int16(POSIX_SPAWN_CLOEXEC_DEFAULT)
+        if let group { flags |= Int16(POSIX_SPAWN_SETPGROUP); posix_spawnattr_setpgroup(&attributes, group) }
+        guard posix_spawnattr_setflags(&attributes, flags) == 0 else { throw Failure.unavailable }
+        var actions: posix_spawn_file_actions_t?
+        guard posix_spawn_file_actions_init(&actions) == 0 else { throw Failure.unavailable }
+        defer { posix_spawn_file_actions_destroy(&actions) }
+        // CLOEXEC_DEFAULT closes everything else; keep exactly stdio.
+        posix_spawn_file_actions_addopen(&actions, 0, "/dev/null", O_RDONLY, 0)
+        posix_spawn_file_actions_addinherit_np(&actions, 1)
+        posix_spawn_file_actions_addinherit_np(&actions, 2)
+        var argv = command.map { strdup($0) } + [nil]
+        var env = environment.map { strdup($0.key + "=" + $0.value) } + [nil]
+        defer { argv.forEach { free($0) }; env.forEach { free($0) } }
+        var pid: Int32 = 0
+        let error = posix_spawn(&pid, command[0], &actions, &attributes, &argv, &env)
         guard error == 0 else { throw NSError(domain: NSPOSIXErrorDomain, code: Int(error)) }
         return pid
     }

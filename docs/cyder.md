@@ -124,6 +124,18 @@ primary 在記憶體中的 request registry 接受後才 ACK；同 ID 重送不�
 仍在執行的遊戲；遊戲結束並交付後即刪除。0.14.0-rc.1 留下的 `request-journal`／`request-outbox`
 會在 primary 啟動時移除，不會被重播。
 
+同一個 Windows 環境（或共用 runtime）的準備工作一次只進行一個：準備期間會修改 `user.reg`、
+DLL、登錄匯入或共用的 MoltenVK／GPTK 連結，並行會互相破壞。只在「準備中」持有，遊戲交棒後即釋放，
+執行中的遊戲不會阻擋其他啟動。另一個 helper 正在準備同一環境時，新的 helper 最多等待 25 秒
+（短於 App 的 30 秒啟動觀察），不再立即失敗。
+
+helper 中途結束（當機、被強制結束）時，該次操作仍可能留下程序。helper 在開始前成為新的
+process group leader 並記錄 group，Bash 及其直接啟動的 Wine client 都在這個 group；
+`wineserver` 與 Wine services 會自行脫離。只要該 group 已無程序，下一次操作或 Cyder 重新開啟時
+就自動釋放（ticket `resolution: abandoned`），不需重開機。仍有殘留程序時，啟動失敗的提示會提供
+「結束殘留程序」，只對該操作自己的 group 送出 SIGTERM／SIGKILL，helper 仍存活時一律拒絕。
+無法讀取的 ticket 會連同原始內容移到 `execution-owners/quarantine/`，不再讓 Cyder 卡在唯讀模式。
+
 一次啟動的 LaunchGroup 提供顯示及有界交棒觀察；選單存續由受管理環境、未決要求與 Cyder 視窗決定。
 根程序使用可信 executor receipt 的 boot／PID／出生時間與 prefix 身分；同 prefix 不推定遊戲歸屬，
 無 launch 證據的程序可獨立呈現。視窗操作另核對有效 token 及能力，不以同名或數字 PID 代替身分。
