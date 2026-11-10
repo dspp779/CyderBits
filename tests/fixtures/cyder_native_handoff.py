@@ -1,5 +1,5 @@
 from pathlib import Path
-import json, os, subprocess, sys, time, uuid
+import json, os, struct, subprocess, sys, time, uuid
 
 root, helper, scripts, native = map(Path, sys.argv[1:5])
 executor = Path(os.environ.get('CYDER_EXECUTION_HELPER', str(helper)))
@@ -190,15 +190,22 @@ printf 'changed\\n' > "$TEST_ROOT/runtime.changed"
     molten.mkdir(parents=True)
     for version in ['1.4.2', '1.2.10']:
         (molten / f'libMoltenVK-{version}.dylib').touch()
-    (molten / 'libMoltenVK.dylib').write_text('cyder-moltenvk-timeline-wait-poll\n')
+    # Minimal x86_64 Mach-O shim: build version and the .real re-export, read by
+    # the formal dependency-free reader (no otool/strings mock).
+    name = b'@loader_path/libMoltenVK.real.dylib\0'
+    reexport_size = (24 + len(name) + 7) // 8 * 8
+    commands = struct.pack('<IIIIII', 0x32, 24, 1, 0x000a0f00, 0, 0)
+    commands += struct.pack('<IIIIII', 0x8000001f, reexport_size, 24, 2, 0x10000, 0x10000)
+    commands += name.ljust(reexport_size - 24, b'\0')
+    header = struct.pack('<IIIIIIII', 0xfeedfacf, 0x01000007, 3, 6, 2, len(commands), 0, 0)
+    (molten / 'libMoltenVK.dylib').write_bytes(header + commands + b'cyder-moltenvk-timeline-wait-poll\n')
     molten_link = molten / 'libMoltenVK.real.dylib'
     molten_link.symlink_to('libMoltenVK-1.2.10.dylib')
     molten_script = runtime / 'launch.sh'
-    # Inert dylib headers use a validation-tool substitute; actual settings,
-    # symlink mutation, authority and final native executor remain formal.
+    # Actual settings, Mach-O validation, symlink mutation, authority and
+    # final native executor are all formal.
     preamble = '''
 export CYDER_MOLTENVK_VARIANT_PREFERENCE=1.4.2 CYDER_MOCK_MACOS=13.0
-otool() { printf '%s\\n' '@loader_path/libMoltenVK.real.dylib'; }
 '''
     prefix_script = runtime / 'prefix-attempt.sh'
     prefix_script.write_text(script.read_text().split('cyder_sentinel_attach()')[0] + preamble + '''
