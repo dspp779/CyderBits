@@ -233,6 +233,8 @@ Retina、DPI、字體與部分 registry 是共用 wineserver／bottle 狀態，�
 
 ## 7. 待開發與建議順序
 
+2026-09-21 新增：[下一版預計改進](releases/next.md) 列入 DXMT 初始化資料遺失修正、低干擾計時、紋理批次上傳、buffer 回收／零填充、archive 工作排程與依量測細化提交等待。工作在 `cyder-wine-engine` 實作，逐項驗收後再整合；尚未承諾新楓之谷首次命中卡頓已改善。下表保留既有工作線的歷史規劃。
+
 | 順序 | 工作 | 完成定義 |
 |---:|---|---|
 | 1 | **P0：0.10.1 實機 release regression** | DXMT／Steam／台版 MapleStory／Classic 完成啟動、畫面、長跑、退出紀錄 |

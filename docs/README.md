@@ -13,6 +13,7 @@
 
 | 版本 | 文件 | 重點 |
 |------|------|------|
+| 下一版（規劃） | [預計改進](releases/next.md) | DXMT 初始化資料遺失、紋理批次上傳、buffer 回收、CPU／提交同步計時與新楓之谷驗收條件 |
 | 0.13.0 | [繁中](releases/v0.13.0.md) | 正式版：首次開機加速、不預裝 Mono/Gecko、偏好設定預設入口、.msi／.bat／.lnk／.reg／mac 捷徑、Retina 預設關、無聲失敗提示 |
 | 0.12.0 | [繁中](releases/v0.12.0.md) | 正式版：LaunchGroup 選單列、winemenubuilder 遊戲庫圖示、語系選單、捷徑名稱、UI 開啟時顯示 Dock |
 | 0.11.1 | [繁中](releases/v0.11.1.md) | 正式版：gamaniagames://、URI 協定清單、open -n file URL、URI 冷啟動不開偏好設定 |
@@ -67,6 +68,7 @@
 | [games/](games/README.md) | 依遊戲與問題類型的總入口 |
 | [games/bluecg/](games/bluecg/README.md) | BlueCG 顯示、runtime、MIDI 問題索引；A6 resize 已解決 |
 | [games/bluecg/audio/midi-underrun.md](games/bluecg/audio/midi-underrun.md) | `dmsynth underrun` 的觀察、判定與診斷計畫 |
+| [games/age-of-empires-rosetta-wine-stutter-research.zh-TW.md](games/age-of-empires-rosetta-wine-stutter-research.zh-TW.md) | 世紀帝國 II／IV 的 Rosetta、Wine 例外處理與 CrossOver 卡頓研究 |
 | [games/pikachu-volleyball/](games/pikachu-volleyball/README.md) | 皮卡丘排球的 MSync／ESync 與 runtime 路徑空白問題 |
 
 ## 已實作 workaround
@@ -116,3 +118,5 @@
 ## 其他
 
 - [../patches/README.md](../patches/README.md) — 選用 Wine 原始碼 patch
+
+- [GameToMac 與新楓之谷 pipeline 卡頓研究](games/gametomac-maplestory-pipeline-study.zh-TW.md) — 本機安裝結果、原始碼機制與 DXMT archive 實驗。

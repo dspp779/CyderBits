@@ -1,0 +1,25 @@
+[
+  {
+    "asset": "official-system-menu.png",
+    "source_scope": "BlueCG system-menu native popup only",
+    "crop": [
+      10,
+      124,
+      440,
+      700
+    ],
+    "source_size": [
+      3360,
+      1890
+    ],
+    "edits": [
+      "crop only; desktop outside popup excluded"
+    ]
+  },
+  {
+    "asset": "rendering-status.png",
+    "source_scope": "exact BlueCG rendering status dialog",
+    "original_sha256": "23b4ae6a435ee493e617263a8f808e038d949cf0e44fc958edb091f44a39e5cf",
+    "edits": []
+  }
+]

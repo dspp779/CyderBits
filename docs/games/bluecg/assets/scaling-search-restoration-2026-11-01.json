@@ -1,0 +1,13 @@
+{
+  "core_restored_sha256": "832fd1de73783849251a1b397f082d289feb957eaabac1473a77ce4a28d8ed1a",
+  "registry_restored_sha256": {
+    "user.reg": "639db5a2cae4fbb5eaf32e968156d9cc4dfe71c2c0f6ff5b51c72f3ca60c004d",
+    "system.reg": "43025032be6eec4823d1435b4d09fe207dd6d5e4686d1dd9d6c40452726d377c",
+    "userdef.reg": "787372f9fdb80afffa4c3a422ca7aaf988c44480c920bc21d5a35ab70b22f1df"
+  },
+  "launcher_ini_restored_sha256": "f3992ad1f95f32bc9b0ddf3ff4483893ed3b70135172e399bcd8ff1ab5f1a893",
+  "bluecg_windows_remaining": 0,
+  "prefix_services_wait_exit": 0,
+  "power_stop_flag": true,
+  "wake_assertion_stopped": true
+}

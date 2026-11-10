@@ -1,0 +1,52 @@
+{
+  "scope": "Alt+Enter expanded bottom-menu screenshot pixel comparison; no resampling",
+  "image_size": [
+    1100,
+    823
+  ],
+  "game_mode": "HD[1]; 3Ddevice:1; GAHD",
+  "retina": false,
+  "regions": {
+    "left_menu": {
+      "rectangle": [
+        0,
+        798,
+        600,
+        823
+      ],
+      "mean_absolute_rgb_error": 0.0,
+      "different_pixels": 0,
+      "pixels": 15000
+    },
+    "right_system_menu": {
+      "rectangle": [
+        870,
+        798,
+        980,
+        823
+      ],
+      "mean_absolute_rgb_error": 0.0,
+      "different_pixels": 0,
+      "pixels": 2750
+    },
+    "complete_bottom_row": {
+      "rectangle": [
+        0,
+        798,
+        1100,
+        823
+      ],
+      "mean_absolute_rgb_error": 0.0,
+      "different_pixels": 0,
+      "pixels": 27500
+    }
+  },
+  "gl": {
+    "geometry": "before client=961x721 rect=0,32,969,787 style=14cf0000 dpi=96\nafter client=1100x791 rect=286,32,1394,857 style=14cf0000 dpi=96",
+    "png_sha256": "7898461c7e60945e99b6991fecc1986d96dbad9e24087da2e5e6bc5ee12e9f8c"
+  },
+  "gdi": {
+    "geometry": "before client=961x721 rect=0,32,969,787 style=14cf0000 dpi=96\nafter client=1100x791 rect=286,32,1394,857 style=14cf0000 dpi=96",
+    "png_sha256": "3829ddba35514772c84ef59191c5421bcab670f2b36cf889a24df5c28859a4d7"
+  }
+}

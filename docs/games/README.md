@@ -17,6 +17,7 @@
 | 皮卡丘打排球 | MSync、ESync 與含空白的 Wine runtime 路徑均列為相容性問題；目前以無同步、無空白實體 runtime 作為 workaround | [皮卡丘排球](pikachu-volleyball/README.md) |
 | 楓之谷（台灣 Beanfun／經典版） | 正式 Cyder + CX26 可跑新楓之谷；OEM-25 僅歷史紀錄 | [研究入口](maplestory/README.md) · [經典版凍結](../maplestory-classic-wineserver-hang.md) · [GRAP 殘留](maplestory/grap-core64-residual-process-analysis.md) |
 | Steam | 自動套用 system compositor 與 CEF sandbox 相容參數；Windows 遊戲仍需逐款驗證 | [Steam](steam/README.md) |
+| 世紀帝國 II／IV | Rosetta、Wine 例外處理與週期性卡頓研究；尚未納入正式 workaround | [研究文件](age-of-empires-rosetta-wine-stutter-research.zh-TW.md) |
 
 ## 建議文件結構
 
@@ -37,5 +38,7 @@ docs/games/
 ```
 
 目前既有的詳細研究文件仍位於 `docs/bluecg-*.md`；子目錄提供按問題分類的穩定入口，避免複製兩份容易失真的長篇內容。
+
+- [GameToMac 與新楓之谷 pipeline 卡頓研究](gametomac-maplestory-pipeline-study.zh-TW.md) — GameToMac 安裝與獨立 DXMT archive 實驗。
 
 - [新楓之谷滾輪相容設定](maplestory-scrolling-compatibility.zh-TW.md) — Issue #9；EXE AppDefaults 自願啟用與還原、離線回歸及待實機驗收項目。

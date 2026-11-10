@@ -1,0 +1,415 @@
+{
+  "core_sha256": "832fd1de73783849251a1b397f082d289feb957eaabac1473a77ce4a28d8ed1a",
+  "official_ddraw_sha256": "c7ba81e067690fc0d77a31c4d7a6ad4af1d0b84255275ca4974971a70394c0c7",
+  "button": {
+    "window_class": "BlueCG.TitleSettings.R23",
+    "module": "bluecg.dll",
+    "wndproc_rva": "0x178e40",
+    "separate_native_window": true
+  },
+  "main_wndproc": {
+    "module": "bluecg.dll",
+    "rva": "0x1783e0"
+  },
+  "official_menu": [
+    {
+      "depth": 0,
+      "position": 0,
+      "id": 29312,
+      "state": 0,
+      "text": "Guide"
+    },
+    {
+      "depth": 1,
+      "position": 0,
+      "id": 29328,
+      "state": 1,
+      "text": "生產製作 (Production && Crafting)"
+    },
+    {
+      "depth": 0,
+      "position": 1,
+      "id": 61728,
+      "state": 1,
+      "text": "回復(&R)"
+    },
+    {
+      "depth": 0,
+      "position": 2,
+      "id": 61456,
+      "state": 0,
+      "text": "移動(&M)"
+    },
+    {
+      "depth": 0,
+      "position": 3,
+      "id": 61440,
+      "state": 0,
+      "text": "大小(&S)"
+    },
+    {
+      "depth": 0,
+      "position": 4,
+      "id": 61472,
+      "state": 0,
+      "text": "最小化(&N)"
+    },
+    {
+      "depth": 0,
+      "position": 5,
+      "id": 61488,
+      "state": 0,
+      "text": "最大化(&X)"
+    },
+    {
+      "depth": 0,
+      "position": 6,
+      "id": 0,
+      "state": 3,
+      "text": ""
+    },
+    {
+      "depth": 0,
+      "position": 7,
+      "id": 29264,
+      "state": 0,
+      "text": "Lock Window Size"
+    },
+    {
+      "depth": 0,
+      "position": 8,
+      "id": 8064,
+      "state": 0,
+      "text": "Original size (1:1)"
+    },
+    {
+      "depth": 0,
+      "position": 9,
+      "id": 8080,
+      "state": 0,
+      "text": "Reset Size 640*480"
+    },
+    {
+      "depth": 0,
+      "position": 10,
+      "id": 8096,
+      "state": 0,
+      "text": "Reset Size 960*720"
+    },
+    {
+      "depth": 0,
+      "position": 11,
+      "id": 8112,
+      "state": 128,
+      "text": "Reset Size 1280*960"
+    },
+    {
+      "depth": 0,
+      "position": 12,
+      "id": 29296,
+      "state": 0,
+      "text": "Hide Other Players and Pets"
+    },
+    {
+      "depth": 0,
+      "position": 13,
+      "id": 29184,
+      "state": 0,
+      "text": "Display options"
+    },
+    {
+      "depth": 1,
+      "position": 0,
+      "id": 29216,
+      "state": 0,
+      "text": "Fit screen (keep ratio)"
+    },
+    {
+      "depth": 1,
+      "position": 1,
+      "id": 29824,
+      "state": 0,
+      "text": "Chat text size... (100%)"
+    },
+    {
+      "depth": 1,
+      "position": 2,
+      "id": 29232,
+      "state": 0,
+      "text": "Rendering status..."
+    },
+    {
+      "depth": 0,
+      "position": 14,
+      "id": 61536,
+      "state": 4096,
+      "text": "關閉(&C)\tAlt+F4"
+    },
+    {
+      "depth": 0,
+      "position": 15,
+      "id": 0,
+      "state": 3,
+      "text": ""
+    },
+    {
+      "depth": 0,
+      "position": 16,
+      "id": 61761,
+      "state": 0,
+      "text": "關於 Wine(&A)"
+    }
+  ],
+  "builtin_menu": [
+    {
+      "depth": 0,
+      "position": 0,
+      "id": 29312,
+      "state": 0,
+      "text": "Guide"
+    },
+    {
+      "depth": 1,
+      "position": 0,
+      "id": 29328,
+      "state": 1,
+      "text": "生產製作 (Production && Crafting)"
+    },
+    {
+      "depth": 0,
+      "position": 1,
+      "id": 61728,
+      "state": 0,
+      "text": "回復(&R)"
+    },
+    {
+      "depth": 0,
+      "position": 2,
+      "id": 61456,
+      "state": 0,
+      "text": "移動(&M)"
+    },
+    {
+      "depth": 0,
+      "position": 3,
+      "id": 61440,
+      "state": 0,
+      "text": "大小(&S)"
+    },
+    {
+      "depth": 0,
+      "position": 4,
+      "id": 61472,
+      "state": 0,
+      "text": "最小化(&N)"
+    },
+    {
+      "depth": 0,
+      "position": 5,
+      "id": 61488,
+      "state": 0,
+      "text": "最大化(&X)"
+    },
+    {
+      "depth": 0,
+      "position": 6,
+      "id": 0,
+      "state": 3,
+      "text": ""
+    },
+    {
+      "depth": 0,
+      "position": 7,
+      "id": 29264,
+      "state": 0,
+      "text": "Lock Window Size"
+    },
+    {
+      "depth": 0,
+      "position": 8,
+      "id": 8064,
+      "state": 0,
+      "text": "Original size (1:1)"
+    },
+    {
+      "depth": 0,
+      "position": 9,
+      "id": 8080,
+      "state": 0,
+      "text": "Reset Size 640*480"
+    },
+    {
+      "depth": 0,
+      "position": 10,
+      "id": 8096,
+      "state": 0,
+      "text": "Reset Size 960*720"
+    },
+    {
+      "depth": 0,
+      "position": 11,
+      "id": 8112,
+      "state": 0,
+      "text": "Reset Size 1280*960"
+    },
+    {
+      "depth": 0,
+      "position": 12,
+      "id": 29296,
+      "state": 0,
+      "text": "Hide Other Players and Pets"
+    },
+    {
+      "depth": 0,
+      "position": 13,
+      "id": 29184,
+      "state": 0,
+      "text": "Display options"
+    },
+    {
+      "depth": 1,
+      "position": 0,
+      "id": 29216,
+      "state": 0,
+      "text": "Fit screen (keep ratio)"
+    },
+    {
+      "depth": 1,
+      "position": 1,
+      "id": 29824,
+      "state": 0,
+      "text": "Chat text size... (120%)"
+    },
+    {
+      "depth": 1,
+      "position": 2,
+      "id": 29232,
+      "state": 0,
+      "text": "Rendering status..."
+    },
+    {
+      "depth": 0,
+      "position": 14,
+      "id": 61536,
+      "state": 4096,
+      "text": "關閉(&C)\tAlt+F4"
+    },
+    {
+      "depth": 0,
+      "position": 15,
+      "id": 0,
+      "state": 3,
+      "text": ""
+    },
+    {
+      "depth": 0,
+      "position": 16,
+      "id": 61761,
+      "state": 0,
+      "text": "關於 Wine(&A)"
+    }
+  ],
+  "menu_identity_matches_after_percentage_normalization": true,
+  "loaded_modules": {
+    "official-menu-hd1": {
+      "native_ddraw_loaded": true,
+      "builtin_ddraw_loaded": true
+    },
+    "builtin-menu-hd1": {
+      "native_ddraw_loaded": false,
+      "builtin_ddraw_loaded": true
+    }
+  },
+  "sizes": [
+    {
+      "label": "original",
+      "command": 8064,
+      "native_bounds": {
+        "Height": 753,
+        "Width": 961,
+        "X": 314,
+        "Y": 30
+      },
+      "win32_geometry": "TARGET windows_pid=480 client=961x721 rect=310,32,1279,787"
+    },
+    {
+      "label": "reset640",
+      "command": 8080,
+      "native_bounds": {
+        "Height": 512,
+        "Width": 640,
+        "X": 314,
+        "Y": 30
+      },
+      "win32_geometry": "TARGET windows_pid=480 client=640x480 rect=310,32,958,546"
+    },
+    {
+      "label": "reset960",
+      "command": 8096,
+      "native_bounds": {
+        "Height": 753,
+        "Width": 961,
+        "X": 314,
+        "Y": 30
+      },
+      "win32_geometry": "TARGET windows_pid=480 client=961x721 rect=310,32,1279,787"
+    },
+    {
+      "label": "reset1280",
+      "command": 8112,
+      "native_bounds": {
+        "Height": 823,
+        "Width": 1280,
+        "X": 314,
+        "Y": 30
+      },
+      "win32_geometry": "TARGET windows_pid=480 client=1280x791 rect=310,32,1598,857"
+    },
+    {
+      "label": "fit-screen",
+      "command": 29216,
+      "native_bounds": {
+        "Height": 821,
+        "Width": 1052,
+        "X": 314,
+        "Y": 30
+      },
+      "win32_geometry": "TARGET windows_pid=480 client=1052x789 rect=310,32,1370,855"
+    },
+    {
+      "label": "original-return",
+      "command": 8064,
+      "native_bounds": {
+        "Height": 753,
+        "Width": 961,
+        "X": 314,
+        "Y": 30
+      },
+      "win32_geometry": "TARGET windows_pid=480 client=961x721 rect=310,32,1279,787"
+    }
+  ],
+  "rendering_status": {
+    "frame_source": [
+      961,
+      721
+    ],
+    "frame_destination": [
+      961,
+      721
+    ],
+    "frame_format": "RGB32",
+    "settings_file": "bluecg_render.ini",
+    "not_directdraw_surface_format_measurement": true
+  },
+  "restoration": {
+    "six_original_files_exact": true,
+    "small_settings_snapshot_files": 19,
+    "changed_snapshot_files_restored": 4,
+    "new_render_settings_removed": true,
+    "game_payload_hashes_unchanged": true,
+    "both_games_exited_normally": true,
+    "observation_hooks_unhooked": true,
+    "no_cnc_installed": true,
+    "no_other_game_settings_changed": true
+  }
+}

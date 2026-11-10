@@ -1,0 +1,809 @@
+{
+  "date": "2026-11-01",
+  "scope": "Seven game launches; visual/API diagnostics only, no performance ranking",
+  "core": {
+    "sha256": "832fd1de73783849251a1b397f082d289feb957eaabac1473a77ce4a28d8ed1a",
+    "image_size": 25772032
+  },
+  "game_exe_sha256": "54196345594f5f7c9e1e8b586736cc371780b1cbd3b7cfe470ba12f8c66a77c8",
+  "official_ddraw_sha256": "c7ba81e067690fc0d77a31c4d7a6ad4af1d0b84255275ca4974971a70394c0c7",
+  "game_mode": "HD[1], 3Ddevice:1, GAHD, fontmode:system, fontface:MingLiU",
+  "wine_retina_mode": false,
+  "display_backing_scale": 2,
+  "native_capture_size": [
+    2200,
+    1646
+  ],
+  "regions": {
+    "five_buttons": [
+      220,
+      1598,
+      1200,
+      1644
+    ],
+    "system": [
+      1740,
+      1598,
+      1960,
+      1644
+    ]
+  },
+  "runs": [
+    {
+      "case": "cause-gl-builtin",
+      "renderer_diagnostic": "gl",
+      "loaded_graphics_modules": [
+        {
+          "name": "ddraw.dll",
+          "kind": "builtin"
+        },
+        {
+          "name": "opengl32.dll",
+          "kind": "builtin"
+        },
+        {
+          "name": "wined3d.dll",
+          "kind": "builtin"
+        }
+      ],
+      "environment_renderer_override_present": false,
+      "origin_zero_srccopy_blits_from_core": [
+        {
+          "source": [
+            961,
+            721
+          ],
+          "destination": [
+            1100,
+            791
+          ],
+          "stretch_mode": 3,
+          "mode_setter_core_offset": "0xb1a18",
+          "blit_caller_core_offset": "0xb1aaa",
+          "observed_calls": 345,
+          "scale_x": "1100/961",
+          "scale_y": "113/103",
+          "non_integer_scale": true,
+          "non_uniform_scale": true
+        }
+      ],
+      "font_control": {
+        "font_smoothing": 1,
+        "font_smoothing_type": 1,
+        "intermediate_blue_pixels": 1765,
+        "save_exit": 0
+      },
+      "comparisons": {
+        "five_buttons": {
+          "rgb_mae": 0.0,
+          "different_pixels": 0,
+          "pixels": 45080,
+          "rgb_sha256": "3c267d6b16318f26790373deee01ed9b209c2367dde6f46c5cc3730e4408939d"
+        },
+        "system": {
+          "rgb_mae": 0.0,
+          "different_pixels": 0,
+          "pixels": 10120,
+          "rgb_sha256": "5720bd43e52a50d54e37f171461005b6fb32cd69e4f8f9bd7189d4ed21f780b3"
+        }
+      }
+    },
+    {
+      "case": "cause-gdi-builtin",
+      "renderer_diagnostic": "gdi/no3d",
+      "loaded_graphics_modules": [
+        {
+          "name": "ddraw.dll",
+          "kind": "builtin"
+        },
+        {
+          "name": "opengl32.dll",
+          "kind": "builtin"
+        },
+        {
+          "name": "wined3d.dll",
+          "kind": "builtin"
+        }
+      ],
+      "environment_renderer_override_present": false,
+      "origin_zero_srccopy_blits_from_core": [
+        {
+          "source": [
+            961,
+            721
+          ],
+          "destination": [
+            1100,
+            791
+          ],
+          "stretch_mode": 3,
+          "mode_setter_core_offset": "0xb1a18",
+          "blit_caller_core_offset": "0xb1aaa",
+          "observed_calls": 497,
+          "scale_x": "1100/961",
+          "scale_y": "113/103",
+          "non_integer_scale": true,
+          "non_uniform_scale": true
+        }
+      ],
+      "font_control": {
+        "font_smoothing": 1,
+        "font_smoothing_type": 1,
+        "intermediate_blue_pixels": 1765,
+        "save_exit": 0
+      },
+      "comparisons": {
+        "five_buttons": {
+          "rgb_mae": 0.0,
+          "different_pixels": 0,
+          "pixels": 45080,
+          "rgb_sha256": "3c267d6b16318f26790373deee01ed9b209c2367dde6f46c5cc3730e4408939d"
+        },
+        "system": {
+          "rgb_mae": 0.0,
+          "different_pixels": 0,
+          "pixels": 10120,
+          "rgb_sha256": "5720bd43e52a50d54e37f171461005b6fb32cd69e4f8f9bd7189d4ed21f780b3"
+        }
+      },
+      "alt_enter_client": {
+        "before": [
+          961,
+          721
+        ],
+        "after": [
+          1100,
+          791
+        ]
+      }
+    },
+    {
+      "case": "cause-four-builtin",
+      "renderer_diagnostic": "gdi/no3d",
+      "loaded_graphics_modules": [
+        {
+          "name": "ddraw.dll",
+          "kind": "builtin"
+        },
+        {
+          "name": "opengl32.dll",
+          "kind": "builtin"
+        },
+        {
+          "name": "wined3d.dll",
+          "kind": "builtin"
+        }
+      ],
+      "environment_renderer_override_present": false,
+      "origin_zero_srccopy_blits_from_core": [
+        {
+          "source": [
+            961,
+            721
+          ],
+          "destination": [
+            1100,
+            791
+          ],
+          "stretch_mode": 3,
+          "mode_setter_core_offset": "0xb1a18",
+          "blit_caller_core_offset": "0xb1aaa",
+          "observed_calls": 511,
+          "scale_x": "1100/961",
+          "scale_y": "113/103",
+          "non_integer_scale": true,
+          "non_uniform_scale": true
+        }
+      ],
+      "font_control": {
+        "font_smoothing": 1,
+        "font_smoothing_type": 1,
+        "intermediate_blue_pixels": 1765,
+        "save_exit": 0
+      },
+      "comparisons": {
+        "five_buttons": {
+          "rgb_mae": 0.0,
+          "different_pixels": 0,
+          "pixels": 45080,
+          "rgb_sha256": "3c267d6b16318f26790373deee01ed9b209c2367dde6f46c5cc3730e4408939d"
+        },
+        "system": {
+          "rgb_mae": 0.0,
+          "different_pixels": 0,
+          "pixels": 10120,
+          "rgb_sha256": "5720bd43e52a50d54e37f171461005b6fb32cd69e4f8f9bd7189d4ed21f780b3"
+        }
+      },
+      "alt_enter_client": {
+        "before": [
+          961,
+          721
+        ],
+        "after": [
+          1100,
+          791
+        ]
+      }
+    },
+    {
+      "case": "cause-gl-native",
+      "renderer_diagnostic": "gl",
+      "loaded_graphics_modules": [
+        {
+          "name": "ddraw.dll",
+          "kind": "builtin"
+        },
+        {
+          "name": "ddraw.dll",
+          "kind": "native"
+        },
+        {
+          "name": "opengl32.dll",
+          "kind": "builtin"
+        },
+        {
+          "name": "wined3d.dll",
+          "kind": "builtin"
+        }
+      ],
+      "environment_renderer_override_present": false,
+      "origin_zero_srccopy_blits_from_core": [
+        {
+          "source": [
+            961,
+            721
+          ],
+          "destination": [
+            1100,
+            791
+          ],
+          "stretch_mode": 3,
+          "mode_setter_core_offset": "0xb1a18",
+          "blit_caller_core_offset": "0xb1aaa",
+          "observed_calls": 318,
+          "scale_x": "1100/961",
+          "scale_y": "113/103",
+          "non_integer_scale": true,
+          "non_uniform_scale": true
+        }
+      ],
+      "font_control": {
+        "font_smoothing": 1,
+        "font_smoothing_type": 1,
+        "intermediate_blue_pixels": 1765,
+        "save_exit": 0
+      },
+      "comparisons": {
+        "five_buttons": {
+          "rgb_mae": 0.0,
+          "different_pixels": 0,
+          "pixels": 45080,
+          "rgb_sha256": "3c267d6b16318f26790373deee01ed9b209c2367dde6f46c5cc3730e4408939d"
+        },
+        "system": {
+          "rgb_mae": 0.0,
+          "different_pixels": 0,
+          "pixels": 10120,
+          "rgb_sha256": "5720bd43e52a50d54e37f171461005b6fb32cd69e4f8f9bd7189d4ed21f780b3"
+        }
+      },
+      "alt_enter_client": {
+        "before": [
+          961,
+          721
+        ],
+        "after": [
+          1052,
+          761
+        ]
+      }
+    },
+    {
+      "case": "cause-gdi-native",
+      "renderer_diagnostic": "gdi/no3d",
+      "loaded_graphics_modules": [
+        {
+          "name": "ddraw.dll",
+          "kind": "builtin"
+        },
+        {
+          "name": "ddraw.dll",
+          "kind": "native"
+        },
+        {
+          "name": "opengl32.dll",
+          "kind": "builtin"
+        },
+        {
+          "name": "wined3d.dll",
+          "kind": "builtin"
+        }
+      ],
+      "environment_renderer_override_present": false,
+      "origin_zero_srccopy_blits_from_core": [
+        {
+          "source": [
+            961,
+            721
+          ],
+          "destination": [
+            1100,
+            791
+          ],
+          "stretch_mode": 3,
+          "mode_setter_core_offset": "0xb1a18",
+          "blit_caller_core_offset": "0xb1aaa",
+          "observed_calls": 316,
+          "scale_x": "1100/961",
+          "scale_y": "113/103",
+          "non_integer_scale": true,
+          "non_uniform_scale": true
+        }
+      ],
+      "font_control": {
+        "font_smoothing": 1,
+        "font_smoothing_type": 1,
+        "intermediate_blue_pixels": 1765,
+        "save_exit": 0
+      },
+      "comparisons": {
+        "five_buttons": {
+          "rgb_mae": 0.0,
+          "different_pixels": 0,
+          "pixels": 45080,
+          "rgb_sha256": "3c267d6b16318f26790373deee01ed9b209c2367dde6f46c5cc3730e4408939d"
+        },
+        "system": {
+          "rgb_mae": 0.0,
+          "different_pixels": 0,
+          "pixels": 10120,
+          "rgb_sha256": "5720bd43e52a50d54e37f171461005b6fb32cd69e4f8f9bd7189d4ed21f780b3"
+        }
+      },
+      "alt_enter_client": {
+        "before": [
+          961,
+          721
+        ],
+        "after": [
+          1052,
+          761
+        ]
+      }
+    },
+    {
+      "case": "cause-aaoff-builtin",
+      "renderer_diagnostic": "gl",
+      "loaded_graphics_modules": [
+        {
+          "name": "ddraw.dll",
+          "kind": "builtin"
+        },
+        {
+          "name": "opengl32.dll",
+          "kind": "builtin"
+        },
+        {
+          "name": "wined3d.dll",
+          "kind": "builtin"
+        }
+      ],
+      "environment_renderer_override_present": false,
+      "origin_zero_srccopy_blits_from_core": [
+        {
+          "source": [
+            961,
+            721
+          ],
+          "destination": [
+            1100,
+            791
+          ],
+          "stretch_mode": 3,
+          "mode_setter_core_offset": "0xb1a18",
+          "blit_caller_core_offset": "0xb1aaa",
+          "observed_calls": 495,
+          "scale_x": "1100/961",
+          "scale_y": "113/103",
+          "non_integer_scale": true,
+          "non_uniform_scale": true
+        }
+      ],
+      "font_control": {
+        "font_smoothing": 0,
+        "font_smoothing_type": 1,
+        "intermediate_blue_pixels": 0,
+        "save_exit": 0
+      },
+      "comparisons": {
+        "five_buttons": {
+          "rgb_mae": 0.0,
+          "different_pixels": 0,
+          "pixels": 45080,
+          "rgb_sha256": "3c267d6b16318f26790373deee01ed9b209c2367dde6f46c5cc3730e4408939d"
+        },
+        "system": {
+          "rgb_mae": 0.0,
+          "different_pixels": 0,
+          "pixels": 10120,
+          "rgb_sha256": "5720bd43e52a50d54e37f171461005b6fb32cd69e4f8f9bd7189d4ed21f780b3"
+        }
+      },
+      "alt_enter_client": {
+        "before": [
+          961,
+          721
+        ],
+        "after": [
+          1100,
+          791
+        ]
+      }
+    },
+    {
+      "case": "cause-gl-restore",
+      "renderer_diagnostic": "gl",
+      "loaded_graphics_modules": [
+        {
+          "name": "ddraw.dll",
+          "kind": "builtin"
+        },
+        {
+          "name": "opengl32.dll",
+          "kind": "builtin"
+        },
+        {
+          "name": "wined3d.dll",
+          "kind": "builtin"
+        }
+      ],
+      "environment_renderer_override_present": false,
+      "origin_zero_srccopy_blits_from_core": [
+        {
+          "source": [
+            961,
+            721
+          ],
+          "destination": [
+            1100,
+            791
+          ],
+          "stretch_mode": 3,
+          "mode_setter_core_offset": "0xb1a18",
+          "blit_caller_core_offset": "0xb1aaa",
+          "observed_calls": 497,
+          "scale_x": "1100/961",
+          "scale_y": "113/103",
+          "non_integer_scale": true,
+          "non_uniform_scale": true
+        }
+      ],
+      "font_control": {
+        "font_smoothing": 1,
+        "font_smoothing_type": 1,
+        "intermediate_blue_pixels": 1765,
+        "save_exit": 0
+      },
+      "comparisons": {
+        "five_buttons": {
+          "rgb_mae": 0.0,
+          "different_pixels": 0,
+          "pixels": 45080,
+          "rgb_sha256": "3c267d6b16318f26790373deee01ed9b209c2367dde6f46c5cc3730e4408939d"
+        },
+        "system": {
+          "rgb_mae": 0.0,
+          "different_pixels": 0,
+          "pixels": 10120,
+          "rgb_sha256": "5720bd43e52a50d54e37f171461005b6fb32cd69e4f8f9bd7189d4ed21f780b3"
+        }
+      },
+      "alt_enter_client": {
+        "before": [
+          961,
+          721
+        ],
+        "after": [
+          1100,
+          791
+        ]
+      }
+    }
+  ],
+  "registry_initialization_controls": [
+    {
+      "mode": "builtin",
+      "case": "clean",
+      "values": {},
+      "exit": 0,
+      "diagnostics": [],
+      "probe_completed": true
+    },
+    {
+      "mode": "builtin",
+      "case": "four_exact",
+      "values": {
+        "renderer": "gdi",
+        "DirectDrawRenderer": "gdi",
+        "MaxVersionGL": "1.0",
+        "CSMT": "0"
+      },
+      "exit": 0,
+      "diagnostics": [
+        "00d4:err:winediag:wined3d_dll_init Disabling 3D support."
+      ],
+      "probe_completed": true
+    },
+    {
+      "mode": "builtin",
+      "case": "renderer_only",
+      "values": {
+        "renderer": "gdi"
+      },
+      "exit": 0,
+      "diagnostics": [
+        "00d4:err:winediag:wined3d_dll_init Disabling 3D support."
+      ],
+      "probe_completed": true
+    },
+    {
+      "mode": "builtin",
+      "case": "DirectDrawRenderer_only",
+      "values": {
+        "DirectDrawRenderer": "gdi"
+      },
+      "exit": 0,
+      "diagnostics": [],
+      "probe_completed": true
+    },
+    {
+      "mode": "builtin",
+      "case": "MaxVersionGL_string_only",
+      "values": {
+        "MaxVersionGL": "1.0"
+      },
+      "exit": 0,
+      "diagnostics": [],
+      "probe_completed": true
+    },
+    {
+      "mode": "builtin",
+      "case": "CSMT_string_only",
+      "values": {
+        "CSMT": "0"
+      },
+      "exit": 0,
+      "diagnostics": [],
+      "probe_completed": true
+    },
+    {
+      "mode": "builtin",
+      "case": "CSMT_dword_control",
+      "values": {
+        "CSMT": 0
+      },
+      "exit": 0,
+      "diagnostics": [
+        "00d4:err:winediag:wined3d_dll_init Setting multithreaded command stream to 0."
+      ],
+      "probe_completed": true
+    },
+    {
+      "mode": "builtin",
+      "case": "MaxVersionGL_dword41_control",
+      "values": {
+        "MaxVersionGL": 262145
+      },
+      "exit": 0,
+      "diagnostics": [
+        "00d4:err:winediag:wined3d_dll_init Setting maximum allowed wined3d GL version to 4.1."
+      ],
+      "probe_completed": true
+    },
+    {
+      "mode": "native",
+      "case": "clean",
+      "values": {},
+      "exit": 0,
+      "diagnostics": [],
+      "probe_completed": true
+    },
+    {
+      "mode": "native",
+      "case": "four_exact",
+      "values": {
+        "renderer": "gdi",
+        "DirectDrawRenderer": "gdi",
+        "MaxVersionGL": "1.0",
+        "CSMT": "0"
+      },
+      "exit": 0,
+      "diagnostics": [
+        "00d4:err:winediag:wined3d_dll_init Disabling 3D support."
+      ],
+      "probe_completed": true
+    },
+    {
+      "mode": "native",
+      "case": "renderer_only",
+      "values": {
+        "renderer": "gdi"
+      },
+      "exit": 0,
+      "diagnostics": [
+        "00d4:err:winediag:wined3d_dll_init Disabling 3D support."
+      ],
+      "probe_completed": true
+    },
+    {
+      "mode": "native",
+      "case": "DirectDrawRenderer_only",
+      "values": {
+        "DirectDrawRenderer": "gdi"
+      },
+      "exit": 0,
+      "diagnostics": [],
+      "probe_completed": true
+    },
+    {
+      "mode": "native",
+      "case": "MaxVersionGL_string_only",
+      "values": {
+        "MaxVersionGL": "1.0"
+      },
+      "exit": 0,
+      "diagnostics": [],
+      "probe_completed": true
+    },
+    {
+      "mode": "native",
+      "case": "CSMT_string_only",
+      "values": {
+        "CSMT": "0"
+      },
+      "exit": 0,
+      "diagnostics": [],
+      "probe_completed": true
+    },
+    {
+      "mode": "native",
+      "case": "CSMT_dword_control",
+      "values": {
+        "CSMT": 0
+      },
+      "exit": 0,
+      "diagnostics": [
+        "00d4:err:winediag:wined3d_dll_init Setting multithreaded command stream to 0."
+      ],
+      "probe_completed": true
+    },
+    {
+      "mode": "native",
+      "case": "MaxVersionGL_dword41_control",
+      "values": {
+        "MaxVersionGL": 262145
+      },
+      "exit": 0,
+      "diagnostics": [
+        "00d8:err:winediag:wined3d_dll_init Setting maximum allowed wined3d GL version to 4.1."
+      ],
+      "probe_completed": true
+    }
+  ],
+  "font_smoothing_controls": [
+    {
+      "font_smoothing": 0,
+      "font_smoothing_type": 1,
+      "intermediate_blue_pixels": 0,
+      "save_exit": 0,
+      "name": "off",
+      "unique_rgb_colors": 2,
+      "non_gray_pixels": 0
+    },
+    {
+      "font_smoothing": 1,
+      "font_smoothing_type": 1,
+      "intermediate_blue_pixels": 1765,
+      "save_exit": 0,
+      "name": "gray",
+      "unique_rgb_colors": 16,
+      "non_gray_pixels": 0
+    },
+    {
+      "font_smoothing": 1,
+      "font_smoothing_type": 2,
+      "intermediate_blue_pixels": 2503,
+      "save_exit": 0,
+      "name": "cleartype",
+      "unique_rgb_colors": 1856,
+      "non_gray_pixels": 3552
+    }
+  ],
+  "probe_validation": {
+    "stretch_3": {
+      "source": [
+        640,
+        96
+      ],
+      "destination": [
+        960,
+        144
+      ],
+      "stretch_mode": 3,
+      "save_exit": 0
+    },
+    "stretch_4": {
+      "source": [
+        640,
+        96
+      ],
+      "destination": [
+        960,
+        144
+      ],
+      "stretch_mode": 4,
+      "save_exit": 0
+    },
+    "existing_file_refused_exit": 20,
+    "existing_file_unchanged": true,
+    "invalid_bmp_refused_exit": 22
+  },
+  "filter_controls": {
+    "3": {
+      "source": [
+        640,
+        96
+      ],
+      "destination": [
+        960,
+        144
+      ],
+      "source_color_count": 16,
+      "output_color_count": 16,
+      "new_colors_not_in_source": 0
+    },
+    "4": {
+      "source": [
+        640,
+        96
+      ],
+      "destination": [
+        960,
+        144
+      ],
+      "source_color_count": 16,
+      "output_color_count": 246,
+      "new_colors_not_in_source": 230
+    }
+  },
+  "restoration": {
+    "registry_sha256": {
+      "game-test": {
+        "user.reg": "639db5a2cae4fbb5eaf32e968156d9cc4dfe71c2c0f6ff5b51c72f3ca60c004d",
+        "system.reg": "43025032be6eec4823d1435b4d09fe207dd6d5e4686d1dd9d6c40452726d377c",
+        "userdef.reg": "787372f9fdb80afffa4c3a422ca7aaf988c44480c920bc21d5a35ab70b22f1df"
+      },
+      "synthetic-probe": {
+        "user.reg": "0b454e1fe1a45147a387a4df729e909b5bd60d1f8f7343b737f8c68664722f8e",
+        "system.reg": "33a507a2a1e034582e5e462350190a015d1be677d9848aef1f507a86d001b716",
+        "userdef.reg": "787372f9fdb80afffa4c3a422ca7aaf988c44480c920bc21d5a35ab70b22f1df"
+      }
+    },
+    "launcher_ini_sha256": "f3992ad1f95f32bc9b0ddf3ff4483893ed3b70135172e399bcd8ff1ab5f1a893",
+    "core_sha256": "832fd1de73783849251a1b397f082d289feb957eaabac1473a77ce4a28d8ed1a",
+    "bluecg_windows_remaining": 0,
+    "prefix_services_wait_exit": 0,
+    "no_production_prefix_written": true,
+    "no_engine_installed_or_replaced": true
+  },
+  "runtime_sha256": {
+    "lib/wine/x86_64-unix/winemac.so": "fe31b28d36cc39f0ea547b13d01456b00c02055c6e15a713588dae368811ec12",
+    "lib/wine/i386-windows/gdi32.dll": "8b6d957da49447709aed28624c9dfb05e4975961d25e85c9e9e7c56f8c584045",
+    "lib/wine/i386-windows/wined3d.dll": "a3f95175b1f80e1a646bf5b1cb19c44be2ed233e81ea3b8bc4a30226b74f1569"
+  },
+  "diagnostic_source_sha256": {
+    "scripts/bluecg-gdi-probe.c": "525c2598cff98db993d277bc8f45057d5fe4d74cd46827d36967f59de9277778",
+    "scripts/bluecg-scaling-evidence.py": "7b66278b78cf79223545c242f4189e986acd7d79c6b1d82195be43805480e6e1"
+  }
+}
