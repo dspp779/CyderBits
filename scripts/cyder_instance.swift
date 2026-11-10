@@ -9,208 +9,26 @@ struct CyderInstanceRequest {
     let arguments: [String]?
     let urls: [String]
     let showUI: Bool
-    let record: CyderRequestJournal.Record
+    let record: CyderRequestRegistry.Record
 }
 
-/// A retained delivery copy is evidence of an attempt, never permission to
-/// launch. Only a matching durable journal record acknowledges this copy.
-struct CyderOutboxNotice: Equatable {
-    let id: String
-    let title: String
-    let detail: String
-    var requestID: String? = nil
-    var digest: String? = nil
-    var canRecover: Bool { requestID != nil && digest != nil }
-}
-
-enum CyderRequestOutbox {
-    enum Failure: Error { case unavailable, invalid, full }
-    private static let maxEntries = 512
-    private static let maxBytes = 16 * 1024 * 1024
-    private static func withDirectory<T>(_ support: URL, create: Bool = false,
-                                         _ body: (Int32) throws -> T) throws -> T {
-        precondition(!Thread.isMainThread)
-        let path = support.appendingPathComponent("request-outbox").path
-        if create, mkdir(path, 0o700) != 0, errno != EEXIST { throw Failure.unavailable }
-        let fd = Darwin.open(path, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC | O_NONBLOCK)
-        guard fd >= 0 else { throw Failure.unavailable }
-        defer { Darwin.close(fd) }
-        var info = stat()
-        guard fstat(fd, &info) == 0, info.st_uid == getuid(), info.st_mode & 0o077 == 0 else { throw Failure.invalid }
-        let lock = openat(fd, ".owner-lock", O_RDWR | O_CREAT | O_NOFOLLOW | O_CLOEXEC | O_NONBLOCK, 0o600)
-        guard lock >= 0 else { throw Failure.unavailable }
-        defer { Darwin.close(lock) }
-        var lockInfo = stat()
-        guard fstat(lock, &lockInfo) == 0, lockInfo.st_mode & S_IFMT == S_IFREG,
-              lockInfo.st_uid == getuid(), lockInfo.st_mode & 0o077 == 0,
-              flock(lock, LOCK_EX | LOCK_NB) == 0 else { throw Failure.unavailable }
-        defer { _ = flock(lock, LOCK_UN) }
-        return try body(fd)
-    }
-    private static func names(_ directory: Int32) throws -> [String] {
-        let copy = dup(directory)
-        guard copy >= 0 else { throw Failure.unavailable }
-        guard let stream = fdopendir(copy) else { Darwin.close(copy); throw Failure.unavailable }
-        defer { closedir(stream) }
-        var result: [String] = []
-        while let entry = readdir(stream) {
-            let name = withUnsafePointer(to: &entry.pointee.d_name) {
-                $0.withMemoryRebound(to: CChar.self, capacity: Int(MAXNAMLEN) + 1) { String(cString: $0) }
-            }
-            guard name != ".", name != "..", name != ".owner-lock" else { continue }
-            guard result.count < maxEntries else { throw Failure.full }
-            result.append(name)
-        }
-        return result.sorted()
-    }
-    private static func read(_ directory: Int32, _ name: String) throws -> (CyderRequestMessage, stat, Int) {
-        let fd = openat(directory, name, O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC)
-        guard fd >= 0 else { throw Failure.invalid }
-        defer { Darwin.close(fd) }
-        var before = stat(), after = stat()
-        guard fstat(fd, &before) == 0, before.st_mode & S_IFMT == S_IFREG,
-              before.st_uid == getuid(), before.st_mode & 0o077 == 0,
-              before.st_size > 0, before.st_size < CyderRequestChannel.maxFrame else { throw Failure.invalid }
-        var bytes = Data(count: Int(before.st_size))
-        let count = bytes.withUnsafeMutableBytes { raw -> Int in
-            var offset = 0
-            while offset < raw.count {
-                let n = Darwin.read(fd, raw.baseAddress!.advanced(by: offset), raw.count - offset)
-                if n < 0 && errno == EINTR { continue }
-                guard n > 0 else { return -1 }; offset += n
-            }
-            return offset
-        }
-        guard count == bytes.count, fstat(fd, &after) == 0,
-              before.st_size == after.st_size,
-              before.st_mtimespec.tv_sec == after.st_mtimespec.tv_sec,
-              before.st_mtimespec.tv_nsec == after.st_mtimespec.tv_nsec,
-              before.st_ctimespec.tv_sec == after.st_ctimespec.tv_sec,
-              before.st_ctimespec.tv_nsec == after.st_ctimespec.tv_nsec,
-              let message = try? JSONDecoder().decode(CyderRequestMessage.self, from: bytes),
-              valid(message) else { throw Failure.invalid }
-        return (message, after, count)
-    }
-    private static func valid(_ message: CyderRequestMessage) -> Bool {
-        guard message.protocolVersion == 1, message.kind == "submit",
-              let id = message.requestID, let payload = message.payload,
-              payload.isValid, payload.matches(message.payloadDigest) else { return false }
-        let parts = id.split(separator: ":", omittingEmptySubsequences: false)
-        return parts.count == 2 && parts.allSatisfy { UUID(uuidString: String($0)) != nil }
-    }
-    private static func filename(_ id: String) -> String { id.replacingOccurrences(of: ":", with: "-") + ".json" }
-
-    static func save(_ message: CyderRequestMessage, support: URL) throws {
-        guard valid(message), let id = message.requestID else { throw Failure.invalid }
-        let bytes = try JSONEncoder().encode(message)
-        guard bytes.count < CyderRequestChannel.maxFrame else { throw Failure.full }
-        try withDirectory(support, create: true) { directory in
-            let entries = try names(directory)
-            guard entries.count < maxEntries else { throw Failure.full }
-            var total = bytes.count
-            for name in entries {
-                var info = stat()
-                guard fstatat(directory, name, &info, AT_SYMLINK_NOFOLLOW) == 0 else { throw Failure.unavailable }
-                guard info.st_size >= 0, info.st_size <= maxBytes else { throw Failure.full }
-                total += Int(info.st_size)
-                guard total <= maxBytes else { throw Failure.full }
-            }
-            let fd = openat(directory, filename(id), O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0o600)
-            guard fd >= 0 else { throw Failure.unavailable }
-            defer { Darwin.close(fd) }
-            let written = bytes.withUnsafeBytes { raw -> Bool in
-                var offset = 0
-                while offset < raw.count {
-                    let n = Darwin.write(fd, raw.baseAddress!.advanced(by: offset), raw.count - offset)
-                    if n < 0 && errno == EINTR { continue }
-                    guard n > 0 else { return false }; offset += n
-                }
-                return fsync(fd) == 0
-            }
-            guard written, fsync(directory) == 0 else { throw Failure.unavailable }
-        }
-    }
-    private static func remove(_ directory: Int32, name: String, identity: stat) throws {
-        var current = stat()
-        guard fstatat(directory, name, &current, AT_SYMLINK_NOFOLLOW) == 0,
-              current.st_dev == identity.st_dev, current.st_ino == identity.st_ino,
-              current.st_size == identity.st_size,
-              current.st_mtimespec.tv_sec == identity.st_mtimespec.tv_sec,
-              current.st_mtimespec.tv_nsec == identity.st_mtimespec.tv_nsec,
-              current.st_ctimespec.tv_sec == identity.st_ctimespec.tv_sec,
-              current.st_ctimespec.tv_nsec == identity.st_ctimespec.tv_nsec else { throw Failure.invalid }
-        guard unlinkat(directory, name, 0) == 0, fsync(directory) == 0 else { throw Failure.unavailable }
-    }
-    static func retainedRequest(id: String, digest: String, support: URL) throws -> CyderRequestMessage {
-        try withDirectory(support) { directory in
-            let (message, _, _) = try read(directory, filename(id))
-            guard message.requestID == id, message.payloadDigest == digest else { throw Failure.invalid }
-            return message
-        }
-    }
-    static func acknowledge(_ record: CyderRequestJournal.Record, support: URL) throws {
-        try withDirectory(support) { directory in
-            let name = filename(record.id)
-            let (message, identity, _) = try read(directory, name)
-            guard message.requestID == record.id, message.payloadDigest == record.digest else { throw Failure.invalid }
-            try remove(directory, name: name, identity: identity)
-        }
-    }
-    static func reconcile(support: URL, records: [CyderRequestJournal.Record], namespace: UUID? = nil) throws -> [CyderOutboxNotice] {
-        let path = support.appendingPathComponent("request-outbox").path
-        var info = stat()
-        if lstat(path, &info) != 0, errno == ENOENT { return [] }
-        let accepted = Dictionary(uniqueKeysWithValues: records.map { ($0.id, $0) })
-        return try withDirectory(support) { directory in
-            var notices: [CyderOutboxNotice] = [], bytesRead = 0
-            for name in try names(directory) {
-                let fallback = CyderOutboxNotice(id: "outbox-file:" + name, title: "未確認的舊要求",
-                    detail: "無法核對原始要求；已保留檔案，請查看診斷記錄。不會自動啟動。")
-                var size = stat()
-                guard fstatat(directory, name, &size, AT_SYMLINK_NOFOLLOW) == 0,
-                      size.st_mode & S_IFMT == S_IFREG,
-                      size.st_size > 0, size.st_size < CyderRequestChannel.maxFrame else {
-                    notices.append(fallback); continue
-                }
-                bytesRead += Int(size.st_size)
-                guard bytesRead <= maxBytes else { throw Failure.full }
-                guard let (message, identity, _) = try? read(directory, name), let id = message.requestID else {
-                    notices.append(fallback); continue
-                }
-                if let record = accepted[id], record.digest == message.payloadDigest {
-                    do { try remove(directory, name: name, identity: identity) }
-                    catch { notices.append(.init(id: "outbox:" + id, title: "已核對啟動要求", detail: "要求已被接受；本機副本尚未移除，不會重複派送。")) }
-                } else {
-                    let recoverable = accepted[id] == nil && name == filename(id) &&
-                        namespace.map { id.hasPrefix($0.uuidString + ":") } == true
-                    notices.append(.init(id: "outbox:" + id, title: message.payload?.displayName ?? "未確認的啟動要求",
-                        detail: accepted[id] == nil
-                            ? (recoverable ? "尚無接受紀錄；可核對原要求後重新傳送或取消。" : "無法核對原紀錄；已保留副本，不會自動啟動。")
-                            : "原要求與接受紀錄不一致；已保留副本，請查看診斷記錄。",
-                        requestID: recoverable ? id : nil, digest: recoverable ? message.payloadDigest : nil))
-                }
-            }
-            return notices
-        }
-    }
-}
-
+/// Elects the primary, accepts launch requests (locally or from a secondary
+/// instance over the request channel) into the in-memory registry, and keeps
+/// the app informed of native executor tickets.
+///
+/// Nothing about requests is persisted. The executor tickets are the only
+/// state that outlives Cyder: they say which native process belongs to which
+/// launch, and that is all restart recovery needs.
 final class CyderInstanceCoordinator {
     enum Role { case primary, secondary, unavailable }
     private let support: URL
     private let path: String
     private let startup = DispatchQueue(label: "local.cyder.instance-start")
     private let forwarding = DispatchQueue(label: "local.cyder.instance-forward")
-    private let outboxQueue = DispatchQueue(label: "local.cyder.instance-outbox")
-    private var outboxScan: UUID?
-    private var outboxAction: UUID?
     private var forwardInFlight = false
-    private(set) var outboxNotices: [CyderOutboxNotice] = []
-    var onOutboxChanged: (([CyderOutboxNotice]) -> Void)?
-    private let journal: CyderRequestJournal
+    private let registry: CyderRequestRegistry
     private let channel: CyderRequestChannel
     private var onRequest: ((CyderInstanceRequest) -> Void)?
-    private var namespace: UUID?
     private var closing = false
     private var startupGeneration: UUID?
     private var startRequested = false
@@ -219,16 +37,13 @@ final class CyderInstanceCoordinator {
     private var cleanupCompletions: [() -> Void] = []
     private let startupDeadline: TimeInterval
     private let beforeElection: () -> Void
-    private let outboxDeadline: TimeInterval
-    private let beforeOutboxRead: () -> Void
     private let forwardDeadline: TimeInterval
-    private let beforeForwardSave: () -> Void
     private var primary = false
     private var delivered = Set<String>()
-    private(set) var recovered: [CyderRequestJournal.Record] = []
-    var onRecoveryChanged: (([CyderRequestJournal.Record]) -> Void)?
-    var onRequestCancelled: ((String) -> Void)?
-    var executionEpoch: UUID { journal.executorEpoch }
+    /// Every ticket snapshot (current and earlier Cyder processes), delivered
+    /// on main before terminal tickets are pruned.
+    var onExecutionTickets: (([CyderExecutionOwner.Ticket]) -> Void)?
+    var executionEpoch: UUID { registry.executorEpoch }
     private var executionReceiptInFlight = false
     private var executionReceiptRefreshPending = false
     private lazy var executionWatch: CyderExecutionWatch = {
@@ -243,20 +58,16 @@ final class CyderInstanceCoordinator {
          bundleID: String = ProcessInfo.processInfo.environment["CYDER_BUNDLE_ID"]
             ?? Bundle.main.bundleIdentifier ?? "local.cyder.app",
          startupDeadline: TimeInterval = 5, beforeElection: @escaping () -> Void = {},
-         outboxDeadline: TimeInterval = 5, beforeOutboxRead: @escaping () -> Void = {},
-         forwardDeadline: TimeInterval = 5, beforeForwardSave: @escaping () -> Void = {},
+         forwardDeadline: TimeInterval = 5,
          beforeExecutionRead: @escaping () -> Void = {},
          normalizeSettings: @escaping (Data) throws -> Data = { $0 }) {
         self.support = support
         self.startupDeadline = startupDeadline
         self.beforeElection = beforeElection
-        self.outboxDeadline = outboxDeadline
-        self.beforeOutboxRead = beforeOutboxRead
         self.forwardDeadline = forwardDeadline
-        self.beforeForwardSave = beforeForwardSave
         self.beforeExecutionRead = beforeExecutionRead
         path = support.appendingPathComponent(".requests-v1.sock").path
-        journal = CyderRequestJournal(directory: support.appendingPathComponent("request-journal"),
+        registry = CyderRequestRegistry(
             captureSettings: { try normalizeSettings(CyderAcceptedSettings.capture(at: support.appendingPathComponent("settings.json"))) })
         channel = CyderRequestChannel(path: path)
         sentinel = CyderSentinelServer(support: support, bundleID: bundleID)
@@ -294,32 +105,24 @@ final class CyderInstanceCoordinator {
                 case .secondary: finish(.secondary)
                 case .unavailable: finish(.unavailable); self.releaseStartupResources()
                 case .primary:
-                    self.journal.open { result in
-                        guard mayContinue() else { self.releaseStartupResources(); return }
-                        guard case .success(let records) = result else {
-                            finish(.unavailable); self.releaseStartupResources(); return
+                    self.startup.async {
+                        // 0.14.0-rc.1 persisted requests here. They carry no
+                        // authority any more and must never be replayed.
+                        for legacy in ["request-journal", "request-outbox"] {
+                            try? FileManager.default.removeItem(at: self.support.appendingPathComponent(legacy))
                         }
-                        self.journal.namespace { namespace in
+                        let recoveredExecutors = (try? CyderExecutionOwner.recover(root: self.support.appendingPathComponent("execution-owners"))) != nil
+                        let started = recoveredExecutors && self.channel.start { [weak self] message, reply in
+                            DispatchQueue.main.async { self?.receive(message, reply: reply) }
+                        }
+                        DispatchQueue.main.async {
                             guard mayContinue() else { self.releaseStartupResources(); return }
-                            self.namespace = namespace
-                            self.startup.async {
-                                let recoveredExecutors = (try? CyderExecutionOwner.recover(root: self.support.appendingPathComponent("execution-owners"))) != nil
-                                let started = recoveredExecutors && self.channel.start { [weak self] message, reply in
-                                    DispatchQueue.main.async { self?.receive(message, reply: reply) }
-                                }
-                                DispatchQueue.main.async {
-                                    guard mayContinue() else { self.releaseStartupResources(); return }
-                                    self.primary = started
-                                    if started {
-                                        self.recovered = records
-                                        self.onRecoveryChanged?(records)
-                                        finish(.primary)
-                                        self.refreshOutbox(records: records)
-                                        self.refreshExecutionReceipts()
-                                    } else {
-                                        finish(.unavailable); self.releaseStartupResources()
-                                    }
-                                }
+                            self.primary = started
+                            if started {
+                                finish(.primary)
+                                self.refreshExecutionReceipts()
+                            } else {
+                                finish(.unavailable); self.releaseStartupResources()
                             }
                         }
                     }
@@ -333,7 +136,7 @@ final class CyderInstanceCoordinator {
         guard !startupCleanupRequested else { return }
         startupCleanupRequested = true
         channel.stop { [self] in
-            journal.close { [self] in
+            registry.close { [self] in
                 sentinel.stop { DispatchQueue.main.async {
                     self.startupInFlight = false
                     let callbacks = self.cleanupCompletions; self.cleanupCompletions.removeAll()
@@ -345,13 +148,13 @@ final class CyderInstanceCoordinator {
 
     private func receive(_ message: CyderRequestMessage, reply: @escaping (CyderRequestReply) -> Void) {
         precondition(Thread.isMainThread)
-        func respond(_ status: String, _ record: CyderRequestJournal.Record? = nil) {
+        func respond(_ status: String, _ record: CyderRequestRegistry.Record? = nil) {
             // Acceptance settings belong to the primary executor, not the wire
             // ACK/status projection (which has a smaller transport byte budget).
             var wireRecord = record
             wireRecord?.settingsSnapshot = nil
-            reply(.init(protocolVersion: 1, requestID: message.requestID, primaryEpoch: journal.executorEpoch,
-                        namespace: namespace, status: status, record: wireRecord))
+            reply(.init(protocolVersion: 1, requestID: message.requestID, primaryEpoch: registry.executorEpoch,
+                        namespace: registry.namespace, status: status, record: wireRecord))
         }
         guard primary else { respond("unavailable"); return }
         if message.kind == "hello" { respond(closing ? "closing" : "ready"); return }
@@ -359,7 +162,7 @@ final class CyderInstanceCoordinator {
         switch message.kind {
         case "submit":
             guard let payload = message.payload, payload.matches(message.payloadDigest) else { respond("rejected"); return }
-            journal.submit(id: id, payload: payload) { [weak self] result in
+            registry.submit(id: id, payload: payload) { [weak self] result in
                 switch result {
                 case .failure(let failure): respond(failure == .closing ? "closing" : "rejected")
                 case .success(let record):
@@ -368,19 +171,9 @@ final class CyderInstanceCoordinator {
                 }
             }
         case "query":
-            journal.query(id: id) { result in
+            registry.query(id: id) { result in
                 if case .success(let record) = result { respond("existingStatus", record) }
                 else { respond("rejected") }
-            }
-        case "cancel":
-            guard let digest = message.payloadDigest else { respond("rejected"); return }
-            journal.cancel(id: id, digest: digest) { [weak self] result in
-                switch result {
-                case .success(let record):
-                    self?.cancelled(record)
-                    respond("cancelled", record)
-                case .failure(let failure): respond(failure == .tooLate ? "cancellationTooLate" : "rejected")
-                }
             }
         default: respond("rejected")
         }
@@ -388,22 +181,21 @@ final class CyderInstanceCoordinator {
 
     func submit(_ payload: CyderRequestPayload, completion: @escaping (Bool) -> Void) {
         precondition(Thread.isMainThread)
-        guard primary, !closing, let namespace else { completion(false); return }
-        let id = CyderRequestJournal.makeID(namespace: namespace)
-        journal.submit(id: id, payload: payload) { [weak self] result in
+        guard primary, !closing else { completion(false); return }
+        let id = CyderRequestRegistry.makeID(namespace: registry.namespace)
+        registry.submit(id: id, payload: payload) { [weak self] result in
             guard case .success(let record) = result else { completion(false); return }
-            completion(true) // durable acceptance; not game success
+            completion(true) // accepted for dispatch; not game success
             self?.deliver(record)
         }
     }
 
-    private func deliver(_ record: CyderRequestJournal.Record) {
-        publish(record)
+    private func deliver(_ record: CyderRequestRegistry.Record) {
         guard !closing, !delivered.contains(record.id) else { return }
         delivered.insert(record.id)
         if let children = record.children {
             for id in children {
-                journal.query(id: id) { [weak self] result in
+                registry.query(id: id) { [weak self] result in
                     if case .success(let child) = result { self?.deliver(child) }
                 }
             }
@@ -414,100 +206,28 @@ final class CyderInstanceCoordinator {
             urls: payload.urls, showUI: payload.showUI, record: record))
     }
 
-    func authorize(_ record: CyderRequestJournal.Record,
-                   completion: @escaping (CyderRequestJournal.Record?) -> Void) {
+    func authorize(_ record: CyderRequestRegistry.Record,
+                   completion: @escaping (CyderRequestRegistry.Record?) -> Void) {
         guard primary, !closing else { completion(nil); return }
-        journal.authorizeDispatch(id: record.id) { [weak self] result in
+        registry.authorizeDispatch(id: record.id) { [weak self] result in
             guard let self, !self.closing, case .success(let authorized) = result else { completion(nil); return }
-            self.publish(authorized)
             completion(authorized)
         }
     }
 
-    func recordSpawn(_ record: CyderRequestJournal.Record, pid: Int32, boot: String?, started: UInt64?) {
+    func finish(_ record: CyderRequestRegistry.Record, outcome: String, failed: Bool = false, uncertain: Bool = false) {
         guard let launch = record.launchID, let epoch = record.executorEpoch else { return }
-        journal.receipt(id: record.id, launchID: launch, epoch: epoch, supervisorPID: pid,
-                        layer: "native-launcher", boot: boot, started: started) { [weak self] result in
-            if case .success(let updated) = result {
-                self?.publish(updated)
-                self?.refreshExecutionReceipts()
-            }
-        }
+        registry.complete(id: record.id, launchID: launch, epoch: epoch, outcome: outcome, failed: failed, uncertain: uncertain) { _ in }
     }
 
-    func finish(_ record: CyderRequestJournal.Record, outcome: String, failed: Bool = false, uncertain: Bool = false) {
-        guard let launch = record.launchID, let epoch = record.executorEpoch else { return }
-        journal.complete(id: record.id, launchID: launch, epoch: epoch, outcome: outcome, failed: failed, uncertain: uncertain) { [weak self] result in
-            if case .success(let updated) = result { self?.publish(updated) }
-        }
+    /// A queued request that cannot be dispatched (for example its environment
+    /// could not be resolved) ends here; nothing waits for a later resume.
+    func withdraw(_ record: CyderRequestRegistry.Record, reason: String) {
+        registry.fail(id: record.id, outcome: reason) { _ in }
     }
 
-    private func publish(_ record: CyderRequestJournal.Record) {
-        precondition(Thread.isMainThread)
-        if let index = recovered.firstIndex(where: { $0.id == record.id }) {
-            guard record.version >= recovered[index].version else { return }
-            recovered[index] = record
-        } else { recovered.append(record) }
-        onRecoveryChanged?(recovered)
-    }
-
-    private func cancelled(_ record: CyderRequestJournal.Record) {
-        publish(record)
-        onRequestCancelled?(record.id)
-        for id in record.children ?? [] {
-            onRequestCancelled?(id)
-            journal.query(id: id) { [weak self] result in
-                if case .success(let child) = result { self?.publish(child) }
-            }
-        }
-    }
-
-    func cancelRequest(id: String, completion: @escaping (Bool) -> Void) {
-        precondition(Thread.isMainThread)
-        guard primary, !closing, let record = recovered.first(where: { $0.id == id }) else { completion(false); return }
-        journal.cancel(id: id, digest: record.digest) { [weak self] result in
-            guard case .success(let updated) = result else { completion(false); return }
-            self?.cancelled(updated)
-            completion(true)
-        }
-    }
-
-    func resumeRequest(id: String, completion: @escaping (Bool) -> Void) {
-        precondition(Thread.isMainThread)
-        guard primary, !closing else { completion(false); return }
-        journal.resume(id: id) { [weak self] result in
-            guard let self, case .success(let updated) = result else { completion(false); return }
-            self.delivered.remove(id)
-            self.deliver(updated) // deliver also checks quiescing; no automatic replay on open
-            completion(true)
-        }
-    }
-
-    func deferRequest(id: String, reason: String, completion: @escaping (Bool) -> Void) {
-        precondition(Thread.isMainThread)
-        guard primary, !closing else { completion(false); return }
-        journal.deferDispatch(id: id, outcome: reason) { [weak self] result in
-            guard let self, case .success(let record) = result else { completion(false); return }
-            self.publish(record)
-            completion(true)
-        }
-    }
-
-    func refreshRequests() {
-        precondition(Thread.isMainThread)
-        guard primary, !closing else { return }
-        refreshExecutionReceipts()
-        journal.snapshot { [weak self] result in
-            guard let self, case .success(let records) = result else { return }
-            var latest = Dictionary(uniqueKeysWithValues: self.recovered.map { ($0.id, $0) })
-            for record in records where record.version >= (latest[record.id]?.version ?? 0) { latest[record.id] = record }
-            self.recovered = Array(latest.values)
-            self.onRecoveryChanged?(self.recovered)
-            self.refreshOutbox(records: records)
-        }
-    }
-
-    /// One physical reader persists correlated native evidence before pruning.
+    /// Reads executor tickets on change events (see CyderExecutionWatch), hands
+    /// them to the app, then prunes the terminal ones it has just delivered.
     /// It never resumes or completes a launch based on a Bash/native exit.
     func refreshExecutionReceipts() {
         precondition(Thread.isMainThread)
@@ -520,46 +240,22 @@ final class CyderInstanceCoordinator {
             let tickets = try? CyderExecutionOwner.snapshot(root: root)
             DispatchQueue.main.async { [self] in
                 guard !closing, let tickets else { finishExecutionReceiptRead(); return }
-                updateExecutionReceiptPolling(tickets)
-                let receipts = tickets.compactMap { ticket -> CyderRequestJournal.ExecutionReceipt? in
-                    guard let correlation = ticket.correlation else { return nil }
-                    let spawn = ticket.nativeSpawn.map {
-                        CyderRequestJournal.NativeSpawnReceipt(phase: $0.phase,
-                            bridgePID: $0.bridge.pid, bridgeBoot: $0.bridge.boot, bridgeStarted: $0.bridge.started,
-                            processPID: $0.process?.pid, processBoot: $0.process?.boot,
-                            processStarted: $0.process?.started, status: $0.status, signalled: $0.signalled)
-                    }
-                    return .init(ticketID: ticket.id, requestID: correlation.requestID,
-                        launchID: correlation.launchID, epoch: ticket.issuer, digest: correlation.digest,
-                        phase: ticket.phase, ownerPID: ticket.owner?.pid, ownerBoot: ticket.owner?.boot,
-                        ownerStarted: ticket.owner?.started, childPID: ticket.child?.pid,
-                        childBoot: ticket.child?.boot, childStarted: ticket.child?.started, status: ticket.status,
-                        signalled: ticket.signalled, nativeSpawn: spawn, prefixScope: ticket.scope)
-                }
-                journal.reconcileExecutions(receipts) { [self] result in
-                    guard !closing, case .success(let confirmed) = result else { finishExecutionReceiptRead(); return }
-                    let ids = Set(confirmed)
-                    updateExecutionReceiptPolling(tickets, confirmed: ids)
-                    startup.async { [self] in
-                        try? CyderExecutionOwner.prune(root: root, confirmed: tickets.filter { ids.contains($0.id) })
-                        DispatchQueue.main.async { [self] in
-                            finishExecutionReceiptRead()
-                            guard !closing else { return }
-                            journal.snapshot { [weak self] result in
-                                guard let self, !self.closing, case .success(let records) = result else { return }
-                                let previous = Dictionary(uniqueKeysWithValues: self.recovered.map { ($0.id, $0) })
-                                var latest = previous
-                                for record in records where record.version >= (latest[record.id]?.version ?? 0) { latest[record.id] = record }
-                                if latest != previous {
-                                    self.recovered = Array(latest.values)
-                                    self.onRecoveryChanged?(self.recovered)
-                                }
-                            }
-                        }
-                    }
+                onExecutionTickets?(tickets)
+                updateExecutionWatch(tickets)
+                // Delivered above; a settled launch ticket has nothing left to
+                // prove. Uncorrelated maintenance tickets keep the executor's
+                // own bounded retention (newest 32).
+                let settled = tickets.filter { $0.correlation != nil && Self.isSettled($0) }
+                startup.async { [self] in
+                    try? CyderExecutionOwner.prune(root: root, confirmed: settled)
+                    DispatchQueue.main.async { [self] in finishExecutionReceiptRead() }
                 }
             }
         }
+    }
+
+    static func isSettled(_ ticket: CyderExecutionOwner.Ticket) -> Bool {
+        ticket.phase.isTerminal && ticket.nativeSpawn.map { $0.phase.isTerminal } != false
     }
 
     private func finishExecutionReceiptRead() {
@@ -572,12 +268,9 @@ final class CyderInstanceCoordinator {
     /// Re-read tickets on change events instead of polling: directory writes
     /// (every ticket transition is a rename there) and exits of the processes
     /// an unresolved ticket depends on. See CyderExecutionWatch.
-    private func updateExecutionReceiptPolling(_ tickets: [CyderExecutionOwner.Ticket], confirmed: Set<UUID> = []) {
+    private func updateExecutionWatch(_ tickets: [CyderExecutionOwner.Ticket]) {
         guard primary, !closing else { return }
-        let unresolved = tickets.filter {
-            $0.correlation != nil && (!confirmed.contains($0.id) ||
-                (!$0.phase.isTerminal && $0.nativeSpawn?.phase.isTerminal != true))
-        }
+        let unresolved = tickets.filter { $0.correlation != nil && !Self.isSettled($0) }
         var pids = Set<Int32>()
         for ticket in unresolved {
             [ticket.owner?.pid, ticket.child?.pid, ticket.nativeSpawn?.bridge.pid, ticket.nativeSpawn?.process?.pid]
@@ -586,88 +279,10 @@ final class CyderInstanceCoordinator {
         executionWatch.update(unresolved: !unresolved.isEmpty, pids: pids)
     }
 
-    /// Reconcile against a durable snapshot without submit, resume, or dispatch.
-    /// A deadline does not release the physical scanner or create another one.
-    private func refreshOutbox(records: [CyderRequestJournal.Record]) {
-        guard primary, !closing, outboxScan == nil, outboxAction == nil else { return }
-        let token = UUID(); outboxScan = token
-        DispatchQueue.main.asyncAfter(deadline: .now() + max(0, outboxDeadline)) { [weak self] in
-            guard let self, !self.closing, self.outboxScan == token else { return }
-            self.outboxNotices = [.init(id: "outbox-scan", title: "正在核對舊要求",
-                detail: "核對尚未確認；不會自動啟動，其他操作仍可使用。")]
-            self.onOutboxChanged?(self.outboxNotices)
-        }
-        let currentNamespace = namespace
-        outboxQueue.async { [self] in
-            beforeOutboxRead()
-            let result = Result { try CyderRequestOutbox.reconcile(support: support, records: records, namespace: currentNamespace) }
-            DispatchQueue.main.async { [self] in
-                guard outboxScan == token else { return }; outboxScan = nil
-                guard !closing else { return }
-                switch result {
-                case .success(let notices): outboxNotices = notices
-                case .failure: outboxNotices = [.init(id: "outbox-scan", title: "舊要求尚未核對",
-                    detail: "暫時無法讀取或要求過多；請重新整理或查看診斷記錄。不會自動啟動。")]
-                }
-                onOutboxChanged?(outboxNotices)
-            }
-        }
-    }
-
-    /// Explicit recovery keeps the original identity. Journal transactions
-    /// arbitrate a concurrent submit/cancel; a stale UI is never authority.
-    func recoverOutbox(id noticeID: String, cancel: Bool, completion: @escaping (Bool) -> Void) {
-        precondition(Thread.isMainThread)
-        guard primary, !closing, outboxScan == nil, outboxAction == nil,
-              let notice = outboxNotices.first(where: { $0.id == noticeID }),
-              let id = notice.requestID, let digest = notice.digest,
-              namespace.map({ id.hasPrefix($0.uuidString + ":") }) == true else { completion(false); return }
-        let token = UUID(); outboxAction = token
-        let expiresAt = ProcessInfo.processInfo.systemUptime + max(0, outboxDeadline)
-        var reported = false // main only; observation does not release work
-        func report(_ success: Bool) {
-            guard !reported else { return }; reported = true; completion(success)
-        }
-        DispatchQueue.main.asyncAfter(deadline: .now() + max(0, outboxDeadline)) { [weak self] in
-            guard let self, self.outboxAction == token, !self.closing else { return }
-            report(false)
-        }
-        outboxQueue.async { [self] in
-            beforeOutboxRead()
-            let result = Result { try CyderRequestOutbox.retainedRequest(id: id, digest: digest, support: support) }
-            DispatchQueue.main.async { [self] in
-                guard outboxAction == token else { return }
-                guard primary, !closing, !reported, ProcessInfo.processInfo.systemUptime < expiresAt,
-                      case .success(let message) = result, let payload = message.payload else {
-                    outboxAction = nil; report(false); refreshRequests(); return
-                }
-                let accepted: CyderRequestJournal.Reply = { [self] result in
-                    guard case .success(let record) = result else {
-                        outboxAction = nil; report(false); refreshRequests(); return
-                    }
-                    if !closing {
-                        outboxNotices.removeAll { $0.id == noticeID }
-                        onOutboxChanged?(outboxNotices)
-                        if cancel { cancelled(record) } else { deliver(record) }
-                        report(true) // durable result; cleanup is a separate lifetime
-                    }
-                    outboxQueue.async { [self] in
-                        try? CyderRequestOutbox.acknowledge(record, support: support)
-                        DispatchQueue.main.async { [self] in
-                            guard outboxAction == token else { return }
-                            outboxAction = nil
-                            if !closing { refreshRequests() }
-                        }
-                    }
-                }
-                if cancel { journal.cancel(id: id, digest: digest, completion: accepted) }
-                else { journal.submit(id: id, payload: payload, completion: accepted) }
-            }
-        }
-    }
-
     /// Same-ID automatic retries are confined to one monotonic five-second
-    /// budget. Keep an unacknowledged copy; never convert it into a fresh ID.
+    /// budget; the primary's registry makes a retried submit idempotent.
+    /// Nothing is kept on disk: if the primary never answers, this secondary
+    /// reports the request as unconfirmed and the user can start it again.
     func forward(files: [String], arguments: [String]?, urls: [String] = [], showUI: Bool,
                  completion: @escaping (Bool) -> Void) {
         precondition(Thread.isMainThread)
@@ -683,7 +298,6 @@ final class CyderInstanceCoordinator {
         forwarding.async { [self] in
             let sender = UUID()
             var id: String?
-            var outboxSaved = false
             var attempts = 0
             func done(_ accepted: Bool) { DispatchQueue.main.async {
                 self.forwardInFlight = false
@@ -692,43 +306,26 @@ final class CyderInstanceCoordinator {
             } }
             while attempts < 6, ProcessInfo.processInfo.systemUptime < deadline {
                 attempts += 1
-                let remaining = min(0.7, deadline - ProcessInfo.processInfo.systemUptime)
-                guard remaining > 0 else { break }
                 if id == nil {
+                    let remaining = min(0.7, deadline - ProcessInfo.processInfo.systemUptime)
+                    guard remaining > 0 else { break }
                     let hello = CyderRequestMessage(protocolVersion: 1, kind: "hello", requestID: nil,
                         payloadDigest: nil, senderEpoch: sender, payload: nil)
                     if let response = CyderRequestChannel.exchange(path: path, message: hello, timeout: remaining),
                        response.status == "ready", let namespace = response.namespace {
-                        id = CyderRequestJournal.makeID(namespace: namespace)
+                        id = CyderRequestRegistry.makeID(namespace: namespace)
                     }
                 }
                 if let id {
-                    let message = CyderRequestMessage(protocolVersion: 1, kind: "submit", requestID: id,
-                        payloadDigest: payload.digest, senderEpoch: sender, payload: payload)
-                    if !outboxSaved {
-                        do {
-                            beforeForwardSave()
-                            try CyderRequestOutbox.save(message, support: support); outboxSaved = true
-                        }
-                        catch { done(false); return }
-                    }
-                    // Persistence can finish after the observation deadline.
-                    // Retain that original-ID copy without starting a late send.
-                    // The reply follows a durable journal write (full fsync), so
-                    // it gets the whole remaining budget, unlike the quick hello;
-                    // a short per-attempt cap only produced same-ID retries.
+                    // The submit reply may use the whole remaining budget; a
+                    // retry reuses this ID, so acceptance happens at most once.
                     let remaining = deadline - ProcessInfo.processInfo.systemUptime
                     guard remaining > 0 else { break }
+                    let message = CyderRequestMessage(protocolVersion: 1, kind: "submit", requestID: id,
+                        payloadDigest: payload.digest, senderEpoch: sender, payload: payload)
                     if let response = CyderRequestChannel.exchange(path: path, message: message, timeout: remaining),
                        response.status == "accepted", let record = response.record,
                        record.id == id, payload.matches(record.digest) {
-                        // Durable acceptance is already known. Best-effort
-                        // copy cleanup must not turn it into an unknown result.
-                        DispatchQueue.main.async {
-                            guard !reported else { return }; reported = true
-                            completion(true)
-                        }
-                        try? CyderRequestOutbox.acknowledge(record, support: support)
                         done(true)
                         return
                     }
@@ -745,7 +342,7 @@ final class CyderInstanceCoordinator {
         closing = true // invalidate pending delivery callbacks immediately
         executionWatch.stop()
         startupGeneration = nil
-        if primary { journal.quiesce(completion: completion) } else { completion(true) }
+        registry.close { completion(true) }
     }
 
     func stop(completion: @escaping () -> Void = {}) {
@@ -759,7 +356,7 @@ final class CyderInstanceCoordinator {
         }
         primary = false
         channel.stop { [self] in
-            journal.close { [self] in
+            registry.close { [self] in
                 sentinel.stop { DispatchQueue.main.async { completion() } }
             }
         }

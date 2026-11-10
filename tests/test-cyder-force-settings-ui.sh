@@ -253,8 +253,8 @@ assert_contains "$library_ui" "truncatesLastVisibleLine = true" "game tile title
 assert_contains "$library_ui" "preferredMaxLayoutWidth" "multiline NSTextField needs a layout width to wrap"
 assert_contains "$library_ui" "styleMask: [.titled, .closable, .fullSizeContentView]" "game library window should not be resizable"
 assert_contains "$library_ui" "window.collectionBehavior.insert(.fullScreenNone)" "game library should not enter full screen"
-assert_contains "$library_ui" 'requestSummary.topAnchor.constraint(equalTo: content.topAnchor, constant: 32)' "request status should begin below the title bar"
-assert_contains "$library_ui" 'requestSummaryHeight?.constant = text.isEmpty ? 0 : 32' "normal launches must not reserve space for an empty recovery notice"
+assert_contains "$library_ui" 'recoveryNotice.topAnchor.constraint(equalTo: content.topAnchor, constant: 32)' "library content should begin below the title bar"
+assert_not_contains "$library_ui" 'requestSummary' "the request history entry point must stay removed"
 assert_contains "$library_ui" 'scroll.topAnchor.constraint(equalTo: recoveryNotice.bottomAnchor)' "game content should follow collapsible request and recovery status"
 if [[ "$library_ui" == *'addCyderTitlebarBrand(to: window, title: "遊戲庫"'* || "$library_ui" == *'let divider = NSBox()'* ]]; then
   echo "ASSERT failed: game library should not show a title-bar brand or content divider" >&2

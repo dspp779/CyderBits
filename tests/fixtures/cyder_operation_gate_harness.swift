@@ -39,26 +39,23 @@ gate.release(globalLease!)
 pump { afterBarrier != nil }
 gate.release(afterBarrier!)
 
-// Drive the real durable journal at the same boundary as the app: cancellation
-// remains legal while an environment lease is waiting, before authorization.
-let journal = CyderRequestJournal(directory: URL(fileURLWithPath: CommandLine.arguments[1]))
-var opened = false; journal.open { result in guard case .success = result else { fatalError() }; opened = true }
-pump { opened }
-var ns: UUID?; journal.namespace { ns = $0 }; pump { ns != nil }
-let id = CyderRequestJournal.makeID(namespace: ns!)
+// Drive the real registry at the same boundary as the app: withdrawal remains
+// legal while an environment lease is waiting, before authorization.
+let journal = CyderRequestRegistry()
+let id = CyderRequestRegistry.makeID(namespace: journal.namespace)
 let payload = CyderRequestPayload(files: ["/trusted/test.exe"], arguments: nil, urls: [], showUI: false)
 var accepted = false; journal.submit(id: id, payload: payload) { result in guard case .success = result else { fatalError() }; accepted = true }
 pump { accepted }
 var blocker: CyderOperationGate.Lease?; gate.acquire(one) { blocker = $0 }; pump { blocker != nil }
-var authorizeResult: Result<CyderRequestJournal.Record, CyderRequestJournal.Failure>?
+var authorizeResult: Result<CyderRequestRegistry.Record, CyderRequestRegistry.Failure>?
 gate.acquire(one) { lease in
     precondition(lease != nil)
     journal.authorizeDispatch(id: id) { result in authorizeResult = result; gate.release(lease!) }
 }
 var cancelled = false
-journal.cancel(id: id, digest: payload.digest) { result in
+journal.fail(id: id, outcome: "withdrawn") { result in
     guard case .success(let record) = result else { fatalError() }
-    precondition(record.phase == .cancelled); cancelled = true
+    precondition(record.phase == .failed); cancelled = true
 }
 pump { cancelled }; precondition(authorizeResult == nil)
 gate.release(blocker!)
@@ -75,4 +72,4 @@ var lateReply = false
 gate.acquire(two) { lease in precondition(lease == nil); lateReply = true }; pump { lateReply }
 gate.release(held!)
 var closed = false; journal.close { closed = true }; pump { closed }
-print("PASS formal gate/runner/journal: stop timeout retains ownership, independent bottle, global barrier, stale release, cancellation before dispatch, quit freezes pending effects")
+print("PASS formal gate/runner/registry: stop timeout retains ownership, independent bottle, global barrier, stale release, cancellation before dispatch, quit freezes pending effects")

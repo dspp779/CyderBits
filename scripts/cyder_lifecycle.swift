@@ -1,6 +1,6 @@
 import Foundation
 
-/// Pure state machine. All OS, journal and AppKit work belongs to adapters.
+/// Pure state machine. All OS, ticket and AppKit work belongs to adapters.
 /// Events are ordered by the store, never by wall-clock timestamps.
 enum CyderLifecycle {
     struct EnvironmentID: Hashable, Codable {
@@ -24,7 +24,7 @@ enum CyderLifecycle {
     enum Health: String, Codable { case attaching, healthy, degraded }
     enum Stop: String, Codable { case idle, executing, unconfirmed, finished, failed }
     enum RequestPhase: String, Codable {
-        case submitted, queued, dispatching, observing, completed, failed, cancelled, uncertain, awaitingUserResume
+        case submitted, queued, dispatching, observing, completed, failed, cancelled, uncertain, withdrawn
         var isActive: Bool {
             switch self {
             case .submitted, .queued, .dispatching, .observing: return true
@@ -115,7 +115,7 @@ enum CyderLifecycle {
         case visibleUI(Bool)
         case ingressPending(Bool)
         case restoring(Bool)
-        case journalRequest(Request, version: UInt64)
+        case recordedRequest(Request, version: UInt64)
         case recoveredLaunch(Stamp, request: String, launch: Launch, root: ProcessID)
         case manage(Environment)
         case accepted(Request) // emitted only after durable acceptance
@@ -162,7 +162,7 @@ enum CyderLifecycle {
         private(set) var visibleUI = false
         private(set) var ingressPending = false
         private(set) var restoring = false
-        private var journalVersions: [String: UInt64] = [:]
+        private var recordedVersions: [String: UInt64] = [:]
         private(set) var environments: [EnvironmentID: Environment] = [:]
         private(set) var requests: [String: Request] = [:]
         private(set) var launches: [String: Launch] = [:]
@@ -227,8 +227,8 @@ enum CyderLifecycle {
             case .restoring(let pending):
                 guard phase == .active else { return [] }
                 restoring = pending
-            case .journalRequest(let incoming, let version):
-                guard journalVersions[incoming.id].map({ version > $0 }) ?? true,
+            case .recordedRequest(let incoming, let version):
+                guard recordedVersions[incoming.id].map({ version > $0 }) ?? true,
                       requests[incoming.id].map({ $0.digest == incoming.digest }) ?? true else { return [] }
                 let previous = requests[incoming.id]
                 var request = Request(id: incoming.id, digest: incoming.digest,
@@ -241,10 +241,10 @@ enum CyderLifecycle {
                     request.phase = previous.phase; request.outcome = previous.outcome
                 }
                 if phase != .active {
-                    if [.queued, .submitted].contains(request.phase) { request.phase = .awaitingUserResume }
+                    if [.queued, .submitted].contains(request.phase) { request.phase = .withdrawn }
                     else if [.dispatching, .observing].contains(request.phase) { request.phase = .uncertain }
                 }
-                requests[incoming.id] = request; journalVersions[incoming.id] = version
+                requests[incoming.id] = request; recordedVersions[incoming.id] = version
             case .recoveredLaunch(let stamp, let id, var launch, let root):
                 guard accepts(stamp), environments[stamp.environment]?.existence == .alive,
                       environments[stamp.environment]?.health == .healthy, let request = requests[id],
@@ -278,8 +278,8 @@ enum CyderLifecycle {
                 environments[environment.id] = environment
             case .accepted(var request):
                 guard requests[request.id] == nil else { return [] }
-                // Late journal completion must never cause a post-quit dispatch.
-                if phase != .active && (request.phase == .queued || request.phase == .submitted) { request.phase = .awaitingUserResume }
+                // Late acceptance must never cause a post-quit dispatch.
+                if phase != .active && (request.phase == .queued || request.phase == .submitted) { request.phase = .withdrawn }
                 requests[request.id] = request
             case .dispatchCommitted(let stamp, let id, let launch):
                 guard accepts(stamp), stamp.environment == launch.environment,
@@ -312,7 +312,7 @@ enum CyderLifecycle {
                       deadline.isFinite else { return [] }
                 launches[id]?.deadline = deadline
             case .cancellationCommitted(let id):
-                guard var request = requests[id], [.submitted, .queued, .awaitingUserResume].contains(request.phase) else { return [] }
+                guard var request = requests[id], [.submitted, .queued, .withdrawn].contains(request.phase) else { return [] }
                 request.phase = .cancelled
                 request.outcome = .cancelled
                 requests[id] = request
@@ -458,7 +458,7 @@ enum CyderLifecycle {
                 restoring = false
                 ingressPending = false
                 for (id, request) in requests where request.phase == .queued || request.phase == .submitted {
-                    requests[id]?.phase = .awaitingUserResume
+                    requests[id]?.phase = .withdrawn
                 }
                 effects = [.persistQuiescing, .cancelOwnedObservers]
             case .terminated:
@@ -476,7 +476,7 @@ enum CyderLifecycle {
     }
 }
 
-/// Single writer. A blocked observer or journal must never occupy this queue.
+/// Single writer. A blocked observer must never occupy this queue.
 final class CyderLifecycleStore {
     private let queue = DispatchQueue(label: "local.cyder.lifecycle-state")
     private var state: CyderLifecycle.State

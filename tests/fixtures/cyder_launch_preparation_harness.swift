@@ -63,20 +63,21 @@ blocked.resolve(work: { fatalError("quiesced read started") }) { outcome in
 }
 pump { quit }
 
-let journal = CyderRequestJournal(directory: URL(fileURLWithPath: CommandLine.arguments[1]))
+let registry = CyderRequestRegistry()
 func wait<T>(_ body: (@escaping (T) -> Void) -> Void) -> T { var value: T?; body { value = $0 }; pump { value != nil }; return value! }
-func ok<T>(_ result: Result<T, CyderRequestJournal.Failure>) -> T { guard case .success(let value) = result else { fatalError("\(result)") }; return value }
-_ = ok(wait { journal.open(completion: $0) })
-let ns: UUID = wait { done in journal.namespace { done($0!) } }
-let request = CyderRequestJournal.makeID(namespace: ns)
+func ok<T>(_ result: Result<T, CyderRequestRegistry.Failure>) -> T { guard case .success(let value) = result else { fatalError("\(result)") }; return value }
 let payload = CyderRequestPayload(files: ["/trusted/read-only.exe"], arguments: nil, urls: [], showUI: false)
-_ = ok(wait { journal.submit(id: request, payload: payload, completion: $0) })
-let paused = ok(wait { journal.deferDispatch(id: request, outcome: "scope-unavailable", completion: $0) })
-precondition(paused.phase == .awaitingUserResume && paused.payload == payload && paused.launchID == nil)
-precondition(wait { journal.authorizeDispatch(id: request, completion: $0) } == .failure(.tooLate))
-let resumed = ok(wait { journal.resume(id: request, completion: $0) })
-precondition(resumed.outcome == nil && resumed.phase == .queued)
-_ = ok(wait { journal.authorizeDispatch(id: request, completion: $0) })
-precondition(wait { journal.deferDispatch(id: request, outcome: "late-read", completion: $0) } == .failure(.tooLate), "late preparation rewound a dispatched request")
-let _: Bool = wait { done in journal.close { done(true) } }
-print("PASS formal bounded preflight/journal: fixed deadline, ordered independent progress, retained stuck slots, queued cancel, no late replay, quit, durable pause/resume, dispatch fence")
+// A request whose environment cannot be resolved is withdrawn, never parked
+// for a later resume, and can no longer be dispatched.
+let request = CyderRequestRegistry.makeID(namespace: registry.namespace)
+_ = ok(wait { registry.submit(id: request, payload: payload, completion: $0) })
+let withdrawn = ok(wait { registry.fail(id: request, outcome: "scope-unavailable", completion: $0) })
+precondition(withdrawn.phase == .failed && withdrawn.payload == nil && withdrawn.launchID == nil)
+precondition(wait { registry.authorizeDispatch(id: request, completion: $0) } == .failure(.tooLate))
+// A late preparation result cannot withdraw a request that was dispatched.
+let dispatchedRequest = CyderRequestRegistry.makeID(namespace: registry.namespace)
+_ = ok(wait { registry.submit(id: dispatchedRequest, payload: payload, completion: $0) })
+_ = ok(wait { registry.authorizeDispatch(id: dispatchedRequest, completion: $0) })
+precondition(wait { registry.fail(id: dispatchedRequest, outcome: "late-read", completion: $0) } == .failure(.tooLate), "late preparation rewound a dispatched request")
+let _: Bool = wait { done in registry.close { done(true) } }
+print("PASS formal bounded preflight/registry: fixed deadline, ordered independent progress, retained stuck slots, queued cancel, no late replay, quit, withdrawal without parking, dispatch fence")

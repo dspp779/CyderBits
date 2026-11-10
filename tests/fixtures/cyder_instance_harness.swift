@@ -64,7 +64,7 @@ var afterCleanupACK: Bool?
 secondary.forward(files: ["/trusted/after-secondary-cleanup.exe"], arguments: nil, showUI: false) { afterCleanupACK = $0 }
 pump { afterCleanupACK != nil }; precondition(afterCleanupACK == true && received.count == 4,
                                                "secondary cleanup removed the active primary channel")
-var dispatched: CyderRequestJournal.Record?
+var dispatched: CyderRequestRegistry.Record?
 var authorized = false
 primary.authorize(received[0].record) { dispatched = $0; authorized = true }
 pump { authorized }
@@ -72,7 +72,7 @@ precondition(dispatched?.phase == .dispatching)
 precondition(dispatched?.settingsSnapshot == acceptedPreferences, "dispatch reread mutable settings")
 // Quit races with a queued authorization: at most committed dispatch is uncertain;
 // completion cannot release a new spawn after the main-thread freeze.
-var late: CyderRequestJournal.Record?
+var late: CyderRequestRegistry.Record?
 var lateDone = false
 primary.authorize(received[1].record) { late = $0; lateDone = true }
 var saved: Bool?
@@ -82,9 +82,15 @@ precondition(saved == true && late == nil)
 var stopped = false
 primary.stop { stopped = true }
 pump { stopped }
-// A completed native executor receipt arriving while no primary exists must
-// join its original request on re-election, then be safely pruned only after
-// the journal has saved it. This is explicitly injected native-layer evidence.
+// Requests are not persisted: a re-elected primary replays nothing, and legacy
+// rc.1 request files are removed. A game launched by the previous primary is
+// still attributed through its executor ticket, which is the only surviving state.
+let legacyJournal = CyderPaths.support.appendingPathComponent("request-journal")
+let legacyOutbox = CyderPaths.support.appendingPathComponent("request-outbox")
+for legacy in [legacyJournal, legacyOutbox] {
+    try FileManager.default.createDirectory(at: legacy, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+    try Data(#"{"schema":1,"records":{}}"#.utf8).write(to: legacy.appendingPathComponent("requests-v1.json"))
+}
 let fixtureBoot = CyderExecutionOwner.Birth.current()!.boot
 let correlatedTicket = CyderExecutionOwner.Ticket(schema: 1, id: UUID(), issuer: dispatched!.executorEpoch!,
     scope: "injected-prefix-scope", prefix: CyderPaths.support.path, phase: .handedOff, owner: .init(boot: fixtureBoot, pid: 12345, started: 10),
@@ -92,20 +98,11 @@ let correlatedTicket = CyderExecutionOwner.Ticket(schema: 1, id: UUID(), issuer:
     correlation: .init(requestID: dispatched!.id, launchID: dispatched!.launchID!, digest: dispatched!.digest),
     handoff: .init(executable: "/injected/wine", pidFile: CyderPaths.support.appendingPathComponent("injected.pid").path),
     nativeSpawn: .init(phase: .spawned, bridge: .init(boot: fixtureBoot, pid: 12347, started: 12),
-        process: .init(boot: fixtureBoot, pid: 12348, started: 13)))
+        process: .init(boot: fixtureBoot, pid: 12348, started: 13)), displayName: "楓之谷.exe")
 let correlatedURL = ownerDirectory.appendingPathComponent(correlatedTicket.id.uuidString + ".json")
 try JSONEncoder().encode(correlatedTicket).write(to: correlatedURL)
 chmod(correlatedURL.path, 0o600)
-let liveReceiptGate = DispatchSemaphore(value: 0)
-let receiptRetryGate = DispatchSemaphore(value: 0)
-var nativeReadsOnWorker = 0, nativeReadCount = 0
-let replacement = CyderInstanceCoordinator(support: CyderPaths.support, bundleID: "test", beforeExecutionRead: {
-    nativeReadsOnWorker += 1
-    let count = nativeReadsOnWorker
-    DispatchQueue.main.async { nativeReadCount = count }
-    if count == 2 { liveReceiptGate.wait() }
-    if count == 3 { receiptRetryGate.wait() }
-})
+let replacement = CyderInstanceCoordinator(support: CyderPaths.support, bundleID: "test")
 let rootObserver = CyderLaunchObserver(authority: .init(request: dispatched!.id, launch: dispatched!.launchID!,
     digest: dispatched!.digest, epoch: dispatched!.executorEpoch!))
 var rootObservation: CyderLaunchObserver.Result?
@@ -114,13 +111,15 @@ Task.detached {
         signal: WineActivationWaiter(prefix: CyderPaths.support.path))
     DispatchQueue.main.async { rootObservation = result }
 }
-replacement.onRecoveryChanged = { records in
-    for record in records {
-        guard let receipt = record.executionReceipt, let root = receipt.nativeSpawn,
-              let pid = root.processPID, let boot = root.processBoot, let started = root.processStarted else { continue }
-        rootObserver.receive(.init(authority: .init(request: receipt.requestID, launch: receipt.launchID,
-            digest: receipt.digest, epoch: receipt.epoch), ticket: receipt.ticketID, phase: root.phase,
-            pid: pid, boot: boot, started: started, status: root.status, signalled: root.signalled, prefixScope: receipt.prefixScope))
+var seen: [UUID: CyderExecutionOwner.Ticket] = [:]
+replacement.onExecutionTickets = { tickets in
+    for ticket in tickets {
+        seen[ticket.id] = ticket
+        guard let correlation = ticket.correlation, let spawn = ticket.nativeSpawn, let process = spawn.process else { continue }
+        rootObserver.receive(.init(authority: .init(request: correlation.requestID, launch: correlation.launchID,
+            digest: correlation.digest, epoch: ticket.issuer), ticket: ticket.id, phase: spawn.phase,
+            pid: process.pid, boot: process.boot, started: process.started, status: spawn.status,
+            signalled: spawn.signalled, prefixScope: ticket.scope))
     }
 }
 var nextRole: CyderInstanceCoordinator.Role?
@@ -128,22 +127,14 @@ var replayCount = 0
 replacement.start(onRequest: { _ in replayCount += 1 }) { nextRole = $0 }
 pump { nextRole != nil }
 precondition(nextRole == .primary, "primary lock was not released")
+pump { seen[correlatedTicket.id] != nil }
 precondition(replayCount == 0, "reopening replayed an accepted request")
-precondition(replacement.recovered.filter { $0.phase == .awaitingUserResume }.count >= 1)
-precondition(replacement.recovered.contains { $0.id == dispatched!.id && $0.phase == .uncertain })
-pump { replacement.recovered.first { $0.id == dispatched!.id }?.executionReceipt?.ticketID == correlatedTicket.id }
+precondition(!FileManager.default.fileExists(atPath: legacyJournal.path) && !FileManager.default.fileExists(atPath: legacyOutbox.path),
+             "legacy request files must be removed, never replayed")
+precondition(seen[correlatedTicket.id]?.displayName == "楓之谷.exe", "running game lost its name across restart")
 precondition(FileManager.default.fileExists(atPath: correlatedURL.path), "live root ticket was pruned")
-precondition(replacement.recovered.first { $0.id == dispatched!.id }?.executionReceipt?.prefixScope == correlatedTicket.scope)
-pump { nativeReadCount == 2 } // Automatic polling, no manual refresh.
-var livePollTick = false
-DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { livePollTick = true }
-pump { livePollTick }
-precondition(nativeReadCount == 2, "automatic polling accumulated physical readers during a stall")
-// Make the next durable write fail while preserving the original journal and
-// its open ownership FD. Restore before allowing the one subsequent reader.
-let journalDirectory = CyderPaths.support.appendingPathComponent("request-journal")
-let preservedJournalDirectory = CyderPaths.support.appendingPathComponent("request-journal-preserved")
-try FileManager.default.moveItem(at: journalDirectory, to: preservedJournalDirectory)
+// The native exit is written by the executor; the directory event alone (no
+// manual refresh, no polling) delivers it, then the settled ticket is pruned.
 var completedTicket = correlatedTicket
 completedTicket.phase = .finished
 completedTicket.nativeSpawn?.phase = .exited
@@ -151,22 +142,10 @@ completedTicket.nativeSpawn?.status = 53
 completedTicket.nativeSpawn?.signalled = false
 try JSONEncoder().encode(completedTicket).write(to: correlatedURL, options: .atomic)
 chmod(correlatedURL.path, 0o600)
-liveReceiptGate.signal()
-pump { nativeReadCount == 3 }
-precondition(replacement.recovered.first { $0.id == dispatched!.id }?.executionReceipt?.nativeSpawn?.phase == .spawned,
-             "uncommitted terminal receipt reached the UI")
-precondition(FileManager.default.fileExists(atPath: correlatedURL.path), "write failure pruned the terminal receipt")
-try FileManager.default.moveItem(at: preservedJournalDirectory, to: journalDirectory)
-receiptRetryGate.signal()
-// No manual refresh or native parent completion follows this root outcome.
-pump { replacement.recovered.first { $0.id == dispatched!.id }?.executionReceipt?.nativeSpawn?.status == 53 }
 pump { rootObservation != nil }
-precondition(rootObservation == .rootFailed(53), "durable root receipt did not reach the formal launch observer")
+precondition(rootObservation == .rootFailed(53), "native root result did not reach the formal launch observer")
+precondition(seen[correlatedTicket.id]?.phase == .finished, "terminal ticket pruned before delivery")
 pump { !FileManager.default.fileExists(atPath: correlatedURL.path) }
-precondition(replacement.recovered.first { $0.id == dispatched!.id }?.executionReceipt?.nativeSpawn?.status == 53,
-             "executor pruning lost the distinct native Wine root result")
-precondition(replacement.recovered.first { $0.id == dispatched!.id }?.phase == .uncertain,
-             "native exit was incorrectly promoted to a confirmed Windows launch")
 precondition(replayCount == 0)
 var replacementSaved: Bool?
 replacement.quiesce { replacementSaved = $0 }
@@ -174,13 +153,16 @@ pump { replacementSaved != nil }
 var replacementStopped = false
 replacement.stop { replacementStopped = true }
 pump { replacementStopped }
-let readsAtStop = nativeReadCount
-var stoppedPollTick = false
-DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { stoppedPollTick = true }
-pump { stoppedPollTick }
-precondition(nativeReadCount == readsAtStop, "receipt polling survived coordinator stop")
-print("PASS automatic root receipt: late outcome persists without manual refresh, one physical reader through timer stall, failed durable write retries before UI/pruning, formal observer receives root status, quit cancels polling")
-print("PASS actual instance coordinator: single primary, durable mixed-batch ACK, queued children, quit/dispatch race, re-election, no replay")
+let deliveriesAtStop = seen.count
+try JSONEncoder().encode(correlatedTicket).write(to: correlatedURL, options: .atomic)
+chmod(correlatedURL.path, 0o600)
+var stoppedTick = false
+DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { stoppedTick = true }
+pump { stoppedTick }
+precondition(seen.count == deliveriesAtStop && seen[correlatedTicket.id]?.phase == .finished, "ticket watch survived coordinator stop")
+try FileManager.default.removeItem(at: correlatedURL)
+print("PASS ticket-based recovery: no request persistence or replay, legacy files removed, running game keeps its name, event-delivered root result, settled ticket pruned after delivery, watch stops with coordinator")
+print("PASS actual instance coordinator: single primary, mixed-batch ACK, queued children, quit/dispatch race, re-election, no replay")
 
 // A bounded startup observation cannot grant authority when the physical
 // election returns late. Stop completion tracks actual ownership release.
@@ -208,19 +190,6 @@ pump { afterLateRole != nil }
 precondition(afterLateRole == .primary, "late startup leaked its ownership")
 var afterStopped = false; afterLate.stop { afterStopped = true }; pump { afterStopped }
 print("PASS bounded startup: timeout refuses submit, late election cannot become primary, physical cleanup releases ownership, no replay")
-
-let corruptPath = delayedRoot.appendingPathComponent("request-journal/requests-v1.json")
-let corruptBytes = Data("corrupt durable request history".utf8)
-try corruptBytes.write(to: corruptPath)
-let corruptOwner = CyderInstanceCoordinator(support: delayedRoot, bundleID: "late")
-var corruptRole: CyderInstanceCoordinator.Role?
-corruptOwner.start(onRequest: { _ in fatalError("corrupt journal dispatched") }) { corruptRole = $0 }
-pump { corruptRole != nil }
-precondition(corruptRole == .unavailable)
-var corruptStopped = false; corruptOwner.stop { corruptStopped = true }; pump { corruptStopped }
-let remainingBytes = try Data(contentsOf: corruptPath)
-precondition(remainingBytes == corruptBytes, "unavailable startup overwrote corrupt journal")
-print("PASS startup corruption: read-only outcome, no dispatch, original history preserved")
 
 // Receipt refresh owns one physical reader. Repeated invalidations coalesce
 // into one additional scan; no second worker bypasses a blocked filesystem.

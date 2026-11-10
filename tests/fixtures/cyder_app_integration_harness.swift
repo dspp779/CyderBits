@@ -27,28 +27,19 @@ func pump(_ ready: () -> Bool) {
     require(ready(), "seed deadline")
 }
 if mode == "seed" {
-    let journal = CyderRequestJournal(directory: CyderPaths.support.appendingPathComponent("request-journal"))
-    var opened = false
-    journal.open { result in if case .success = result { opened = true } }
-    pump { opened }
-    var namespace: UUID?
-    journal.namespace { namespace = $0 }; pump { namespace != nil }
-    let queued = CyderRequestJournal.makeID(namespace: namespace!)
-    let dispatch = CyderRequestJournal.makeID(namespace: namespace!)
-    for id in [queued, dispatch] {
-        var submitted = false
-        journal.submit(id: id, payload: .init(files: [output.appendingPathComponent(id == queued ? "queued.exe" : "dispatch.exe").path], arguments: nil, urls: [], showUI: false)) { result in
-            if case .success = result { submitted = true }
-        }
-        pump { submitted }
+    // Leftovers of the 0.14.0-rc.1 durable journal and outbox. They carry no
+    // authority: the next primary removes them and never replays them.
+    let journal = CyderPaths.support.appendingPathComponent("request-journal")
+    let outbox = CyderPaths.support.appendingPathComponent("request-outbox")
+    for directory in [journal, outbox] {
+        try! FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
     }
-    var authorized = false
-    journal.authorizeDispatch(id: dispatch) { result in if case .success = result { authorized = true } }
-    pump { authorized }
-    var closed = false
-    journal.close { closed = true }; pump { closed }
-    save("seed.json", ["queued": queued, "dispatch": dispatch])
-    print("PASS seed: actual durable queued/dispatching journal")
+    let queued = UUID().uuidString + ":" + UUID().uuidString
+    try! Data(#"{"schema":1,"records":{"\#(queued)":{"phase":"queued","payload":{"files":["\#(output.appendingPathComponent("queued.exe").path)"]}}}}"#.utf8)
+        .write(to: journal.appendingPathComponent("requests-v1.json"))
+    try! Data("{}".utf8).write(to: outbox.appendingPathComponent(queued.replacingOccurrences(of: ":", with: "-") + ".json"))
+    save("seed.json", ["queued": queued])
+    print("PASS seed: legacy rc.1 journal and outbox files")
     exit(0)
 }
 
@@ -118,7 +109,7 @@ timer.setEventHandler {
         guard now - unavailableSince! >= 0.5 else { return }
         ready = true
         actions.append("unavailable")
-        for title in ["設定…", "啟動要求…"] {
+        for title in ["設定…"] {
             require(NSApp.mainMenu?.items.first?.submenu?.items.first(where: { $0.title == title })?.isEnabled == false,
                     "read-only fallback enabled mutation menu: \(title)")
         }
@@ -143,9 +134,8 @@ timer.setEventHandler {
     menuAction("設定…")
     waitForWindow("settings menu did not open formal controller") { $0.isVisible && $0.windowController is CyderSettingsWindowController }
     actions.append("settings")
-    menuAction("啟動要求…")
-    waitForWindow("requests menu did not open formal controller") { $0.isVisible && $0.windowController is CyderRequestWindowController }
-    actions.append("requests")
+    require(NSApp.mainMenu?.items.first?.submenu?.items.contains(where: { $0.title == "啟動要求…" }) == false,
+            "removed request history menu is still present")
     menuAction("遊戲庫…")
     library.orderOut(nil)
     _ = delegate.applicationShouldHandleReopen(NSApp, hasVisibleWindows: false)

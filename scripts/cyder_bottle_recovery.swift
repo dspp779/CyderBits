@@ -1,7 +1,7 @@
 import Foundation
 import Darwin
 
-/// Supplements the private environment journal using only Cyder's own bottle
+/// Supplements the private environment registry using only Cyder's own bottle
 /// directory. Merely having a prefix on disk never creates a live environment.
 final class CyderBottleRecovery {
     typealias Identity = CyderEnvironmentProbe.Identity

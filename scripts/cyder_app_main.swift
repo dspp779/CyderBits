@@ -42,12 +42,8 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
     private let launchPreparation = CyderLaunchPreparation<CyderOperationGate.Scope?>()
     private var diagnosticsOperationInProgress = false
     private var diagnosticsPresentation: UUID?
-    private var requestRecords: [CyderRequestJournal.Record] = []
-    private var outboxNotices: [CyderOutboxNotice] = []
     private weak var existingSettingsController: CyderSettingsWindowController?
     private weak var existingLibraryController: CyderGameLibraryWindowController?
-    private weak var existingRequestController: CyderRequestWindowController?
-    private var cancelledRequestIDs = Set<String>()
     private var pendingRequestAcquisitions: [String: UUID] = [:]
     private var pendingPreparation: [String: UUID] = [:]
     private let processRunner = CyderProcessRunner(delivery: DispatchQueue(label: "local.cyder.process-delivery", qos: .utility))
@@ -61,7 +57,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         let executable: String
         let arguments: [String]?
         var isURI = false
-        var authorization: CyderRequestJournal.Record? = nil
+        var authorization: CyderRequestRegistry.Record? = nil
         var lease: CyderOperationGate.Lease? = nil
     }
 
@@ -114,39 +110,17 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
     private var deferredInstanceRequests: [CyderInstanceRequest] = []
     private lazy var instanceCoordinator: CyderInstanceCoordinator = {
         let coordinator = CyderInstanceCoordinator(normalizeSettings: CyderSettingsStore.acceptedSnapshot)
-        coordinator.onRecoveryChanged = { [weak self] records in
+        coordinator.onExecutionTickets = { [weak self] tickets in
             guard let self, !self.quitTransaction else { return }
-            self.requestRecords = records
-            let history = records.compactMap { CyderRecoveryObserver.Record($0) }
+            // Executor tickets are the only launch state that survives Cyder;
+            // they attach native process proofs to this session's launches and
+            // to games still running from an earlier Cyder process.
+            let epoch = self.instanceCoordinator.executionEpoch
+            let history = tickets.compactMap { CyderRecoveryObserver.Record(ticket: $0, currentEpoch: epoch) }
             for record in history { if let proof = record.root { self.wineLaunchObserver?.receive(proof) } }
             self.statusItemController.receiveHistory(history)
-            self.existingLibraryController?.updateRequestSummary(CyderRequestRow.summary(records, outbox: self.outboxNotices))
-            self.existingRequestController?.update(records, outbox: self.outboxNotices)
         }
-        coordinator.onOutboxChanged = { [weak self] notices in
-            guard let self, !self.quitTransaction else { return }
-            self.outboxNotices = notices
-            self.existingLibraryController?.updateRequestSummary(CyderRequestRow.summary(self.requestRecords, outbox: notices))
-            self.existingRequestController?.update(self.requestRecords, outbox: notices)
-        }
-        coordinator.onRequestCancelled = { [weak self] id in self?.cancelQueuedRequest(id) }
         return coordinator
-    }()
-    private lazy var requestController: CyderRequestWindowController = {
-        let controller = CyderRequestWindowController()
-        existingRequestController = controller
-        controller.onResume = { [weak self] id, done in self?.instanceCoordinator.resumeRequest(id: id, completion: done) }
-        controller.onCancel = { [weak self] id, done in self?.instanceCoordinator.cancelRequest(id: id, completion: done) }
-        controller.onResend = { [weak self] id, done in self?.instanceCoordinator.recoverOutbox(id: id, cancel: false, completion: done) }
-        controller.onWithdraw = { [weak self] id, done in self?.instanceCoordinator.recoverOutbox(id: id, cancel: true, completion: done) }
-        controller.onRefresh = { [weak self] in self?.instanceCoordinator.refreshRequests() }
-        controller.onOpenDiagnostics = { NSWorkspace.shared.open(CyderPaths.support.appendingPathComponent("Logs")) }
-        controller.onClose = { [weak self] in
-            guard let self, self.existingSettingsController?.window?.isVisible != true,
-                  self.existingLibraryController?.window?.isVisible != true else { return }
-            self.statusItemController.setUIVisible(false)
-        }
-        return controller
     }()
     private lazy var bottleRecovery = CyderBottleRecovery(support: CyderPaths.support,
         engine: CyderPaths.engine.appendingPathComponent("bin/wineserver")) { [weak self] identity, owner, observedAt in
@@ -191,7 +165,6 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
                   !self.openingGameLibrary, !self.libraryLaunchInProgress, self.queuedLaunches.isEmpty, self.activeProcessOperations == 0, self.pendingLaunchAcquisitions.isEmpty,
                   !self.environmentPreparationInProgress,
                   self.existingSettingsController?.window?.isVisible != true,
-                  self.existingRequestController?.window?.isVisible != true,
                   self.existingUnavailableController?.window?.isVisible != true,
                   self.existingLibraryController?.window?.isVisible != true else { return }
             NSApp.terminate(nil)
@@ -261,7 +234,6 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             }
             guard !self.environmentPreparationInProgress,
                   !self.openingGameLibrary,
-                  self.existingRequestController?.window?.isVisible != true,
                   self.existingLibraryController?.window?.isVisible != true else { return }
             self.statusItemController.setUIVisible(false)
             NSApp.setActivationPolicy(.accessory)
@@ -274,9 +246,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
     private lazy var gameLibraryController: CyderGameLibraryWindowController = {
         let controller = CyderGameLibraryWindowController(readOnly: readOnlyMode)
         existingLibraryController = controller
-        controller.onOpenRequests = { [weak self] in self?.showRequests() }
         controller.onPrepareEnvironment = { [weak self] in self?.prepareEnvironmentFromLibrary() }
-        controller.updateRequestSummary(CyderRequestRow.summary(requestRecords, outbox: outboxNotices))
         controller.onLaunch = { [weak self] executable, settings in
             self?.launchGameFromLibrary(executable, settings: settings)
         }
@@ -295,7 +265,6 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             guard let self,
                   !self.environmentPreparationInProgress,
                   self.existingSettingsController?.window?.isVisible != true,
-                  self.existingRequestController?.window?.isVisible != true,
                   !self.gameLibraryController.isGameSettingsVisible else { return }
             self.statusItemController.setUIVisible(false)
             NSApp.setActivationPolicy(.accessory)
@@ -859,7 +828,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    private func finishRequestPart(_ record: CyderRequestJournal.Record?, failed: Bool = false, uncertain: Bool = false) {
+    private func finishRequestPart(_ record: CyderRequestRegistry.Record?, failed: Bool = false, uncertain: Bool = false) {
         guard let record else { return }
         let remaining = max(0, (requestRemaining[record.id] ?? 1) - 1)
         requestRemaining[record.id] = remaining
@@ -939,7 +908,6 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         if isPrimaryInstance {
             instanceCoordinator.quiesce { [weak self] saved in
                 guard let self else { flushDiagnostics(); return }
-                if !saved { CyderDiagnostics.shared.warning("quit: retaining durable journal for conservative recovery") }
                 self.instanceCoordinator.stop { flushDiagnostics() }
             }
         } else { flushDiagnostics() }
@@ -966,9 +934,6 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         let settings = appMenu.addItem(withTitle: "設定…", action: #selector(showSettings), keyEquivalent: ",")
         settings.target = self
         settings.isEnabled = !readOnlyMode
-        let requests = appMenu.addItem(withTitle: "啟動要求…", action: #selector(showRequests), keyEquivalent: "")
-        requests.target = self
-        requests.isEnabled = !readOnlyMode
         let library = appMenu.addItem(withTitle: "遊戲庫…", action: #selector(showGameLibrary), keyEquivalent: "")
         library.target = self
         appMenu.addItem(NSMenuItem.separator())
@@ -1003,30 +968,6 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         settingsController.showWindow(nil)
         settingsController.window?.makeKeyAndOrderFront(nil)
         settingsController.window?.orderFrontRegardless()
-    }
-
-    @objc private func showRequests() {
-        guard !readOnlyMode else { showReadOnlyStatus(); return }
-        guard !quitTransaction else { return }
-        statusItemController.setUIVisible(true)
-        requestController.update(requestRecords, outbox: outboxNotices)
-        activateCyderUI(dockVisible: true)
-        requestController.showWindow(nil)
-        requestController.window?.makeKeyAndOrderFront(nil)
-    }
-
-    private func cancelQueuedRequest(_ id: String) {
-        cancelledRequestIDs.insert(id)
-        pendingLaunchAcquisitions.remove(id)
-        if let preparation = pendingPreparation.removeValue(forKey: id) { launchPreparation.cancel(preparation) }
-        if let acquisition = pendingRequestAcquisitions.removeValue(forKey: id) { operationGate.cancel(acquisition) }
-        for launch in queuedLaunches where launch.authorization?.id == id {
-            if let lease = launch.lease { operationGate.release(lease) }
-        }
-        queuedLaunches.removeAll { $0.authorization?.id == id }
-        requestRemaining.removeValue(forKey: id)
-        launchNextQueuedExecutableIfReady()
-        settleLaunchIngressIfIdle()
     }
 
     private func settleLaunchIngressIfIdle() {
@@ -1146,7 +1087,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         _ executable: URL,
         settings: CyderExecutableSettings?,
         launchArguments: [String]? = nil,
-        authorization: CyderRequestJournal.Record? = nil,
+        authorization: CyderRequestRegistry.Record? = nil,
         lease: CyderOperationGate.Lease? = nil
     ) {
         guard !quitTransaction, !readOnlyMode, isPrimaryInstance else {
@@ -1235,7 +1176,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func enqueueOrLaunch(_ executableFiles: [String], arguments: [String]? = nil,
-                                 authorization: CyderRequestJournal.Record? = nil) {
+                                 authorization: CyderRequestRegistry.Record? = nil) {
         guard !quitTransaction else { return }
         guard let authorization else {
             instanceCoordinator.submit(.init(files: executableFiles, arguments: arguments, urls: [], showUI: false)) { [weak self] accepted in
@@ -1267,28 +1208,30 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         }) { [weak self] outcome in
             guard let self else { return }
             self.pendingPreparation.removeValue(forKey: requestID)
-            guard !self.quitTransaction, !self.cancelledRequestIDs.contains(requestID) else {
+            guard !self.quitTransaction else {
                 self.pendingLaunchAcquisitions.remove(requestID); return
             }
             guard case .resolved(let optionalScope) = outcome, let scope = optionalScope else {
-                self.instanceCoordinator.deferRequest(id: requestID, reason: "scope-unavailable") { saved in
-                    self.pendingLaunchAcquisitions.remove(requestID)
-                    guard !self.quitTransaction else { return }
-                    if !self.libraryLaunchInProgress && self.pendingLaunchAcquisitions.isEmpty && self.queuedLaunches.isEmpty {
-                        self.settleLaunchIngressIfIdle()
-                        if self.existingLibraryController?.window?.isVisible != true { self.showRequests() }
-                    }
-                    if !saved { CyderDiagnostics.shared.warning("unable to persist launch preflight pause; accepted request retained") }
+                // Nothing is kept for a later resume: say so and let the user
+                // start the game again once the environment is available.
+                self.pendingLaunchAcquisitions.remove(requestID)
+                if let record = launch.authorization { self.instanceCoordinator.withdraw(record, reason: "scope-unavailable") }
+                self.requestRemaining.removeValue(forKey: requestID)
+                if !self.libraryLaunchInProgress && self.pendingLaunchAcquisitions.isEmpty && self.queuedLaunches.isEmpty {
+                    self.settleLaunchIngressIfIdle()
                 }
+                CyderDiagnostics.shared.warning("launch withdrawn: environment scope unavailable")
+                self.hideSetup()
+                self.showAlert("無法啟動遊戲", "Cyder 無法確認這個遊戲使用的 Windows 環境，程式尚未執行。請確認遊戲檔案仍在原位置後再啟動一次。")
                 return
             }
-            // Stay queued in the durable journal while a conflicting stop or
-            // mutation owns this environment. Authorization follows the lease.
+            // Wait in memory while a conflicting stop or mutation owns this
+            // environment. Authorization follows the lease.
             self.pendingRequestAcquisitions[requestID] = self.operationGate.acquire(scope) { lease in
                 self.pendingRequestAcquisitions.removeValue(forKey: requestID)
                 self.pendingLaunchAcquisitions.remove(requestID)
                 guard let lease else { return }
-                guard !self.quitTransaction, !self.cancelledRequestIDs.contains(requestID) else { self.operationGate.release(lease); return }
+                guard !self.quitTransaction else { self.operationGate.release(lease); return }
                 var ready = launch; ready.lease = lease
                 self.queuedLaunches.append(ready)
                 self.launchNextQueuedExecutableIfReady()
@@ -1604,7 +1547,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
 
     private func runDocumentLaunch(context: CyderLaunchContext, executable: URL,
                                    launchArguments: [String]?, launchEnvironment: [String: String],
-                                   authorization: CyderRequestJournal.Record?, lease: CyderOperationGate.Lease?) async -> CyderLaunchOutcome {
+                                   authorization: CyderRequestRegistry.Record?, lease: CyderOperationGate.Lease?) async -> CyderLaunchOutcome {
         // Opening an EXE is a launch-only path. It must never create or repair
         // a prefix invisibly; the user can open Cyder.app to see setup progress
         // and recovery errors.
@@ -1791,7 +1734,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         prefix: URL,
         launchArguments: [String]? = nil,
         launchEnvironment: [String: String] = [:],
-        authorization: CyderRequestJournal.Record? = nil,
+        authorization: CyderRequestRegistry.Record? = nil,
         lease: CyderOperationGate.Lease? = nil,
         launchTarget: CyderWineLaunchTarget = .exe
     ) async -> CyderLaunchOutcome {
@@ -1838,13 +1781,13 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         let acceptedSettings: CyderSettings
         do {
             guard let snapshot = authorization?.settingsSnapshot else {
-                throw CyderRequestJournal.Failure.invalid
+                throw CyderRequestRegistry.Failure.invalid
             }
             acceptedSettings = try JSONDecoder().decode(CyderSettings.self, from: snapshot)
             var info = stat()
             guard lstat(requestDirectory.path, &info) == 0, info.st_mode & S_IFMT == S_IFDIR,
                   info.st_uid == getuid(), chmod(requestDirectory.path, 0o700) == 0 else {
-                throw CyderRequestJournal.Failure.unavailable
+                throw CyderRequestRegistry.Failure.unavailable
             }
             try JSONEncoder().encode(acceptedSettings).write(to: snapshotURL, options: .atomic)
             try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: snapshotURL.path)
@@ -1961,8 +1904,10 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             operationScope: .prefix(prefix),
             onSpawn: { [weak self] receipt in
                 guard let self else { return }
-                let birth = CyderEnvironmentProbe.processIdentity(receipt.supervisorPID)
-                self.instanceCoordinator.recordSpawn(authorization, pid: receipt.supervisorPID, boot: birth?.boot, started: birth?.started)
+                _ = receipt
+                // The executor's ticket write also wakes the watcher; this
+                // only shortens the first read after spawn.
+                DispatchQueue.main.async { self.instanceCoordinator.refreshExecutionReceipts() }
             },
             onRelease: { [weak self] in
                 try? FileManager.default.removeItem(at: snapshotURL)
@@ -2518,7 +2463,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         args: [String],
         stage: CyderStage,
         operation: String,
-        authorization: CyderRequestJournal.Record? = nil,
+        authorization: CyderRequestRegistry.Record? = nil,
         extraEnvironment: [String: String] = [:],
         lease: CyderOperationGate.Lease? = nil,
         operationScope: CyderOperationGate.Scope? = nil,
@@ -2652,7 +2597,8 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
                 } else { handoff = nil }
                 let ticket = try CyderExecutionOwner.prepare(root: ownerRoot, issuer: issuer, scope: prefix,
                                                             correlation: correlation, handoff: handoff,
-                                                            requiresGlobalScope: scope == .allEnvironments)
+                                                            requiresGlobalScope: scope == .allEnvironments,
+                                                            displayName: authorization?.displayName)
                 process.executableURL = helper
                 process.arguments = ["--execution-owner", ownerRoot.path, ticket.uuidString, "--", "/bin/bash"] + args
                 process.environment = environment
@@ -2801,7 +2747,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @available(macOS 11.0, *)
-    private func enqueueOrLaunchURIs(_ uris: [String], authorization: CyderRequestJournal.Record? = nil) {
+    private func enqueueOrLaunchURIs(_ uris: [String], authorization: CyderRequestRegistry.Record? = nil) {
         guard !uris.isEmpty, !quitTransaction else { return }
         guard let authorization else {
             instanceCoordinator.submit(.init(files: [], arguments: nil, urls: uris, showUI: false)) { [weak self] accepted in
@@ -2842,7 +2788,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @available(macOS 11.0, *)
-    private func launchURI(_ uri: String, authorization: CyderRequestJournal.Record? = nil,
+    private func launchURI(_ uri: String, authorization: CyderRequestRegistry.Record? = nil,
                            lease: CyderOperationGate.Lease? = nil) {
         guard !quitTransaction else { if let lease { operationGate.release(lease) }; return }
         guard let resourcePath = Bundle.main.resourcePath else {

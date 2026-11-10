@@ -178,7 +178,7 @@ final class CyderStatusItemController: NSObject, NSMenuDelegate {
             let id = record.request.id
             guard historyRecords[id].map({ record.version > $0.version && record.request.digest == $0.request.digest }) ?? true else { continue }
             historyRecords[id] = record; changed.append(record)
-            events.append(.journalRequest(record.request, version: record.version))
+            events.append(.recordedRequest(record.request, version: record.version))
             if let root = record.root { attachNativeRoot(root) }
         }
         if !events.isEmpty { lifecycleStore.send(events); recoveryObserver.update(changed) }

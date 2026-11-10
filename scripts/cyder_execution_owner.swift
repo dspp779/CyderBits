@@ -70,6 +70,9 @@ enum CyderExecutionOwner {
         // Keep the actual prefix identity for the final handoff even when
         // shared-runtime preparation requires a global mutation barrier.
         var requiresGlobalScope: Bool? = nil
+        /// What the user launched, for showing a game that is still running
+        /// after Cyder restarts. Tickets are the only launch state that survives.
+        var displayName: String? = nil
         var effectiveScope: String? { requiresGlobalScope == true ? nil : scope }
     }
     private final class Directory {
@@ -137,6 +140,7 @@ enum CyderExecutionOwner {
                   (ticket.schema == 2) == (ticket.requiresGlobalScope == true),
                   name == ticket.id.uuidString + ".json",
                   ticket.correlation?.isValid != false, ticket.handoff?.isValid != false,
+                  (ticket.displayName?.count ?? 0) <= 100,
                   ticket.nativeSpawn?.isValid != false,
                   (ticket.handoff == nil || ticket.scope != nil),
                   (ticket.nativeSpawn == nil || ticket.handoff != nil),
@@ -165,7 +169,7 @@ enum CyderExecutionOwner {
         return ("\(info.st_uid):\(info.st_dev):\(info.st_ino)", canonical)
     }
     static func prepare(root: URL, issuer: UUID, scope: String?, correlation: Correlation? = nil, handoff: Handoff? = nil,
-                        requiresGlobalScope: Bool = false) throws -> UUID {
+                        requiresGlobalScope: Bool = false, displayName: String? = nil) throws -> UUID {
         precondition(!Thread.isMainThread)
         guard correlation?.isValid != false else { throw Failure.invalid }
         let directory = try Directory(root)
@@ -183,7 +187,8 @@ enum CyderExecutionOwner {
         // global barrier and executing a shared mutation under a prefix lock.
         let ticket = Ticket(schema: requiresGlobalScope ? 2 : 1, id: UUID(), issuer: issuer, scope: identity.key, prefix: identity.path,
                             phase: .prepared, correlation: correlation, handoff: canonicalHandoff,
-                            requiresGlobalScope: requiresGlobalScope ? true : nil)
+                            requiresGlobalScope: requiresGlobalScope ? true : nil,
+                            displayName: displayName.map { String($0.unicodeScalars.filter { !CharacterSet.controlCharacters.contains($0) }.map(String.init).joined().prefix(100)) })
         try directory.write(ticket)
         return ticket.id
     }
@@ -194,7 +199,7 @@ enum CyderExecutionOwner {
         return try directory.names().map { try directory.read($0) }
     }
     /// Correlated results are eligible only after the exact snapshot has been
-    /// durably copied into the request journal. Missing tickets cannot execute.
+    /// delivered to the app. Missing tickets cannot execute.
     static func prune(root: URL, confirmed: [Ticket]) throws {
         precondition(!Thread.isMainThread)
         let directory = try Directory(root)

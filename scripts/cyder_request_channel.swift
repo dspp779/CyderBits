@@ -15,11 +15,11 @@ struct CyderRequestReply: Codable {
     let primaryEpoch: UUID
     let namespace: UUID?
     let status: String
-    let record: CyderRequestJournal.Record?
+    let record: CyderRequestRegistry.Record?
 }
 
 /// Bounded, same-user Unix stream channel. Exactly one JSON line per connection.
-/// Transport completion never substitutes for journal acceptance.
+/// Transport completion never substitutes for registry acceptance.
 final class CyderRequestChannel {
     private let path: String
     private let queue = DispatchQueue(label: "local.cyder.request-channel")
@@ -40,7 +40,7 @@ final class CyderRequestChannel {
     static let replyDeadline: TimeInterval = 30
     init(path: String) { self.path = path }
 
-    /// Call only while holding the primary ownership and journal locks.
+    /// Call only while holding the primary ownership lock.
     func start(handler: @escaping (CyderRequestMessage, @escaping (CyderRequestReply) -> Void) -> Void) -> Bool {
         precondition(!Thread.isMainThread)
         self.handler = handler
@@ -108,7 +108,7 @@ final class CyderRequestChannel {
             source.resume()
             // Frame deadline only: a same-user peer that never finishes its one
             // line cannot hold one of the 16 slots. Once a frame is delivered,
-            // the durable handler (journal fsync) gets its own, longer budget.
+            // the handler gets its own, longer budget.
             queue.asyncAfter(deadline: .now() + Self.frameDeadline) { [weak self] in
                 guard let client = self?.clients[clientFD], client.token == token, !client.delivered else { return }
                 self?.remove(clientFD)

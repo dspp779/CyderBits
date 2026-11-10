@@ -93,7 +93,7 @@ var state = L.State(); state.reduce(.manage(environment))
 let stamp = state.stamp(for: scope)!
 let synthetic = L.ProcessID(boot: "fixture", pid: 42001, started: 1)
 state.reduce(.independentProcess(stamp, synthetic, name: "Unknown.exe", existence: .alive))
-state.reduce(.journalRequest(.init(id: "history", digest: "digest", environment: scope, phase: .uncertain, launch: "history"), version: 1))
+state.reduce(.recordedRequest(.init(id: "history", digest: "digest", environment: scope, phase: .uncertain, launch: "history"), version: 1))
 let effects = state.reduce(.recoveredLaunch(stamp, request: "history", launch: .init(id: "history", request: "history", environment: scope, name: "Historical", deadline: 0), root: synthetic))
 precondition(effects == [.restoreObservation(stamp, "history")] && state.snapshot.processes[synthetic]?.launch == "history")
 for existence in [L.Existence.alive, .unconfirmed, .exited] {

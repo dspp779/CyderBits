@@ -46,7 +46,7 @@ struct CyderSettingsHarness {
         let acceptedScrolling = try JSONDecoder().decode(CyderSettings.self, from: scrollingSnapshot)
         precondition(acceptedScrolling.scrolling == .traditional)
         // Cross-component regression: real default/explicit model snapshots
-        // must survive the journal's durable acceptance, not just JSON decoding.
+        // must survive registry acceptance, not just JSON decoding.
         func waitFor<T>(_ begin: (@escaping (T) -> Void) -> Void) -> T {
             let semaphore = DispatchSemaphore(value: 0)
             var result: T?
@@ -57,17 +57,16 @@ struct CyderSettingsHarness {
         let acceptanceRoot = path.deletingLastPathComponent().appendingPathComponent("acceptance")
         try FileManager.default.createDirectory(at: acceptanceRoot, withIntermediateDirectories: true)
         let livePreferences = acceptanceRoot.appendingPathComponent("settings.json")
-        let acceptedJournal = CyderRequestJournal(directory: acceptanceRoot.appendingPathComponent("journal"),
+        let acceptedJournal = CyderRequestRegistry(
             delivery: DispatchQueue(label: "test.settings-acceptance"), captureSettings: {
                 try CyderSettingsStore.acceptedSnapshot(CyderAcceptedSettings.capture(at: livePreferences))
             })
-        _ = try waitFor { acceptedJournal.open(completion: $0) }.get()
-        let acceptedNamespace = waitFor { acceptedJournal.namespace(completion: $0) }!
+        let acceptedNamespace = acceptedJournal.namespace
         let loginPayload = CyderRequestPayload(files: ["/isolated/MapleStory.exe"],
             arguments: ["login.example.invalid", "8484", "BeanFun", "fake-token", "fake-account"], urls: [], showUI: false)
         // New installation: no settings.json. Normalization still emits schema 14.
         let firstRequest = try waitFor {
-            acceptedJournal.submit(id: CyderRequestJournal.makeID(namespace: acceptedNamespace), payload: loginPayload, completion: $0)
+            acceptedJournal.submit(id: CyderRequestRegistry.makeID(namespace: acceptedNamespace), payload: loginPayload, completion: $0)
         }.get()
         precondition(firstRequest.phase == .queued && firstRequest.settingsSnapshot != nil)
         let firstSettings = try JSONDecoder().decode(CyderSettings.self, from: firstRequest.settingsSnapshot!)
@@ -76,14 +75,14 @@ struct CyderSettingsHarness {
         configured.perExecutable["MapleStory.exe"] = CyderExecutableSettings(scrolling: .traditional)
         try JSONEncoder().encode(configured).write(to: livePreferences)
         let savedRequest = try waitFor {
-            acceptedJournal.submit(id: CyderRequestJournal.makeID(namespace: acceptedNamespace), payload: loginPayload, completion: $0)
+            acceptedJournal.submit(id: CyderRequestRegistry.makeID(namespace: acceptedNamespace), payload: loginPayload, completion: $0)
         }.get()
         let savedSettings = try JSONDecoder().decode(CyderSettings.self, from: savedRequest.settingsSnapshot!)
         precondition(savedSettings.perExecutable["MapleStory.exe"]?.scrolling == .traditional)
         precondition(savedRequest.payload?.arguments == loginPayload.arguments)
         let dispatched = try waitFor { acceptedJournal.authorizeDispatch(id: savedRequest.id, completion: $0) }.get()
         precondition(dispatched.phase == .dispatching && dispatched.settingsSnapshot == savedRequest.settingsSnapshot)
-        // Newer schemas are CyderSettings' concern, not a journal range check.
+        // Newer schemas are CyderSettings' concern, not an acceptance range check.
         precondition(CyderAcceptedSettings.isValid(Data(#"{"schemaVersion":15}"#.utf8)))
         precondition(!CyderAcceptedSettings.isValid(Data(#"{"schemaVersion":0}"#.utf8)))
         let journalClosed = DispatchSemaphore(value: 0)

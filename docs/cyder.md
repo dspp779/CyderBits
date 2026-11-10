@@ -113,10 +113,16 @@ LaunchServices，並把 `--args` 後的每一個值原樣轉送給 Windows 程�
 省略 `-n` 可能只把 EXE 的 open event 送到既有 Cyder，而遺失這次參數。
 
 macOS 11+ 的 Cyder native launcher 在隔離的 support root 內維持單一可派送 primary。
-sentinel 與 journal 以檔案鎖確認所有權，Unix socket 負責傳輸；socket 不回應不代表可以奪取活 primary。
+sentinel 以檔案鎖確認所有權，Unix socket 負責傳輸；socket 不回應不代表可以奪取活 primary。
 `open -n` 建立的額外 instance 以固定 request ID 轉送 EXE、動態參數或「顯示 Cyder」要求，
-只有 durable journal 接受後才 ACK；重送不重新派送。無法確認時提供唯讀遊戲庫及診斷入口，
-不以自動重試冒險重複啟動。
+primary 在記憶體中的 request registry 接受後才 ACK；同 ID 重送不重新派送。無法確認時提供唯讀遊戲庫
+及診斷入口，不以自動重試冒險重複啟動。
+
+啟動要求不寫入磁碟：Cyder 結束或當機時尚未派送的要求直接消失，不會在下次開啟時重播，
+需要時由使用者重新啟動遊戲。唯一跨越 Cyder 的狀態是原生 executor ticket
+（`execution-owners/`），它記錄每次啟動的遊戲名稱與原生程序身分，供重新開啟 Cyder 後辨識
+仍在執行的遊戲；遊戲結束並交付後即刪除。0.14.0-rc.1 留下的 `request-journal`／`request-outbox`
+會在 primary 啟動時移除，不會被重播。
 
 一次啟動的 LaunchGroup 提供顯示及有界交棒觀察；選單存續由受管理環境、未決要求與 Cyder 視窗決定。
 根程序使用可信 executor receipt 的 boot／PID／出生時間與 prefix 身分；同 prefix 不推定遊戲歸屬，

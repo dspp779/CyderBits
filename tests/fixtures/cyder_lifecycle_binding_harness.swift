@@ -52,24 +52,23 @@ Task {
 }
 pump { stamp != nil }
 let boundStamp = stamp!
-let journal = CyderRequestJournal(directory: directory.appendingPathComponent("journal"))
-var opened = false, namespace: UUID?, record: CyderRequestJournal.Record?
-journal.open { if case .success = $0 { opened = true } }; pump { opened }
-journal.namespace { namespace = $0 }; pump { namespace != nil }
-let requestID = namespace!.uuidString + ":" + UUID().uuidString
+let journal = CyderRequestRegistry()
+var record: CyderRequestRegistry.Record?
+let requestID = CyderRequestRegistry.makeID(namespace: journal.namespace)
 journal.submit(id: requestID, payload: .init(files: ["/fixture.exe"], arguments: nil, urls: [], showUI: false)) {
     if case .success(let value) = $0 { record = value }
 }
 pump { record != nil }
 precondition(record!.phase == .queued)
-controller.receiveHistory([CyderRecoveryObserver.Record(record!)!])
-pump { controller.lifecycleSnapshot.requests[requestID]?.phase == .queued }
 record = nil
 journal.authorizeDispatch(id: requestID) { if case .success(let value) = $0 { record = value } }
 pump { record != nil }
 let committed = record!
 precondition(committed.phase == .dispatching)
-controller.receiveHistory([CyderRecoveryObserver.Record(committed)!])
+// The app learns of a dispatched launch from its executor ticket.
+let activeTicket = CyderExecutionOwner.Ticket(schema: 1, id: UUID(), issuer: committed.executorEpoch!, scope: nil, phase: .active,
+    correlation: .init(requestID: committed.id, launchID: committed.launchID!, digest: committed.digest), displayName: "Committed fixture")
+controller.receiveHistory([CyderRecoveryObserver.Record(ticket: activeTicket, currentEpoch: committed.executorEpoch!)!])
 let authority = CyderLaunchObserver.Authority(request: committed.id, launch: committed.launchID!, digest: committed.digest, epoch: committed.executorEpoch!)
 controller.beginLaunch(id: authority.launch, prefix: prefix, executableName: "Committed fixture", authority: authority, stamp: boundStamp,
     committedRequest: .init(id: committed.id, digest: committed.digest, environment: boundStamp.environment, phase: .dispatching, launch: authority.launch))
@@ -137,4 +136,4 @@ pump { checkedRelease }
 monitor.stop(); observer.cancel(); controller.quiesce()
 var closed = false; journal.close { closed = true }; pump { closed }
 precondition(child.isRunning, "quiesce must not terminate native client")
-print("PASS formal journal authorization + monitor stamp + status adapter + lifecycle store + observer + menu; actual native birth, injected windows/exit, exact scope, generation retirement and no replay/kill")
+print("PASS formal registry authorization + monitor stamp + status adapter + lifecycle store + observer + menu; actual native birth, injected windows/exit, exact scope, generation retirement and no replay/kill")

@@ -1,6 +1,6 @@
-/// Phases of a native executor ticket, shared by the owner ledger, the request
-/// journal's receipts and the observers. Raw values are the on-disk strings, so
-/// existing tickets and journals decode unchanged; an unknown value now fails
+/// Phases of a native executor ticket, shared by the owner ledger and the
+/// observers. Raw values are the on-disk strings, so existing tickets decode
+/// unchanged; an unknown value now fails
 /// decoding instead of being silently ignored by a string comparison.
 enum CyderTicketPhase: String, Codable, CaseIterable {
     /// Issued by the app, revocable until a helper claims it.

@@ -37,65 +37,48 @@ let restoredFile = restoredDirectory.appendingPathComponent("managed-environment
 try bytes.write(to: restoredFile); try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: restoredFile.path)
 oldMonitor.stop()
 let identity = CyderEnvironmentProbe.identify(prefix: prefix, engine: child.executableURL!)!
-let journalDirectory = directory.appendingPathComponent("journal")
-let firstJournal = CyderRequestJournal(directory: journalDirectory)
-var opened = false, namespace: UUID?
-firstJournal.open { if case .success = $0 { opened = true } }; pump("journal open") { opened }
-firstJournal.namespace { namespace = $0 }; pump("namespace") { namespace != nil }
-func submit(_ name: String) -> CyderRequestJournal.Record {
-    var record: CyderRequestJournal.Record?
-    firstJournal.submit(id: namespace!.uuidString + ":" + UUID().uuidString,
-        payload: .init(files: ["/fixture/\(name).exe"], arguments: nil, urls: [], showUI: false)) {
-        if case .success(let value) = $0 { record = value }
-    }
-    pump("submit") { record != nil }; return record!
-}
-let queued = submit("Queued"), initial = submit("Recovered")
-var authorized: CyderRequestJournal.Record?
-firstJournal.authorizeDispatch(id: initial.id) { if case .success(let value) = $0 { authorized = value } }
-pump("authorized") { authorized != nil }
-let committed = authorized!
-let receipt = CyderRequestJournal.ExecutionReceipt(ticketID: UUID(), requestID: committed.id, launchID: committed.launchID!, epoch: committed.executorEpoch!, digest: committed.digest,
-    phase: .handedOff, ownerPID: nil, ownerBoot: nil, ownerStarted: nil, childPID: nil, childBoot: nil, childStarted: nil, status: nil,
-    nativeSpawn: .init(phase: .spawned, bridgePID: process.pid, bridgeBoot: process.boot, bridgeStarted: process.started,
-        processPID: process.pid, processBoot: process.boot, processStarted: process.started, status: nil, signalled: nil), prefixScope: identity.executionScope)
-var savedReceipt = false
-firstJournal.reconcileExecutions([receipt]) { if case .success(let ids) = $0 { savedReceipt = ids == [receipt.ticketID] } }
-pump("native receipt persisted") { savedReceipt }
-var closed = false; firstJournal.close { closed = true }; pump("journal close") { closed }
-let journal = CyderRequestJournal(directory: journalDirectory)
-opened = false; journal.open { if case .success = $0 { opened = true } }; pump("journal reopen") { opened }
-var records: [CyderRequestJournal.Record]?
-journal.snapshot { if case .success(let value) = $0 { records = value } }; pump("recovery snapshot") { records != nil }
-precondition(records!.first { $0.id == initial.id }?.phase == .uncertain && records!.first { $0.id == queued.id }?.phase == .awaitingUserResume)
+// A game launched by an earlier Cyder process survives only as its executor
+// ticket (requests are not persisted). Its native spawn names the live child.
+let earlierEpoch = UUID(), currentEpoch = UUID()
+let earlierTicket = CyderExecutionOwner.Ticket(schema: 1, id: UUID(), issuer: earlierEpoch, scope: identity.executionScope,
+    phase: .handedOff, correlation: .init(requestID: UUID().uuidString + ":" + UUID().uuidString, launchID: UUID().uuidString,
+        digest: String(repeating: "a", count: 64)),
+    handoff: .init(executable: "/fixture/wine", pidFile: directory.appendingPathComponent("pid").path),
+    nativeSpawn: .init(phase: .spawned, bridge: .init(boot: process.boot, pid: process.pid, started: process.started),
+        process: .init(boot: process.boot, pid: process.pid, started: process.started)), displayName: "Recovered.exe")
+let history = [CyderRecoveryObserver.Record(ticket: earlierTicket, currentEpoch: currentEpoch)!]
+precondition(history[0].request.phase == .uncertain, "an earlier process's launch has an unknown outcome")
+let initial = (id: earlierTicket.correlation!.requestID, launchID: earlierTicket.correlation!.launchID)
 let nativeAX = CyderWindowAccess.Driver(scan: { _ in .windows([]) }, equal: { $0 === $1 }, activate: { _,_,_ in fatalError("recovery must not activate") })
 let controller = CyderStatusItemController(windowDriver: nativeAX); controller.setUIVisible(true)
-controller.receiveLifecycleEvent(.restoring(true)); controller.receiveHistory(records!.compactMap { CyderRecoveryObserver.Record($0) })
-pump("history in common store") { controller.lifecycleSnapshot.requests.count == 2 }
+controller.receiveLifecycleEvent(.restoring(true)); controller.receiveHistory(history)
+pump("history in common store") { controller.lifecycleSnapshot.requests.count == 1 }
 precondition(controller.lifecycleSnapshot.processes.isEmpty && controller.lifecycleSnapshot.launches.isEmpty, "history treated as living without calibration")
 let monitor = CyderEnvironmentMonitor(epoch: controller.lifecycleEpoch, directory: restoredDirectory, expectedEngine: child.executableURL!, waitersEnabled: false,
     probe: { _ in .alive(process) }, event: controller.receiveLifecycleEvent)
 var restored = false
 monitor.restore { restored = true; controller.receiveLifecycleEvent(.restoring(false)) }
-pump("native root restored after current calibration") { restored && controller.nativeRootPID(id: committed.launchID!) == process.pid && controller.lifecycleSnapshot.processes[process]?.existence == .alive }
+pump("native root restored after current calibration") { restored && controller.nativeRootPID(id: initial.launchID) == process.pid && controller.lifecycleSnapshot.processes[process]?.existence == .alive }
 let snapshot = controller.lifecycleSnapshot
-precondition(snapshot.requests[initial.id]?.phase == .uncertain && snapshot.requests[queued.id]?.phase == .awaitingUserResume)
-precondition(!snapshot.hasActiveWork && snapshot.launches[committed.launchID!]?.outcome == .unconfirmed, "recovery manufactured new observation/dispatch")
-precondition(snapshot.processes[process]?.ownership == .rootReceipt && snapshot.processes[process]?.launch == committed.launchID)
+precondition(snapshot.requests[initial.id]?.phase == .uncertain)
+precondition(!snapshot.hasActiveWork && snapshot.launches[initial.launchID]?.outcome == .unconfirmed, "recovery manufactured new observation/dispatch")
+precondition(snapshot.processes[process]?.ownership == .rootReceipt && snapshot.processes[process]?.launch == initial.launchID)
 let menu = NSMenu(); controller.menuNeedsUpdate(menu)
 precondition(menu.items.contains { $0.title.contains("Recovered.exe") && $0.title.contains("尚未確認視窗") })
 precondition(!menu.items.contains { $0.title.contains("正在啟動") })
+// The new primary's registry has never seen the earlier request: it cannot be dispatched again.
+let registry = CyderRequestRegistry()
 var rejectedReplay = false
-journal.authorizeDispatch(id: initial.id) { if case .failure(.tooLate) = $0 { rejectedReplay = true } }
+registry.authorizeDispatch(id: initial.id) { if case .failure(.missing) = $0 { rejectedReplay = true } }
 pump("historical request cannot dispatch") { rejectedReplay }
 let count = snapshot.launches.count
-for _ in 0..<40 { controller.receiveHistory(records!.compactMap { CyderRecoveryObserver.Record($0) }) }
+for _ in 0..<40 { controller.receiveHistory(history) }
 settle(); precondition(controller.lifecycleSnapshot.launches.count == count)
 controller.quiesce(); monitor.stop(); settle()
 precondition(child.isRunning, "recovery quit killed the actual native process")
-print("PASS persisted journal + registry reopen, current native birth, formal controller/store/session, historical result retained, no replay/focus, duplicate coalescing, quit preserves native child; server and window data injected")
+print("PASS executor ticket + registry reopen, current native birth, formal controller/store/session, historical result retained, no replay/focus, duplicate coalescing, quit preserves native child; server and window data injected")
 
-// Real native inspection rejects a prior boot and PID reuse, even when journal
+// Real native inspection rejects a prior boot and PID reuse, even when ticket
 // correlation and prefix are otherwise valid. No historical title is authority.
 func candidate(_ id: String, birth: L.ProcessID, scope: String = identity.executionScope) -> CyderRecoveryObserver.Record {
     .init(version: 1, request: .init(id: id, digest: id, environment: nil, phase: .uncertain, launch: id), name: id,
@@ -126,7 +109,7 @@ ambiguous.setUIVisible(true)
 ambiguous.receiveHistory([candidate("claim-one", birth: process), candidate("claim-two", birth: process)])
 ambiguous.receiveLifecycleEvent(.manage(.init(id: identity.environment, prefix: identity.prefix, engine: identity.engine, generation: 1, existence: .alive, health: .healthy)))
 settle(0.2)
-precondition(ambiguousReads.calls() == 0 && ambiguous.lifecycleSnapshot.launches.isEmpty, "conflicting journal claims guessed one owner")
+precondition(ambiguousReads.calls() == 0 && ambiguous.lifecycleSnapshot.launches.isEmpty, "conflicting ticket claims guessed one owner")
 ambiguous.quiesce()
 print("PASS conflicting historical claims do not choose an arbitrary launch owner")
 
@@ -199,4 +182,3 @@ print("recovery callback-cycle proxy samples=30 p95_ms=\(samples.sorted()[28]) m
 print("recovery_sample,callback_cycle_ms")
 for (i, sample) in samples.enumerated() { print("\(i + 1),\(sample)") }
 print("PASS blocked recovery retains physical slots and permits menus/quit; no late restoration")
-closed = false; journal.close { closed = true }; pump("final journal close") { closed }

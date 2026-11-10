@@ -16,10 +16,14 @@ assert_contains "$instance" 'CyderSentinelServer' \
   "instances must use the sentinel socket as the owner lock"
 assert_contains "$instance" 'CyderRequestChannel' \
   "secondary delivery must use the bounded request channel"
-assert_contains "$instance" 'journal.authorizeDispatch' \
-  "dispatch must cross the persistent journal before execution"
+assert_contains "$instance" 'registry.authorizeDispatch' \
+  "dispatch must cross the request registry's fence before execution"
 assert_not_contains "$instance" 'requestPollTimer' \
-  "legacy polling must not run alongside the journal consumer"
+  "legacy polling must not run alongside the registry consumer"
+assert_not_contains "$instance" 'CyderRequestOutbox' \
+  "requests must not be persisted in an outbox"
+assert_not_contains "$app" '啟動要求…' \
+  "the unreachable request history window must stay removed"
 assert_not_contains "$instance" '.native-instance-' \
   "the mkdir pid lock must not remain the owner lock"
 assert_contains "$app" 'isPrimaryInstance' \

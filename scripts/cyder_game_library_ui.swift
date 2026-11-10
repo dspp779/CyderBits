@@ -1231,7 +1231,6 @@ final class CyderGameLibraryWindowController: NSWindowController, NSWindowDelega
     var onLaunch: ((URL, CyderExecutableSettings?) -> Void)?
     var onRemoveProfile: ((URL, @escaping (Bool) -> Void) -> Void)?
     var onOpenPreferences: (() -> Void)?
-    var onOpenRequests: (() -> Void)?
     var onPrepareEnvironment: (() -> Void)?
     var onClose: (() -> Void)?
 
@@ -1276,16 +1275,6 @@ final class CyderGameLibraryWindowController: NSWindowController, NSWindowDelega
     private let toolbarPreferencesButton = NSButton()
     private let toolbarRefreshButton = NSButton()
     private let toolbarAddButton = NSButton()
-    private let requestSummary = NSButton()
-    private var requestSummaryHeight: NSLayoutConstraint?
-
-    func updateRequestSummary(_ text: String) {
-        requestSummary.title = text
-        requestSummary.isHidden = text.isEmpty
-        requestSummaryHeight?.constant = text.isEmpty ? 0 : 32
-        requestSummary.setAccessibilityLabel(text)
-    }
-    @objc private func openRequests() { onOpenRequests?() }
 
     convenience init(loader: CyderLibraryLoader? = nil, readOnly: Bool = false) {
         let window = NSWindow(
@@ -1450,18 +1439,10 @@ final class CyderGameLibraryWindowController: NSWindowController, NSWindowDelega
         content.addSubview(recoveryNotice)
         content.addSubview(scroll)
         content.addSubview(emptyState)
-        requestSummary.target = self; requestSummary.action = #selector(openRequests)
-        requestSummary.bezelStyle = .rounded; requestSummary.isHidden = true
-        requestSummary.translatesAutoresizingMaskIntoConstraints = false; content.addSubview(requestSummary)
-        requestSummaryHeight = requestSummary.heightAnchor.constraint(equalToConstant: 0)
         NSLayoutConstraint.activate([
-            requestSummary.topAnchor.constraint(equalTo: content.topAnchor, constant: 32),
-            requestSummary.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 12),
-            requestSummary.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -12),
-            requestSummaryHeight!,
             scroll.leadingAnchor.constraint(equalTo: content.leadingAnchor),
             scroll.trailingAnchor.constraint(equalTo: content.trailingAnchor),
-            recoveryNotice.topAnchor.constraint(equalTo: requestSummary.bottomAnchor),
+            recoveryNotice.topAnchor.constraint(equalTo: content.topAnchor, constant: 32),
             recoveryNotice.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 12),
             recoveryNotice.trailingAnchor.constraint(lessThanOrEqualTo: content.trailingAnchor, constant: -12),
             recoveryHeight!,

@@ -1151,7 +1151,7 @@ final class CyderSettingsStore {
         }
     }
 
-    /// Materialize defaults and migrations before journal acceptance, so even
+    /// Materialize defaults and migrations at acceptance, so even
     /// absent keys cannot change meaning while the request waits or recovers.
     static func acceptedSnapshot(_ data: Data) throws -> Data {
         let settings = try JSONDecoder().decode(CyderSettings.self, from: data)

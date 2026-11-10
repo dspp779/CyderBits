@@ -33,7 +33,7 @@ def finish(child, output, seed=False):
     state = json.loads((output / 'terminated.json').read_text())
     assert state['expected'], state
     if state['mode'] != 'secondary':
-        expected = ['unavailable', 'read-only-library'] if state['mode'] == 'unavailable' else ['library', 'settings', 'requests', 'reopen']
+        expected = ['unavailable', 'read-only-library'] if state['mode'] == 'unavailable' else ['library', 'settings', 'reopen']
         assert state['actions'][:len(expected)] == expected, state
         assert state['actions'][-1].startswith('quit-'), state
         assert 0 <= state['quitSeconds'] < 8, state
@@ -46,17 +46,15 @@ def until(predicate, timeout=20):
         time.sleep(.03)
     raise AssertionError('integration observation deadline')
 
-def records(case):
-    path = root / case / 'support/request-journal/requests-v1.json'
-    return json.loads(path.read_text())['records'] if path.exists() else {}
+def tickets(case):
+    return list((root / case / 'support/execution-owners').glob('*.json'))
 
 try:
     for mode in ['menu', 'direct', 'runloop', 'unavailable', 'slowlog']:
         child, output = start(mode, mode, 'primary')
         state = finish(child, output)
-        assert records(mode) == {}, 'browsing generated a launch request'
-        if mode == 'unavailable':
-            assert not (root / mode / 'support/request-journal').exists(), 'read-only fallback acquired journal'
+        assert not tickets(mode), 'browsing generated a launch'
+        assert not (root / mode / 'support/request-journal').exists(), 'requests must not be persisted'
         if mode == 'slowlog':
             logs = root / mode / 'support/Logs'
             assert (output / 'diagnostic-blocked.json').exists(), 'diagnostic fault was not entered'
@@ -67,28 +65,21 @@ try:
     primary, primary_output = start('forward', 'recovery', 'primary')
     until(lambda: (primary_output / 'ready.json').exists() or primary.poll() is not None)
     assert primary.poll() is None, str(primary_output)
-    before = records('recovery')
-    assert before[ids['queued']]['phase'] == 'awaitingUserResume', before
-    assert before[ids['dispatch']]['phase'] == 'uncertain', before
+    legacy = [root / 'recovery/support/request-journal', root / 'recovery/support/request-outbox']
+    until(lambda: not any(path.exists() for path in legacy))
+    assert not tickets('recovery'), 'legacy request was replayed'
+    # The secondary exits 0 only after the primary accepted its forwarded request.
     secondary, secondary_output = start('secondary', 'recovery', 'secondary')
     finish(secondary, secondary_output)
-    until(lambda: any(r.get('outcome') == 'ui-presented' for r in records('recovery').values()))
-    current = records('recovery')
-    assert len(current) == 3 and sum(r.get('outcome') == 'ui-presented' for r in current.values()) == 1, current
-    assert current[ids['queued']] == before[ids['queued']]
-    assert current[ids['dispatch']] == before[ids['dispatch']]
     (primary_output / 'continue').write_text('quit\n')
     finish(primary, primary_output)
-    # Reopen the whole app again. Historical requests stay non-dispatchable.
+    # Reopen the whole app again: nothing was persisted, so nothing can replay.
     restarted, restarted_output = start('direct', 'recovery', 'restarted')
     finish(restarted, restarted_output)
-    after = records('recovery')
-    assert set(after) == set(current), 'reopen created or replayed requests'
-    assert after[ids['queued']] == current[ids['queued']]
-    assert after[ids['dispatch']] == current[ids['dispatch']]
-    assert not list((root / 'recovery/support/execution-owners').glob('*.json')), 'unexpected native executor request'
+    assert not any(path.exists() for path in legacy), 'requests were persisted again'
+    assert not tickets('recovery'), 'unexpected native executor request'
     (root / 'complete').write_text('complete\n')
-    print('PASS full app: durable secondary forwarding once, historical queued/dispatch recovery, reopen without replay, menu/AppKit quit', flush=True)
+    print('PASS full app: secondary forwarding accepted once, legacy rc.1 request files removed without replay, reopen without replay, menu/AppKit quit', flush=True)
 finally:
     for child, log in children:
         if child.poll() is None:

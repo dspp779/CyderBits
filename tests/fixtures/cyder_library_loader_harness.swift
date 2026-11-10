@@ -88,7 +88,6 @@ let dismiss = views(controller.window!.contentView!).compactMap { $0 as? NSButto
 dismiss.performClick(nil)
 precondition(dismiss.superview!.isHidden)
 if let path = ProcessInfo.processInfo.environment["CYDER_TEST_RENDER"] {
-    controller.updateRequestSummary("1 個項目尚未啟動 · 查看要求")
     controller.showRecoveryNotice()
     controller.window!.contentView!.layoutSubtreeIfNeeded()
     let view = controller.window!.contentView!
