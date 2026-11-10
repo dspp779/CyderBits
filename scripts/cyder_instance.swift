@@ -576,7 +576,7 @@ final class CyderInstanceCoordinator {
         guard primary, !closing else { return }
         let unresolved = tickets.filter {
             $0.correlation != nil && (!confirmed.contains($0.id) ||
-                (!["finished", "revoked"].contains($0.phase) && !["exited", "failed"].contains($0.nativeSpawn?.phase ?? "")))
+                (!$0.phase.isTerminal && $0.nativeSpawn?.phase.isTerminal != true))
         }
         var pids = Set<Int32>()
         for ticket in unresolved {

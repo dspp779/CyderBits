@@ -64,7 +64,7 @@ final class Fixture {
         }
     }
     func rootExit(scope: String? = nil) {
-        observer.receive(.init(authority: authority, ticket: UUID(), phase: "exited", pid: 1234, boot: "injected", started: 100,
+        observer.receive(.init(authority: authority, ticket: UUID(), phase: .exited, pid: 1234, boot: "injected", started: 100,
             status: 0, signalled: false, prefixScope: scope ?? identity.executionScope))
         pump { self.confirmed }; settle()
     }

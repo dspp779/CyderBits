@@ -13,7 +13,7 @@ func pump(_ condition: () -> Bool, timeout: TimeInterval = 10) {
 // authority becomes visible, not in a later best-effort background pass.
 let ownerDirectory = CyderPaths.support.appendingPathComponent("execution-owners")
 try FileManager.default.createDirectory(at: ownerDirectory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
-let staleExecution = CyderExecutionOwner.Ticket(schema: 1, id: UUID(), issuer: UUID(), scope: nil, phase: "prepared")
+let staleExecution = CyderExecutionOwner.Ticket(schema: 1, id: UUID(), issuer: UUID(), scope: nil, phase: .prepared)
 let staleExecutionURL = ownerDirectory.appendingPathComponent(staleExecution.id.uuidString + ".json")
 try JSONEncoder().encode(staleExecution).write(to: staleExecutionURL)
 chmod(staleExecutionURL.path, 0o600)
@@ -24,7 +24,7 @@ primary.start(onRequest: { received.append($0) }) { role = $0 }
 pump { role != nil }
 precondition(role == .primary)
 let recoveredExecution = try JSONDecoder().decode(CyderExecutionOwner.Ticket.self, from: Data(contentsOf: staleExecutionURL))
-precondition(recoveredExecution.phase == "revoked", "primary admitted requests before revoking an unclaimed old executor")
+precondition(recoveredExecution.phase == .revoked, "primary admitted requests before revoking an unclaimed old executor")
 let acceptedPreferences = Data(#"{"schemaVersion":13,"dpi":144}"#.utf8)
 try acceptedPreferences.write(to: CyderPaths.support.appendingPathComponent("settings.json"))
 let secondary = CyderInstanceCoordinator(support: CyderPaths.support, bundleID: "test")
@@ -87,11 +87,11 @@ pump { stopped }
 // the journal has saved it. This is explicitly injected native-layer evidence.
 let fixtureBoot = CyderExecutionOwner.Birth.current()!.boot
 let correlatedTicket = CyderExecutionOwner.Ticket(schema: 1, id: UUID(), issuer: dispatched!.executorEpoch!,
-    scope: "injected-prefix-scope", prefix: CyderPaths.support.path, phase: "handedOff", owner: .init(boot: fixtureBoot, pid: 12345, started: 10),
+    scope: "injected-prefix-scope", prefix: CyderPaths.support.path, phase: .handedOff, owner: .init(boot: fixtureBoot, pid: 12345, started: 10),
     child: .init(boot: fixtureBoot, pid: 12346, started: 11), status: 0, signalled: false,
     correlation: .init(requestID: dispatched!.id, launchID: dispatched!.launchID!, digest: dispatched!.digest),
     handoff: .init(executable: "/injected/wine", pidFile: CyderPaths.support.appendingPathComponent("injected.pid").path),
-    nativeSpawn: .init(phase: "spawned", bridge: .init(boot: fixtureBoot, pid: 12347, started: 12),
+    nativeSpawn: .init(phase: .spawned, bridge: .init(boot: fixtureBoot, pid: 12347, started: 12),
         process: .init(boot: fixtureBoot, pid: 12348, started: 13)))
 let correlatedURL = ownerDirectory.appendingPathComponent(correlatedTicket.id.uuidString + ".json")
 try JSONEncoder().encode(correlatedTicket).write(to: correlatedURL)
@@ -145,15 +145,15 @@ let journalDirectory = CyderPaths.support.appendingPathComponent("request-journa
 let preservedJournalDirectory = CyderPaths.support.appendingPathComponent("request-journal-preserved")
 try FileManager.default.moveItem(at: journalDirectory, to: preservedJournalDirectory)
 var completedTicket = correlatedTicket
-completedTicket.phase = "finished"
-completedTicket.nativeSpawn?.phase = "exited"
+completedTicket.phase = .finished
+completedTicket.nativeSpawn?.phase = .exited
 completedTicket.nativeSpawn?.status = 53
 completedTicket.nativeSpawn?.signalled = false
 try JSONEncoder().encode(completedTicket).write(to: correlatedURL, options: .atomic)
 chmod(correlatedURL.path, 0o600)
 liveReceiptGate.signal()
 pump { nativeReadCount == 3 }
-precondition(replacement.recovered.first { $0.id == dispatched!.id }?.executionReceipt?.nativeSpawn?.phase == "spawned",
+precondition(replacement.recovered.first { $0.id == dispatched!.id }?.executionReceipt?.nativeSpawn?.phase == .spawned,
              "uncommitted terminal receipt reached the UI")
 precondition(FileManager.default.fileExists(atPath: correlatedURL.path), "write failure pruned the terminal receipt")
 try FileManager.default.moveItem(at: preservedJournalDirectory, to: journalDirectory)

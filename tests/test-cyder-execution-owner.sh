@@ -18,5 +18,5 @@ cleanup() {
 }
 trap cleanup EXIT
 cp "$ROOT/tests/fixtures/cyder_execution_owner_harness.swift" "$TEST_DIR/main.swift"
-swiftc -module-cache-path "$TEST_DIR/cache" "$ROOT/scripts/cyder_execution_owner.swift" "$TEST_DIR/main.swift" -o "$TEST_DIR/test"
+swiftc -module-cache-path "$TEST_DIR/cache" "$ROOT/scripts/cyder_execution_owner.swift" "$ROOT/scripts/cyder_execution_phase.swift" "$TEST_DIR/main.swift" -o "$TEST_DIR/test"
 "$TEST_DIR/test" "$TEST_DIR/state"

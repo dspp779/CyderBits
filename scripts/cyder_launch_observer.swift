@@ -30,7 +30,7 @@ final class CyderLaunchObserver {
     struct NativeRoot: Equatable {
         let authority: Authority
         let ticket: UUID
-        let phase: String
+        let phase: CyderSpawnPhase
         let pid: Int32
         let boot: String
         let started: UInt64
@@ -67,8 +67,8 @@ final class CyderLaunchObserver {
         guard authority == root.authority else { return }
         queue.async { [self] in
             guard !finished, authority == root.authority, root.pid > 0, root.started > 0, !root.boot.isEmpty,
-                  ["spawned", "exited"].contains(root.phase) else { return }
-            if root.phase == "exited" {
+                  root.phase.hasProcess else { return }
+            if root.phase == .exited {
                 guard let status = root.status, (0...255).contains(status), let signalled = root.signalled,
                       !signalled || (1...127).contains(status) else { return }
             }
@@ -77,7 +77,7 @@ final class CyderLaunchObserver {
                 if comparable.prefixScope == nil { comparable.prefixScope = root.prefixScope }
                 guard previous.ticket == root.ticket, previous.pid == root.pid, previous.boot == root.boot,
                       previous.started == root.started,
-                      previous.prefixScope == nil || previous.prefixScope == root.prefixScope, previous.phase != "exited" || comparable == root else { return }
+                      previous.prefixScope == nil || previous.prefixScope == root.prefixScope, previous.phase != .exited || comparable == root else { return }
             }
             nativeRoot = root
             evaluateNativeRoot()
@@ -96,14 +96,14 @@ final class CyderLaunchObserver {
     func receiveEnvironmentEnded(prefixScope: String) {
         queue.async { [self] in
             guard !finished, nativeRoot?.prefixScope == prefixScope,
-                  nativeRoot?.phase == "exited", nativeRoot?.status == 0,
+                  nativeRoot?.phase == .exited, nativeRoot?.status == 0,
                   nativeRoot?.signalled == false, drainRequested else { return }
             environmentEnded = true
             evaluateNativeRoot()
         }
     }
     private func evaluateNativeRoot() {
-        guard !finished, let root = nativeRoot, root.phase == "exited", let status = root.status else { return }
+        guard !finished, let root = nativeRoot, root.phase == .exited, let status = root.status else { return }
         if status == 0, root.signalled == false, let scope = root.prefixScope,
            let request = drainRequest, !drainRequested {
             drainRequested = true

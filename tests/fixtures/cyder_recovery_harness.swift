@@ -56,8 +56,8 @@ firstJournal.authorizeDispatch(id: initial.id) { if case .success(let value) = $
 pump("authorized") { authorized != nil }
 let committed = authorized!
 let receipt = CyderRequestJournal.ExecutionReceipt(ticketID: UUID(), requestID: committed.id, launchID: committed.launchID!, epoch: committed.executorEpoch!, digest: committed.digest,
-    phase: "handedOff", ownerPID: nil, ownerBoot: nil, ownerStarted: nil, childPID: nil, childBoot: nil, childStarted: nil, status: nil,
-    nativeSpawn: .init(phase: "spawned", bridgePID: process.pid, bridgeBoot: process.boot, bridgeStarted: process.started,
+    phase: .handedOff, ownerPID: nil, ownerBoot: nil, ownerStarted: nil, childPID: nil, childBoot: nil, childStarted: nil, status: nil,
+    nativeSpawn: .init(phase: .spawned, bridgePID: process.pid, bridgeBoot: process.boot, bridgeStarted: process.started,
         processPID: process.pid, processBoot: process.boot, processStarted: process.started, status: nil, signalled: nil), prefixScope: identity.executionScope)
 var savedReceipt = false
 firstJournal.reconcileExecutions([receipt]) { if case .success(let ids) = $0 { savedReceipt = ids == [receipt.ticketID] } }
@@ -99,7 +99,7 @@ print("PASS persisted journal + registry reopen, current native birth, formal co
 // correlation and prefix are otherwise valid. No historical title is authority.
 func candidate(_ id: String, birth: L.ProcessID, scope: String = identity.executionScope) -> CyderRecoveryObserver.Record {
     .init(version: 1, request: .init(id: id, digest: id, environment: nil, phase: .uncertain, launch: id), name: id,
-        root: .init(authority: .init(request: id, launch: id, digest: id, epoch: UUID()), ticket: UUID(), phase: "spawned",
+        root: .init(authority: .init(request: id, launch: id, digest: id, epoch: UUID()), ticket: UUID(), phase: .spawned,
                     pid: birth.pid, boot: birth.boot, started: birth.started, status: nil, signalled: nil, prefixScope: scope))
 }
 final class NativeReads {

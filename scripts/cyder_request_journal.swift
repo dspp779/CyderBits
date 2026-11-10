@@ -117,7 +117,7 @@ enum CyderAcceptedSettings {
 /// or AppKit. No transport handler may acknowledge before its callback.
 final class CyderRequestJournal {
     struct NativeSpawnReceipt: Codable, Equatable {
-        let phase: String
+        let phase: CyderSpawnPhase
         let bridgePID: Int32
         let bridgeBoot: String
         let bridgeStarted: UInt64
@@ -133,7 +133,7 @@ final class CyderRequestJournal {
         let launchID: String
         let epoch: UUID
         let digest: String
-        let phase: String
+        let phase: CyderTicketPhase
         let ownerPID: Int32?
         let ownerBoot: String?
         let ownerStarted: UInt64?
@@ -422,10 +422,10 @@ final class CyderRequestJournal {
             do {
                 guard !closing, available, var next = document else { throw Failure.unavailable }
                 guard receipts.count <= 512 else { throw Failure.full }
-                let ranks = ["prepared": 0, "active": 1, "uncertain": 2, "handedOff": 2, "finished": 3, "revoked": 3]
                 var confirmed: [UUID] = []
                 for receipt in receipts {
-                    guard let rank = ranks[receipt.phase], var record = next.records[receipt.requestID],
+                    let rank = receipt.phase.rank
+                    guard var record = next.records[receipt.requestID],
                           record.digest == receipt.digest, record.launchID == receipt.launchID,
                           record.executorEpoch == receipt.epoch else { continue }
                     if let old = record.executionReceipt {
@@ -434,8 +434,8 @@ final class CyderRequestJournal {
                         var comparable = old
                         if comparable.prefixScope == nil { comparable.prefixScope = receipt.prefixScope }
                         guard old.ticketID == receipt.ticketID,
-                              rank >= (ranks[old.phase] ?? 4),
-                              !(rank == 3 && ranks[old.phase] == 3 && comparable != receipt) else { continue }
+                              rank >= old.phase.rank,
+                              !(receipt.phase.isTerminal && old.phase.isTerminal && comparable != receipt) else { continue }
                         if let scope = old.prefixScope {
                             guard receipt.prefixScope == scope else { continue }
                         }
@@ -448,13 +448,11 @@ final class CyderRequestJournal {
                                   old.childStarted == receipt.childStarted else { continue }
                         }
                         if let prior = old.nativeSpawn {
-                            let spawnRanks = ["claiming": 0, "spawned": 1, "exited": 2, "failed": 2]
                             guard let current = receipt.nativeSpawn,
                                   prior.bridgePID == current.bridgePID, prior.bridgeBoot == current.bridgeBoot,
                                   prior.bridgeStarted == current.bridgeStarted,
-                                  let priorRank = spawnRanks[prior.phase], let currentRank = spawnRanks[current.phase],
-                                  currentRank >= priorRank,
-                                  !(priorRank == 2 && prior != current) else { continue }
+                                  current.phase.rank >= prior.phase.rank,
+                                  !(prior.phase.isTerminal && prior != current) else { continue }
                             if prior.processPID != nil {
                                 guard prior.processPID == current.processPID, prior.processBoot == current.processBoot,
                                       prior.processStarted == current.processStarted else { continue }

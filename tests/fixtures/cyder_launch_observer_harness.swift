@@ -66,7 +66,7 @@ precondition(CyderLaunchObserver.readSidecar(fifo).isEmpty, "FIFO should not blo
 
 let authority = CyderLaunchObserver.Authority(request: "request", launch: "launch", digest: "digest", epoch: UUID())
 let ticket = UUID()
-func native(_ phase: String = "exited", authority a: CyderLaunchObserver.Authority = authority,
+func native(_ phase: CyderSpawnPhase = .exited, authority a: CyderLaunchObserver.Authority = authority,
             started: UInt64 = 100, status: Int32? = 53, signalled: Bool? = false) -> CyderLaunchObserver.NativeRoot {
     .init(authority: a, ticket: ticket, phase: phase, pid: 999, boot: "injected-boot", started: started,
           status: status, signalled: signalled)
@@ -85,7 +85,7 @@ let wrongAuthorities = [
     .init(request: authority.request, launch: authority.launch, digest: authority.digest, epoch: UUID())]
 let fenced = CyderLaunchObserver(authority: authority)
 for wrong in wrongAuthorities { fenced.receive(native(authority: wrong)) }
-fenced.receive(native("spawned", status: nil, signalled: nil))
+fenced.receive(native(.spawned, status: nil, signalled: nil))
 fenced.receive(native(started: 101)) // Same numeric PID, different birth.
 var fencedResult: CyderLaunchObserver.Result?
 start(fenced, WineActivationWaiter(prefix: root.path), duration: 0.1,

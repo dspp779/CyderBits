@@ -559,27 +559,27 @@ final class CyderStatusItemController: NSObject, NSMenuDelegate {
         let id = receipt.authority.launch
         guard !isQuiescing, var session = sessions[id], session.authority == receipt.authority,
               receipt.pid > 0, receipt.started > 0, !receipt.boot.isEmpty, receipt.prefixScope != nil,
-              ["spawned", "exited"].contains(receipt.phase) else { return }
+              receipt.phase.hasProcess else { return }
         if let stamp = session.stamp {
             let environment = stamp.environment
             guard receipt.prefixScope == "\(environment.uid):\(Int64(bitPattern: environment.device)):\(environment.inode)" else { return }
         }
-        if receipt.phase == "exited" {
+        if receipt.phase == .exited {
             guard let status = receipt.status, (0...255).contains(status), let signalled = receipt.signalled,
                   !signalled || (1...127).contains(status) else { return }
         }
         if let previous = session.nativeRoot {
             guard previous.ticket == receipt.ticket, previous.pid == receipt.pid, previous.boot == receipt.boot,
                   previous.started == receipt.started, previous.prefixScope == receipt.prefixScope,
-                  previous.phase != "exited" || previous == receipt else { return }
+                  previous.phase != .exited || previous == receipt else { return }
             if previous == receipt { return }
         }
         let process = CyderLifecycle.ProcessID(boot: receipt.boot, pid: receipt.pid, started: receipt.started)
         session.nativeRoot = receipt
-        session.root = receipt.phase == "spawned" ? process : nil
+        session.root = receipt.phase == .spawned ? process : nil
         sessions[id] = session
-        publishProcesses([process], session: session, existence: receipt.phase == "exited" ? .exited : .alive)
-        if receipt.phase == "exited" { handleProcessExit(process) }
+        publishProcesses([process], session: session, existence: receipt.phase == .exited ? .exited : .alive)
+        if receipt.phase == .exited { handleProcessExit(process) }
         else { watchProcess(process); claimLiveWindows(id: id) }
         refresh()
     }

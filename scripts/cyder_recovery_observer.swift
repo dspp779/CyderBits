@@ -35,7 +35,7 @@ final class CyderRecoveryObserver {
             }
             birthClaims.removeAll(keepingCapacity: true)
             for record in self.records.values {
-                guard let root = record.root, root.phase == "spawned", root.authority.request == record.request.id,
+                guard let root = record.root, root.phase == .spawned, root.authority.request == record.request.id,
                       root.authority.digest == record.request.digest, root.authority.launch == record.request.launch else { continue }
                 birthClaims[.init(boot: root.boot, pid: root.pid, started: root.started), default: 0] += 1
             }
@@ -55,7 +55,7 @@ final class CyderRecoveryObserver {
     private func candidate(_ record: Record) -> Attempt? {
         guard !closed, let snapshot, snapshot.phase == .active,
               [.completed, .failed, .uncertain].contains(record.request.phase),
-              let root = record.root, root.phase == "spawned", root.pid > 0, root.started > 0, !root.boot.isEmpty,
+              let root = record.root, root.phase == .spawned, root.pid > 0, root.started > 0, !root.boot.isEmpty,
               root.authority.request == record.request.id, root.authority.digest == record.request.digest,
               root.authority.launch == record.request.launch,
               birthClaims[.init(boot: root.boot, pid: root.pid, started: root.started)] == 1,

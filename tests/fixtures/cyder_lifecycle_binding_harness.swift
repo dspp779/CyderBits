@@ -78,16 +78,16 @@ precondition(controller.lifecycleSnapshot.launches.count == 1)
 let identity = birth!, environment = boundStamp.environment
 let scope = "\(environment.uid):\(Int64(bitPattern: environment.device)):\(environment.inode)"
 let ticket = UUID()
-func root(_ phase: String, scope: String) -> CyderLaunchObserver.NativeRoot {
+func root(_ phase: CyderSpawnPhase, scope: String) -> CyderLaunchObserver.NativeRoot {
     .init(authority: authority, ticket: ticket, phase: phase, pid: identity.pid, boot: identity.boot, started: identity.started,
-          status: phase == "exited" ? 0 : nil, signalled: phase == "exited" ? false : nil, prefixScope: scope)
+          status: phase == .exited ? 0 : nil, signalled: phase == .exited ? false : nil, prefixScope: scope)
 }
-controller.attachNativeRoot(root("spawned", scope: "wrong"))
+controller.attachNativeRoot(root(.spawned, scope: "wrong"))
 precondition(controller.nativeRootPID(id: authority.launch) == 0, "matching request cannot override actual environment scope")
 let observer = CyderLaunchObserver(authority: authority), signal = WineActivationWaiter(prefix: prefix.path)
 controller.onWindowConfirmed = { if $0 == authority.launch { signal.signal() } }
-controller.attachNativeRoot(root("spawned", scope: scope))
-observer.receive(root("spawned", scope: scope))
+controller.attachNativeRoot(root(.spawned, scope: scope))
+observer.receive(root(.spawned, scope: scope))
 var outcome: CyderLaunchObserver.Result?
 Task {
     outcome = await observer.wait(duration: 1, signal: signal, onStarted: {
@@ -121,13 +121,13 @@ print("bound_sample,callback_cycle_ms")
 for (index, sample) in samples.enumerated() { print("\(index + 1),\(sample)") }
 // Genuine native exit is deliberately not asserted here: the receipt is fault
 // injection while the child is alive, to exercise the actual adapter/store path.
-controller.attachNativeRoot(root("exited", scope: scope))
+controller.attachNativeRoot(root(.exited, scope: scope))
 pump { controller.lifecycleSnapshot.processes[identity]?.existence == .exited }
 precondition(controller.lifecycleSnapshot.windows.isEmpty && child.isRunning)
 controller.receiveLifecycleEvent(.manage(.init(id: environment, prefix: prefix.path, engine: child.executableURL!.path,
     generation: boundStamp.generation + 1)))
 pump { controller.nativeRootPID(id: authority.launch) == 0 }
-controller.attachNativeRoot(root("spawned", scope: scope))
+controller.attachNativeRoot(root(.spawned, scope: scope))
 precondition(controller.nativeRootPID(id: authority.launch) == 0, "late receipt cannot recreate old generation session")
 var released = false
 monitor.endExecution(execution!) { released = true }; pump { released }

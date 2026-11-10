@@ -29,12 +29,12 @@ DispatchQueue.global().async {
             from: Data(contentsOf: ledger.appendingPathComponent(id.uuidString + ".json")))
         if CyderExecutionOwner.Birth.current() == nil {
             let diagnostic = try String(contentsOf: log, encoding: .utf8)
-            check(status == 75 && receipt.phase == "prepared", "unreadable identity changed ticket or allowed an effect")
+            check(status == 75 && receipt.phase == .prepared, "unreadable identity changed ticket or allowed an effect")
             check(!FileManager.default.fileExists(atPath: target.path), "unconfirmed identity spawned a child")
             check(diagnostic.contains("processIdentityUnavailable") && !diagnostic.contains(": revoked"), "permission failure mislabeled as revoked")
             print("PASS denied host identity: accurate diagnostic, prepared ticket preserved, no child spawned")
         } else {
-            check(status == 0 && receipt.phase == "finished", "valid host identity could not claim")
+            check(status == 0 && receipt.phase == .finished, "valid host identity could not claim")
             check(FileManager.default.fileExists(atPath: target.path), "valid host claim lost its child")
             print("PASS available host identity: actual claim, effect and finished receipt")
         }
@@ -50,5 +50,5 @@ DispatchQueue.global().async {
 }
 dispatchMain()
 SWIFT
-swiftc -module-cache-path "$TMP/cache" "$ROOT/scripts/cyder_execution_owner.swift" "$TMP/main.swift" -o "$TMP/test"
+swiftc -module-cache-path "$TMP/cache" "$ROOT/scripts/cyder_execution_owner.swift" "$ROOT/scripts/cyder_execution_phase.swift" "$TMP/main.swift" -o "$TMP/test"
 "$TMP/test" "$TMP/state"

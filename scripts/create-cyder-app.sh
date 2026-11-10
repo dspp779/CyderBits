@@ -298,6 +298,7 @@ SWIFT_SOURCES=(
   "$SCRIPT_DIR/cyder_instance.swift"
   "$SCRIPT_DIR/cyder_execution_watch.swift"
   "$SCRIPT_DIR/cyder_execution_owner.swift"
+  "$SCRIPT_DIR/cyder_execution_phase.swift"
   "$SCRIPT_DIR/cyder_uri_handler.swift"
   "$SCRIPT_DIR/cyder_gptk.swift"
   "$SCRIPT_DIR/cyder_settings.swift"

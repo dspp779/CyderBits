@@ -260,11 +260,11 @@ let receiptDispatch = value(wait { receiptJournal.authorizeDispatch(id: receiptI
 let ticketID = UUID()
 func nativeReceipt(ticket: UUID = ticketID, id: String = receiptID, launch: String = receiptDispatch.launchID!,
                    epoch: UUID = receiptDispatch.executorEpoch!, digest: String = payload.digest,
-                   phase: String = "finished", child: Int32 = 22002) -> J.ExecutionReceipt {
+                   phase: CyderTicketPhase = .finished, child: Int32 = 22002) -> J.ExecutionReceipt {
     .init(ticketID: ticket, requestID: id, launchID: launch, epoch: epoch, digest: digest,
           phase: phase, ownerPID: 22001, ownerBoot: "injected-boot", ownerStarted: 10,
           childPID: child, childBoot: "injected-boot", childStarted: 11,
-          status: phase == "finished" ? 0 : nil, signalled: phase == "finished" ? false : nil)
+          status: phase == .finished ? 0 : nil, signalled: phase == .finished ? false : nil)
 }
 let wrongReceipts = [nativeReceipt(id: J.makeID(namespace: receiptNamespace)),
     nativeReceipt(launch: UUID().uuidString), nativeReceipt(epoch: UUID()), nativeReceipt(digest: emptyArguments.digest)]
@@ -280,26 +280,26 @@ let storedReceipt = value(wait { receiptJournal.query(id: receiptID, completion:
 precondition(lostReceiptACK.wait(timeout: .now()) == .timedOut)
 precondition(storedReceipt.executionReceipt == nativeReceipt() && storedReceipt.phase == .dispatching)
 precondition(value(wait { receiptJournal.reconcileExecutions([nativeReceipt()], completion: $0) }) == [ticketID])
-precondition(value(wait { receiptJournal.reconcileExecutions([nativeReceipt(phase: "active"), nativeReceipt(ticket: UUID()), nativeReceipt(child: 22003)], completion: $0) }).isEmpty)
+precondition(value(wait { receiptJournal.reconcileExecutions([nativeReceipt(phase: .active), nativeReceipt(ticket: UUID()), nativeReceipt(child: 22003)], completion: $0) }).isEmpty)
 precondition(value(wait { receiptJournal.query(id: receiptID, completion: $0) }).executionReceipt == nativeReceipt())
 // Wine-layer progress is independently monotonic inside the native receipt.
 let spawnID = J.makeID(namespace: receiptNamespace)
 _ = value(wait { receiptJournal.submit(id: spawnID, payload: payload, completion: $0) })
 let spawnDispatch = value(wait { receiptJournal.authorizeDispatch(id: spawnID, completion: $0) })
 let spawnTicketID = UUID()
-func wineReceipt(_ phase: String, process: Int32 = 24002, bridge: Int32 = 24001, scope: String? = "501:1:2") -> J.ExecutionReceipt {
+func wineReceipt(_ phase: CyderSpawnPhase, process: Int32 = 24002, bridge: Int32 = 24001, scope: String? = "501:1:2") -> J.ExecutionReceipt {
     .init(ticketID: spawnTicketID, requestID: spawnID, launchID: spawnDispatch.launchID!,
-          epoch: spawnDispatch.executorEpoch!, digest: payload.digest, phase: "handedOff",
+          epoch: spawnDispatch.executorEpoch!, digest: payload.digest, phase: .handedOff,
           ownerPID: 23001, ownerBoot: "injected-boot", ownerStarted: 20,
           childPID: 23002, childBoot: "injected-boot", childStarted: 21, status: 0, signalled: false,
           nativeSpawn: .init(phase: phase, bridgePID: bridge, bridgeBoot: "injected-boot", bridgeStarted: 22,
               processPID: process, processBoot: "injected-boot", processStarted: 23,
-              status: phase == "exited" ? 53 : nil, signalled: phase == "exited" ? false : nil), prefixScope: scope)
+              status: phase == .exited ? 53 : nil, signalled: phase == .exited ? false : nil), prefixScope: scope)
 }
-precondition(value(wait { receiptJournal.reconcileExecutions([wineReceipt("spawned")], completion: $0) }) == [spawnTicketID])
-precondition(value(wait { receiptJournal.reconcileExecutions([wineReceipt("exited")], completion: $0) }) == [spawnTicketID])
-precondition(value(wait { receiptJournal.reconcileExecutions([wineReceipt("spawned"), wineReceipt("exited", process: 24003), wineReceipt("exited", bridge: 24004), wineReceipt("exited", scope: nil), wineReceipt("exited", scope: "501:1:3")], completion: $0) }).isEmpty)
-precondition(value(wait { receiptJournal.query(id: spawnID, completion: $0) }).executionReceipt == wineReceipt("exited"))
+precondition(value(wait { receiptJournal.reconcileExecutions([wineReceipt(.spawned)], completion: $0) }) == [spawnTicketID])
+precondition(value(wait { receiptJournal.reconcileExecutions([wineReceipt(.exited)], completion: $0) }) == [spawnTicketID])
+precondition(value(wait { receiptJournal.reconcileExecutions([wineReceipt(.spawned), wineReceipt(.exited, process: 24003), wineReceipt(.exited, bridge: 24004), wineReceipt(.exited, scope: nil), wineReceipt(.exited, scope: "501:1:3")], completion: $0) }).isEmpty)
+precondition(value(wait { receiptJournal.query(id: spawnID, completion: $0) }).executionReceipt == wineReceipt(.exited))
 // Legacy terminal receipts can gain only the omitted native prefix proof.
 var upgradedLegacy = nativeReceipt()
 upgradedLegacy.prefixScope = "501:10:20"

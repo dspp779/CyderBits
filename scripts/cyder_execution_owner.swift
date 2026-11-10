@@ -29,18 +29,17 @@ enum CyderExecutionOwner {
         }
     }
     struct NativeSpawn: Codable, Equatable {
-        var phase: String // claiming, spawned, exited, failed
+        var phase: CyderSpawnPhase
         let bridge: Birth
         var process: Birth?
         var status: Int32?
         var signalled: Bool?
         var isValid: Bool {
-            guard ["claiming", "spawned", "exited", "failed"].contains(phase),
-                  bridge.pid > 0, bridge.started > 0, !bridge.boot.isEmpty else { return false }
-            if ["spawned", "exited"].contains(phase) {
+            guard bridge.pid > 0, bridge.started > 0, !bridge.boot.isEmpty else { return false }
+            if phase.hasProcess {
                 guard let process, process.pid > 0, process.started > 0, process.boot == bridge.boot else { return false }
             }
-            return phase != "exited" || (status != nil && signalled != nil)
+            return phase != .exited || (status != nil && signalled != nil)
         }
     }
     struct Correlation: Codable, Equatable {
@@ -60,7 +59,7 @@ enum CyderExecutionOwner {
         let issuer: UUID
         let scope: String? // nil = all environments; UID/device/inode otherwise
         var prefix: String? = nil
-        var phase: String
+        var phase: CyderTicketPhase
         var owner: Birth?
         var child: Birth?
         var status: Int32?
@@ -137,12 +136,11 @@ enum CyderExecutionOwner {
                   let ticket = try? JSONDecoder().decode(Ticket.self, from: data), [1, 2].contains(ticket.schema),
                   (ticket.schema == 2) == (ticket.requiresGlobalScope == true),
                   name == ticket.id.uuidString + ".json",
-                  ["prepared", "active", "handedOff", "finished", "revoked", "uncertain"].contains(ticket.phase),
                   ticket.correlation?.isValid != false, ticket.handoff?.isValid != false,
                   ticket.nativeSpawn?.isValid != false,
                   (ticket.handoff == nil || ticket.scope != nil),
                   (ticket.nativeSpawn == nil || ticket.handoff != nil),
-                  (ticket.phase != "handedOff" || ["spawned", "exited"].contains(ticket.nativeSpawn?.phase ?? "")) else { throw Failure.invalid }
+                  (ticket.phase != .handedOff || ticket.nativeSpawn?.phase.hasProcess == true) else { throw Failure.invalid }
             return ticket
         }
         func write(_ ticket: Ticket) throws {
@@ -184,7 +182,7 @@ enum CyderExecutionOwner {
         // Older helpers reject schema 2 instead of silently ignoring the new
         // global barrier and executing a shared mutation under a prefix lock.
         let ticket = Ticket(schema: requiresGlobalScope ? 2 : 1, id: UUID(), issuer: issuer, scope: identity.key, prefix: identity.path,
-                            phase: "prepared", correlation: correlation, handoff: canonicalHandoff,
+                            phase: .prepared, correlation: correlation, handoff: canonicalHandoff,
                             requiresGlobalScope: requiresGlobalScope ? true : nil)
         try directory.write(ticket)
         return ticket.id
@@ -205,9 +203,9 @@ enum CyderExecutionOwner {
     }
     private static func prune(_ directory: Directory, confirmed: [Ticket]) throws {
         let tickets = try directory.names().map { try directory.read($0) }
-        let disposable = tickets.filter { $0.correlation == nil && ["finished", "revoked"].contains($0.phase) }
+        let disposable = tickets.filter { $0.correlation == nil && $0.phase.isTerminal }
         let disposableIDs = Set(disposable.dropFirst(32).map(\.id))
-        for ticket in tickets where ["finished", "revoked"].contains(ticket.phase) {
+        for ticket in tickets where ticket.phase.isTerminal {
             guard disposableIDs.contains(ticket.id) || confirmed.contains(ticket) else { continue }
             let lock: Int32
             do { lock = try directory.lock(ticket.id.uuidString + ".lock") }
@@ -244,14 +242,14 @@ enum CyderExecutionOwner {
             catch Failure.busy { continue }
             defer { Darwin.close(spawnLock) }
             ticket = try directory.read(name)
-            if ticket.phase == "prepared" { ticket.phase = "revoked"; try directory.write(ticket) }
-            else if ["active", "handedOff", "uncertain"].contains(ticket.phase), let oldBoot = ticket.owner?.boot, let currentBoot, oldBoot != currentBoot {
-                ticket.phase = "revoked"; try directory.write(ticket) // no process survives an OS boot boundary
-            } else if ["active", "handedOff", "uncertain"].contains(ticket.phase), ticket.nativeSpawn?.process != nil,
-                      ["spawned", "exited"].contains(ticket.nativeSpawn?.phase ?? "") {
-                ticket.phase = ticket.nativeSpawn?.phase == "exited" ? "finished" : "handedOff"
+            if ticket.phase == .prepared { ticket.phase = .revoked; try directory.write(ticket) }
+            else if [.active, .handedOff, .uncertain].contains(ticket.phase), let oldBoot = ticket.owner?.boot, let currentBoot, oldBoot != currentBoot {
+                ticket.phase = .revoked; try directory.write(ticket) // no process survives an OS boot boundary
+            } else if [.active, .handedOff, .uncertain].contains(ticket.phase), ticket.nativeSpawn?.process != nil,
+                      ticket.nativeSpawn?.phase.hasProcess == true {
+                ticket.phase = ticket.nativeSpawn?.phase == .exited ? .finished : .handedOff
                 try directory.write(ticket)
-            } else if ticket.phase == "active" { ticket.phase = "uncertain"; try directory.write(ticket) }
+            } else if ticket.phase == .active { ticket.phase = .uncertain; try directory.write(ticket) }
         }
     }
     private static func overlaps(_ a: String?, _ b: String?) -> Bool { a == nil || b == nil || a == b }
@@ -272,7 +270,7 @@ enum CyderExecutionOwner {
         defer { if prefix >= 0 { Darwin.close(prefix) } }
         for name in try directory.names() {
             let previous = try directory.read(name)
-            guard !overlaps(scope, previous.effectiveScope) || !["active", "uncertain"].contains(previous.phase) else { throw Failure.uncertain }
+            guard !overlaps(scope, previous.effectiveScope) || !previous.phase.holdsScope else { throw Failure.uncertain }
         }
         guard try identify(identity.path).key == scope else { throw Failure.invalid }
         return try work()
@@ -295,7 +293,7 @@ enum CyderExecutionOwner {
             defer { if scopeLock >= 0 { Darwin.close(scopeLock) } }
             let ownerLock = try directory.lock(id.uuidString + ".lock"); defer { Darwin.close(ownerLock) }
             ticket = try directory.read(name)
-            guard ticket.phase == "prepared" else { throw Failure.revoked }
+            guard ticket.phase == .prepared else { throw Failure.revoked }
             // An unreadable process/boot identity is not a revoked ticket.
             // Fail closed and leave the prepared ticket untouched so a host
             // permission problem is diagnosable without weakening ownership.
@@ -305,9 +303,9 @@ enum CyderExecutionOwner {
             // lock is not permission to bypass an unresolved prior operation.
             for otherName in try directory.names() where otherName != name {
                 let other = try directory.read(otherName)
-                if overlaps(ticket.effectiveScope, other.effectiveScope), ["active", "uncertain"].contains(other.phase) { throw Failure.uncertain }
+                if overlaps(ticket.effectiveScope, other.effectiveScope), other.phase.holdsScope { throw Failure.uncertain }
             }
-            ticket.phase = "active"; ticket.owner = owner; try directory.write(ticket)
+            ticket.phase = .active; ticket.owner = owner; try directory.write(ticket)
             let child = Process(); child.executableURL = URL(fileURLWithPath: command[0]); child.arguments = Array(command.dropFirst())
             // Authority is reconstructed from this ticket, never inherited
             // from a parent launch or user-provided game environment.
@@ -322,7 +320,7 @@ enum CyderExecutionOwner {
             child.standardInput = FileHandle.nullDevice
             child.standardOutput = FileHandle.standardOutput; child.standardError = FileHandle.standardError
             do { try child.run() }
-            catch { ticket.phase = "finished"; ticket.status = 127; try directory.write(ticket); return 127 }
+            catch { ticket.phase = .finished; ticket.status = 127; try directory.write(ticket); return 127 }
             // If this write fails, keep owning the child and scope until it
             // actually returns; never abandon a running mutation on disk error.
             do {
@@ -340,14 +338,14 @@ enum CyderExecutionOwner {
             // arriving after settlement cannot claim; one already spawning must
             // return before the scope is released, even if Bash exited early.
             switch ticket.nativeSpawn?.phase {
-            case "spawned": ticket.phase = "handedOff"
-            case "claiming": ticket.phase = "uncertain"
-            default: ticket.phase = "finished"
+            case .spawned: ticket.phase = .handedOff
+            case .claiming: ticket.phase = .uncertain
+            case .exited, .failed, nil: ticket.phase = .finished
             }
             ticket.status = child.terminationStatus
             ticket.signalled = child.terminationReason == .uncaughtSignal
             try directory.write(ticket)
-            if ticket.phase == "uncertain" || (ticket.handoff != nil && ticket.nativeSpawn == nil && child.terminationStatus == 0) { return 75 }
+            if ticket.phase == .uncertain || (ticket.handoff != nil && ticket.nativeSpawn == nil && child.terminationStatus == 0) { return 75 }
             return child.terminationReason == .uncaughtSignal ? 128 + child.terminationStatus : child.terminationStatus
         } catch {
             if case Failure.processIdentityUnavailable = error {
@@ -418,17 +416,17 @@ enum CyderExecutionOwner {
                 let claimLock = try directory.waitLock(id.uuidString + ".spawn.lock")
                 defer { Darwin.close(claimLock) }
                 var ticket = try directory.read(name)
-                guard ticket.phase == "active", ticket.nativeSpawn == nil, let handoff = ticket.handoff else { throw Failure.revoked }
+                guard ticket.phase == .active, ticket.nativeSpawn == nil, let handoff = ticket.handoff else { throw Failure.revoked }
                 guard let owner = ticket.owner, Birth.current(owner.pid) == owner,
                       let bridge = Birth.current() else { throw Failure.ownerMissing }
                 guard try identify(ProcessInfo.processInfo.environment["WINEPREFIX"]).key == ticket.scope,
                       try identify(ticket.prefix).key == ticket.scope else { throw Failure.scopeChanged }
                 guard URL(fileURLWithPath: command[0]).resolvingSymlinksInPath().path == handoff.executable else { throw Failure.executableChanged }
-                ticket.nativeSpawn = .init(phase: "claiming", bridge: bridge)
+                ticket.nativeSpawn = .init(phase: .claiming, bridge: bridge)
                 try directory.write(ticket)
                 do { pid = try spawnWine([handoff.executable] + command.dropFirst()) }
                 catch {
-                    ticket.nativeSpawn?.phase = "failed"; ticket.nativeSpawn?.status = 127
+                    ticket.nativeSpawn?.phase = .failed; ticket.nativeSpawn?.status = 127
                     try directory.write(ticket); throw error
                 }
                 // This is our unreaped child, including a very fast zombie;
@@ -438,11 +436,11 @@ enum CyderExecutionOwner {
                     throw Failure.uncertain
                 }
                 ticket.nativeSpawn?.process = birth
-                ticket.nativeSpawn?.phase = "spawned"
+                ticket.nativeSpawn?.phase = .spawned
                 // Spawn has crossed the real native image boundary. The outer
                 // owner may still hold its scope while Bash returns, but a
                 // concurrent owner crash must not strand this as pre-spawn.
-                ticket.phase = "handedOff"
+                ticket.phase = .handedOff
                 do {
                     try directory.write(ticket)
                     try publishPID(pid, to: handoff.pidFile)
@@ -458,12 +456,12 @@ enum CyderExecutionOwner {
             let resultLock = try directory.waitLock(id.uuidString + ".spawn.lock")
             defer { Darwin.close(resultLock) }
             var ticket = try directory.read(name)
-            ticket.nativeSpawn?.phase = "exited"
+            ticket.nativeSpawn?.phase = .exited
             ticket.nativeSpawn?.status = result.status; ticket.nativeSpawn?.signalled = result.signalled
             // The Bash result can arrive after this very fast native child.
             // Only the second of those outcomes seals an immutable terminal
             // ticket, so reconciliation cannot preserve a premature terminal.
-            if ticket.phase == "handedOff", ticket.status != nil { ticket.phase = "finished" }
+            if ticket.phase == .handedOff, ticket.status != nil { ticket.phase = .finished }
             try directory.write(ticket)
             return result.signalled ? 128 + result.status : result.status
         } catch {

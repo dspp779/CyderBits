@@ -42,9 +42,9 @@ pump { node != nil }
 let identity = node!.id
 let authority = CyderLaunchObserver.Authority(request: "request", launch: "launch", digest: "digest", epoch: UUID())
 let ticket = UUID(), scope = "501:11:22"
-func receipt(_ phase: String = "spawned", a: CyderLaunchObserver.Authority = authority, started: UInt64? = nil) -> CyderLaunchObserver.NativeRoot {
+func receipt(_ phase: CyderSpawnPhase = .spawned, a: CyderLaunchObserver.Authority = authority, started: UInt64? = nil) -> CyderLaunchObserver.NativeRoot {
     .init(authority: a, ticket: ticket, phase: phase, pid: identity.pid, boot: identity.boot, started: started ?? identity.started,
-        status: phase == "exited" ? 0 : nil, signalled: phase == "exited" ? false : nil, prefixScope: scope)
+        status: phase == .exited ? 0 : nil, signalled: phase == .exited ? false : nil, prefixScope: scope)
 }
 var confirmations: [String] = []
 controller.onWindowConfirmed = { confirmations.append($0) }
@@ -57,7 +57,7 @@ precondition(controller.nativeRootPID(id: authority.launch) == 0)
 controller.attachNativeRoot(receipt()); pump { controller.hasLiveWatchedPIDs(id: authority.launch) }
 precondition(confirmations.isEmpty, "process alone was treated as a window")
 // A receipt for a reused numeric PID cannot remove the actual root.
-controller.attachNativeRoot(receipt("exited", started: identity.started + 1)); settle()
+controller.attachNativeRoot(receipt(.exited, started: identity.started + 1)); settle()
 precondition(controller.hasLiveWatchedPIDs(id: authority.launch))
 // Same prefix, separate accepted request: one native root cannot satisfy both.
 let second = CyderLaunchObserver.Authority(request: "second", launch: "second", digest: "second", epoch: authority.epoch)
@@ -72,7 +72,7 @@ controller.endLaunch(id: second.launch)
 windows.hold(); var finished = false
 controller.claimLiveWindows(id: authority.launch) { finished = true }
 pump { windows.started() }
-controller.attachNativeRoot(receipt("exited"))
+controller.attachNativeRoot(receipt(.exited))
 let beforeRelease = confirmations.count
 windows.release(); pump { finished }; settle()
 precondition(!controller.hasLiveWatchedPIDs(id: authority.launch) && confirmations.count == beforeRelease)
@@ -80,7 +80,7 @@ precondition(child.isRunning, "observation cleanup killed the controlled native 
 // A past environment at the same path cannot remove a new prefix identity.
 let newAuthority = CyderLaunchObserver.Authority(request: "fresh", launch: "fresh", digest: "fresh", epoch: authority.epoch)
 controller.beginLaunch(id: newAuthority.launch, prefix: root, executableName: "Fresh", authority: newAuthority)
-let fresh = CyderLaunchObserver.NativeRoot(authority: newAuthority, ticket: UUID(), phase: "spawned", pid: identity.pid,
+let fresh = CyderLaunchObserver.NativeRoot(authority: newAuthority, ticket: UUID(), phase: .spawned, pid: identity.pid,
     boot: identity.boot, started: identity.started, status: nil, signalled: nil, prefixScope: "501:11:23")
 controller.attachNativeRoot(fresh)
 let oldEnvironment = CyderLifecycle.EnvironmentID(uid: 501, device: 11, inode: 22, namespace: "wine-user")

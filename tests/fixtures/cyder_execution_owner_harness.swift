@@ -60,7 +60,7 @@ try io { try CyderExecutionOwner.recover(root: ledger) }
 let late = try start(revoked, name: "revoked"); pump { !late.isRunning }
 check(late.terminationStatus == 75 && !exists("revoked", "entered"), "old prepared ticket spawned after recovery")
 let revokedReceipt = try receipt(revoked)
-check(revokedReceipt.phase == "revoked", "prepared ticket not durably revoked")
+check(revokedReceipt.phase == .revoked, "prepared ticket not durably revoked")
 let nativeCorrelation = CyderExecutionOwner.Correlation(requestID: UUID().uuidString + ":" + UUID().uuidString,
     launchID: UUID().uuidString, digest: String(repeating: "b", count: 64))
 let active = try reserve("one", correlation: nativeCorrelation)
@@ -69,7 +69,7 @@ pump { exists("active", "entered") }
 try io { try CyderExecutionOwner.recover(root: ledger) }
 pump { (try? receipt(active).child) != nil }
 let activeReceipt = try receipt(active)
-check(activeReceipt.phase == "active" && activeReceipt.owner?.pid == owner.processIdentifier && activeReceipt.child != nil,
+check(activeReceipt.phase == .active && activeReceipt.owner?.pid == owner.processIdentifier && activeReceipt.child != nil,
       "live owner not retained with actual process identities")
 let alias = root.appendingPathComponent("prefix-alias")
 try FileManager.default.createSymbolicLink(at: alias, withDestinationURL: root.appendingPathComponent("prefixes/one"))
@@ -89,7 +89,7 @@ check(same.terminationStatus == 75 && all.terminationStatus == 75, "cross-proces
 check(other.terminationStatus == 0 && exists("other", "finished"), "independent environment was blocked")
 try Data().write(to: root.appendingPathComponent("active.release")); pump { !owner.isRunning }
 check(owner.terminationStatus == 23 && exists("active", "finished"), "native child result lost")
-let finished = try receipt(active); check(finished.phase == "finished" && finished.status == 23, "actual result not persisted")
+let finished = try receipt(active); check(finished.phase == .finished && finished.status == 23, "actual result not persisted")
 check(finished.correlation == nativeCorrelation && finished.issuer == issuer && finished.signalled == false,
       "actual helper lost original correlation or termination reason")
 let again = try start(active, name: "again"); pump { !again.isRunning }
@@ -118,7 +118,7 @@ check(beforeCrash.owner == CyderExecutionOwner.Birth.current(crashOwner.processI
 check(kill(crashOwner.processIdentifier, SIGKILL) == 0, "could not stop exact native fixture owner")
 pump { !crashOwner.isRunning }
 try io { try CyderExecutionOwner.recover(root: ledger) }
-let crashReceipt = try receipt(crashTicket); check(crashReceipt.phase == "uncertain", "lost owner falsely completed")
+let crashReceipt = try receipt(crashTicket); check(crashReceipt.phase == .uncertain, "lost owner falsely completed")
 let blockedTicket = try reserve("crash"), safeTicket = try reserve("other-after-crash")
 let blocked = try start(blockedTicket, name: "blocked"), safe = try start(safeTicket, name: "safe")
 pump { !blocked.isRunning && !safe.isRunning }
@@ -135,7 +135,7 @@ priorBoot.owner = .init(boot: "injected-prior-boot", pid: beforeCrash.owner!.pid
 try JSONEncoder().encode(priorBoot).write(to: ledger.appendingPathComponent(crashTicket.uuidString + ".json"))
 try io { try CyderExecutionOwner.recover(root: ledger) }
 let bootRecovered = try receipt(crashTicket)
-check(bootRecovered.phase == "revoked", "old-boot executor permanently blocked recovery")
+check(bootRecovered.phase == .revoked, "old-boot executor permanently blocked recovery")
 print("PASS injected boot boundary: old uncertain executor revoked without replay")
 
 // Model a recovered runtime mutation whose outcome is unknown. Its concrete
@@ -143,7 +143,7 @@ print("PASS injected boot boundary: old uncertain executor revoked without repla
 // environments, including native filesystem maintenance.
 let globalUnknownID = try reserve("global-unknown", requiresGlobalScope: true)
 var globalUnknown = try receipt(globalUnknownID)
-globalUnknown.phase = "uncertain"
+globalUnknown.phase = .uncertain
 globalUnknown.owner = CyderExecutionOwner.Birth.current()
 let globalUnknownURL = ledger.appendingPathComponent(globalUnknownID.uuidString + ".json")
 try JSONEncoder().encode(globalUnknown).write(to: globalUnknownURL)
@@ -163,7 +163,7 @@ globalUnknown.owner = .init(boot: "injected-prior-boot", pid: globalUnknown.owne
 try JSONEncoder().encode(globalUnknown).write(to: globalUnknownURL)
 try io { try CyderExecutionOwner.recover(root: ledger) }
 let globalRecovered = try receipt(globalUnknownID)
-check(globalRecovered.phase == "revoked", "prior-boot global uncertainty remained")
+check(globalRecovered.phase == .revoked, "prior-boot global uncertainty remained")
 print("PASS injected runtime uncertainty: actual prefix retained, native launches and maintenance in every scope refuse until valid recovery")
 
 // Retention data below is explicitly injected. Physical executor and crash
@@ -172,8 +172,8 @@ let retention = root.appendingPathComponent("retention")
 try FileManager.default.createDirectory(at: retention, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
 let correlation = CyderExecutionOwner.Correlation(requestID: UUID().uuidString + ":" + UUID().uuidString,
     launchID: UUID().uuidString, digest: String(repeating: "a", count: 64))
-let retained = CyderExecutionOwner.Ticket(schema: 1, id: UUID(), issuer: issuer, scope: nil, phase: "finished", status: 0, correlation: correlation)
-let unresolved = CyderExecutionOwner.Ticket(schema: 1, id: UUID(), issuer: issuer, scope: nil, phase: "uncertain")
+let retained = CyderExecutionOwner.Ticket(schema: 1, id: UUID(), issuer: issuer, scope: nil, phase: .finished, status: 0, correlation: correlation)
+let unresolved = CyderExecutionOwner.Ticket(schema: 1, id: UUID(), issuer: issuer, scope: nil, phase: .uncertain)
 func inject(_ ticket: CyderExecutionOwner.Ticket) throws {
     let url = retention.appendingPathComponent(ticket.id.uuidString + ".json")
     try JSONEncoder().encode(ticket).write(to: url); chmod(url.path, 0o600)
@@ -181,19 +181,19 @@ func inject(_ ticket: CyderExecutionOwner.Ticket) throws {
 try inject(retained); try inject(unresolved)
 var oldFinished: [UUID] = []
 for _ in 0..<510 {
-    let terminal = CyderExecutionOwner.Ticket(schema: 1, id: UUID(), issuer: issuer, scope: nil, phase: "finished", status: 0)
+    let terminal = CyderExecutionOwner.Ticket(schema: 1, id: UUID(), issuer: issuer, scope: nil, phase: .finished, status: 0)
     try inject(terminal); oldFinished.append(terminal.id)
 }
 let admitted = try io { try CyderExecutionOwner.prepare(root: retention, issuer: issuer, scope: nil) }
 let compacted = try io { try CyderExecutionOwner.snapshot(root: retention) }
 check(compacted.count == 35 && compacted.contains(retained) && compacted.contains(unresolved)
-      && compacted.contains { $0.id == admitted && $0.phase == "prepared" }, "capacity recovery deleted unresolved/correlated authority or retained all terminal history")
+      && compacted.contains { $0.id == admitted && $0.phase == .prepared }, "capacity recovery deleted unresolved/correlated authority or retained all terminal history")
 let removedID = oldFinished.first { id in !compacted.contains { $0.id == id } }!
 let latePruned = Process(); latePruned.executableURL = helper
 latePruned.arguments = ["--execution-owner", retention.path, removedID.uuidString, "--", "/bin/bash", script.path, root.appendingPathComponent("pruned-late").path, "quick", "0"]
 try latePruned.run(); pump { !latePruned.isRunning }
 check(latePruned.terminationStatus == 75 && !exists("pruned-late", "entered"), "pruned old ticket was recreated/replayed")
-var staleConfirmation = retained; staleConfirmation.phase = "active"
+var staleConfirmation = retained; staleConfirmation.phase = .active
 try io { try CyderExecutionOwner.prune(root: retention, confirmed: [staleConfirmation, unresolved]) }
 let beforeAcknowledgement = try io { try CyderExecutionOwner.snapshot(root: retention) }
 check(beforeAcknowledgement.contains(retained) && beforeAcknowledgement.contains(unresolved), "stale ACK or uncertain evidence deleted ticket")
@@ -205,10 +205,12 @@ print("PASS retention: 512-ticket capacity reclaims only disposable terminal his
 let invalidSpawnRoot = root.appendingPathComponent("invalid-spawn")
 try FileManager.default.createDirectory(at: invalidSpawnRoot, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
 let invalidSpawn = CyderExecutionOwner.Ticket(schema: 1, id: UUID(), issuer: issuer, scope: "injected-scope",
-    prefix: root.path, phase: "handedOff", handoff: .init(executable: "/injected/wine", pidFile: root.appendingPathComponent("pid").path),
-    nativeSpawn: .init(phase: "unknown-future-state", bridge: .init(boot: "injected-boot", pid: 123, started: 456)))
+    prefix: root.path, phase: .handedOff, handoff: .init(executable: "/injected/wine", pidFile: root.appendingPathComponent("pid").path),
+    nativeSpawn: .init(phase: .claiming, bridge: .init(boot: "injected-boot", pid: 123, started: 456)))
 let invalidSpawnURL = invalidSpawnRoot.appendingPathComponent(invalidSpawn.id.uuidString + ".json")
-let invalidSpawnBytes = try JSONEncoder().encode(invalidSpawn)
+// A future/unknown phase must be refused by decoding, so inject it as raw bytes.
+let invalidSpawnBytes = Data(String(decoding: try JSONEncoder().encode(invalidSpawn), as: UTF8.self)
+    .replacingOccurrences(of: "\"claiming\"", with: "\"unknown-future-state\"").utf8)
 try invalidSpawnBytes.write(to: invalidSpawnURL); chmod(invalidSpawnURL.path, 0o600)
 var rejectedInvalidSpawn = false
 do { _ = try io { try CyderExecutionOwner.snapshot(root: invalidSpawnRoot) } } catch { rejectedInvalidSpawn = true }
