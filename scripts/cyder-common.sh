@@ -3348,9 +3348,10 @@ cyder_apply_scrolling_for_exe() {
       [[ -e "$prefix/.cyder-maplestory-scrolling/original.json" ]] || return 0
     mode=restore ;; traditional|precise) ;; *) echo "Invalid scrolling preference" >&2; return 2 ;; esac
   if ! helper="$(cyder_scrolling_helper)"; then
-    [[ "$mode" == restore ]] && return 0
-    echo "Cyder scrolling helper is missing" >&2
-    return 2
+    # Only outside Cyder.app (scripts run from a checkout); the release app
+    # always ships CyderSwift. Keep the prefix's existing value, as unmanaged.
+    [[ "$mode" == restore ]] || echo "Cyder scrolling helper (CyderSwift) not found; leaving UsePreciseScrolling unchanged" >&2
+    return 0
   fi
   cyder_has_running_prefix "$prefix" && running=(--prefix-running)
   CYDER_EXECUTION_FINAL=0 "$helper" --scrolling "$mode" "$prefix" "$wine_bin" "$name" ${running[@]+"${running[@]}"} >/dev/null

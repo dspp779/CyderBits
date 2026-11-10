@@ -86,6 +86,13 @@ if cyder_run_wine_exe "$TMP/engine/bin/wine" "$TMP/game space/MapleStory.exe" "$
 fi
 assert_not_contains "$(cat "$CYDER_SCROLL_TEST_EVENTS")" 'game;' 'Failed scrolling update must block final handoff'
 unset CYDER_SCROLL_TEST_FAIL
+# Scripts run from a checkout (no Cyder.app, no CyderSwift) still launch and
+# leave the prefix's value unchanged; only a failed update blocks the game.
+: >"$CYDER_SCROLL_TEST_EVENTS"
+CYDER_ENVIRONMENT_HELPER="$TMP/missing/CyderSwift" CYDER_SCRIPTS="$TMP/no-bundle/scripts" \
+  cyder_run_wine_exe "$TMP/engine/bin/wine" "$TMP/game space/MapleStory.exe" "$TMP/prefix" 2>"$TMP/missing.err"
+assert_contains "$(cat "$CYDER_SCROLL_TEST_EVENTS")" 'game;' 'Missing helper outside the app must not block the launch'
+assert_not_contains "$(cat "$CYDER_SCROLL_TEST_EVENTS")" '--scrolling' 'No helper ran outside the app'
 # MSI, registry imports and unresolved link/script targets must not get an
 # invented EXE registry key. Existing persisted EXE settings are left intact.
 for kind in msi reg link script; do
