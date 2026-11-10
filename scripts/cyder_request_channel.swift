@@ -36,6 +36,8 @@ final class CyderRequestChannel {
     private var clients: [Int32: Client] = [:]
     private var handler: ((CyderRequestMessage, @escaping (CyderRequestReply) -> Void) -> Void)?
     static let maxFrame = 256 * 1024
+    static let frameDeadline: TimeInterval = 5
+    static let replyDeadline: TimeInterval = 30
     init(path: String) { self.path = path }
 
     /// Call only while holding the primary ownership and journal locks.
@@ -104,8 +106,11 @@ final class CyderRequestChannel {
             resources.enter()
             source.setCancelHandler { [resources] in close(clientFD); resources.leave() }
             source.resume()
-            queue.asyncAfter(deadline: .now() + 5) { [weak self] in
-                guard self?.clients[clientFD]?.token == token else { return }
+            // Frame deadline only: a same-user peer that never finishes its one
+            // line cannot hold one of the 16 slots. Once a frame is delivered,
+            // the durable handler (journal fsync) gets its own, longer budget.
+            queue.asyncAfter(deadline: .now() + Self.frameDeadline) { [weak self] in
+                guard let client = self?.clients[clientFD], client.token == token, !client.delivered else { return }
                 self?.remove(clientFD)
             }
         }
@@ -125,6 +130,10 @@ final class CyderRequestChannel {
               let message = try? JSONDecoder().decode(CyderRequestMessage.self, from: client.bytes.prefix(newline)),
               message.protocolVersion == 1 else { remove(clientFD); return }
         clients[clientFD]?.delivered = true
+        queue.asyncAfter(deadline: .now() + Self.replyDeadline) { [weak self] in
+            guard self?.clients[clientFD]?.token == token else { return }
+            self?.remove(clientFD) // the sender recovers the durable result by same-ID query
+        }
         handler?(message) { [weak self] reply in
             guard let self else { return }
             self.queue.async {
@@ -190,7 +199,7 @@ final class CyderRequestChannel {
             while offset < buffer.count {
                 guard budget() else { return false }
                 let count = send(fd, buffer.baseAddress!.advanced(by: offset), buffer.count - offset, 0)
-                if count < 0 && errno == EINTR { continue }
+                if count < 0 && (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK) { continue }
                 guard count > 0 else { return false }
                 offset += count
             }
@@ -202,7 +211,8 @@ final class CyderRequestChannel {
         while received.count <= maxFrame {
             guard budget() else { return nil }
             let count = recv(fd, &buffer, buffer.count, 0)
-            if count < 0 && errno == EINTR { continue }
+            // SO_RCVTIMEO slices are at most 1 s; the deadline is enforced by budget().
+            if count < 0 && (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK) { continue }
             guard count > 0 else { return nil }
             received.append(contentsOf: buffer.prefix(count))
             if let newline = received.firstIndex(of: 10) {

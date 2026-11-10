@@ -24,6 +24,11 @@ work.async {
                         namespace: namespace, status: status, record: record))
         }
         guard message.kind != "stall" else { return }
+        if message.kind == "slow" {
+            // A durable handler slower than one SO_RCVTIMEO slice (1 s).
+            DispatchQueue.global().asyncAfter(deadline: .now() + 1.6) { respond("slow-done") }
+            return
+        }
         guard let id = message.requestID else { respond("hello"); return }
         if message.kind == "submit", let payload = message.payload {
             journal.submit(id: id, payload: payload) { result in
@@ -60,6 +65,11 @@ work.async {
     let stall = CyderRequestMessage(protocolVersion: 1, kind: "stall", requestID: nil, payloadDigest: nil, senderEpoch: sender, payload: nil)
     precondition(CyderRequestChannel.exchange(path: path, message: stall, timeout: 0.15) == nil)
     precondition(ProcessInfo.processInfo.systemUptime - start < 1, "stalled peer exceeded budget")
+    // Problem 6: a reply that takes longer than 1 s (journal full fsync) is
+    // still delivered within the caller's budget instead of timing out early.
+    let slow = CyderRequestMessage(protocolVersion: 1, kind: "slow", requestID: nil, payloadDigest: nil, senderEpoch: sender, payload: nil)
+    precondition(CyderRequestChannel.exchange(path: path, message: slow, timeout: 4)?.status == "slow-done", "slow durable reply was dropped")
+    precondition(CyderRequestChannel.frameDeadline < CyderRequestChannel.replyDeadline)
     let oversized = CyderRequestPayload(files: ["/" + String(repeating: "x", count: CyderRequestChannel.maxFrame)], arguments: nil, urls: [], showUI: false)
     let huge = CyderRequestMessage(protocolVersion: 1, kind: "submit", requestID: id, payloadDigest: nil, senderEpoch: sender, payload: oversized)
     precondition(CyderRequestChannel.exchange(path: path, message: huge) == nil, "oversized frame accepted")

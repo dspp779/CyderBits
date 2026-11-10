@@ -714,7 +714,10 @@ final class CyderInstanceCoordinator {
                     }
                     // Persistence can finish after the observation deadline.
                     // Retain that original-ID copy without starting a late send.
-                    let remaining = min(0.7, deadline - ProcessInfo.processInfo.systemUptime)
+                    // The reply follows a durable journal write (full fsync), so
+                    // it gets the whole remaining budget, unlike the quick hello;
+                    // a short per-attempt cap only produced same-ID retries.
+                    let remaining = deadline - ProcessInfo.processInfo.systemUptime
                     guard remaining > 0 else { break }
                     if let response = CyderRequestChannel.exchange(path: path, message: message, timeout: remaining),
                        response.status == "accepted", let record = response.record,
