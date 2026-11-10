@@ -388,7 +388,7 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate,
         moltenvkVariant.target = self
         moltenvkVariant.action = #selector(moltenvkVariantChanged)
         updateMoltenvkMenuItemAvailability()
-        moltenvkHelp.stringValue = "舊 Intel 顯示異常時可改用 1.2.10；Mach Ports 修復由引擎 shim 提供。"
+        moltenvkHelp.stringValue = "舊 Intel 顯示異常時可嘗試 1.2.10，但不保證修復閃爍。DXVK 啟動會檢查實際 minOS；新版引擎的兩個版本皆可能需要 macOS 12。"
         moltenvkHelp.textColor = .secondaryLabelColor
         moltenvkHelp.font = .systemFont(ofSize: 12)
         moltenvkHelp.maximumNumberOfLines = 3

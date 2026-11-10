@@ -3438,6 +3438,7 @@ cyder_run_wine_exe() {
     export CX_BOTTLE="$prefix" CX_ROOT="$engine_root" WINEARCH=win64
     cyder_sync_crossover_graphics_environment "$prefix" || return $?
   fi
+  cyder_validate_moltenvk_for_backend "$engine_root" "${CYDER_GRAPHICS_BACKEND:-${CX_GRAPHICS_BACKEND:-default}}" || return $?
   engine_version="$(head -n 1 "$engine_root/version" 2>/dev/null || true)"
   if [[ "$capture_log" == 1 && -f "$engine_root/lib/wine/x86_64-windows/ntdll.dll" ]]; then
     ntdll_sha256="$(/usr/bin/shasum -a 256 \

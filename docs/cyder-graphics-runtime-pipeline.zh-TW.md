@@ -70,6 +70,40 @@ MoltenVK 必須留在 engine，因為 DXVK 家族的可用性檢查讀的是
 
 ---
 
+## MoltenVK minOS 與啟動契約（2026-10-20）
+
+引擎 commit `8cb157d` 將 1.4.2、1.2.10 兩個 versioned real 的預設 deployment
+target 設為 12.0；Wine host 與未版本化 wait-poll shim 仍維持 10.15。
+封裝上限允許 real 為 12.0，不能解讀為所有引擎中的同名檔案都有相同 minOS。
+
+`cyder_resolve_moltenvk_variant` 在 macOS 12 以下仍產生 1.2.10 候選，以保留
+舊引擎行為。候選與 `.real` symlink 並非相容性保證：`cyder_run_wine_exe`
+在後端確定後、啟動 Wine 前呼叫 `cyder_validate_moltenvk_for_backend`。
+DXVK 路徑用 `otool -arch x86_64 -l` 讀取 shim 及所選 real 的實際 minOS
+（含舊 `LC_VERSION_MIN_MACOSX`），逐一比較主機完整版本。
+超出主機版本、缺少 real 或無法讀取 x86_64 minOS 時，明確回報檔案與原因並停止。
+不會自動改用另一個圖形後端。舊單 dylib／`lib64` 引擎也檢查實際檔案。
+
+此 gate 僅套用 DXVK；WineD3D、D3DMetal、DXMT 與引擎安裝／偏好切換不受
+這項 Vulkan 相容性檢查阻擋，各後端原有條件仍適用。
+
+| 系統／產物 | 程式驗證的結果 | 實機仍需確認 |
+|---|---|---|
+| macOS 10.15／11 + real minOS 12.0 | 拒絕 DXVK，1.2.10 名稱不會繞過檢查 | 尚未主張存在正式發行或實機故障案例 |
+| macOS 10.15／11 + 舊 real／單 dylib minOS 10.15 | 通過 minOS gate，保留舊路徑 | driver、依賴庫、Vulkan 與遊戲載入 |
+| macOS 12／13 + real minOS 12.0 | 保留所選 1.4.2／1.2.10，通過 gate | Intel／Apple Silicon 各 GPU 的遊戲畫面與穩定性 |
+| WineD3D／D3DMetal／DXMT | 跳過此 Vulkan gate | 各自原有系統與硬體要求 |
+
+`tests/test-cyder-moltenvk-variant.sh` 使用真正編譯的 Mach-O fixture 與模擬
+主機版本，並驗證不相容 DXVK 不會啟動 Wine；不是在 macOS 11／12／13 實機跑遊戲。
+本次本機 Wine install 的未版本化 MoltenVK 宣告 minOS 10.15，沒有用這項
+檢查推論新雙 real 套件已正式出貨。
+
+[Issue #7](https://github.com/dspp779/CyderBits/issues/7) 的 macOS 13 Intel
+GPU 黑畫面，以及回報改用 1.2.10 後仍有的間歇閃爍，屬於另行追蹤的 rendering
+驗收。必須記錄引擎／real 雜湊、GPU、系統與相同場景 A/B；minOS 通過不代表
+畫面正確，也不宣告修復此 issue。
+
 ## 2. 開發機：編譯與打包
 
 Install 樹同時有 Wine 與圖形 PE，只為了本機測試與打包來源。出貨拆成兩個 artifact。

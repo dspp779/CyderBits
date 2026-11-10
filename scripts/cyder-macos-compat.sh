@@ -29,9 +29,9 @@ cyder_macos_at_least() {
   return 1
 }
 
-# Current CX26 Cyder engine binaries (wine/ntdll/MoltenVK) are built with
-# MACOSX_DEPLOYMENT_TARGET=10.15. This gate also protects a future lower-floor
-# non-Vulkan runtime from loading MoltenVK on an unsupported host.
+# Wine hosts and the wait-poll shim retain the 10.15 floor. Versioned reals
+# may require 12.0; the DXVK launch gate checks their actual Mach-O minOS.
+# This baseline gate also protects a future lower-floor non-Vulkan runtime.
 cyder_apply_moltenvk_os_floor() {
   if cyder_macos_at_least 10 15; then
     return 0

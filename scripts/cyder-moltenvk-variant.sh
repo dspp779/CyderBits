@@ -10,7 +10,7 @@ if [[ -f "$_CYDER_MVK_DIR/cyder-macos-compat.sh" ]]; then
 fi
 unset _CYDER_MVK_DIR
 
-# prints 1.4.2 or 1.2.10
+# Prints a candidate only; version names never prove host compatibility.
 cyder_resolve_moltenvk_variant() {
   local pref="${1:?}"
   case "$pref" in
@@ -92,6 +92,49 @@ cyder_default_moltenvk_variant_preference() {
     printf '1.4.2\n'
   else
     printf '1.2.10\n'
+  fi
+}
+
+# Inspect the Wine process slice, including older LC_VERSION_MIN_MACOSX dylibs.
+# Fail closed when the file/slice/load command cannot be inspected.
+cyder_moltenvk_check_minos() {
+  local dylib="${1:?}" headers required host
+  headers="$(otool -arch x86_64 -l "$dylib" 2>/dev/null)" || headers=""
+  required="$(printf '%s\n' "$headers" | awk '
+    $1 == "cmd" { legacy = ($2 == "LC_VERSION_MIN_MACOSX") }
+    $1 == "minos" || (legacy && $1 == "version") { print $2; exit }
+  ')"
+  if [[ ! "$required" =~ ^[0-9]+\.[0-9]+(\.[0-9]+)?$ ]]; then
+    echo "DXVK/Vulkan blocked: cannot determine x86_64 Mach-O minOS: $dylib" >&2
+    return 1
+  fi
+  host="$(cyder_macos_product_version)"
+  if ! awk -v host="$host" -v need="$required" 'BEGIN {
+    split(host,h,"."); split(need,n,".");
+    for (i=1;i<=3;i++) { if (h[i]+0 > n[i]+0) exit 0; if (h[i]+0 < n[i]+0) exit 1 }
+    exit 0
+  }'; then
+    echo "DXVK/Vulkan blocked: macOS $host; $dylib requires macOS $required. Choose a compatible engine or another graphics backend." >&2
+    return 1
+  fi
+}
+
+# Call after backend resolution, before spawning Wine. Installation/preference
+# maintenance may still select a real on a host using WineD3D or D3DMetal.
+cyder_validate_moltenvk_for_backend() {
+  local engine="${1:?}" backend="${2:-default}" unix shim real
+  [[ "$backend" == dxvk ]] || return 0
+  unix="$(cyder_moltenvk_unix_lib "$engine")"
+  shim="$unix/libMoltenVK.dylib"
+  if [[ ! -e "$shim" && ! -L "$shim" ]]; then
+    shim="$engine/lib64/libMoltenVK.dylib"
+  fi
+  cyder_moltenvk_check_minos "$shim" || return $?
+  real="${shim%/*}/libMoltenVK.real.dylib"
+  # Old single-dylib engines have no .real. A shim must have a readable real.
+  if [[ -e "$real" || -L "$real" ]] ||
+     otool -L "$shim" 2>/dev/null | grep -Fq '@loader_path/libMoltenVK.real.dylib'; then
+    cyder_moltenvk_check_minos "$real" || return $?
   fi
 }
 

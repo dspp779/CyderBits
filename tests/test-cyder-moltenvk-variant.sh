@@ -36,7 +36,7 @@ export PATH="$BIN:/usr/bin:/bin:/usr/sbin:/sbin"
 
 CYDER_MOCK_MACOS=11.0
 assert_eq "$(cyder_resolve_moltenvk_variant 1.4.2)" "1.2.10" \
-  "macOS 11 must force MoltenVK 1.2.10 even when preference is 1.4.2"
+  "macOS 11 candidate retains legacy preference; compatibility is checked separately"
 
 CYDER_MOCK_MACOS=13.0
 assert_eq "$(cyder_resolve_moltenvk_variant 1.2.10)" "1.2.10" \
@@ -58,7 +58,7 @@ assert_eq "$(readlink "$UNIX/libMoltenVK.real.dylib")" "libMoltenVK-1.2.10.dylib
 CYDER_MOCK_MACOS=11.0
 cyder_apply_moltenvk_variant "$FAKE" "1.4.2"
 assert_eq "$(readlink "$UNIX/libMoltenVK.real.dylib")" "libMoltenVK-1.2.10.dylib" \
-  "apply on macOS 11 must force 1.2.10"
+  "macOS 11 selection alone is not proof of loadability"
 
 # Soft apply on engines without dual layout must succeed.
 SINGLE="$(mktemp -d "${TMPDIR:-/tmp}/cyder-mvk-single.XXXXXX")"
@@ -66,6 +66,110 @@ mkdir -p "$SINGLE/lib/wine/x86_64-unix"
 : >"$SINGLE/lib/wine/x86_64-unix/libMoltenVK.dylib"
 assert cyder_apply_moltenvk_variant_if_present "$SINGLE" "1.4.2"
 rm -rf "$SINGLE"
+
+# Real Mach-O fixtures: do not mistake a mocked version/name for loadability.
+export PATH=/usr/bin:/bin:/usr/sbin:/sbin
+sdk="$(xcrun --sdk macosx --show-sdk-path)"
+printf 'int mvk_probe = 1;\n' > "$FAKE/probe.c"
+build_real() {
+  /usr/bin/clang -arch x86_64 -isysroot "$sdk" -mmacosx-version-min="$2" \
+    -dynamiclib "$FAKE/probe.c" -o "$1"
+}
+build_real "$UNIX/libMoltenVK.dylib" 10.15
+build_real "$UNIX/libMoltenVK-1.4.2.dylib" 12.0
+build_real "$UNIX/libMoltenVK-1.2.10.dylib" 12.0
+ln -sfn libMoltenVK-1.2.10.dylib "$UNIX/libMoltenVK.real.dylib"
+for host in 10.15 11.0 11.7.10; do
+  CYDER_MOCK_MACOS="$host"
+  if cyder_validate_moltenvk_for_backend "$FAKE" dxvk 2> "$FAKE/error"; then
+    echo "expected macOS $host to reject minOS 12 real" >&2; exit 1
+  fi
+  assert_contains "$(cat "$FAKE/error")" 'requires macOS 12.0' 'error explains actual floor'
+  for backend in wined3d d3dmetal dxmt default; do
+    assert cyder_validate_moltenvk_for_backend "$FAKE" "$backend"
+  done
+done
+for host in 12.0 13.0; do
+  CYDER_MOCK_MACOS="$host"
+  for variant in 1.4.2 1.2.10; do
+    assert_eq "$(cyder_resolve_moltenvk_variant "$variant")" "$variant" '12+ respects preference'
+    ln -sfn "libMoltenVK-$variant.dylib" "$UNIX/libMoltenVK.real.dylib"
+    assert cyder_validate_moltenvk_for_backend "$FAKE" dxvk
+  done
+done
+# Legacy real and single-dylib engine remain usable on 10.15/11.
+build_real "$UNIX/libMoltenVK-1.2.10.dylib" 10.15
+ln -sfn libMoltenVK-1.2.10.dylib "$UNIX/libMoltenVK.real.dylib"
+for host in 10.15 11.0; do
+  CYDER_MOCK_MACOS="$host"
+  assert cyder_validate_moltenvk_for_backend "$FAKE" dxvk
+done
+rm "$UNIX/libMoltenVK.real.dylib"
+assert cyder_validate_moltenvk_for_backend "$FAKE" dxvk
+# Real re-export shim must not hide a missing dependency behind its 10.15 floor.
+cp "$UNIX/libMoltenVK.dylib" "$FAKE/single.dylib"
+/usr/bin/install_name_tool -id '@loader_path/libMoltenVK.real.dylib' "$UNIX/libMoltenVK-1.2.10.dylib"
+ln -s libMoltenVK-1.2.10.dylib "$UNIX/libMoltenVK.real.dylib"
+/usr/bin/clang -arch x86_64 -isysroot "$sdk" -mmacosx-version-min=10.15 \
+  -dynamiclib "$FAKE/probe.c" -Wl,-reexport_library,"$UNIX/libMoltenVK.real.dylib" \
+  -o "$UNIX/libMoltenVK.dylib"
+assert cyder_validate_moltenvk_for_backend "$FAKE" dxvk
+rm "$UNIX/libMoltenVK.real.dylib"
+if cyder_validate_moltenvk_for_backend "$FAKE" dxvk 2>/dev/null; then exit 1; fi
+cp "$FAKE/single.dylib" "$UNIX/libMoltenVK.dylib"
+# The shim itself must also fit the host.
+build_real "$UNIX/libMoltenVK.dylib" 12.0
+if cyder_validate_moltenvk_for_backend "$FAKE" dxvk 2>/dev/null; then exit 1; fi
+cp "$FAKE/single.dylib" "$UNIX/libMoltenVK.dylib"
+
+# Missing/broken real, non-Mach-O and missing x86_64 slice fail closed.
+ln -s missing.dylib "$UNIX/libMoltenVK.real.dylib"
+if cyder_validate_moltenvk_for_backend "$FAKE" dxvk 2>/dev/null; then exit 1; fi
+rm "$UNIX/libMoltenVK.real.dylib"
+printf 'invalid\n' > "$UNIX/libMoltenVK.dylib"
+if cyder_validate_moltenvk_for_backend "$FAKE" dxvk 2>/dev/null; then exit 1; fi
+/usr/bin/clang -arch arm64 -isysroot "$sdk" -mmacosx-version-min=12.0 \
+  -dynamiclib "$FAKE/probe.c" -o "$UNIX/libMoltenVK.dylib"
+CYDER_MOCK_MACOS=13.0
+if cyder_validate_moltenvk_for_backend "$FAKE" dxvk 2>/dev/null; then exit 1; fi
+# Old lib64 layout is checked too.
+mkdir -p "$FAKE/old/lib64"
+build_real "$FAKE/old/lib64/libMoltenVK.dylib" 10.15
+CYDER_MOCK_MACOS=11.0
+assert cyder_validate_moltenvk_for_backend "$FAKE/old" dxvk
+build_real "$FAKE/old/lib64/libMoltenVK.dylib" 12.0
+if cyder_validate_moltenvk_for_backend "$FAKE/old" dxvk 2>/dev/null; then exit 1; fi
+
+# Old Mach-O load command and patch-level floors are compared correctly.
+(
+  otool() { printf 'cmd LC_VERSION_MIN_MACOSX\nversion 10.15\nsdk 12.0\n'; }
+  CYDER_MOCK_MACOS=11.0
+  assert cyder_moltenvk_check_minos legacy-fixture
+)
+(
+  otool() { printf 'cmd LC_BUILD_VERSION\nminos 12.0.1\nsdk 27.0\n'; }
+  CYDER_MOCK_MACOS=12.0
+  if cyder_moltenvk_check_minos patch-fixture 2>/dev/null; then exit 1; fi
+  CYDER_MOCK_MACOS=12.0.1
+  assert cyder_moltenvk_check_minos patch-fixture
+)
+
+# Exercise the shared Wine entry point: blocked DXVK never spawns Wine.
+source "$ROOT/scripts/cyder-common.sh"
+cyder_configure_compatdb() { :; }
+cyder_apply_steam_compatibility_arguments() { :; }
+cyder_wine_locale_exports() { :; }
+cyder_apply_gptk_launch_environment() { :; }
+cyder_wine_is_crossover_frontend() { return 1; }
+mkdir -p "$FAKE/old/bin" "$FAKE/prefix"
+printf '#!/bin/sh\ntouch "%s/spawned"\n' "$FAKE" > "$FAKE/old/bin/wine"
+chmod +x "$FAKE/old/bin/wine"
+CYDER_GRAPHICS_BACKEND=dxvk
+if cyder_run_wine_exe "$FAKE/old/bin/wine" "$FAKE/game.exe" "$FAKE/prefix" 2> "$FAKE/error"; then
+  echo 'expected Wine entry point to block DXVK' >&2; exit 1
+fi
+assert test ! -e "$FAKE/spawned"
+assert_contains "$(cat "$FAKE/error")" 'DXVK/Vulkan blocked' 'launch surfaces compatibility error'
 
 common="$(cat "$ROOT/scripts/cyder-common.sh")"
 launcher="$(cat "$ROOT/scripts/cyder_launcher.sh")"
