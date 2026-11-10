@@ -94,12 +94,24 @@ assert_contains "$launcher_body" "無法啟動遊戲" "launcher must include ope
 assert_not_contains "$launcher_body" "exec /usr/bin/open" \
   "generated launcher must not exec open (need exit-status handling)"
 # Missing EXE must surface an alert path instead of silent open failure.
+# Run a copy whose osascript/open are stubs: the real ones would show a modal
+# alert (blocking the suite until clicked) and launch the fake Cyder.app.
 rm -f "$fake_exe"
+stubs="$tmp/stubs"
+mkdir -p "$stubs"
+printf '%s\n' '#!/bin/bash' 'printf "%s\n" "$*" >> "${0%/*}/osascript.calls"' > "$stubs/osascript"
+printf '%s\n' '#!/bin/bash' 'printf "%s\n" "$*" >> "${0%/*}/open.calls"' 'exit 1' > "$stubs/open"
+chmod +x "$stubs/osascript" "$stubs/open"
+sed -e "s#/usr/bin/osascript#$stubs/osascript#g" -e "s#/usr/bin/open#$stubs/open#g" \
+  "$tmp/My Game.app/Contents/MacOS/CyderGame" > "$stubs/CyderGame"
 set +e
-"$tmp/My Game.app/Contents/MacOS/CyderGame" >/dev/null 2>&1
+/bin/bash "$stubs/CyderGame" >/dev/null 2>&1
 missing_status=$?
 set -e
 assert_eq "$missing_status" "1" "missing EXE must exit non-zero after alerting"
+assert_contains "$(cat "$stubs/osascript.calls")" "找不到遊戲檔案" "missing EXE must show its alert"
+assert_contains "$(cat "$stubs/osascript.calls")" "無法開啟 Cyder" "failed recovery open must also alert"
+assert_contains "$(cat "$stubs/open.calls")" "-n -a $fake_cyder" "missing EXE must try to open Cyder for recovery"
 icon_path="$tmp/My Game.app/Contents/Resources/AppIcon.icns"
 [[ -f "$icon_path" ]] || {
   echo "ASSERT failed: launcher must include an icon (Cyder fallback when no --icon-png)" >&2
