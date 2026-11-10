@@ -20,8 +20,8 @@ expect_failure() {
 }
 
 python3 "$TOOL" validate "$RULES" >"$TEST_TMP/validate.txt"
-assert_contains "$(cat "$TEST_TMP/validate.txt")" "4 authoring rules, 3 enabled" \
-  "validation should include Steam, cnc-ddraw, and MapleStory Classic rules"
+assert_contains "$(cat "$TEST_TMP/validate.txt")" "5 authoring rules, 3 enabled" \
+  "validation should include the disabled CS2 candidate"
 
 python3 "$TOOL" compile "$RULES" -o "$TEST_TMP/first.cdb" >/dev/null
 python3 "$TOOL" compile "$RULES" -o "$TEST_TMP/second.cdb" >/dev/null
@@ -165,5 +165,48 @@ open(sys.argv[2], "wb").write(data)
 ' "$TEST_TMP/first.cdb" "$TEST_TMP/bad-size.cdb"
 expect_failure "declared file size mismatch must be rejected" \
   python3 "$TOOL" inspect "$TEST_TMP/bad-size.cdb"
+
+# CS2 is authorable, but the bundled database must stay byte-identical.
+if [[ "$inspection" == *"game.cities-skylines-2.dxmt"* ]]; then
+  echo "unvalidated CS2 rule was emitted" >&2
+  exit 1
+fi
+python3 - "$ROOT" "$TEST_TMP" <<'PYTEST'
+import copy, importlib.util, pathlib, sys
+root, temp = map(pathlib.Path, sys.argv[1:])
+spec = importlib.util.spec_from_file_location("compatdb", root / "scripts/cyder-compatdb.py")
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+rules = module.load_rules([str(root / "compatdb/rules")])
+cs2 = next(r for r in rules if r["id"] == "game.cities-skylines-2.dxmt")
+assert not cs2["enabled"]
+candidate = copy.deepcopy(cs2)
+candidate["enabled"] = True
+decoded = module.decode(module.encode([candidate]))
+assert decoded["rules"][0]["graphics_backend"] == "dxmt"
+# v1 rejects attempts to smuggle a shell hook or DLL writer into a rule.
+import yaml
+source = yaml.safe_load((root / "compatdb/rules/games.yml").read_text())
+raw = next(r for r in source["rules"] if r["id"] == cs2["id"])
+for action in ("shell_hook", "binary_patch"):
+    bad = copy.deepcopy(raw)
+    bad["actions"][action] = "untrusted"
+    try:
+        module.validate_rule(bad, "cs2-unsafe")
+    except module.CompatDBError:
+        pass
+    else:
+        raise AssertionError(f"unsafe {action} accepted")
+PYTEST
+
+# Direct game selection must not acquire Steam-only launch arguments.
+source "$ROOT/scripts/cyder-common.sh"
+cyder_apply_steam_compatibility_arguments '/games/Cities Skylines II/Cities2.exe' '-screen-fullscreen' '0'
+[[ "${#CYDER_STEAM_ARGUMENTS[@]}" == 2 ]]
+[[ "${CYDER_STEAM_ARGUMENTS[0]}" == '-screen-fullscreen' ]]
+[[ "${CYDER_STEAM_ARGUMENTS[1]}" == 0 ]]
+cyder_apply_steam_compatibility_arguments '/Steam/steam.exe' '-silent'
+[[ "${#CYDER_STEAM_ARGUMENTS[@]}" == 3 ]]
+[[ "${CYDER_STEAM_ARGUMENTS[0]}" == '-silent' ]]
 
 echo "PASS test-cyder-compatdb-data"

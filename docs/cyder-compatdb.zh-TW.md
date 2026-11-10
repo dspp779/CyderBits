@@ -155,7 +155,12 @@ Cyder 支援相同的 payload layout，但不會把 Apple runtime 納入原始�
 看到 Metal HUD 只能證明程序使用 Metal；D3DMetal、DXMT、MoltenVK，甚至
 其他 Metal layer 都可能觸發 HUD，不能單靠 HUD 判定 backend。
 
-EXE replacement 需獨立成規則：
+注意：以下 EXE replacement 僅為 compiler／CDB v1 編碼能力。現行 standalone
+`cxcompatdb.so` 不執行 replacement、set/unset env 或 WineD3D renderer action
+（見 `compatdb/FORMAT.md`）；不可用它把 Paradox Launcher 換成 Cities2.exe。
+初始執行檔選擇由 App 負責。v1 不提供 shell hook 或遊戲 DLL 寫入。
+
+EXE replacement 的保留格式需獨立成規則：
 
 ```yaml
 actions:

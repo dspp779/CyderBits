@@ -30,3 +30,37 @@ rules:
           executable: 'C:\Games\Other\game.exe'
           command_line:
             - game.exe
+
+  # Issue #10: candidate only; enable after Cyder-specific game acceptance.
+  # Does not start Steam, bypass a launcher, or modify game DLLs.
+  - id: game.cities-skylines-2.dxmt
+    description: Candidate DXMT selection for Cities Skylines II; not compatibility certification.
+    priority: 100
+    enabled: false
+    stability: experimental
+    applies_to:
+      platform: macos
+      engine_api: 1
+    match:
+      executable:
+        path_suffix: '\Cities2.exe'
+    actions:
+      graphics_backend: dxmt
+    tests:
+      matches:
+        - name: direct CS2 launch with spaces in its path
+          executable: 'C:\Program Files (x86)\Steam\steamapps\common\Cities Skylines II\Cities2.exe'
+          command_line: [Cities2.exe]
+        - name: case insensitive executable selection
+          executable: 'D:\Games\CITIES2.EXE'
+          command_line: [CITIES2.EXE]
+      excludes:
+        - name: Paradox launcher remains unchanged
+          executable: 'C:\Games\CS2\Launcher\bootstrapper-v2.exe'
+          command_line: [bootstrapper-v2.exe]
+        - name: original Cities Skylines remains unchanged
+          executable: 'C:\Games\Cities.exe'
+          command_line: [Cities.exe]
+        - name: Steam remains unchanged
+          executable: 'C:\Steam\steam.exe'
+          command_line: [steam.exe]
