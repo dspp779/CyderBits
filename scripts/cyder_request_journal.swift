@@ -28,9 +28,27 @@ struct CyderRequestPayload: Codable, Equatable {
 
 /// Read on the journal owner queue, before durable acceptance. An unreadable
 /// file is not equivalent to defaults; only ENOENT means no saved preferences.
+///
+/// Consistency comes from the writer, not from timestamps: CyderSettingsStore
+/// replaces settings.json atomically (write + rename), so one open descriptor
+/// always reads one complete version. Comparing ctime/mtime before and after
+/// the read rejected valid snapshots, because renaming a new file over the old
+/// one updates the old inode's ctime. A non-atomic external editor can expose
+/// a partial file; that is detected by parsing and retried a few times.
 enum CyderAcceptedSettings {
     static let maxBytes = 262144
+    static let retryDelays: [useconds_t] = [10_000, 50_000, 200_000]
     static func capture(at url: URL) throws -> Data {
+        for delay in [0] + retryDelays {
+            if delay > 0 { usleep(delay) }
+            do { return try readOnce(url) } catch Partial.content { continue }
+        }
+        throw CyderRequestJournal.Failure.invalid
+    }
+    /// Possibly an in-progress non-atomic write; owner/type errors are final.
+    private enum Partial: Error { case content }
+
+    private static func readOnce(_ url: URL) throws -> Data {
         let fd = Darwin.open(url.path, O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC)
         guard fd >= 0 else {
             if errno == ENOENT {
@@ -40,23 +58,18 @@ enum CyderAcceptedSettings {
             throw CyderRequestJournal.Failure.unavailable
         }
         defer { Darwin.close(fd) }
-        var before = stat()
-        guard fstat(fd, &before) == 0, before.st_mode & S_IFMT == S_IFREG,
-              before.st_uid == getuid(), before.st_size >= 0,
-              before.st_size <= maxBytes else { throw CyderRequestJournal.Failure.invalid }
-        let handle = FileHandle(fileDescriptor: fd, closeOnDealloc: false)
-        let data = try handle.read(upToCount: maxBytes + 1) ?? Data()
-        var after = stat()
-        guard fstat(fd, &after) == 0, data.count == before.st_size,
-              before.st_size == after.st_size,
-              before.st_mtimespec.tv_sec == after.st_mtimespec.tv_sec,
-              before.st_mtimespec.tv_nsec == after.st_mtimespec.tv_nsec,
-              before.st_ctimespec.tv_sec == after.st_ctimespec.tv_sec,
-              before.st_ctimespec.tv_nsec == after.st_ctimespec.tv_nsec,
-              isValid(data) else { throw CyderRequestJournal.Failure.invalid }
+        var info = stat()
+        guard fstat(fd, &info) == 0, info.st_mode & S_IFMT == S_IFREG,
+              info.st_uid == getuid(), info.st_size >= 0,
+              info.st_size <= maxBytes else { throw CyderRequestJournal.Failure.invalid }
+        let data = try FileHandle(fileDescriptor: fd, closeOnDealloc: false).read(upToCount: maxBytes + 1) ?? Data()
+        guard data.count == info.st_size, isValid(data) else { throw Partial.content }
         return data
     }
 
+    /// Structural check only. Schema meaning and migration belong to
+    /// CyderSettings (acceptedSnapshot decodes and re-encodes it); a range here
+    /// had to be edited on every schema bump and broke mixed-version snapshots.
     static func isValid(_ data: Data) -> Bool {
         guard data.count <= maxBytes,
               let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return false }
@@ -64,7 +77,7 @@ enum CyderAcceptedSettings {
             guard let number = version as? NSNumber,
                   String(cString: number.objCType) != "c",
                   number.doubleValue.rounded() == number.doubleValue,
-                  (1...14).contains(number.intValue) else { return false }
+                  number.intValue >= 1 else { return false }
         }
         return true
     }

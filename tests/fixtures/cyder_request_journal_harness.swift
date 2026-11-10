@@ -192,11 +192,38 @@ let legacyRecords = value(wait { migration.open(completion: $0) })
 precondition(legacyRecords[0].settingsSnapshot == nil && legacyRecords[0].phase == .awaitingUserResume)
 precondition(value(wait { migration.resume(id: legacyID, completion: $0) }).settingsSnapshot == snapshotB)
 closeJournal(migration)
-for schema in 1...14 {
+// Structural only: schema meaning belongs to CyderSettings, so newer schemas
+// (written by a newer app) are not rejected here.
+for schema in [1, 14, 15, 99] {
     precondition(CyderAcceptedSettings.isValid(Data("{\"schemaVersion\":\(schema)}".utf8)))
 }
-for bad in ["[]", "{\"schemaVersion\":15}", "{\"schemaVersion\":true}", "{\"schemaVersion\":1.5}"] {
+for bad in ["[]", "{\"schemaVersion\":0}", "{\"schemaVersion\":-1}", "{\"schemaVersion\":true}", "{\"schemaVersion\":1.5}"] {
     precondition(!CyderAcceptedSettings.isValid(Data(bad.utf8)))
+}
+// Problem 7: settings saved atomically while a launch is accepted must never
+// reject the launch. A rename over the old file changes the old inode's ctime,
+// which the former before/after timestamp check treated as corruption.
+do {
+    let writerDone = DispatchSemaphore(value: 0)
+    var stop = false
+    let lock = NSLock()
+    DispatchQueue.global().async {
+        var index = 0
+        while true {
+            lock.lock(); let finished = stop; lock.unlock()
+            if finished { break }
+            index += 1
+            try? Data("{\"schemaVersion\":14,\"dpi\":\(96 + index % 50)}".utf8).write(to: settingsURL, options: .atomic)
+        }
+        writerDone.signal()
+    }
+    for _ in 0..<400 { _ = try CyderAcceptedSettings.capture(at: settingsURL) }
+    lock.lock(); stop = true; lock.unlock()
+    writerDone.wait()
+    // A torn non-atomic write is retried, then refused rather than accepted.
+    try Data("{\"schemaVersion\":".utf8).write(to: settingsURL)
+    do { _ = try CyderAcceptedSettings.capture(at: settingsURL); fatalError("partial JSON accepted") }
+    catch let failure as J.Failure { precondition(failure == .invalid) }
 }
 try FileManager.default.removeItem(at: settingsURL)
 let absent = try capture()

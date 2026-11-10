@@ -83,7 +83,9 @@ struct CyderSettingsHarness {
         precondition(savedRequest.payload?.arguments == loginPayload.arguments)
         let dispatched = try waitFor { acceptedJournal.authorizeDispatch(id: savedRequest.id, completion: $0) }.get()
         precondition(dispatched.phase == .dispatching && dispatched.settingsSnapshot == savedRequest.settingsSnapshot)
-        precondition(!CyderAcceptedSettings.isValid(Data(#"{"schemaVersion":15}"#.utf8)))
+        // Newer schemas are CyderSettings' concern, not a journal range check.
+        precondition(CyderAcceptedSettings.isValid(Data(#"{"schemaVersion":15}"#.utf8)))
+        precondition(!CyderAcceptedSettings.isValid(Data(#"{"schemaVersion":0}"#.utf8)))
         let journalClosed = DispatchSemaphore(value: 0)
         acceptedJournal.close { journalClosed.signal() }
         precondition(journalClosed.wait(timeout: .now() + 10) == .success)

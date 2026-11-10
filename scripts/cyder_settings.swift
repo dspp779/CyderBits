@@ -1069,30 +1069,33 @@ final class CyderSettingsStore {
         self.url = url
     }
 
+    /// update() writes atomically (rename), so one descriptor reads one whole
+    /// version; timestamps are not compared (a rename over the old file changes
+    /// its ctime and caused false rejections). A partial file from a non-atomic
+    /// external editor fails to decode and is retried briefly.
     static func readValidated(at url: URL) throws -> CyderSettings {
-        let fd = Darwin.open(url.path, O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC)
-        guard fd >= 0 else {
-            if errno == ENOENT {
-                var info = stat()
-                if lstat(url.path, &info) != 0, errno == ENOENT { return .defaults }
+        var lastError: Error = CyderSettingsAccess.Failure.invalid
+        for delay: useconds_t in [0, 10_000, 50_000, 200_000] {
+            if delay > 0 { usleep(delay) }
+            let fd = Darwin.open(url.path, O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC)
+            guard fd >= 0 else {
+                if errno == ENOENT {
+                    var info = stat()
+                    if lstat(url.path, &info) != 0, errno == ENOENT { return .defaults }
+                }
+                throw CyderSettingsAccess.Failure.invalid
             }
-            throw CyderSettingsAccess.Failure.invalid
+            defer { Darwin.close(fd) }
+            var info = stat()
+            guard fstat(fd, &info) == 0, info.st_mode & S_IFMT == S_IFREG,
+                  info.st_uid == getuid(), info.st_size >= 0, info.st_size <= 262144 else {
+                throw CyderSettingsAccess.Failure.invalid
+            }
+            let data = try FileHandle(fileDescriptor: fd, closeOnDealloc: false).read(upToCount: 262145) ?? Data()
+            guard data.count == info.st_size else { lastError = CyderSettingsAccess.Failure.invalid; continue }
+            do { return try JSONDecoder().decode(CyderSettings.self, from: data) } catch { lastError = error }
         }
-        defer { Darwin.close(fd) }
-        var before = stat(), after = stat()
-        guard fstat(fd, &before) == 0, before.st_mode & S_IFMT == S_IFREG,
-              before.st_uid == getuid(), before.st_size >= 0, before.st_size <= 262144 else {
-            throw CyderSettingsAccess.Failure.invalid
-        }
-        let data = try FileHandle(fileDescriptor: fd, closeOnDealloc: false).read(upToCount: 262145) ?? Data()
-        guard fstat(fd, &after) == 0, data.count == before.st_size, before.st_size == after.st_size,
-              before.st_mtimespec.tv_sec == after.st_mtimespec.tv_sec,
-              before.st_mtimespec.tv_nsec == after.st_mtimespec.tv_nsec,
-              before.st_ctimespec.tv_sec == after.st_ctimespec.tv_sec,
-              before.st_ctimespec.tv_nsec == after.st_ctimespec.tv_nsec else {
-            throw CyderSettingsAccess.Failure.invalid
-        }
-        return try JSONDecoder().decode(CyderSettings.self, from: data)
+        throw lastError
     }
 
     func update(_ work: (inout CyderSettings) -> Void) throws {
