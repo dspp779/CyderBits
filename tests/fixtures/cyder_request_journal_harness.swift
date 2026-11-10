@@ -192,6 +192,19 @@ let legacyRecords = value(wait { migration.open(completion: $0) })
 precondition(legacyRecords[0].settingsSnapshot == nil && legacyRecords[0].phase == .awaitingUserResume)
 precondition(value(wait { migration.resume(id: legacyID, completion: $0) }).settingsSnapshot == snapshotB)
 closeJournal(migration)
+// Problem 1: the fingerprint is a fixed byte layout (independently
+// reproduced in Python), not Foundation JSON output. rc.1 fingerprints still
+// match so existing journals and mixed-version peers keep working.
+do {
+    let vector = CyderRequestPayload(files: ["/Games/Maple Story/MapleStory.exe"], arguments: ["a\nb", "日本語", "/x"],
+                                     urls: [], showUI: false, settings: Data("{\"schemaVersion\":14}".utf8))
+    precondition(vector.digest == "8e99eb11b865937fb7575f3145369e7c050b80d42193ab12dee314bd51f927c1", "fingerprint layout changed")
+    precondition(vector.digest != vector.legacyDigest && vector.matches(vector.legacyDigest) && vector.matches(vector.digest))
+    let noArguments = CyderRequestPayload(files: ["/a.exe"], arguments: nil, urls: [], showUI: false)
+    let emptyArguments = CyderRequestPayload(files: ["/a.exe"], arguments: [], urls: [], showUI: false)
+    precondition(noArguments.digest != emptyArguments.digest, "absent and empty arguments must differ")
+    precondition(!noArguments.matches(emptyArguments.digest) && !noArguments.matches(nil))
+}
 // Structural only: schema meaning belongs to CyderSettings, so newer schemas
 // (written by a newer app) are not rejected here.
 for schema in [1, 14, 15, 99] {

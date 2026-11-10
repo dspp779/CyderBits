@@ -12,10 +12,39 @@ struct CyderRequestPayload: Codable, Equatable {
         let raw = files.first.map { URL(fileURLWithPath: $0).lastPathComponent } ?? (urls.isEmpty ? "啟動要求" : "開啟連結")
         return String(raw.unicodeScalars.filter { !CharacterSet.controlCharacters.contains($0) }.map(String.init).joined().prefix(100))
     }
+    /// Fingerprint over an explicit, versioned byte layout, so it cannot change
+    /// with Foundation's JSON formatting (escaping, key order, number style).
+    /// Layout: "cyder-request-v2\0", then for each field a tag byte and its
+    /// content; strings and data are u64-BE length-prefixed, lists are
+    /// u64-BE count-prefixed, optionals carry a 0/1 presence byte.
     var digest: String {
+        var bytes = Data("cyder-request-v2\0".utf8)
+        func u64(_ value: Int) { withUnsafeBytes(of: UInt64(value).bigEndian) { bytes.append(contentsOf: $0) } }
+        func blob(_ data: Data) { u64(data.count); bytes.append(data) }
+        func list(_ tag: UInt8, _ values: [String]?) {
+            bytes.append(tag)
+            guard let values else { bytes.append(0); return }
+            bytes.append(1); u64(values.count)
+            values.forEach { blob(Data($0.utf8)) }
+        }
+        list(1, files)
+        list(2, arguments)
+        list(3, urls)
+        bytes.append(4); bytes.append(showUI ? 1 : 0)
+        bytes.append(5)
+        if let settings { bytes.append(1); blob(settings) } else { bytes.append(0) }
+        return SHA256.hash(data: bytes).map { String(format: "%02x", $0) }.joined()
+    }
+    /// The 0.14.0-rc.1 fingerprint (sorted-key JSONEncoder). Accepted only for
+    /// records and peers created by that build; never produced for new ones.
+    var legacyDigest: String {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys]
         return SHA256.hash(data: try! encoder.encode(self)).map { String(format: "%02x", $0) }.joined()
+    }
+    func matches(_ digest: String?) -> Bool {
+        guard let digest else { return false }
+        return digest == self.digest || digest == legacyDigest
     }
     var isValid: Bool {
         files.count + urls.count <= 128 && (arguments?.count ?? 0) <= 1024 && (settings?.count ?? 0) <= 262144
@@ -202,7 +231,7 @@ final class CyderRequestJournal {
                     guard loaded.records.count <= limit,
                           loaded.records.allSatisfy({ $0.key == $0.value.id && validID($0.key, namespace: loaded.namespace) }) else { throw Failure.corrupt }
                     for (id, record) in loaded.records {
-                        if let payload = record.payload, !payload.isValid || payload.digest != record.digest { throw Failure.corrupt }
+                        if let payload = record.payload, !payload.isValid || !payload.matches(record.digest) { throw Failure.corrupt }
                         if let snapshot = record.settingsSnapshot, !CyderAcceptedSettings.isValid(snapshot) { throw Failure.corrupt }
                         switch record.phase {
                         case .queued:
@@ -269,7 +298,7 @@ final class CyderRequestJournal {
         transaction(completion) { [self] current in
             guard validID(id, namespace: current.namespace), payload.isValid else { throw Failure.invalid }
             if let previous = current.records[id] {
-                guard previous.digest == payload.digest else { throw Failure.conflictingPayload }
+                guard payload.matches(previous.digest) else { throw Failure.conflictingPayload }
                 return previous
             }
             guard !closing else { throw Failure.closing }

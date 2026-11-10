@@ -94,7 +94,7 @@ enum CyderRequestOutbox {
     private static func valid(_ message: CyderRequestMessage) -> Bool {
         guard message.protocolVersion == 1, message.kind == "submit",
               let id = message.requestID, let payload = message.payload,
-              payload.isValid, message.payloadDigest == payload.digest else { return false }
+              payload.isValid, payload.matches(message.payloadDigest) else { return false }
         let parts = id.split(separator: ":", omittingEmptySubsequences: false)
         return parts.count == 2 && parts.allSatisfy { UUID(uuidString: String($0)) != nil }
     }
@@ -358,7 +358,7 @@ final class CyderInstanceCoordinator {
         guard let id = message.requestID else { respond("rejected"); return }
         switch message.kind {
         case "submit":
-            guard let payload = message.payload, message.payloadDigest == payload.digest else { respond("rejected"); return }
+            guard let payload = message.payload, payload.matches(message.payloadDigest) else { respond("rejected"); return }
             journal.submit(id: id, payload: payload) { [weak self] result in
                 switch result {
                 case .failure(let failure): respond(failure == .closing ? "closing" : "rejected")
@@ -721,7 +721,7 @@ final class CyderInstanceCoordinator {
                     guard remaining > 0 else { break }
                     if let response = CyderRequestChannel.exchange(path: path, message: message, timeout: remaining),
                        response.status == "accepted", let record = response.record,
-                       record.id == id, record.digest == payload.digest {
+                       record.id == id, payload.matches(record.digest) {
                         // Durable acceptance is already known. Best-effort
                         // copy cleanup must not turn it into an unknown result.
                         DispatchQueue.main.async {
