@@ -30,6 +30,11 @@ if CommandLine.arguments.dropFirst().first == "--check-host-identity" {
     }
     exit(0)
 }
+if CommandLine.arguments.dropFirst().first == "--sleep" { sleep(30); exit(0) }
+if CommandLine.arguments.dropFirst().first == "--runtime-users" {
+    DispatchQueue.global().async { exit(CyderRuntimeUsers.run(arguments: CommandLine.arguments)) }
+    dispatchMain()
+}
 if CommandLine.arguments.dropFirst().first == "--environment-state" {
     DispatchQueue.global().async { exit(CyderEnvironmentCommand.run(arguments: CommandLine.arguments)) }
     dispatchMain()
@@ -56,7 +61,7 @@ if CommandLine.arguments.count == 3, CommandLine.arguments[1] == "--recover" {
 }
 exit(CyderExecutionOwner.run(arguments: CommandLine.arguments))
 SWIFT
-swiftc -module-cache-path "$TEST_DIR/cache" "$ROOT/scripts/cyder_execution_owner.swift" "$ROOT/scripts/cyder_execution_phase.swift" "$ROOT/scripts/cyder_lifecycle.swift" "$ROOT/scripts/cyder_environment_probe.swift" "$ROOT/scripts/cyder_environment_command.swift" "$TEST_DIR/main.swift" -o "$TEST_DIR/helper"
+swiftc -module-cache-path "$TEST_DIR/cache" "$ROOT/scripts/cyder_execution_owner.swift" "$ROOT/scripts/cyder_execution_phase.swift" "$ROOT/scripts/cyder_lifecycle.swift" "$ROOT/scripts/cyder_environment_probe.swift" "$ROOT/scripts/cyder_environment_command.swift" "$ROOT/scripts/cyder_process_table.swift" "$ROOT/scripts/cyder_runtime_users.swift" "$TEST_DIR/main.swift" -o "$TEST_DIR/helper"
 "$TEST_DIR/helper" --check-host-identity
 if ! /usr/bin/arch -x86_64 /usr/bin/true >/dev/null 2>&1; then
   echo "Native handoff tests require x86_64 execution (Rosetta 2 on Apple Silicon). No handoff was attempted; this is not a pass or skip." >&2

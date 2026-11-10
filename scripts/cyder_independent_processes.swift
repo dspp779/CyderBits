@@ -5,72 +5,16 @@ import Darwin
 /// run off the UI/state queues. No environment/argv dumps are retained or logged.
 enum CyderProcessInventory {
     typealias L = CyderLifecycle
-    struct Metadata: Equatable { let prefix: String; let name: String }
+    typealias Metadata = CyderProcessTable.Metadata
     struct Match: Equatable { let process: L.ProcessID; let environment: L.EnvironmentID; let name: String }
     struct Reading { let presence: CyderProcessEvidence.Presence; let match: Match? }
     static func pids() -> [Int32] {
-        precondition(!Thread.isMainThread)
-        var mib: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_UID, Int32(getuid())]
         // A truncated/failed inventory is not proof of anyone's exit.
-        var entries = [kinfo_proc](repeating: kinfo_proc(), count: 4096)
-        var size = entries.count * MemoryLayout<kinfo_proc>.stride
-        let result = entries.withUnsafeMutableBytes { sysctl(&mib, 4, $0.baseAddress, &size, nil, 0) }
-        guard result == 0, size <= entries.count * MemoryLayout<kinfo_proc>.stride else { return [] }
-        return entries.prefix(size / MemoryLayout<kinfo_proc>.stride).map { $0.kp_proc.p_pid }.filter { $0 > 0 }
+        CyderProcessTable.completePIDs() ?? []
     }
-    static func parse(_ bytes: [UInt8]) -> Metadata? {
-        guard bytes.count > 4, bytes.count <= 2 * 1024 * 1024 else { return nil }
-        var argc: Int32 = 0
-        withUnsafeMutableBytes(of: &argc) { $0.copyBytes(from: bytes.prefix(4)) }
-        guard argc > 0, argc <= 4096 else { return nil }
-        var offset = 4
-        func string() -> ArraySlice<UInt8>? {
-            let start = offset
-            while offset < bytes.count && bytes[offset] != 0 { offset += 1 }
-            guard offset < bytes.count else { return nil }
-            let value = bytes[start..<offset]; offset += 1; return value
-        }
-        guard let executable = string(), !executable.isEmpty else { return nil }
-        while offset < bytes.count && bytes[offset] == 0 { offset += 1 }
-        var name: String?
-        for _ in 0..<argc {
-            guard let raw = string() else { return nil }
-            if name == nil, let argument = String(bytes: raw, encoding: .utf8), argument.lowercased().hasSuffix(".exe") {
-                let leaf = argument.replacingOccurrences(of: "\\", with: "/").split(separator: "/").last.map(String.init) ?? ""
-                let clean = String(leaf.unicodeScalars.filter { !CharacterSet.controlCharacters.contains($0) }.prefix(100))
-                if !clean.isEmpty { name = clean }
-            }
-        }
-        var prefix: String?
-        var count = 0
-        while offset < bytes.count && bytes[offset] != 0 {
-            count += 1
-            guard count <= 4096, let raw = string() else { return nil }
-            let key = Array("WINEPREFIX=".utf8)
-            if raw.starts(with: key) {
-                guard prefix == nil, let value = String(bytes: raw.dropFirst(key.count), encoding: .utf8),
-                      value.hasPrefix("/"), value.utf8.count < 4096 else { return nil }
-                prefix = value
-            }
-        }
-        guard let prefix else { return nil } // CX_BOTTLE alone is not an absolute prefix identity.
-        return .init(prefix: prefix, name: name ?? "Windows 程序")
-    }
-    static func metadata(_ pid: Int32) -> Metadata? {
-        precondition(!Thread.isMainThread)
-        var mib: [Int32] = [CTL_KERN, KERN_PROCARGS2, pid], size = 0
-        guard sysctl(&mib, 3, nil, &size, nil, 0) == 0, size > 4, size <= 2 * 1024 * 1024 else { return nil }
-        var bytes = [UInt8](repeating: 0, count: size)
-        guard bytes.withUnsafeMutableBytes({ sysctl(&mib, 3, $0.baseAddress, &size, nil, 0) }) == 0,
-              size <= bytes.count else { return nil }
-        return parse(Array(bytes.prefix(size)))
-    }
-    static func image(_ pid: Int32) -> String? {
-        precondition(!Thread.isMainThread)
-        var path = [CChar](repeating: 0, count: 4 * Int(MAXPATHLEN))
-        guard proc_pidpath(pid, &path, UInt32(path.count)) > 0 else { return nil }
-        return URL(fileURLWithPath: String(cString: path)).resolvingSymlinksInPath().path
-    }
+    static func parse(_ bytes: [UInt8]) -> Metadata? { CyderProcessTable.parse(bytes) }
+    static func metadata(_ pid: Int32) -> Metadata? { CyderProcessTable.metadata(pid) }
+    static func image(_ pid: Int32) -> String? { CyderProcessTable.image(pid) }
     static func prefixID(_ prefix: String) -> L.EnvironmentID? {
         precondition(!Thread.isMainThread)
         var info = stat()
@@ -83,8 +27,7 @@ enum CyderProcessInventory {
         let suffix = "/bin/wineserver"
         guard engine.hasPrefix("/"), engine.hasSuffix(suffix) else { return false }
         let root = String(engine.dropLast(suffix.count))
-        let paths = ["bin/wine", "bin/wine64", "bin/wine-preloader", "bin/wine64-preloader",
-                     "lib/wine/x86_64-unix/wine", "lib/wine/i386-unix/wine", "lib/wine/aarch64-unix/wine"]
+        let paths = CyderProcessTable.clientImages
         // The monitor supplied a canonical server path. Keep the allowlist
         // lexical: resolving every environment here would let one unavailable
         // mount stall both workers even while inspecting unrelated PIDs.

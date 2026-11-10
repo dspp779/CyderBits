@@ -220,6 +220,28 @@ cyder_apply_moltenvk_variant_from_preference "$TEST_ROOT/runtime"
     assert prefix_owner.returncode == 75 and os.readlink(molten_link) == 'libMoltenVK-1.2.10.dylib'
     print('PASS MoltenVK native scope: non-handoff prefix owner cannot switch the shared runtime', flush=True)
     molten_script.write_text(preamble + script.read_text())
+    shared_helper = {'CYDER_ENVIRONMENT_HELPER': str(helper)}
+    # A running Wine client of this engine (any bottle) loads MoltenVK lazily:
+    # the global owner must refuse to switch it, not just exclude preparations.
+    client = runtime / 'runtime/bin/wine64'
+    # A copy of the test helper (copied Apple platform binaries may be refused).
+    client.write_bytes(helper.read_bytes()); client.chmod(0o755)
+    sleeper = subprocess.Popen([str(client), '--sleep'])
+    processes.append(sleeper)
+    busy_ticket = reserve(runtime, global_scope=True)
+    busy_owner = start(runtime, busy_ticket, ['/bin/bash', str(molten_script)], shared_helper)
+    try:
+        wait(lambda: busy_owner.poll() is not None, 'busy shared runtime owner did not return')
+    except AssertionError:
+        print((runtime / ('owner-' + busy_ticket + '.log')).read_text(), receipt(busy_ticket), flush=True)
+        raise
+    busy_log = (runtime / ('owner-' + busy_ticket + '.log')).read_text()
+    assert busy_owner.returncode == 75, busy_log
+    assert f'pid={sleeper.pid}' in busy_log and 'CYDER-RUNTIME-IN-USE component=' in busy_log, busy_log
+    assert os.readlink(molten_link) == 'libMoltenVK-1.2.10.dylib' and not runtime_link.is_symlink()
+    assert not (runtime / 'native.entered').exists()
+    sleeper.kill(); sleeper.wait()
+    print('PASS shared runtime: global owner refuses to switch GPTK/MoltenVK while a Wine client of the engine runs', flush=True)
     runtime_ticket = reserve(runtime, global_scope=True)
     assert receipt(runtime_ticket)['schema'] == 2
     old_executor = os.environ.get('CYDER_TEST_OLD_EXECUTOR')
@@ -229,7 +251,7 @@ cyder_apply_moltenvk_variant_from_preference "$TEST_ROOT/runtime"
         assert old_attempt.returncode == 75 and not (runtime / 'old-helper-spawned').exists()
         assert receipt(runtime_ticket)['phase'] == 'prepared'
         print('PASS legacy helper: schema 2 global authority refused without starting a child or altering the ticket', flush=True)
-    runtime_owner = start(runtime, runtime_ticket, ['/bin/bash', str(molten_script)])
+    runtime_owner = start(runtime, runtime_ticket, ['/bin/bash', str(molten_script)], shared_helper)
     wait(lambda: (runtime / 'wrapper.entered').exists(), 'global runtime preparation did not reach formal launch')
     assert runtime_link.resolve() == (runtime / 'support/runtime/apple_gptk').resolve()
     assert os.readlink(molten_link) == 'libMoltenVK-1.4.2.dylib'

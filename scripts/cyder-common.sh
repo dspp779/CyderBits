@@ -1128,6 +1128,7 @@ cyder_link_gptk_into_engine() {
     echo "Shared GPTK configuration changed; retry the launch to acquire its global operation scope." >&2
     return 75
   fi
+  cyder_shared_runtime_idle "$engine_root" gptk || return $?
   [[ ! -L "$link" ]] || rm -f "$link" || return $?
   mkdir -p "$lib64"
   ln -s "$gptk_root" "$link"
@@ -3327,13 +3328,31 @@ cyder_bounded_wine_log() {
 # The native helper reads user.reg directly: an already-matching value costs no
 # Wine process, an idle prefix is edited atomically, and only a running prefix
 # uses a single reg.exe call (see cyder_scrolling.swift).
-cyder_scrolling_helper() {
+cyder_native_helper() {
   local helper="${CYDER_ENVIRONMENT_HELPER:-}"
   if [[ -z "$helper" || ! -x "$helper" ]]; then
     helper="${CYDER_SCRIPTS:-$CYDER_COMMON_DIR}/../../MacOS/CyderSwift"
   fi
   [[ -x "$helper" ]] || return 1
   printf '%s\n' "$helper"
+}
+
+# Shared engine files (MoltenVK .real, GPTK link) are loaded by every Wine
+# process of the engine whenever it needs them. Repoint one only while no Wine
+# client of the engine runs (see cyder_runtime_users.swift); the caller holds
+# the exclusive all-environments scope, so no Cyder launch starts one meanwhile.
+cyder_shared_runtime_idle() {
+  local engine="${1:?}" component="${2:?}" helper
+  if ! helper="$(cyder_native_helper)"; then
+    if [[ -n "${CYDER_EXECUTION_RUNTIME_MUTATION:-}${CYDER_EXECUTION_OWNER_TICKET:-}" ]]; then
+      echo "Cyder helper (CyderSwift) not found; cannot confirm the shared $component runtime is unused" >&2
+      return 75
+    fi
+    # Scripts run from a checkout, outside Cyder.app.
+    echo "CyderSwift not found; switching the shared $component runtime without checking for running Wine processes" >&2
+    return 0
+  fi
+  "$helper" --runtime-users "$engine" "$component" || return 75
 }
 
 cyder_apply_scrolling_for_exe() {
@@ -3347,7 +3366,7 @@ cyder_apply_scrolling_for_exe() {
     compgen -G "$prefix/.cyder-scrolling/*/original.json" >/dev/null ||
       [[ -e "$prefix/.cyder-maplestory-scrolling/original.json" ]] || return 0
     mode=restore ;; traditional|precise) ;; *) echo "Invalid scrolling preference" >&2; return 2 ;; esac
-  if ! helper="$(cyder_scrolling_helper)"; then
+  if ! helper="$(cyder_native_helper)"; then
     # Only outside Cyder.app (scripts run from a checkout); the release app
     # always ships CyderSwift. Keep the prefix's existing value, as unmanaged.
     [[ "$mode" == restore ]] || echo "Cyder scrolling helper (CyderSwift) not found; leaving UsePreciseScrolling unchanged" >&2

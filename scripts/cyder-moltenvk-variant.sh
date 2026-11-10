@@ -150,6 +150,10 @@ cyder_apply_moltenvk_variant() {
     echo "Shared MoltenVK configuration changed; retry the launch to acquire its global operation scope." >&2
     return 75
   fi
+  # Running games load the variant lazily; never switch it under them.
+  if declare -F cyder_shared_runtime_idle >/dev/null 2>&1; then
+    cyder_shared_runtime_idle "$engine" moltenvk || return $?
+  fi
   ln -sfn "$target" "$unix/libMoltenVK.real.dylib"
 }
 

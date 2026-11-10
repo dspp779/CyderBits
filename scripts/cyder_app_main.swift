@@ -2326,6 +2326,10 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             presentInterruptedOperation(ticket, failure: failure)
             return .close
         }
+        if let report = CyderRuntimeUsers.report(in: failure.technicalDetails) {
+            presentRuntimeInUse(report, failure: failure)
+            return .close
+        }
         var action: CyderFailureAction = .close
         onMainThread {
             let alert = NSAlert()
@@ -2409,6 +2413,50 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
                     self.showAlert("仍有程序在執行", "上一次的操作仍在進行，請等它完成，或從選單停止這個 Windows 環境後再試。")
                 }
             }
+        }
+    }
+
+    /// The launch needs a different shared graphics runtime (MoltenVK variant
+    /// or GPTK link) than the one running Wine processes use. All bottles share
+    /// it and games load it lazily, so it is switched only when none run.
+    private func presentRuntimeInUse(_ report: CyderRuntimeUsers.Report, failure: CyderFailure) {
+        func key(_ path: String) -> String { URL(fileURLWithPath: path).standardizedFileURL.path }
+        let used = Set(report.users.compactMap { $0.prefix.map(key) })
+        let moltenvk = report.component != "gptk"
+        let component = moltenvk ? "MoltenVK 版本" : "GPTK（D3DMetal）來源"
+        let stop: [URL] = onMainThread {
+            // Monitor URLs are passed back unchanged; only those can be stopped.
+            let stoppable = statusItemController.monitoredPrefixes.filter { used.contains(key($0.path)) }
+            let stoppableKeys = Set(stoppable.map { key($0.path) })
+            let others = report.users.filter { user in !(user.prefix.map { stoppableKeys.contains(key($0)) } ?? false) }
+            let alert = NSAlert()
+            alert.messageText = "目前無法切換\(component)"
+            var text = "\(component)由所有 Windows 環境共用，遊戲執行中也會隨時載入，因此只能在沒有 Windows 程式執行時切換。這次啟動沒有執行。"
+            if !stoppable.isEmpty {
+                text += "\n\n執行中的環境：" + stoppable.map(\.lastPathComponent).joined(separator: "、")
+            }
+            if !others.isEmpty {
+                let names = Array(Set(others.map(\.name))).sorted().prefix(5)
+                text += "\n\n其他執行中的 Windows 程式（需自行結束）：" + names.joined(separator: "、")
+            }
+            if moltenvk { text += "\n\n也可以在設定中改回目前使用的版本後再啟動。" }
+            alert.informativeText = text
+            alert.alertStyle = .warning
+            if !stoppable.isEmpty { alert.addButton(withTitle: stoppable.count == 1 ? "停止這個環境" : "停止這些環境") }
+            alert.addButton(withTitle: "關閉")
+            alert.addButton(withTitle: "開啟相關記錄")
+            let response = runFrontmostAlert(alert, dockVisible: terminateWhenSettingsClose && !documentLaunchRequested)
+            let logs: NSApplication.ModalResponse = stoppable.isEmpty ? .alertSecondButtonReturn : .alertThirdButtonReturn
+            if response == logs {
+                NSWorkspace.shared.activateFileViewerSelecting([failure.logURL ?? CyderDiagnostics.shared.sessionLogURL])
+            }
+            return !stoppable.isEmpty && response == .alertFirstButtonReturn ? stoppable : []
+        }
+        guard !stop.isEmpty else { return }
+        DispatchQueue.main.async { [weak self] in
+            guard let self, !self.quitTransaction else { return }
+            CyderDiagnostics.shared.info("runtime switch refused component=\(report.component) stopping=\(stop.count)")
+            self.statusItemController.requestStop(prefixes: stop)
         }
     }
 
@@ -2914,6 +2962,9 @@ struct CyderMain {
                 exit(CyderEnvironmentCommand.run(arguments: CommandLine.arguments))
             }
             dispatchMain()
+        }
+        if CommandLine.arguments.dropFirst().first == "--runtime-users" {
+            exit(CyderRuntimeUsers.run(arguments: CommandLine.arguments))
         }
         if CommandLine.arguments.dropFirst().first == "--scrolling" {
             exit(CyderScrollingRegistry.run(arguments: CommandLine.arguments))
