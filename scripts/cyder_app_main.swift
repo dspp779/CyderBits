@@ -2928,6 +2928,9 @@ struct CyderMain {
             }
             dispatchMain()
         }
+        if CommandLine.arguments.dropFirst().first == "--scrolling" {
+            exit(CyderScrollingRegistry.run(arguments: CommandLine.arguments))
+        }
         if ["--execution-owner", "--execution-wine"].contains(CommandLine.arguments.dropFirst().first ?? "") {
             exit(CyderExecutionOwner.run(arguments: CommandLine.arguments))
         }

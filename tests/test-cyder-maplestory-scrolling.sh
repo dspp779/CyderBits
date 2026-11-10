@@ -1,14 +1,20 @@
 #!/usr/bin/env bash
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-/usr/bin/ruby "$ROOT/tests/test-cyder-maplestory-scrolling.rb"
 source "$ROOT/tests/assert.sh"
-assert_contains "$(cat "$ROOT/scripts/create-cyder-app.sh")" \
-  'cp "$SCRIPT_DIR/cyder-maplestory-scrolling.rb" "$RES/ogom-scripts/"' \
-  'App must ship the explicit scrolling and restore tool'
-# The existing idle-prefix display editor must preserve EXE-scoped scrolling.
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
+mkdir -p "$TMP/cache" "$TMP/run"
+cp "$ROOT/tests/fixtures/cyder_scrolling_harness.swift" "$TMP/main.swift"
+swiftc -module-cache-path "$TMP/cache" "$ROOT/scripts/cyder_scrolling.swift" "$TMP/main.swift" -o "$TMP/harness"
+"$TMP/harness" "$TMP/run"
+assert_contains "$(cat "$ROOT/scripts/create-cyder-app.sh")" '"$SCRIPT_DIR/cyder_scrolling.swift"' \
+  'App must build the native scrolling helper'
+assert_contains "$(cat "$ROOT/scripts/cyder_app_main.swift")" 'CyderScrollingRegistry.run' \
+  'CyderSwift must expose --scrolling'
+assert_not_contains "$(cat "$ROOT/scripts/cyder-common.sh")" '/usr/bin/ruby "$helper"' \
+  'Launch path must not depend on system Ruby for scrolling'
+# The existing idle-prefix display editor must preserve EXE-scoped scrolling.
 cat >"$TMP/user.reg" <<'REG'
 WINE REGISTRY Version 2
 

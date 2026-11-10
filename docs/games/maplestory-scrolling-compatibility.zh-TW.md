@@ -93,10 +93,14 @@ Mac Driver scrolling 動作。現有 env 動作不會讓 macdrv 自動讀取新�
 UI 顯示同 prefix 同名 EXE 共用設定及重新啟動才生效的提示。
 
 偏好 UI 只保存設定，不呼叫 Wine、不立即改動正在執行的 prefix。已識別的 EXE 在下次
-啟動前，由 `cyder-scrolling.rb` 備份、套用 N / Y 並讀回確認；失敗時阻止該次最終啟動。
+啟動前，由 `CyderSwift --scrolling`（`scripts/cyder_scrolling.swift`）備份並套用 N / Y；失敗時阻止該次最終啟動。
+它直接讀取 `user.reg`：值已相同時不做任何事（不啟動 Wine、不寫檔）；prefix 閒置時以原子
+rename 修改 `user.reg` 並讀回確認；只有 prefix 正在執行時才呼叫一次 `reg add`／`reg delete`。
+執行中寫入後會留下 `pending-live` 標記，直到下次閒置時 `user.reg` 已由 wineserver 寫回，
+期間不以磁碟值判斷是否相同。原值僅支援一般 REG_SZ ASCII 文字；其他型別或跳脫內容會拒絕且不修改。
 切回不自動套用（包含刪除遊戲覆寫後跟隨已停用的全域）時，在該 EXE 下次啟動前還原
 首次保存的原值。從未受 Cyder 管理的值維持原狀，不會為了停用而刪除使用者自己的設定。
-預設且沒有歷史備份的 prefix，不啟動 Ruby / Wine registry client。
+不自動套用且沒有歷史備份（`original.json`）的 prefix，不啟動任何輔助程式。
 
 更新在選定 sync 模式與 session 準備完成後、最終遊戲 handoff 之前進行，避免 registry
 client 以不同的 sync 設定先啟動 wineserver。正常字型／顯示設定的套用順序維持不變。
@@ -108,7 +112,7 @@ client 以不同的 sync 設定先啟動 wineserver。正常字型／顯示設�
 啟動的新 MapleStory 程序讀取，但尚未受管理的子程序不會自動取得 UI 中的新偏好。
 本次未新增 CompatDB action 或 Wine patch。
 
-通用工具隨 app 打包；原 `cyder-maplestory-scrolling.rb` 保留為相容入口。
+工具內建於 `CyderSwift`；舊 Ruby 版本已移除，但沿用相同的備份格式與位置。
 不同 EXE 的備份各自獨立，MapleStory 沿用先前備份位置。備份路徑不代表完整路徑隔離，
 同 prefix 同名 EXE 仍共享登錄值和備份；需要不同設定時必須使用獨立 bottle。
 
@@ -119,18 +123,19 @@ client 以不同的 sync 設定先啟動 wineserver。正常字型／顯示設�
 使用者指定的實際絕對路徑，不應盲目照抄回報者的 OEM 路徑。
 
 ```sh
-export WINEPREFIX="/absolute/path/to/the/game/bottle"
-export WINE_INSTALL="/absolute/path/to/the/matching/engine"
-/usr/bin/ruby scripts/cyder-maplestory-scrolling.rb status
-/usr/bin/ruby scripts/cyder-maplestory-scrolling.rb traditional
+PREFIX="/absolute/path/to/the/game/bottle"
+WINE="/absolute/path/to/the/matching/engine/bin/wine"
+HELPER="/Applications/Cyder.app/Contents/MacOS/CyderSwift"
+"$HELPER" --scrolling status "$PREFIX" "$WINE" MapleStory.exe
+"$HELPER" --scrolling traditional "$PREFIX" "$WINE" MapleStory.exe
 # 完全關閉後重新啟動 MapleStory，在遊戲內比較滾輪操作。
 # 若要明確要求精準模式：
-/usr/bin/ruby scripts/cyder-maplestory-scrolling.rb precise
+"$HELPER" --scrolling precise "$PREFIX" "$WINE" MapleStory.exe
 # 若要回到首次操作前的狀態：
-/usr/bin/ruby scripts/cyder-maplestory-scrolling.rb restore
+"$HELPER" --scrolling restore "$PREFIX" "$WINE" MapleStory.exe
 ```
 
-在已打包 app 中，檔案位於 `Cyder.app/Contents/Resources/ogom-scripts/`，以完整路徑執行。
+prefix 仍在執行時請加上 `--prefix-running`，讓工具改用 `reg.exe` 寫入執行中的登錄。
 新值只影響後續初始化 driver 的程序；不會強制結束遊戲或 wineserver。
 即使程序仍在執行時操作，也應在完整退出並重新啟動遊戲後才驗收。
 

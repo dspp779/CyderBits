@@ -40,13 +40,13 @@ export CYDER_SCROLLING_PREFERENCE=unmanaged
 cyder_load_saved_settings
 assert_eq "$CYDER_SCROLLING_PREFERENCE" unmanaged 'Native opt-out must survive global reload'
 
-cat >"$TMP/helper/cyder-scrolling.rb" <<'RUBY'
-File.open(ENV.fetch('CYDER_SCROLL_TEST_EVENTS'), 'a') do |f|
-  f.puts [ARGV.join('|'), ENV['WINEPREFIX'], ENV['WINEMSYNC'], ENV['WINEESYNC'], ENV['CYDER_EXECUTION_FINAL']].join(';')
-end
-exit(ENV.fetch('CYDER_SCROLL_TEST_FAIL', '0').to_i)
-RUBY
-export CYDER_SCRIPTS="$TMP/helper"
+cat >"$TMP/helper/CyderSwift" <<'SH'
+#!/bin/bash
+printf '%s;%s;%s;%s;%s\n' "$(IFS='|'; echo "$*")" "$WINEPREFIX" "${WINEMSYNC:-}" "${WINEESYNC:-}" "$CYDER_EXECUTION_FINAL" >>"$CYDER_SCROLL_TEST_EVENTS"
+exit "${CYDER_SCROLL_TEST_FAIL:-0}"
+SH
+chmod +x "$TMP/helper/CyderSwift"
+export CYDER_ENVIRONMENT_HELPER="$TMP/helper/CyderSwift" WINEPREFIX="$TMP/prefix"
 # With default/unmanaged and no backup directories there is no helper work.
 export CYDER_SCROLLING_PREFERENCE=unmanaged
 cyder_apply_scrolling_for_exe "$TMP/engine/bin/wine" "$TMP/prefix" "$TMP/game space/MapleStory.exe"
@@ -65,14 +65,19 @@ export CYDER_MSYNC=1 CYDER_ESYNC=0 CYDER_WINE_DETACH=0
 export CYDER_SCROLLING_PREFERENCE=traditional
 cyder_run_wine_exe "$TMP/engine/bin/wine" "$TMP/game space/MapleStory.exe" "$TMP/prefix"
 actual="$(cat "$CYDER_SCROLL_TEST_EVENTS")"
-assert_eq "$(printf '%s\n' "$actual" | head -1)" "traditional|MapleStory.exe;$TMP/prefix;1;;0" 'Scrolling must run under the chosen sync mode before native final handoff'
+assert_eq "$(printf '%s\n' "$actual" | head -1)" "--scrolling|traditional|$TMP/prefix|$TMP/engine/bin/wine|MapleStory.exe;$TMP/prefix;1;;0" 'Scrolling must run under the chosen sync mode before native final handoff'
 assert_eq "$(printf '%s\n' "$actual" | tail -1)" 'game;1;1' 'Final launch must follow registry preparation'
 # Restore is only attempted when a Cyder baseline might exist in this prefix.
 mkdir -p "$TMP/prefix/.cyder-maplestory-scrolling"
 : >"$CYDER_SCROLL_TEST_EVENTS"
 export CYDER_SCROLLING_PREFERENCE=unmanaged
 cyder_run_wine_exe "$TMP/engine/bin/wine" "$TMP/game space/MapleStory.exe" "$TMP/prefix"
-assert_contains "$(cat "$CYDER_SCROLL_TEST_EVENTS")" 'restore|MapleStory.exe' 'Opt-out must restore on next launch'
+assert_not_contains "$(cat "$CYDER_SCROLL_TEST_EVENTS")" '--scrolling' 'An empty state directory is not a baseline'
+: >"$TMP/prefix/.cyder-maplestory-scrolling/original.json"
+: >"$CYDER_SCROLL_TEST_EVENTS"
+export CYDER_SCROLLING_PREFERENCE=unmanaged
+cyder_run_wine_exe "$TMP/engine/bin/wine" "$TMP/game space/MapleStory.exe" "$TMP/prefix"
+assert_contains "$(cat "$CYDER_SCROLL_TEST_EVENTS")" '--scrolling|restore|' 'Opt-out must restore on next launch'
 # A failed write must prevent the game from launching.
 : >"$CYDER_SCROLL_TEST_EVENTS"
 export CYDER_SCROLL_TEST_FAIL=9 CYDER_SCROLLING_PREFERENCE=precise
@@ -88,5 +93,4 @@ for kind in msi reg link script; do
   CYDER_LAUNCH_TARGET_KIND="$kind" cyder_run_wine_exe "$TMP/engine/bin/wine" "$TMP/game space/OtherGame.exe" "$TMP/prefix"
   assert_not_contains "$(cat "$CYDER_SCROLL_TEST_EVENTS")" 'precise|' 'Only resolved EXE launches can apply scrolling'
 done
-assert_contains "$(cat "$ROOT/scripts/create-cyder-app.sh")" 'cp "$SCRIPT_DIR/cyder-scrolling.rb" "$RES/ogom-scripts/"' 'App must bundle generic scrolling tool'
 echo 'PASS test-cyder-scrolling-launch (12 resolution cases, final launch ordering, opt-out, failure, non-EXE guards; no Wine)'

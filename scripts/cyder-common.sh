@@ -3324,22 +3324,36 @@ cyder_bounded_wine_log() {
 
 # Apply only a known EXE basename. A global Cyder preference is a default
 # for launches, not permission to mutate Wine's prefix-wide Mac Driver value.
+# The native helper reads user.reg directly: an already-matching value costs no
+# Wine process, an idle prefix is edited atomically, and only a running prefix
+# uses a single reg.exe call (see cyder_scrolling.swift).
+cyder_scrolling_helper() {
+  local helper="${CYDER_ENVIRONMENT_HELPER:-}"
+  if [[ -z "$helper" || ! -x "$helper" ]]; then
+    helper="${CYDER_SCRIPTS:-$CYDER_COMMON_DIR}/../../MacOS/CyderSwift"
+  fi
+  [[ -x "$helper" ]] || return 1
+  printf '%s\n' "$helper"
+}
+
 cyder_apply_scrolling_for_exe() {
   local wine_bin="$1" prefix="$2" exe="$3"
-  local mode="${CYDER_SCROLLING_PREFERENCE:-unmanaged}"
-  local helper="${CYDER_SCRIPTS:-$CYDER_COMMON_DIR}/cyder-scrolling.rb"
-  case "$(basename "$exe" | tr '[:upper:]' '[:lower:]')" in *.exe) ;; *) return 0 ;; esac
+  local mode="${CYDER_SCROLLING_PREFERENCE:-unmanaged}" helper name
+  local -a running=()
+  name="$(basename "$exe")"
+  case "$(tr '[:upper:]' '[:lower:]' <<<"$name")" in *.exe) ;; *) return 0 ;; esac
   case "$mode" in unmanaged)
-    # Unmanaged launches without a saved override need no registry client.
-    [[ -d "$prefix/.cyder-scrolling" || -e "$prefix/.cyder-maplestory-scrolling" ]] || return 0
+    # Unmanaged launches only restore a saved Cyder baseline, if any exists.
+    compgen -G "$prefix/.cyder-scrolling/*/original.json" >/dev/null ||
+      [[ -e "$prefix/.cyder-maplestory-scrolling/original.json" ]] || return 0
     mode=restore ;; traditional|precise) ;; *) echo "Invalid scrolling preference" >&2; return 2 ;; esac
-  if [[ ! -f "$helper" ]]; then
+  if ! helper="$(cyder_scrolling_helper)"; then
     [[ "$mode" == restore ]] && return 0
     echo "Cyder scrolling helper is missing" >&2
     return 2
   fi
-  WINEPREFIX="$prefix" WINE_INSTALL="$(cd "$(dirname "$wine_bin")/.." && pwd -P)" \
-    CYDER_EXECUTION_FINAL=0 /usr/bin/ruby "$helper" "$mode" "$(basename "$exe")" >/dev/null
+  cyder_has_running_prefix "$prefix" && running=(--prefix-running)
+  CYDER_EXECUTION_FINAL=0 "$helper" --scrolling "$mode" "$prefix" "$wine_bin" "$name" ${running[@]+"${running[@]}"} >/dev/null
 }
 
 cyder_run_wine_exe() {
