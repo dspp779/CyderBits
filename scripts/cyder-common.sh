@@ -69,7 +69,7 @@ cyder_detect_default_mingliu_target() {
 }
 
 cyder_detect_default_font_preset() {
-  local dir item lower
+  local dir
   if command -v fc-list >/dev/null 2>&1; then
     if fc-list 2>/dev/null | grep -qiE 'MingLiU|PMingLiU|細明體|新細明體'; then
       printf 'mingliu\n'
@@ -79,15 +79,13 @@ cyder_detect_default_font_preset() {
   for dir in "$HOME/Library/Fonts" /Library/Fonts /System/Library/Fonts \
     /System/Library/Fonts/Supplemental; do
     [[ -d "$dir" ]] || continue
-    while IFS= read -r item; do
-      lower="$(printf '%s' "$item" | tr '[:upper:]' '[:lower:]')"
-      case "$lower" in
-        *mingliu* | *pmingliu* | *細明體* | *新細明體*)
-          printf 'mingliu\n'
-          return 0
-          ;;
-      esac
-    done < <(find "$dir" -maxdepth 2 -type f 2>/dev/null || true)
+    # One case-insensitive find per folder; this runs on every launcher start
+    # and used to fork tr for each of several hundred font files (~1.5 s).
+    # MingLiU/PMingLiU match case-insensitively; 細明體 also covers 新細明體.
+    if [[ -n "$(find "$dir" -maxdepth 2 -type f \( -ipath '*mingliu*' -o -path '*細明體*' \) -print -quit 2>/dev/null)" ]]; then
+      printf 'mingliu\n'
+      return 0
+    fi
   done
   printf 'songti\n'
 }
@@ -1446,7 +1444,9 @@ cyder_now_ms() {
   if [[ -n "${EPOCHREALTIME:-}" ]]; then
     awk -v t="$EPOCHREALTIME" 'BEGIN { printf "%d\n", t * 1000 }'
   else
-    python3 -c 'import time; print(int(time.time() * 1000))'
+    # System perl, not python3: on Macs without Command Line Tools
+    # /usr/bin/python3 is an installer stub that prompts the user.
+    /usr/bin/perl -MTime::HiRes=time -e 'printf "%d\n", time * 1000'
   fi
 }
 

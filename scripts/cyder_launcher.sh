@@ -24,7 +24,9 @@ cyder_now_ms() {
   if [[ -n "${EPOCHREALTIME:-}" ]]; then
     awk -v t="$EPOCHREALTIME" 'BEGIN { printf "%d\n", t * 1000 }'
   else
-    python3 -c 'import time; print(int(time.time() * 1000))'
+    # System perl, not python3: on Macs without Command Line Tools
+    # /usr/bin/python3 is an installer stub that prompts the user.
+    /usr/bin/perl -MTime::HiRes=time -e 'printf "%d\n", time * 1000'
   fi
 }
 

@@ -8,8 +8,14 @@ cyder_macos_product_version() {
     printf '%s\n' "$CYDER_MOCK_MACOS"
     return 0
   fi
-  /usr/bin/sw_vers -productVersion 2>/dev/null || echo "0.0"
+  # Read once per launch chain (callers use command substitution, so a lazy
+  # cache would be lost in the subshell); see the export below.
+  printf '%s\n' "${CYDER_MACOS_PRODUCT_VERSION_CACHE:-$(/usr/bin/sw_vers -productVersion 2>/dev/null || echo "0.0")}"
 }
+if [[ -z "${CYDER_MACOS_PRODUCT_VERSION_CACHE:-}" ]]; then
+  CYDER_MACOS_PRODUCT_VERSION_CACHE="$(/usr/bin/sw_vers -productVersion 2>/dev/null || true)"
+  export CYDER_MACOS_PRODUCT_VERSION_CACHE
+fi
 
 # Compare host macOS version to major.minor. Returns 0 when host >= required.
 cyder_macos_at_least() {
