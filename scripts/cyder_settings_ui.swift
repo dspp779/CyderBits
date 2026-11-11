@@ -50,7 +50,8 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate,
     var onImmediateSave: ((_ registrySetting: String) async -> Bool)?
     /// Live Wine `reg add` with draft env; return true only after registry apply succeeds.
     var onApplyWhileRunning: ((_ draftEnvironment: [String: String]) async -> Bool)?
-    var onRebuild: (() -> Void)?
+    /// Called with `true` for 完全重設, `false` for 修復.
+    var onRepair: ((Bool) -> Void)?
     var onPrepareEnvironment: (() -> Void)?
     private var environmentState = CyderEnvironmentReadinessObserver.State.current(.ready)
     private var baseSettingsControlsEnabled = false
@@ -529,7 +530,7 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate,
     }
 
     private func makeAdvancedTab() -> NSTabViewItem {
-        let rebuild = NSButton(title: "重建 Windows 遊戲環境…", target: self, action: #selector(rebuildEnvironment))
+        let rebuild = NSButton(title: "修復 Windows 遊戲環境…", target: self, action: #selector(rebuildEnvironment))
         rebuild.bezelStyle = .rounded
         let winetricks = NSButton(title: "Winetricks 元件…", target: self, action: #selector(openWinetricks))
         winetricks.bezelStyle = .rounded
@@ -542,7 +543,7 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate,
         return tab("進階", rows: [
             stopAllWineButton,
             rebuild,
-            note("重新建立執行 Windows 遊戲所需的環境。遊戲檔案不會刪除，但已安裝的 Windows 元件與自訂設定需要重新套用。"),
+            note("遊戲無法啟動或環境異常時使用。修復會保留已安裝的程式與存檔；仍無法解決時可選擇完全重設。"),
             winetricks,
             note("安裝 WMP、Quartz、Devenum、VB6 等元件到共用的 Windows 環境。VC++ 與 .NET Desktop Runtime 請下載官方安裝程式透過 Cyder 執行"),
             row("MapleStory WZ 快取", maplestoryWZCache),
@@ -2005,13 +2006,40 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate,
     @objc private func rebuildEnvironment() {
         guard !environmentBusy else { return }
         let alert = NSAlert()
-        alert.messageText = "重建 Windows 遊戲環境？"
-        alert.informativeText = "遊戲檔案不會刪除，但已安裝的 Windows 元件與自訂設定需要重新套用。"
-        alert.alertStyle = .warning
-        alert.addButton(withTitle: "重建")
+        alert.messageText = "修復 Windows 遊戲環境？"
+        alert.informativeText = "重新安裝 Windows 引擎並更新共用的 Windows 環境。已安裝的程式、存檔與設定都會保留。\n\n如果修復後仍有問題，可以選擇「完全重設」。"
+        alert.alertStyle = .informational
+        alert.addButton(withTitle: "修復")
         alert.addButton(withTitle: "取消")
+        alert.addButton(withTitle: "完全重設…")
+        switch alert.runModal() {
+        case .alertFirstButtonReturn:
+            onRepair?(false)
+            close()
+        case .alertThirdButtonReturn:
+            confirmReset()
+        default:
+            return
+        }
+    }
+
+    private func confirmReset() {
+        let programs = CyderSharedBottleContents.installedPrograms(in: CyderPaths.sharedBottle)
+        let alert = NSAlert()
+        alert.messageText = "完全重設 Windows 遊戲環境？"
+        var text = "將建立全新的 Windows 環境。目前環境中安裝的程式、遊戲存檔、Windows 元件與設定都會移除，需要重新安裝。放在環境外的遊戲資料夾不受影響。"
+        if !programs.isEmpty {
+            let shown = programs.prefix(8).joined(separator: "、")
+            text += "\n\n會移除的程式：" + shown + (programs.count > 8 ? " 等 \(programs.count) 個" : "")
+        }
+        text += "\n\n舊的環境會移到垃圾桶，清空垃圾桶前仍可找回檔案。"
+        alert.informativeText = text
+        alert.alertStyle = .critical
+        alert.addButton(withTitle: "重設")
+        alert.addButton(withTitle: "取消")
+        alert.buttons.first?.hasDestructiveAction = true
         guard alert.runModal() == .alertFirstButtonReturn else { return }
-        onRebuild?()
+        onRepair?(true)
         close()
     }
 

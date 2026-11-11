@@ -205,7 +205,7 @@ Cyder 目前使用一個預設 Wine bottle，所有 `.exe` 共用同一套 Windo
 首次啟動（或 marker 不存在）時，`cyder_launcher.sh` 會依序：
 
 1. 從 app 內 `engine-<version>.tar.zst` 解壓引擎至 `Engines/`（若尚未安裝或版本不同）
-2. 對 `bottles/shared` 執行 wineboot：空 bottle 用 `-i`，既有 bottle 用 `-u`（engine 升級時保留 shared，只清 `.cyder-bootstrap-v1` 以觸發再 provision；需要乾淨環境時用偏好設定「重建 Windows 遊戲環境」）
+2. 對 `bottles/shared` 執行 wineboot：空 bottle 用 `-i`，既有 bottle 用 `-u`（engine 升級時保留 shared，只清 `.cyder-bootstrap-v1` 以觸發再 provision；需要乾淨環境時用偏好設定「修復 Windows 遊戲環境」→「完全重設」）
 3. 安裝 **syswow64/tar.exe**（含 libarchive DLL）。Wine Mono／Gecko 不在初始化安裝；當程式第一次載入 `mscoree`（.NET）或 `mshtml`（內嵌網頁）時，Wine 會跳出元件安裝提示。
 4. 寫入 **Mac 顯示 baseline** registry（預設 RetinaMode 關閉、LogPixels=96）與其他 Golden baseline 設定
 5. 套用進階設定，並為遊戲畫面主程式 `bluecg.exe` 寫入專屬的 `ddraw=n,b` DLL override
@@ -281,7 +281,7 @@ Finder 或 CLI 可直接用 Cyder 開啟 `.msi`：經 `msiexec /i` 安裝到 sha
 
 遊戲庫磁貼右鍵可選「加入 macOS 應用程式」（已存在則為「更新」）：在 `~/Applications/Cyder/` 建立精簡 `.app`，啟動時轉交 `Cyder.app` 開啟對應 EXE。捷徑不含 Wine；若遊戲沒有可用圖示則沿用 Cyder 圖示。CLI：`bash scripts/cyder-create-mac-launcher.sh --exe … --cyder-app … --output …`。
 
-捷徑會**固定寫入當下的 EXE 絕對路徑**。若之後「重建 Windows 遊戲環境」、刪除 bottle 內安裝，或搬移 `Cyder.app`，舊捷徑會失效；捷徑會跳出提示（含 `open` 失敗），請在遊戲庫重新安裝遊戲後再「更新 macOS 應用程式」。
+捷徑會**固定寫入當下的 EXE 絕對路徑**。若之後「完全重設」Windows 遊戲環境、刪除 bottle 內安裝，或搬移 `Cyder.app`，舊捷徑會失效；捷徑會跳出提示（含 `open` 失敗），請在遊戲庫重新安裝遊戲後再「更新 macOS 應用程式」。
 
 直接由 Finder 打開 `.exe` 時，Cyder **不會**安裝、升級或重建環境。若 engine 不存在、版本不同或預設 bottle 尚未完成 bootstrap，只顯示提示，要求使用者先單獨開啟 `Cyder.app` 完成設定與環境建置。
 

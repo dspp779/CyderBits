@@ -270,7 +270,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         controller.onStopAllWine = { [weak self] in
             await self?.stopAllExesWaiting() ?? false
         }
-        controller.onRebuild = { [weak self] in self?.rebuildEnvironment() }
+        controller.onRepair = { [weak self] reset in self?.rebuildEnvironment(reset: reset) }
         controller.onCreateProfile = { [weak self] executable in
             self?.createIndependentProfile(for: executable)
         }
@@ -451,21 +451,23 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    private func rebuildEnvironment(completion: (() -> Void)? = nil) {
+    /// 修復 (default) reinstalls the engine and updates the shared bottle in
+    /// place; 完全重設 (`reset`) moves the bottle to the Trash and creates a new one.
+    private func rebuildEnvironment(reset: Bool = false, completion: (() -> Void)? = nil) {
         guard let resourcePath = Bundle.main.resourcePath else {
-            showAlert("無法重建環境", "Cyder 缺少必要的 Resources 目錄。")
+            showAlert(reset ? "無法重設環境" : "無法修復環境", "Cyder 缺少必要的 Resources 目錄。")
             return
         }
         environmentPreparationInProgress = true
-        let progressPresentation = showSetup("正在重建 Windows 遊戲環境…")
+        let progressPresentation = showSetup(reset ? "正在重設 Windows 遊戲環境…" : "正在修復 Windows 遊戲環境…")
         Task.detached(priority: .userInitiated) { [weak self] in
             guard let self else { return }
             let context = await CyderLaunchContext(resourcePath: resourcePath)
             let result = await self.runLauncher(
                 context: context,
-                args: [context.launcher, "--engine-src", context.engineSrc, "--rebuild-prefix"],
+                args: [context.launcher, "--engine-src", context.engineSrc, reset ? "--rebuild-prefix" : "--repair-prefix"],
                 stage: .bootstrap,
-                operation: "rebuild-prefix",
+                operation: reset ? "rebuild-prefix" : "repair-prefix",
                 progressPresentation: progressPresentation
             )
             DispatchQueue.main.async {
@@ -480,16 +482,18 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
                     }
                 } else {
                     let rebuildFailure = self.failure(
-                        code: "CYD-REBUILD-001",
+                        code: reset ? "CYD-REBUILD-001" : "CYD-REPAIR-001",
                         stage: .bootstrap,
-                        summary: "重建 Windows 遊戲環境失敗。",
+                        summary: reset ? "重設 Windows 遊戲環境失敗。" : "修復 Windows 遊戲環境失敗。",
                         result: result
                     )
                     let action = self.presentFailure(rebuildFailure, allowsRebuild: true)
                     if action == .rebuild {
-                        self.rebuildEnvironment(completion: completion)
+                        self.rebuildEnvironment(reset: reset, completion: completion)
                     } else if completion == nil {
-                        NSApp.terminate(nil)
+                        // A refused or failed repair keeps the bottle; only a reset
+                        // that left no bottle makes Cyder unusable.
+                        if !FileManager.default.fileExists(atPath: CyderPaths.sharedBottle.path) { NSApp.terminate(nil) }
                     } else {
                         CyderDiagnostics.shared.finish(outcome: "rebuild-failed")
                         NSApp.terminate(nil)
@@ -2591,7 +2595,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             alert.addButton(withTitle: "複製診斷資訊")
             alert.addButton(withTitle: "開啟相關記錄")
             if allowsRebuild {
-                alert.addButton(withTitle: "重建 Windows 遊戲環境")
+                alert.addButton(withTitle: "再試一次")
             }
             let response = runFrontmostAlert(
                 alert,
@@ -2657,16 +2661,18 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
     private func presentRuntimeInUse(_ report: CyderRuntimeUsers.Report, failure: CyderFailure) {
         func key(_ path: String) -> String { URL(fileURLWithPath: path).standardizedFileURL.path }
         let used = Set(report.users.compactMap { $0.prefix.map(key) })
-        let moltenvk = report.component != "gptk"
-        let component = moltenvk ? "MoltenVK 版本" : "GPTK（D3DMetal）來源"
+        let moltenvk = report.component == "moltenvk", engine = report.component == "engine"
+        let component = engine ? "Windows 引擎" : moltenvk ? "MoltenVK 版本" : "GPTK（D3DMetal）來源"
         let stop: [URL] = onMainThread {
             // Monitor URLs are passed back unchanged; only those can be stopped.
             let stoppable = statusItemController.monitoredPrefixes.filter { used.contains(key($0.path)) }
             let stoppableKeys = Set(stoppable.map { key($0.path) })
             let others = report.users.filter { user in !(user.prefix.map { stoppableKeys.contains(key($0)) } ?? false) }
             let alert = NSAlert()
-            alert.messageText = "目前無法切換\(component)"
-            var text = "\(component)由所有 Windows 環境共用，遊戲執行中也會隨時載入，因此只能在沒有 Windows 程式執行時切換。這次啟動沒有執行。"
+            alert.messageText = engine ? "目前無法更新 Windows 引擎" : "目前無法切換\(component)"
+            var text = engine
+                ? "Windows 引擎由所有 Windows 環境共用，只能在沒有 Windows 程式執行時更新或修復。這次操作沒有執行。"
+                : "\(component)由所有 Windows 環境共用，遊戲執行中也會隨時載入，因此只能在沒有 Windows 程式執行時切換。這次啟動沒有執行。"
             if !stoppable.isEmpty {
                 text += "\n\n執行中的環境：" + stoppable.map(\.lastPathComponent).joined(separator: "、")
             }
@@ -2912,6 +2918,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         }
         let trackProgress = args.contains("--bootstrap-only")
             || args.contains("--rebuild-prefix")
+            || args.contains("--repair-prefix")
             || args.contains("--profile-create")
         let progressURL = operationLog
             .deletingPathExtension()
@@ -3249,6 +3256,18 @@ struct CyderMain {
                 exit(CyderEnvironmentCommand.run(arguments: CommandLine.arguments))
             }
             dispatchMain()
+        }
+        if CommandLine.arguments.dropFirst().first == "--trash" {
+            // `CyderSwift --trash PATH`: recoverable removal for 完全重設.
+            let arguments = CommandLine.arguments
+            guard arguments.count == 3, arguments[2].hasPrefix("/") else { exit(64) }
+            do {
+                try FileManager.default.trashItem(at: URL(fileURLWithPath: arguments[2]), resultingItemURL: nil)
+                exit(0)
+            } catch {
+                FileHandle.standardError.write(Data("\(error.localizedDescription)\n".utf8))
+                exit(1)
+            }
         }
         if CommandLine.arguments.dropFirst().first == "--runtime-users" {
             exit(CyderRuntimeUsers.run(arguments: CommandLine.arguments))

@@ -126,4 +126,21 @@ assert test -f "$CYDER_SHARED_PREFIX/.cyder-bootstrap-v1"
 assert test -f "$CYDER_SHARED_PREFIX/user-data-marker"
 assert_contains "$(cyder_read_installed_engine_version "$dest")" "wine 12.0" "upgraded engine version file"
 
+# 修復 forces a re-extract even when version and SHA match, so damaged
+# engine files are replaced. It is refused while any Wine process uses it.
+printf 'damaged\n' >>"$dest/bin/wine"
+busy_helper="$TMP/busy-helper"
+printf '%s\n' '#!/bin/bash' 'echo "CYDER-RUNTIME-IN-USE component=$3 pid=99 name=game.exe" >&2' 'exit 75' >"$busy_helper"
+chmod +x "$busy_helper"
+status=0
+output="$(CYDER_ENVIRONMENT_HELPER="$busy_helper" CYDER_EXECUTION_RUNTIME_MUTATION=1 CYDER_FORCE_ENGINE_REINSTALL=1 \
+  cyder_ensure_shared_engine "$ENGINE_TAR_V2" 2>&1)" || status=$?
+assert_eq "$status" "75" "forced reinstall must be refused while the engine is in use"
+assert_contains "$output" "CYDER-RUNTIME-IN-USE component=engine" "refusal should name the engine"
+assert_contains "$(cat "$dest/bin/wine")" "damaged" "a refused reinstall must not touch the engine"
+output="$(CYDER_FORCE_ENGINE_REINSTALL=1 cyder_ensure_shared_engine "$ENGINE_TAR_V2" 2>&1)"
+assert_contains "$output" "Reinstalling shared engine" "forced reinstall should re-extract a current engine"
+assert_not_contains "$(cat "$dest/bin/wine")" "damaged" "forced reinstall should replace damaged engine files"
+assert test -f "$CYDER_SHARED_PREFIX/user-data-marker"
+
 echo "PASS test-cyder-engine-tarball"

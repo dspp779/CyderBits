@@ -520,6 +520,17 @@ struct CyderSettingsHarness {
         )
         precondition(CyderSettings.sanitizedGraphicsBackend("auto") == .default)
 
+        // 完全重設 lists user-installed programs, not Wine's own folders.
+        let bottle = FileManager.default.temporaryDirectory.appendingPathComponent("cyder-bottle-\(UUID().uuidString)")
+        for path in ["Program Files/Common Files", "Program Files/Internet Explorer", "Program Files/Game B",
+                     "Program Files (x86)/Game A", "Program Files (x86)/Game B", "Program Files (x86)/Windows NT"] {
+            try! FileManager.default.createDirectory(at: bottle.appendingPathComponent("drive_c/" + path), withIntermediateDirectories: true)
+        }
+        FileManager.default.createFile(atPath: bottle.appendingPathComponent("drive_c/Program Files/readme.txt").path, contents: Data())
+        precondition(CyderSharedBottleContents.installedPrograms(in: bottle) == ["Game A", "Game B"])
+        precondition(CyderSharedBottleContents.installedPrograms(in: bottle.appendingPathComponent("missing")).isEmpty)
+        try? FileManager.default.removeItem(at: bottle)
+
         print("PASS cyder-settings-harness")
     }
 }

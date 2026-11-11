@@ -67,8 +67,8 @@ enum CyderRuntimeUsers {
     /// process table is unreadable.
     static func run(arguments: [String]) -> Int32 {
         guard arguments.count == 4, arguments[2].hasPrefix("/"),
-              ["moltenvk", "gptk"].contains(arguments[3]) else {
-            FileHandle.standardError.write(Data("usage: CyderSwift --runtime-users ENGINE moltenvk|gptk\n".utf8))
+              ["moltenvk", "gptk", "engine"].contains(arguments[3]) else {
+            FileHandle.standardError.write(Data("usage: CyderSwift --runtime-users ENGINE moltenvk|gptk|engine\n".utf8))
             return 64
         }
         guard let users = scan(engineRoot: URL(fileURLWithPath: arguments[2])) else {

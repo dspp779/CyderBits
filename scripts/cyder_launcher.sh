@@ -76,7 +76,8 @@ Options:
   --dry-run           Print paths without installing engine or launching
   --bootstrap-only    Bootstrap shared prefix (wineboot, tar, hi-res) and exit
   --health-check      Validate the Wine engine and run a minimal prefix probe
-  --rebuild-prefix    Rebuild the shared Windows game environment safely
+  --repair-prefix     Reinstall the engine and update the shared environment in place
+  --rebuild-prefix    Reset the shared environment; the old one goes to the Trash
   --ensure-engine-only  Install shared engine from payload/tarball and exit
   --ensure-graphics-only Install graphics payloads and migrate inactive prefixes
   --ensure-rosetta-only Check Rosetta 2 on Apple Silicon and exit
@@ -114,6 +115,7 @@ DRY_RUN=0
 BOOTSTRAP_ONLY=0
 HEALTH_CHECK=0
 REBUILD_PREFIX=0
+REPAIR_PREFIX=0
 ENSURE_ENGINE_ONLY=0
 ENSURE_GRAPHICS_ONLY=0
 ENSURE_ROSETTA_ONLY=0
@@ -184,6 +186,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --rebuild-prefix)
       REBUILD_PREFIX=1
+      shift
+      ;;
+    --repair-prefix)
+      REPAIR_PREFIX=1
       shift
       ;;
     --ensure-engine-only)
@@ -390,6 +396,7 @@ primary_actions=0
 [[ "$BOOTSTRAP_ONLY" -eq 1 ]] && primary_actions=$((primary_actions + 1))
 [[ "$HEALTH_CHECK" -eq 1 ]] && primary_actions=$((primary_actions + 1))
 [[ "$REBUILD_PREFIX" -eq 1 ]] && primary_actions=$((primary_actions + 1))
+[[ "$REPAIR_PREFIX" -eq 1 ]] && primary_actions=$((primary_actions + 1))
 [[ "$ENSURE_ENGINE_ONLY" -eq 1 ]] && primary_actions=$((primary_actions + 1))
 [[ "$ENSURE_GRAPHICS_ONLY" -eq 1 ]] && primary_actions=$((primary_actions + 1))
 [[ "$ENSURE_ROSETTA_ONLY" -eq 1 ]] && primary_actions=$((primary_actions + 1))
@@ -607,6 +614,17 @@ if [[ "$INSTALL_WINETRICKS" -eq 1 ]]; then
     exit 2
   }
   exec bash "$winetricks_sh" install "${WINETRICKS_VERBS[@]}"
+fi
+
+if [[ "$REPAIR_PREFIX" -eq 1 ]]; then
+  cyder_set_stage engine-extraction
+  cyder_report_progress "正在重新安裝 Windows 引擎…" "engine-reinstall"
+  engine="$(CYDER_FORCE_ENGINE_REINSTALL=1 cyder_resolve_shared_engine "$ENGINE_SRC")" || exit $?
+  wine="$engine/bin/wine"
+  cyder_set_stage bootstrap
+  cyder_report_progress "正在修復 Windows 遊戲環境…" "prefix-repair"
+  cyder_repair_shared_prefix "$wine" "$engine"
+  exit $?
 fi
 
 if [[ "$HEALTH_CHECK" -eq 1 || "$REBUILD_PREFIX" -eq 1 ]]; then

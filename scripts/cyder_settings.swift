@@ -1374,3 +1374,26 @@ struct CyderSettingsPatch {
         current = try JSONDecoder().decode(CyderSettings.self, from: JSONSerialization.data(withJSONObject: merged))
     }
 }
+
+/// What 完全重設 would remove from the shared bottle.
+enum CyderSharedBottleContents {
+    /// Folders Wine itself creates under Program Files.
+    static let wineDefaults: Set<String> = ["common files", "internet explorer", "windows media player",
+        "windows nt", "windows mail", "windows photo viewer", "windows sidebar", "windowspowershell",
+        "microsoft.net", "msbuild", "reference assemblies"]
+    /// User-installed folders under Program Files and Program Files (x86), sorted and de-duplicated.
+    static func installedPrograms(in bottle: URL, fileManager: FileManager = .default) -> [String] {
+        let drive = bottle.appendingPathComponent("drive_c")
+        var names = Set<String>()
+        for folder in ["Program Files", "Program Files (x86)"] {
+            let root = drive.appendingPathComponent(folder)
+            guard let entries = try? fileManager.contentsOfDirectory(at: root, includingPropertiesForKeys: [.isDirectoryKey],
+                                                                     options: [.skipsHiddenFiles]) else { continue }
+            for entry in entries where (try? entry.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true {
+                let name = entry.lastPathComponent
+                if !wineDefaults.contains(name.lowercased()) { names.insert(name) }
+            }
+        }
+        return names.sorted { $0.localizedStandardCompare($1) == .orderedAscending }
+    }
+}

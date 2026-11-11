@@ -969,7 +969,7 @@ cyder_resolve_shared_engine() {
   if [[ -n "$bundled_src" ]]; then
     bundled_src="$(cyder_abs_path "$bundled_src")"
   fi
-  if [[ -n "$bundled_src" && "$engine_src" == "$bundled_src" && -x "$engine/bin/wine" ]]; then
+  if [[ "${CYDER_FORCE_ENGINE_REINSTALL:-0}" != 1 && -n "$bundled_src" && "$engine_src" == "$bundled_src" && -x "$engine/bin/wine" ]]; then
     expected="$(cyder_bundled_engine_version "$CYDER_OGOM" 2>/dev/null || true)"
     installed="$(cyder_read_installed_engine_version "$engine" 2>/dev/null || true)"
     expected_sha="$(cyder_read_bundled_engine_artifact_sha "$CYDER_OGOM" 2>/dev/null || true)"
@@ -1810,9 +1810,9 @@ cyder_ensure_shared_engine() {
        cyder_engine_versions_equal "$installed_version" "$bundled_version"; then
       same_version=1
     fi
-    if [[ -z "$bundled_version" ]] ||
+    if [[ "${CYDER_FORCE_ENGINE_REINSTALL:-0}" != 1 ]] && { [[ -z "$bundled_version" ]] ||
        { [[ "$same_version" -eq 1 ]] &&
-         { [[ -z "$bundled_sha" ]] || [[ "$installed_sha" == "$bundled_sha" ]]; }; }; then
+         { [[ -z "$bundled_sha" ]] || [[ "$installed_sha" == "$bundled_sha" ]]; }; }; }; then
       echo "Shared engine present: $dest" >&2
       if [[ ! -f "$dest/.cyder-engine-signed" ]]; then
         cyder_sign_installed_engine "$dest" || exit 1
@@ -1821,7 +1821,12 @@ cyder_ensure_shared_engine() {
       echo "$dest"
       return 0
     fi
-    if [[ "$same_version" -eq 1 ]]; then
+    # Replacing engine files under any running Wine process (any bottle)
+    # would mix two builds inside one game.
+    cyder_shared_runtime_idle "$dest" engine || exit $?
+    if [[ "${CYDER_FORCE_ENGINE_REINSTALL:-0}" == 1 ]]; then
+      echo "Reinstalling shared engine from the bundled archive -> $dest" >&2
+    elif [[ "$same_version" -eq 1 ]]; then
       echo "Refreshing shared engine artifact ($bundled_version) -> $dest" >&2
     else
       echo "Upgrading shared engine ($installed_version -> $bundled_version) -> $dest" >&2
@@ -1877,7 +1882,7 @@ cyder_init_bottle() {
   local wineboot_flag="-i"
   local wineboot_reason="create"
   if [[ -f "$bottle/system.reg" ]]; then
-    # Prefer Preferences → 重建 Windows if the prefix is too broken to salvage.
+    # Prefer Preferences → 修復 Windows 遊戲環境 → 完全重設 if the prefix is too broken to salvage.
     cyder_seed_crossover_bottle_conf "$wine_bin" "$bottle" || return $?
     echo "Updating bottle: $bottle" >&2
     wineboot_flag="-u"
@@ -2103,6 +2108,23 @@ cyder_health_check_prefix() {
   return "$status"
 }
 
+# Move a path to the user's Trash so a reset stays recoverable. Uses the
+# native helper (FileManager.trashItem) when available.
+cyder_move_to_trash() {
+  local path="${1:?}" helper trash name
+  [[ -e "$path" || -L "$path" ]] || return 0
+  if helper="$(cyder_native_helper 2>/dev/null)"; then
+    "$helper" --trash "$path" && return 0
+    echo "Could not move to the Trash: $path" >&2
+    return 1
+  fi
+  trash="${CYDER_TRASH_DIR:-$HOME/.Trash}"
+  name="$(basename "$path") $(date '+%Y-%m-%d %H.%M.%S')"
+  mkdir -p "$trash" && mv "$path" "$trash/$name"
+}
+
+# 完全重設: replace the shared bottle with a new one. Everything inside it
+# (installed programs, saves, registry, components) goes to the Trash.
 cyder_rebuild_shared_prefix() {
   local wine_bin="$1" engine_root="$2"
   cyder_has_running_prefix "$CYDER_SHARED_PREFIX" && {
@@ -2112,7 +2134,7 @@ cyder_rebuild_shared_prefix() {
   local parent active_prefix
   active_prefix="$CYDER_SHARED_PREFIX"
   parent="$(dirname "$active_prefix")"
-  # Rebuild deliberately deletes the active bottle before provisioning. This
+  # Rebuild deliberately removes the active bottle before provisioning. This
   # prevents stale CrossOver metadata or registry state from surviving.
   [[ ! -L "$active_prefix" ]] || {
     echo "Cannot rebuild a symlinked shared prefix: $active_prefix" >&2
@@ -2123,10 +2145,11 @@ cyder_rebuild_shared_prefix() {
   cyder_stop_prefix_wineserver "$wine_bin" "$active_prefix" || true
 
   if [[ -e "$active_prefix" || -L "$active_prefix" ]]; then
-    if ! cyder_remove_path "$active_prefix"; then
-      echo "Prefix rebuild failed while deleting the active bottle: $active_prefix" >&2
+    if ! cyder_move_to_trash "$active_prefix"; then
+      echo "Prefix rebuild failed while moving the active bottle to the Trash: $active_prefix" >&2
       return 1
     fi
+    echo "Moved the previous bottle to the Trash: $active_prefix" >&2
   fi
   echo "Rebuilding bottle from scratch: $active_prefix" >&2
   if ! cyder_provision_prefix_baseline "$wine_bin" "$engine_root" "$active_prefix"; then
@@ -2136,6 +2159,31 @@ cyder_rebuild_shared_prefix() {
   fi
   cyder_write_bootstrap_marker "$(cyder_current_bootstrap_engine_label "$engine_root")"
   echo "Prefix rebuild completed: $active_prefix" >&2
+}
+
+# 修復: the engine has just been reinstalled from the bundled archive; update
+# the existing bottle in place (wineboot -u, baseline, graphics). Installed
+# programs, saves and registry data are kept.
+cyder_repair_shared_prefix() {
+  local wine_bin="$1" engine_root="$2"
+  cyder_has_running_prefix "$CYDER_SHARED_PREFIX" && {
+    echo "Cannot repair prefix while a Wine process is running." >&2
+    return 2
+  }
+  [[ ! -L "$CYDER_SHARED_PREFIX" ]] || {
+    echo "Cannot repair a symlinked shared prefix: $CYDER_SHARED_PREFIX" >&2
+    return 2
+  }
+  mkdir -p "$(dirname "$CYDER_SHARED_PREFIX")"
+  cyder_stop_prefix_wineserver "$wine_bin" "$CYDER_SHARED_PREFIX" || true
+  echo "Repairing bottle in place: $CYDER_SHARED_PREFIX" >&2
+  cyder_provision_prefix_baseline "$wine_bin" "$engine_root" "$CYDER_SHARED_PREFIX" || {
+    echo "Prefix repair failed; the existing bottle and its programs were kept." >&2
+    return 1
+  }
+  cyder_write_bootstrap_marker "$(cyder_current_bootstrap_engine_label "$engine_root")"
+  cyder_bootstrap_shared_prefix_finish_graphics || return $?
+  echo "Prefix repair completed: $CYDER_SHARED_PREFIX" >&2
 }
 
 cyder_ensure_shared_prefix() {
@@ -3227,7 +3275,7 @@ cyder_write_bootstrap_marker() {
   }
   {
     printf 'revision=%s\n' "$revision"
-    [[ -n "$engine_label" ]] && printf 'engine=%s\n' "$engine_label"
+    if [[ -n "$engine_label" ]]; then printf 'engine=%s\n' "$engine_label"; fi
   } >"$CYDER_BOOTSTRAP_MARKER"
 }
 
