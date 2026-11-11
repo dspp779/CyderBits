@@ -569,14 +569,24 @@ private final class CyderPlaceholderTextView: NSTextView {
 }
 
 /// DirectDraw actions save immediately; the other display controls use Apply.
+/// The cnc-ddraw switch enables or disables the wrapper; its options stay
+/// disabled until cnc-ddraw is confirmed on.
 private final class CyderDirectDrawOptions: NSObject {
     let detail = NSTextField(wrappingLabelWithString: "正在檢查 DirectDraw…")
-    let action = NSButton()
-    let restore = NSButton()
+    let toggle = NSSwitch()
+    /// Shown only when a previous legacy DLL switch did not finish.
+    let repair = NSButton()
     let refresh = NSButton()
     let explanation = NSTextField(wrappingLabelWithString: "")
-    private let filter = NSPopUpButton()
-    private let frameRate = NSPopUpButton()
+    let filter = NSPopUpButton()
+    let frameRate = NSPopUpButton()
+    /// cnc-ddraw built-in upscaling shaders, in menu order.
+    static let filters: [(value: String, title: String)] = [
+        ("bilinear", "雙線性（平滑）"),
+        ("bicubic", "Bicubic（清晰）"),
+        ("lanczos", "Lanczos（最清晰）"),
+        ("nearest", "最近鄰（保留像素）"),
+    ]
     var onBusy: ((Bool) -> Void)?
     var canMutate: (() -> Bool)?
     var selectedBackend: (() -> CyderGraphicsBackend?)?
@@ -594,8 +604,7 @@ private final class CyderDirectDrawOptions: NSObject {
         self.executable = executable
         super.init()
         for (button, title, selector) in [
-            (action, "啟用 cnc-ddraw", #selector(performAction)),
-            (restore, "停用 cnc-ddraw", #selector(restoreOriginal)),
+            (repair, "修復上次切換", #selector(repairLegacy)),
             (refresh, "重新檢查", #selector(reload))
         ] {
             button.title = title
@@ -603,31 +612,35 @@ private final class CyderDirectDrawOptions: NSObject {
             button.target = self
             button.action = selector
         }
-        action.identifier = NSUserInterfaceItemIdentifier("game-cnc-action")
-        restore.identifier = NSUserInterfaceItemIdentifier("game-cnc-restore")
+        toggle.target = self
+        toggle.action = #selector(toggleChanged)
+        toggle.identifier = NSUserInterfaceItemIdentifier("game-cnc-toggle")
+        toggle.setAccessibilityLabel("啟用 cnc-ddraw")
+        repair.identifier = NSUserInterfaceItemIdentifier("game-cnc-repair")
         filter.identifier = NSUserInterfaceItemIdentifier("game-cnc-filter")
         frameRate.identifier = NSUserInterfaceItemIdentifier("game-cnc-frame-rate")
         filter.setAccessibilityLabel("縮放方式")
         frameRate.setAccessibilityLabel("畫面更新上限")
-        filter.addItems(withTitles: ["平滑（雙線性）", "銳利（最近鄰）"])
+        filter.addItems(withTitles: Self.filters.map(\.title))
         frameRate.addItems(withTitles: ["30", "60", "120", "144", "240"])
         frameRate.selectItem(withTitle: "60")
         for control in [filter, frameRate] {
             control.target = self
             control.action = #selector(settingsChanged)
-            control.isEnabled = false
         }
-        detail.font = .systemFont(ofSize: 13, weight: .medium)
+        detail.font = .systemFont(ofSize: 12)
+        detail.textColor = .secondaryLabelColor
         explanation.font = .systemFont(ofSize: 12)
         explanation.textColor = .secondaryLabelColor
         for label in [detail, explanation] {
             label.widthAnchor.constraint(lessThanOrEqualToConstant: 465).isActive = true
             label.isSelectable = true
         }
-        action.isEnabled = false
-        restore.isHidden = true
+        repair.isHidden = true
+        setControlsEnabled(false)
     }
 
+    /// Same column layout as the other game option rows.
     private func optionRow(_ title: String, _ control: NSView) -> NSView {
         let label = NSTextField(labelWithString: title)
         label.font = .systemFont(ofSize: 12)
@@ -639,10 +652,24 @@ private final class CyderDirectDrawOptions: NSObject {
     }
 
     var rows: [NSView] {
-        let bar = NSStackView(views: [action, restore, refresh])
+        let bar = NSStackView(views: [repair, refresh])
         bar.spacing = 8
-        return [detail, explanation, optionRow("縮放方式", filter),
-                optionRow("畫面更新上限", frameRate), bar]
+        return [optionRow("cnc-ddraw", toggle), detail,
+                optionRow("縮放方式", filter), optionRow("畫面更新上限", frameRate),
+                explanation, bar]
+    }
+
+    /// cnc-ddraw (or a legacy DLL install) is active for this game.
+    private var active: Bool { mode == "on" || (mode == "legacy" && ["on", "outdated"].contains(legacyMode)) }
+
+    private func setControlsEnabled(_ enabled: Bool) {
+        let known = enabled && (mode == "on" || mode == "off" || mode == "legacy")
+        toggle.state = active ? .on : .off
+        toggle.isEnabled = known && !(mode == "legacy" && legacyMode == "recovery")
+        // Options apply only to the launch-time wrapper, and only once it is on.
+        filter.isEnabled = enabled && mode == "on"
+        frameRate.isEnabled = enabled && mode == "on"
+        repair.isEnabled = enabled
     }
 
     private func update(_ state: [String: Any]) {
@@ -650,56 +677,42 @@ private final class CyderDirectDrawOptions: NSObject {
         legacyMode = state["legacyMode"] as? String ?? ""
         if let capability = state["capability"] as? String { engineCapability = capability }
         let settings = state["settings"] as? [String: Any] ?? [:]
-        filter.selectItem(at: settings["filter"] as? String == "nearest" ? 1 : 0)
+        let saved = settings["filter"] as? String ?? "bilinear"
+        filter.selectItem(at: Self.filters.firstIndex { $0.value == saved } ?? 0)
         let rate = String((settings["maxfps"] as? NSNumber)?.intValue ?? 60)
         if frameRate.item(withTitle: rate) == nil { frameRate.addItem(withTitle: rate) }
         frameRate.selectItem(withTitle: rate)
-        detailMessage = "適用 32 位元 DirectDraw 遊戲，請選「預設」或 WineD3D。cnc-ddraw 變更立即儲存，下次啟動生效；現有視窗不變。"
-        restore.isHidden = mode != "on" && !(mode == "legacy" && legacyMode != "off")
-        restore.title = mode == "legacy" ? "還原舊版 DLL" : "停用 cnc-ddraw"
-        action.isEnabled = true
+        detailMessage = "適用 32 位元 DirectDraw 老遊戲，圖形轉譯需為「預設」或 WineD3D。變更在下次啟動遊戲時生效。"
+        repair.isHidden = true
         switch mode {
         case "on":
-            detail.stringValue = "cnc-ddraw \(state["version"] as? String ?? "") 已啟用"
-            action.title = "驗證／更新"
+            detail.stringValue = "已啟用 cnc-ddraw \(state["version"] as? String ?? "")"
         case "off":
-            detail.stringValue = "使用原遊戲的 DirectDraw"
-            action.title = "啟用 cnc-ddraw"
+            detail.stringValue = "使用遊戲原本的 DirectDraw"
         case "legacy":
             if legacyMode == "off" {
-                detail.stringValue = "舊版 DLL 已還原，可改用啟動時載入"
-                action.title = "啟用 cnc-ddraw"
+                detail.stringValue = "舊版 DLL 已還原，可改用新的 cnc-ddraw"
             } else if legacyMode == "recovery" {
-                detail.stringValue = "舊版 DLL 切換尚未完成"
-                action.title = "修復上次切換"
-                restore.isHidden = true
+                detail.stringValue = "上次切換舊版 DLL 尚未完成"
+                repair.isHidden = false
             } else {
-                detail.stringValue = "此遊戲使用舊版 DLL 安裝方式"
-                action.title = "啟用 cnc-ddraw"
-                action.isEnabled = false
+                detail.stringValue = "此遊戲資料夾內裝有舊版 cnc-ddraw DLL"
+                detailMessage = "關閉開關會還原舊版 DLL，請先關閉這個遊戲及其啟動器。備份與遊戲資料會保留。"
             }
-            detailMessage = "先關閉這個遊戲及其啟動器，再還原舊版 DLL。備份與遊戲資料會保留，之後可使用新的啟動設定。"
         default:
             detail.stringValue = "無法確認 DirectDraw 狀態"
-            action.isEnabled = false
         }
         if engineCapability == "unavailable", mode != "legacy" {
-            detailMessage = "目前引擎尚不支援這項啟動設定，請先更新引擎。 " + detailMessage
+            detailMessage = "目前引擎尚不支援 cnc-ddraw，請先更新引擎。"
         }
-        // Every helper request disables this button; a confirmed state must
-        // restore its availability as well as its visibility.
-        restore.isEnabled = !restore.isHidden
-        let editable = mode == "on" || mode == "off" || (mode == "legacy" && legacyMode == "off")
-        filter.isEnabled = editable
-        frameRate.isEnabled = editable
+        setControlsEnabled(true)
         refreshBackend()
     }
 
     var rendererConflict: String? {
-        let enabled = mode == "on" || (mode == "legacy" && ["on", "outdated"].contains(legacyMode))
-        guard enabled, let backend = selectedBackend?(),
+        guard active, let backend = selectedBackend?(),
               backend != .default, backend != .wined3d else { return nil }
-        return "目前選用的 " + backend.rawValue + " 與 cnc-ddraw 互斥。請在「顯示」選取「預設」或 WineD3D，或先停用 cnc-ddraw。"
+        return "目前的圖形轉譯 " + backend.rawValue + " 無法與 cnc-ddraw 同時使用。請將圖形轉譯改為「預設」或 WineD3D，或關閉 cnc-ddraw。"
     }
 
     func refreshBackend() {
@@ -707,9 +720,21 @@ private final class CyderDirectDrawOptions: NSObject {
         explanation.stringValue = rendererConflict ?? detailMessage
     }
 
+    @objc private func toggleChanged() {
+        if toggle.state == .on {
+            if let backend = selectedBackend?(), backend != .default, backend != .wined3d {
+                toggle.state = .off
+                explanation.stringValue = "請先將圖形轉譯改為「預設」或 WineD3D，再啟用 cnc-ddraw。"
+                return
+            }
+            enable()
+        } else {
+            run(mode == "legacy" ? "restore" : "disable", mutating: true) { [weak self] in self?.update($0) }
+        }
+    }
+
     @objc private func settingsChanged() {
-        if mode == "on" { performAction(); return }
-        refreshBackend()
+        if mode == "on" { enable() }
     }
 
     @objc func reload() {
@@ -724,21 +749,14 @@ private final class CyderDirectDrawOptions: NSObject {
         operationInFlight = false
     }
 
-    @objc private func restoreOriginal() {
-        run(mode == "legacy" ? "restore" : "disable", mutating: true) { [weak self] in self?.update($0) }
+    @objc private func repairLegacy() {
+        run("recover", mutating: true) { [weak self] in self?.update($0) }
     }
 
-    @objc private func performAction() {
-        if mode == "legacy" && legacyMode == "recovery" {
-            run("recover", mutating: true) { [weak self] in self?.update($0) }
-            return
-        }
-        if let backend = selectedBackend?(), backend != .default, backend != .wined3d {
-            detail.stringValue = "請先在「顯示」選取「預設」或 WineD3D，再啟用 cnc-ddraw。"
-            return
-        }
+    private func enable() {
+        let index = max(0, min(filter.indexOfSelectedItem, Self.filters.count - 1))
         let settings: [String: Any] = [
-            "filter": filter.indexOfSelectedItem == 1 ? "nearest" : "bilinear",
+            "filter": Self.filters[index].value,
             "maxfps": Int(frameRate.titleOfSelectedItem ?? "60") ?? 60
         ]
         guard let data = try? JSONSerialization.data(withJSONObject: settings, options: [.sortedKeys]),
@@ -748,17 +766,17 @@ private final class CyderDirectDrawOptions: NSObject {
 
     private func run(_ command: String, argument: String? = nil, mutating: Bool = false,
                      completion: @escaping ([String: Any]) -> Void) {
-        guard !operationInFlight else { return }
+        guard !operationInFlight else { toggle.state = active ? .on : .off; return }
         if mutating && canMutate?() == false {
             detail.stringValue = "請等遊戲設定讀取或儲存完成，再試一次。"
+            setControlsEnabled(true)
             return
         }
         operationInFlight = true
         busy = mutating
         if mutating { onBusy?(true) }
-        [action, restore, refresh].forEach { $0.isEnabled = false }
-        filter.isEnabled = false
-        frameRate.isEnabled = false
+        refresh.isEnabled = false
+        setControlsEnabled(false)
         detail.stringValue = mutating ? "正在儲存 DirectDraw 設定…" : "正在檢查 DirectDraw…"
         observationGeneration = UUID()
         let generation = observationGeneration
@@ -779,6 +797,8 @@ private final class CyderDirectDrawOptions: NSObject {
                 case .failure(let error):
                     self.detail.stringValue = error.localizedDescription
                     self.explanation.stringValue = "目前設定尚未確認，請排除問題後重新檢查。"
+                    // Leave only the re-check available; the switch shows the last confirmed state.
+                    self.setControlsEnabled(false)
                 }
             }
         }

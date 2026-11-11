@@ -112,6 +112,9 @@ with tempfile.TemporaryDirectory(prefix='cyder-cnc-launch-') as tmp:
     conflict=b.parent/'dxgi.dll';conflict.write_bytes(b'other graphics wrapper')
     call('launch',b,prefix,engine,accept=False);conflict.unlink()
     check(True, 'unknown local DLL and other graphics wrapper remain protected')
+    for name, shader in [('bicubic', b'shader=Bicubic'), ('lanczos', b'shader=Lanczos')]:
+        call('enable', argument='{"filter":"%s","maxfps":60}' % name)
+        check(shader in ini_path(call('launch', a, prefix, engine)['configPath']).read_bytes(), name + ' maps to the cnc-ddraw built-in shader')
     call('enable', argument='{"filter":"bilinear","maxfps":144}')
     new_a=call('launch', a, prefix, engine)
     check(new_a['configPath'] != out_a['configPath'] and ini_a.read_bytes()==bytes_a, 'settings update preserves launcher-child snapshot')

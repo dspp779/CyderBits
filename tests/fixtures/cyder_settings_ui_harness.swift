@@ -107,6 +107,7 @@ check(gameScrolling.itemTitles == CyderScrolling.gameTitles)
 pump { saveButton.isEnabled && gameRetina.isEnabled }
 check(gameControls.contains { ($0 as? NSTextField)?.stringValue.contains("同一 prefix 內同名 EXE") == true })
 try renderScrollingUI(options.window!, name: "game-scrolling")
+try renderScrollingUI(options.window!, name: "game-display", tab: "顯示")
 var savedEvents = 0
 options.onSettingsChanged = { savedEvents += 1 }
 gameRetina.state = .on
