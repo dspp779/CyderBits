@@ -1,0 +1,405 @@
+diff -ruN a/src/d3d11/d3d11_b4g4r4a4.h b/src/d3d11/d3d11_b4g4r4a4.h
+--- a/src/d3d11/d3d11_b4g4r4a4.h
++++ b/src/d3d11/d3d11_b4g4r4a4.h
+@@ -0,0 +1,122 @@
++#pragma once
++
++#include <cstddef>
++#include <cstdint>
++#include <cstring>
++
++namespace dxvk {
++
++  /**
++   * \brief Cyder: B4G4R4A4 emulation helpers
++   *
++   * Metal on non-Apple GPUs has no 4-bit-per-channel formats, so
++   * DXGI_FORMAT_B4G4R4A4_UNORM is stored as VK_FORMAT_B8G8R8A8_UNORM
++   * and converted wherever the application reads or writes texels.
++   * Both layouts share the B, G, R, A channel order from low to high.
++   */
++  inline uint32_t ExpandB4G4R4A4(uint16_t texel) {
++    uint32_t b = (texel >>  0) & 0xf;
++    uint32_t g = (texel >>  4) & 0xf;
++    uint32_t r = (texel >>  8) & 0xf;
++    uint32_t a = (texel >> 12) & 0xf;
++    return (b * 17) | ((g * 17) << 8) | ((r * 17) << 16) | ((a * 17) << 24);
++  }
++
++
++  inline uint16_t PackB4G4R4A4(uint32_t texel) {
++    auto q = [] (uint32_t c) { return ((c & 0xff) + 8) / 17; };
++    return uint16_t(q(texel) | (q(texel >> 8) << 4)
++      | (q(texel >> 16) << 8) | (q(texel >> 24) << 12));
++  }
++
++
++  /**
++   * \brief Converts B4G4R4A4 rows to B8G8R8A8 rows in a separate buffer
++   */
++  inline void ConvertB4G4R4A4ToB8G8R8A8(
++          void*           pDst,
++          size_t          DstRowPitch,
++          size_t          DstSlicePitch,
++    const void*           pSrc,
++          size_t          SrcRowPitch,
++          size_t          SrcSlicePitch,
++          uint32_t        Width,
++          uint32_t        Height,
++          uint32_t        Depth) {
++    if (!SrcRowPitch)
++      SrcRowPitch = size_t(Width) * 2;
++    if (!SrcSlicePitch)
++      SrcSlicePitch = SrcRowPitch * Height;
++
++    for (uint32_t z = 0; z < Depth; z++) {
++      for (uint32_t y = 0; y < Height; y++) {
++        auto src = reinterpret_cast<const char*>(pSrc) + z * SrcSlicePitch + y * SrcRowPitch;
++        auto dst = reinterpret_cast<char*>(pDst) + z * DstSlicePitch + y * DstRowPitch;
++
++        for (uint32_t x = 0; x < Width; x++) {
++          uint16_t texel;
++          std::memcpy(&texel, src + 2 * x, sizeof(texel));
++          uint32_t expanded = ExpandB4G4R4A4(texel);
++          std::memcpy(dst + 4 * x, &expanded, sizeof(expanded));
++        }
++      }
++    }
++  }
++
++
++  /**
++   * \brief Expands B4G4R4A4 texels to B8G8R8A8 in place
++   *
++   * Each row must be at least 4 * Width bytes. Rows are processed
++   * from the last texel backwards so no source texel is overwritten
++   * before it has been read.
++   */
++  inline void ExpandB4G4R4A4InPlace(
++          void*           pData,
++          size_t          RowPitch,
++          size_t          SlicePitch,
++          uint32_t        Width,
++          uint32_t        Height,
++          uint32_t        Depth) {
++    for (uint32_t z = 0; z < Depth; z++) {
++      for (uint32_t y = 0; y < Height; y++) {
++        auto row = reinterpret_cast<char*>(pData) + z * SlicePitch + y * RowPitch;
++
++        for (uint32_t x = Width; x-- > 0; ) {
++          uint16_t texel;
++          std::memcpy(&texel, row + 2 * x, sizeof(texel));
++          uint32_t expanded = ExpandB4G4R4A4(texel);
++          std::memcpy(row + 4 * x, &expanded, sizeof(expanded));
++        }
++      }
++    }
++  }
++
++
++  /**
++   * \brief Packs B8G8R8A8 texels to B4G4R4A4 in place
++   *
++   * Inverse of \ref ExpandB4G4R4A4InPlace, processed front to back.
++   */
++  inline void PackB4G4R4A4InPlace(
++          void*           pData,
++          size_t          RowPitch,
++          size_t          SlicePitch,
++          uint32_t        Width,
++          uint32_t        Height,
++          uint32_t        Depth) {
++    for (uint32_t z = 0; z < Depth; z++) {
++      for (uint32_t y = 0; y < Height; y++) {
++        auto row = reinterpret_cast<char*>(pData) + z * SlicePitch + y * RowPitch;
++
++        for (uint32_t x = 0; x < Width; x++) {
++          uint32_t texel;
++          std::memcpy(&texel, row + 4 * x, sizeof(texel));
++          uint16_t packed = PackB4G4R4A4(texel);
++          std::memcpy(row + 2 * x, &packed, sizeof(packed));
++        }
++      }
++    }
++  }
++
++}
+diff -ruN a/src/d3d11/d3d11_context.cpp b/src/d3d11/d3d11_context.cpp
+--- a/src/d3d11/d3d11_context.cpp
++++ b/src/d3d11/d3d11_context.cpp
+@@ -5,6 +5,7 @@
+ #include "d3d11_query.h"
+ #include "d3d11_texture.h"
+ #include "d3d11_video.h"
++#include "d3d11_b4g4r4a4.h"
+ 
+ #include "../dxbc/dxbc_util.h"
+ 
+@@ -3731,10 +3732,20 @@
+ 
+     auto stagingSlice = AllocStagingBuffer(util::computeImageDataSize(packedFormat, extent));
+ 
+-    util::packImageData(stagingSlice.mapPtr(0),
+-      pSrcData, SrcRowPitch, SrcDepthPitch, 0, 0,
+-      pDstTexture->GetVkImageType(), extent, 1,
+-      formatInfo, formatInfo->aspectMask);
++    if (unlikely(pDstTexture->IsB4G4R4A4Emulated())) {
++      // Cyder: staging data uses the emulated B8G8R8A8 layout
++      size_t rowPitch = size_t(extent.width) * 4;
++
++      ConvertB4G4R4A4ToB8G8R8A8(stagingSlice.mapPtr(0),
++        rowPitch, rowPitch * extent.height,
++        pSrcData, SrcRowPitch, SrcDepthPitch,
++        extent.width, extent.height, extent.depth);
++    } else {
++      util::packImageData(stagingSlice.mapPtr(0),
++        pSrcData, SrcRowPitch, SrcDepthPitch, 0, 0,
++        pDstTexture->GetVkImageType(), extent, 1,
++        formatInfo, formatInfo->aspectMask);
++    }
+ 
+     UpdateImage(pDstTexture, &subresource,
+       offset, extent, std::move(stagingSlice));
+diff -ruN a/src/d3d11/d3d11_context_def.cpp b/src/d3d11/d3d11_context_def.cpp
+--- a/src/d3d11/d3d11_context_def.cpp
++++ b/src/d3d11/d3d11_context_def.cpp
+@@ -1,5 +1,6 @@
+ #include "d3d11_context_def.h"
+ #include "d3d11_device.h"
++#include "d3d11_b4g4r4a4.h"
+ 
+ namespace dxvk {
+   
+@@ -232,7 +233,36 @@
+   void STDMETHODCALLTYPE D3D11DeferredContext::Unmap(
+           ID3D11Resource*             pResource,
+           UINT                        Subresource) {
+-    // No-op, updates are committed in Map
++    // No-op, updates are committed in Map. Cyder: emulated B4G4R4A4
++    // texels still need to be expanded before the copy executes.
++    D3D10DeviceLock lock = LockContext();
++
++    if (!pResource)
++      return;
++
++    D3D11_RESOURCE_DIMENSION resourceDim;
++    pResource->GetType(&resourceDim);
++
++    if (resourceDim == D3D11_RESOURCE_DIMENSION_BUFFER)
++      return;
++
++    D3D11CommonTexture* pTexture = GetCommonTexture(pResource);
++
++    if (likely(!pTexture->IsB4G4R4A4Emulated()))
++      return;
++
++    auto entry = FindMapEntry(pResource, Subresource);
++
++    if (!entry || !entry->MapInfo.pData)
++      return;
++
++    VkImageAspectFlags aspectMask = imageFormatInfo(pTexture->GetPackedFormat())->aspectMask;
++    VkExtent3D extent = pTexture->MipLevelExtent(
++      pTexture->GetSubresourceFromIndex(aspectMask, Subresource).mipLevel);
++
++    ExpandB4G4R4A4InPlace(entry->MapInfo.pData,
++      entry->MapInfo.RowPitch, entry->MapInfo.DepthPitch,
++      extent.width, extent.height, extent.depth);
+   }
+   
+   
+diff -ruN a/src/d3d11/d3d11_context_imm.cpp b/src/d3d11/d3d11_context_imm.cpp
+--- a/src/d3d11/d3d11_context_imm.cpp
++++ b/src/d3d11/d3d11_context_imm.cpp
+@@ -3,6 +3,7 @@
+ #include "d3d11_device.h"
+ #include "d3d11_fence.h"
+ #include "d3d11_texture.h"
++#include "d3d11_b4g4r4a4.h"
+ 
+ constexpr static uint32_t MinFlushIntervalUs = 750;
+ constexpr static uint32_t IncFlushIntervalUs = 250;
+@@ -611,6 +612,18 @@
+       pMappedResource->pData      = reinterpret_cast<char*>(mapPtr) + layout.Offset;
+       pMappedResource->RowPitch   = layout.RowPitch;
+       pMappedResource->DepthPitch = layout.DepthPitch;
++
++      // Cyder: present emulated B8G8R8A8 contents as B4G4R4A4 at the
++      // same pitches; UnmapImage expands them again. Discarded maps
++      // have undefined contents, so skip the conversion there.
++      if (unlikely(pResource->IsB4G4R4A4Emulated()) && MapType != D3D11_MAP_WRITE_DISCARD) {
++        VkExtent3D extent = pResource->MipLevelExtent(
++          pResource->GetSubresourceFromIndex(formatInfo->aspectMask, Subresource).mipLevel);
++
++        PackB4G4R4A4InPlace(pMappedResource->pData,
++          layout.RowPitch, layout.DepthPitch,
++          extent.width, extent.height, extent.depth);
++      }
+     }
+ 
+     m_mappedImageCount += 1;
+@@ -630,6 +643,24 @@
+     // Decrement mapped image counter only after making sure
+     // the given subresource is actually mapped right now
+     m_mappedImageCount -= 1;
++
++    if (unlikely(pResource->IsB4G4R4A4Emulated())) {
++      // Cyder: the application saw B4G4R4A4 texels, see MapImage
++      VkImageAspectFlags aspectMask = imageFormatInfo(pResource->GetPackedFormat())->aspectMask;
++      VkExtent3D extent = pResource->MipLevelExtent(
++        pResource->GetSubresourceFromIndex(aspectMask, Subresource).mipLevel);
++      auto layout = pResource->GetSubresourceLayout(aspectMask, Subresource);
++
++      void* mapPtr = pResource->GetMapMode() == D3D11_COMMON_TEXTURE_MAP_MODE_DIRECT
++        ? pResource->GetImage()->mapPtr(0)
++        : pResource->GetMappedSlice(Subresource).mapPtr;
++
++      if (mapPtr) {
++        ExpandB4G4R4A4InPlace(reinterpret_cast<char*>(mapPtr) + layout.Offset,
++          layout.RowPitch, layout.DepthPitch,
++          extent.width, extent.height, extent.depth);
++      }
++    }
+ 
+     if ((mapType != D3D11_MAP_READ) &&
+         (pResource->GetMapMode() == D3D11_COMMON_TEXTURE_MAP_MODE_BUFFER)) {
+diff -ruN a/src/d3d11/d3d11_initializer.cpp b/src/d3d11/d3d11_initializer.cpp
+--- a/src/d3d11/d3d11_initializer.cpp
++++ b/src/d3d11/d3d11_initializer.cpp
+@@ -1,7 +1,9 @@
+ #include <cstring>
++#include <vector>
+ 
+ #include "d3d11_device.h"
+ #include "d3d11_initializer.h"
++#include "d3d11_b4g4r4a4.h"
+ 
+ namespace dxvk {
+ 
+@@ -41,6 +43,39 @@
+   void D3D11Initializer::InitTexture(
+           D3D11CommonTexture*         pTexture,
+     const D3D11_SUBRESOURCE_DATA*     pInitialData) {
++    // Cyder: expand emulated B4G4R4A4 initial data to B8G8R8A8 first
++    std::vector<D3D11_SUBRESOURCE_DATA> convertedData;
++    std::vector<std::vector<char>>      convertedStorage;
++
++    if (unlikely(pTexture->IsB4G4R4A4Emulated())
++     && pInitialData != nullptr && pInitialData->pSysMem != nullptr) {
++      const uint32_t mipLevels = pTexture->Desc()->MipLevels;
++      const uint32_t count     = pTexture->CountSubresources();
++
++      convertedData.resize(count);
++      convertedStorage.resize(count);
++
++      for (uint32_t i = 0; i < count; i++) {
++        VkExtent3D extent = pTexture->MipLevelExtent(i % mipLevels);
++        size_t rowPitch   = size_t(extent.width) * 4;
++        size_t slicePitch = rowPitch * extent.height;
++
++        convertedStorage[i].resize(slicePitch * extent.depth);
++
++        if (pInitialData[i].pSysMem) {
++          ConvertB4G4R4A4ToB8G8R8A8(convertedStorage[i].data(), rowPitch, slicePitch,
++            pInitialData[i].pSysMem, pInitialData[i].SysMemPitch, pInitialData[i].SysMemSlicePitch,
++            extent.width, extent.height, extent.depth);
++        }
++
++        convertedData[i].pSysMem          = convertedStorage[i].data();
++        convertedData[i].SysMemPitch      = UINT(rowPitch);
++        convertedData[i].SysMemSlicePitch = UINT(slicePitch);
++      }
++
++      pInitialData = convertedData.data();
++    }
++
+     (pTexture->GetMapMode() == D3D11_COMMON_TEXTURE_MAP_MODE_DIRECT)
+       ? InitHostVisibleTexture(pTexture, pInitialData)
+       : InitDeviceLocalTexture(pTexture, pInitialData);
+diff -ruN a/src/d3d11/d3d11_texture.h b/src/d3d11/d3d11_texture.h
+--- a/src/d3d11/d3d11_texture.h
++++ b/src/d3d11/d3d11_texture.h
+@@ -241,6 +241,18 @@
+     VkFormat GetPackedFormat() const {
+       return m_packedFormat;
+     }
++
++    /**
++     * \brief Checks whether B4G4R4A4 texels are stored as B8G8R8A8
++     *
++     * Cyder: texel data must be converted wherever the
++     * application reads or writes it, see d3d11_b4g4r4a4.h.
++     * \returns \c true if the texture uses the emulated layout
++     */
++    bool IsB4G4R4A4Emulated() const {
++      return m_desc.Format == DXGI_FORMAT_B4G4R4A4_UNORM
++          && m_packedFormat == VK_FORMAT_B8G8R8A8_UNORM;
++    }
+     
+     /**
+      * \brief Checks whether the resource is eligible for tracking
+diff -ruN a/src/dxgi/dxgi_format.cpp b/src/dxgi/dxgi_format.cpp
+--- a/src/dxgi/dxgi_format.cpp
++++ b/src/dxgi/dxgi_format.cpp
+@@ -861,10 +861,25 @@
+       RemapDepthFormat(DXGI_FORMAT_D24_UNORM_S8_UINT,     VK_FORMAT_D32_SFLOAT_S8_UINT);
+     }
+ 
+-    if (!adapter->features().ext4444Formats.formatA4R4G4B4) {
+-      RemapColorFormat(DXGI_FORMAT_B4G4R4A4_UNORM, VK_FORMAT_B4G4R4A4_UNORM_PACK16,
+-        { VK_COMPONENT_SWIZZLE_G, VK_COMPONENT_SWIZZLE_R,
+-          VK_COMPONENT_SWIZZLE_A, VK_COMPONENT_SWIZZLE_B });
++    // Cyder: MoltenVK advertises VK_EXT_4444_formats on non-Apple GPUs
++    // even though Metal cannot create those images there, so check the
++    // actual format features. Without any sampleable 4444 format, store
++    // B4G4R4A4 as B8G8R8A8 and convert texel data in D3D11.
++    if (!adapter->features().ext4444Formats.formatA4R4G4B4
++     || !CheckImageFormatSupport(adapter, VK_FORMAT_A4R4G4B4_UNORM_PACK16_EXT,
++          VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT)) {
++      if (CheckImageFormatSupport(adapter, VK_FORMAT_B4G4R4A4_UNORM_PACK16,
++            VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT)) {
++        RemapColorFormat(DXGI_FORMAT_B4G4R4A4_UNORM, VK_FORMAT_B4G4R4A4_UNORM_PACK16,
++          { VK_COMPONENT_SWIZZLE_G, VK_COMPONENT_SWIZZLE_R,
++            VK_COMPONENT_SWIZZLE_A, VK_COMPONENT_SWIZZLE_B });
++      } else {
++        Logger::info("DXGI: DXGI_FORMAT_B4G4R4A4_UNORM -> VK_FORMAT_B8G8R8A8_UNORM (emulated)");
++        RemapColorFormat(DXGI_FORMAT_B4G4R4A4_UNORM, VK_FORMAT_B8G8R8A8_UNORM,
++          { VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY,
++            VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY });
++        m_emulateB4G4R4A4 = true;
++      }
+     }
+   }
+   
+@@ -941,12 +956,17 @@
+   const DXGI_VK_FORMAT_MAPPING* DXGIVkFormatTable::GetPackedFormatMapping(
+           DXGI_FORMAT         Format) const {
+     const size_t formatId = size_t(Format);
+-    
++
++    // Cyder: emulated B4G4R4A4 data is stored as B8G8R8A8 everywhere,
++    // including staging and mapped buffers.
++    if (m_emulateB4G4R4A4 && Format == DXGI_FORMAT_B4G4R4A4_UNORM)
++      return &m_dxgiFormats[formatId];
++
+     return formatId < g_dxgiFormats.size()
+       ? &g_dxgiFormats[formatId]
+       : &g_dxgiFormats[0];
+   }
+-  
++
+ 
+   bool DXGIVkFormatTable::CheckImageFormatSupport(
+     const Rc<DxvkAdapter>&      Adapter,
+diff -ruN a/src/dxgi/dxgi_format.h b/src/dxgi/dxgi_format.h
+--- a/src/dxgi/dxgi_format.h
++++ b/src/dxgi/dxgi_format.h
+@@ -144,6 +144,8 @@
+     std::array<DXGI_VK_FORMAT_MAPPING, 133> m_dxgiFormats;
+     std::array<DXGI_VK_FORMAT_FAMILY,  133> m_dxgiFamilies;
+ 
++    bool m_emulateB4G4R4A4 = false;
++
+     DXGI_VK_FORMAT_INFO GetFormatInfoFromMapping(
+       const DXGI_VK_FORMAT_MAPPING* pMapping,
+             DXGI_VK_FORMAT_MODE   Mode) const;

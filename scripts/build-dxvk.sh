@@ -122,6 +122,18 @@ find_glslang() {
   return 1
 }
 
+# Metal on non-Apple GPUs has no 4-bit formats, so DXVK stores
+# DXGI_FORMAT_B4G4R4A4_UNORM as B8G8R8A8 and converts texel data.
+apply_b4g4r4a4_emulation_patch() {
+  local patch_file="$ROOT/patches/cyder-dxvk-b4g4r4a4-emulation.patch"
+  if grep -Fq 'Cyder: B4G4R4A4 emulation helpers' "$SOURCE/src/d3d11/d3d11_b4g4r4a4.h" 2>/dev/null; then
+    echo "Already applied: $(basename "$patch_file")"
+  else
+    patch --forward --batch -p1 -d "$SOURCE" < "$patch_file"
+    echo "Applied $(basename "$patch_file")"
+  fi
+}
+
 patch_dxvk_source() {
   local header="$SOURCE/src/d3d10/d3d10_interfaces.h"
   local pinned_version=""
@@ -151,6 +163,7 @@ if old in text:
     path.write_text(text.replace(old, new, 1))
 PY
   fi
+  apply_b4g4r4a4_emulation_patch
   [[ -f "$header" ]] || return 0
   python3 - "$header" <<'PY'
 from pathlib import Path
