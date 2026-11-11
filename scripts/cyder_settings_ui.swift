@@ -82,6 +82,7 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate,
     private let syncMode = NSPopUpButton()
     private let syncModeDescription = NSTextField(wrappingLabelWithString: "")
     private let wineLocale = NSPopUpButton()
+    private let wineLocaleDescription = NSTextField(wrappingLabelWithString: "")
     private let retina = NSSwitch()
     private let dpi = NSPopUpButton()
     private let fontMingLiu = NSPopUpButton()
@@ -188,7 +189,6 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate,
         settingsTabView = tabs
         tabs.addTabViewItem(makeGeneralTab())
         tabs.addTabViewItem(makeDisplayTab())
-        tabs.addTabViewItem(makeInputTab())
         tabs.addTabViewItem(makeFontsTab())
         tabs.addTabViewItem(makeGraphicsTab())
         tabs.addTabViewItem(makeAdvancedTab())
@@ -260,11 +260,18 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate,
         wineLocale.addItems(withTitles: CyderWineLocale.menuCases.map { $0.title })
         wineLocale.target = self
         wineLocale.action = #selector(wineLocaleChanged)
+        configureNote(wineLocaleDescription)
+        updateWineLocaleDescription()
+        scrolling.identifier = NSUserInterfaceItemIdentifier("settings-scrolling")
+        scrolling.target = self
+        scrolling.action = #selector(scrollingChanged)
         return tab("一般", rows: [
             row("同步機制", syncMode),
             syncModeDescription,
             row("Windows 語系", wineLocale),
-            note("系統目前偵測為\(CyderWineLocale.detectedSystemLabel())。指定語系會在下次啟動 EXE 時生效；若該 bottle 的 wineserver 仍在跑，代碼頁要等該 bottle 的 wineserver 結束後才會更新。"),
+            wineLocaleDescription,
+            row("精準捲動", scrolling),
+            note("啟用 macOS 平滑高解析度滾動，可能會造成滾動速度過快。"),
             engineFooterGap,
             engineVersionFooter(),
         ])
@@ -345,16 +352,6 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate,
             row("高解析度（Retina Mode）", retina),
             row("縮放比例 / DPI", dpi),
             note("建議使用高解析度模式與 200%。\n125%、150%、175%、250% 等非整數倍率，可能讓部分老遊戲的像素邊緣出現鋸齒或模糊。"),
-        ])
-    }
-
-    private func makeInputTab() -> NSTabViewItem {
-        scrolling.identifier = NSUserInterfaceItemIdentifier("settings-scrolling")
-        scrolling.target = self
-        scrolling.action = #selector(scrollingChanged)
-        return tab("輸入", rows: [
-            row("精準捲動", scrolling),
-            note("開啟可能會捲動過快。"),
         ])
     }
 
@@ -453,9 +450,9 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate,
             rebuild,
             note("重新建立執行 Windows 遊戲所需的環境。遊戲檔案不會刪除，但已安裝的 Windows 元件與自訂設定需要重新套用。"),
             winetricks,
-            note("以原生選擇器安裝 WMP、Quartz、Devenum、VB6 等元件到 shared prefix。.NET／Wine Mono 不預裝：需要時 Wine 會提示安裝，或手動執行 install-wine-mono.sh。VC++ 與 .NET Desktop Runtime 請用官方 installer。請先關閉所有遊戲。"),
+            note("安裝 WMP、Quartz、Devenum、VB6 等元件到共用的 Windows 環境。VC++ 與 .NET Desktop Runtime 請下載官方安裝程式透過 Cyder 執行"),
             row("MapleStory WZ 快取", maplestoryWZCache),
-            note("預設開啟，只對 MapleStory 的唯讀 WZ 小讀取啟用 read-ahead。若遇到資源載入異常，可關閉後重新啟動遊戲。"),
+            note("MapleStory 唯讀 WZ 資料讀取優化，可以提升遊玩流暢度；如遇到異常請關閉"),
         ])
     }
 
@@ -669,7 +666,7 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate,
         wineDiagnostics.target = self
         wineDiagnostics.action = #selector(wineDiagnosticsChanged)
 
-        diagnosticsWarning.stringValue = "⚠ 除錯記錄可能快速佔用大量磁碟空間，並改變遊戲時序。只在重現問題時短時間開啟；完成後請切回「安靜」，再清理除錯記錄。"
+        diagnosticsWarning.stringValue = "⚠ 除錯記錄會快速佔用磁碟空間，也可能讓遊戲變慢。問題重現後請切回「安靜」並清理記錄。"
         diagnosticsWarning.textColor = .systemRed
         diagnosticsWarning.font = .boldSystemFont(ofSize: 12)
         diagnosticsWarning.isHidden = true
@@ -681,11 +678,11 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate,
         return tab("除錯", rows: [
             row("Wine 診斷記錄", wineDiagnostics),
             diagnosticsWarning,
-            note("「安靜」不開啟 Wine trace，啟動失敗仍會由程序退出碼判斷；「只記錄錯誤」適合一般排障；「等待與凍結追蹤」用於重現卡住／凍結；「完整堆疊追蹤」僅供短時間重現 exception／unwind 問題。"),
+            note("平時請保持「安靜」。遇到問題選「只記錄錯誤」；遊戲卡住或凍結選「等待與凍結追蹤」；「完整堆疊追蹤」記錄量最大，只在短時間重現當機時使用。"),
             export,
-            note("只複製上次遊戲啟動的 Wine log；其他初始化或啟動錯誤可直接複製錯誤對話框中的診斷資訊。"),
+            note("匯出上次遊戲的記錄，方便回報問題。啟動失敗時，也可以直接複製錯誤視窗中的資訊。"),
             cleanup,
-            note("會移除 Wine launch/debug log，以及 Logs/operations 和 Logs/sessions 內的紀錄；不會刪除遊戲、prefix 或設定。清理前請先關閉遊戲。"),
+            note("刪除所有除錯與啟動記錄，不會影響遊戲或設定。請先關閉遊戲。"),
         ])
     }
 
@@ -743,6 +740,13 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate,
         label.font = .systemFont(ofSize: 12)
         label.maximumNumberOfLines = 7
         label.widthAnchor.constraint(equalToConstant: 460).isActive = true
+    }
+
+    private func updateWineLocaleDescription() {
+        let locale = CyderWineLocale(menuIndex: wineLocale.indexOfSelectedItem)
+        wineLocaleDescription.stringValue = locale == .system
+            ? "系統目前偵測為\(CyderWineLocale.detectedSystemLabel())"
+            : "使用\(locale.title) (\(locale.rawValue))"
     }
 
     private func updateSyncModeDescription() {
@@ -804,6 +808,7 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate,
         syncMode.selectItem(at: CyderSyncMode(msync: value.msync, esync: value.esync ?? false).rawValue)
         updateSyncModeDescription()
         wineLocale.selectItem(at: value.wineLocale.menuIndex)
+        updateWineLocaleDescription()
         scrolling.state = value.scrolling == .precise ? .on : .off
         retina.state = value.retinaMode ? .on : .off
         let dpiValues = [96, 120, 144, 168, 192, 240]
@@ -1062,13 +1067,13 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate,
             switch selected {
             case .unwind:
                 alert.messageText = "即將開啟高容量堆疊追蹤"
-                alert.informativeText = "完整堆疊追蹤可能快速產生數十 MB 以上的記錄，並改變遊戲時序。請只在短時間重現問題時使用。"
+                alert.informativeText = "記錄量很大，可能讓遊戲變慢。請只在短時間重現問題時使用。"
             case .sync:
                 alert.messageText = "即將開啟等待與凍結追蹤"
-                alert.informativeText = "等待追蹤會記錄每次等待的物件，資料量明顯小於完整堆疊追蹤，但仍會持續寫入。請在重現卡住問題後切回「安靜」。"
+                alert.informativeText = "會持續寫入記錄。重現卡住問題後請切回「安靜」。"
             default:
                 alert.messageText = "即將保存 Wine 錯誤記錄"
-                alert.informativeText = "只記錄錯誤會保存每次遊戲啟動的 Wine 輸出，可能增加磁碟使用量。重現完成後請切回「安靜」並清理除錯記錄。"
+                alert.informativeText = "每次啟動遊戲都會保存記錄。問題處理完後請切回「安靜」並清理記錄。"
             }
             alert.alertStyle = .warning
             alert.addButton(withTitle: "啟用")
@@ -1261,6 +1266,7 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate,
     }
 
     @objc private func wineLocaleChanged() {
+        updateWineLocaleDescription()
         saveImmediately()
     }
 
@@ -1831,6 +1837,7 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate,
         syncMode.selectItem(at: CyderSyncMode(msync: value.msync, esync: value.esync ?? false).rawValue)
         updateSyncModeDescription()
         wineLocale.selectItem(at: value.wineLocale.menuIndex)
+        updateWineLocaleDescription()
         scrolling.state = .off
         retina.state = value.retinaMode ? .on : .off
         dpi.selectItem(at: dpiValues.firstIndex(of: value.dpi) ?? 0)

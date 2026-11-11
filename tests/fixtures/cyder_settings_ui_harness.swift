@@ -154,8 +154,8 @@ for (state, expected) in [(NSControl.StateValue.on, CyderScrolling.precise), (.o
     pump { (try? CyderSettingsStore.readValidated(at: settingsURL).scrolling) == expected }
 }
 check(scrollingRegistryApplies == 0, "scrolling preference edited a live prefix")
-check(scrollingViews.contains { ($0 as? NSTextField)?.stringValue == "開啟可能會捲動過快。" })
-try renderScrollingUI(scrollPreferences.window!, name: "global-scrolling", tab: "輸入")
+check(scrollingViews.contains { ($0 as? NSTextField)?.stringValue == "啟用 macOS 平滑高解析度滾動，可能會造成滾動速度過快。" })
+try renderScrollingUI(scrollPreferences.window!, name: "global-scrolling", tab: "一般")
 scrollPreferences.close(); scrollAccess.quiesce()
 // A late successful physical write may persist, but closing the window must
 // prevent its callback from closing a later modal or claiming a new UI success.
