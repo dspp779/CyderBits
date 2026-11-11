@@ -96,7 +96,7 @@ DispatchQueue.global().async {
 }
 dispatchMain()
 SWIFT
-swiftc -module-cache-path "$TEMP/cache" "$ROOT/scripts/cyder_execution_owner.swift" \
+swiftc -module-cache-path "$TEMP/cache" "$ROOT/scripts/cyder_execution_owner.swift" "$ROOT/scripts/cyder_execution_phase.swift" \
   "$ROOT/scripts/cyder_lifecycle.swift" "$ROOT/scripts/cyder_environment_probe.swift" \
   "$ROOT/scripts/cyder_graphics_runtime.swift" "$TEMP/main.swift" -o "$TEMP/test"
 CYDER_GRAPHICS_TEST_ROOT="$TEMP" "$TEMP/test"

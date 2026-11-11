@@ -16,7 +16,7 @@ prefix='import Foundation\ntypealias CyderLaunchOutcome = CyderProcessRunner.Out
 (tmp/'main.swift').write_text(prefix+source[start:end]+(root/'tests/fixtures/cyder_launch_preparation_budget_harness.swift').read_text())
 PY
 swiftc -module-cache-path "$TEST_DIR/cache" "$ROOT/scripts/cyder_process_runner.swift" \
-  "$ROOT/scripts/cyder_launch_observer.swift" "$TEST_DIR/main.swift" -o "$TEST_DIR/test"
+  "$ROOT/scripts/cyder_launch_observer.swift" "$ROOT/scripts/cyder_execution_phase.swift" "$TEST_DIR/main.swift" -o "$TEST_DIR/test"
 "$TEST_DIR/test" "$TEST_DIR/state"
 if [[ -n "${CYDER_TEST_EVIDENCE:-}" ]]; then
   mkdir -p "$CYDER_TEST_EVIDENCE"

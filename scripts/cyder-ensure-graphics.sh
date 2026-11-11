@@ -95,7 +95,9 @@ cyder_graphics_app_resources() {
   if [[ -n "${CYDER_RESOURCES:-}" ]]; then printf '%s\n' "$CYDER_RESOURCES"; return 0; fi
   if [[ -n "${CYDER_APP:-}" ]]; then printf '%s/Contents/Resources\n' "$CYDER_APP"; return 0; fi
   if [[ "$(basename "$SCRIPT_DIR")" == ogom-scripts ]]; then dirname "$SCRIPT_DIR"; return 0; fi
-  return 1
+  # Not inside an app: print nothing. Returning nonzero here would trip the
+  # launcher's errtrace ERR trap inside the caller's command substitution.
+  return 0
 }
 
 cyder_update_signed_dxmt() {
@@ -283,7 +285,8 @@ cyder_graphics_link_engine_and_winemetal() {
   prefix="${3:-${CYDER_SHARED_PREFIX:-}}"
 
   local app_resources
-  if app_resources="$(cyder_graphics_app_resources)"; then
+  app_resources="$(cyder_graphics_app_resources)"
+  if [[ -n "$app_resources" ]]; then
     cyder_update_signed_dxmt "$app_resources" "$runtime_root" "$engines_root" "$prefix" || return $?
     mkdir -p "$engine/lib" "$engines_root"
     cyder_replace_engine_graphics_link "$engine/lib/dxvk" "$runtime_root/graphics/current-dxvk" "$engine" "$engines_root"
@@ -306,7 +309,8 @@ cyder_ensure_graphics() {
   prefix="${1:-${CYDER_SHARED_PREFIX:-}}"
 
   local app_resources
-  if app_resources="$(cyder_graphics_app_resources)"; then
+  app_resources="$(cyder_graphics_app_resources)"
+  if [[ -n "$app_resources" ]]; then
     cyder_update_signed_dxmt "$app_resources" "$runtime_root" "$engines_root" "$prefix" || return $?
     cyder_install_graphics_payload "$source_dir" "$runtime_root" dxvk || return $?
     mkdir -p "$engine/lib" "$engines_root"
