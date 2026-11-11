@@ -93,6 +93,24 @@ bash scripts/build-wine.sh --with-vulkan --vulkan-source crossover
 
 To skip Vulkan entirely (BlueCG default): `--without-vulkan`.
 
+## DXVK — B4G4R4A4 emulation (`cyder-dxvk-b4g4r4a4-emulation.patch`)
+
+Applied by `scripts/build-dxvk.sh` to the CrossOver DXVK 1.10.3 snapshot
+(marker: `Cyder: B4G4R4A4 emulation helpers` in `src/d3d11/d3d11_b4g4r4a4.h`).
+
+Metal on non-Apple GPUs (Intel, AMD, NVIDIA Macs) has no 4-bit-per-channel
+pixel formats, yet MoltenVK still advertises `VK_EXT_4444_formats`. Stock DXVK
+then maps `DXGI_FORMAT_B4G4R4A4_UNORM` to an image Metal cannot create, and
+TMS MapleStory draws its maps, NPCs and monsters with that format (black map,
+tens of thousands of `D3D11: Cannot create texture` errors). The patch checks
+real sampled-image support for both 4444 formats; when neither works it stores
+the format as `VK_FORMAT_B8G8R8A8_UNORM` everywhere (including packed staging
+and mapped buffers) and converts texels where the application touches them:
+initial data, `UpdateSubresource`, and `Map`/`Unmap` on immediate and deferred
+contexts (mapped data is presented as B4G4R4A4 at the reported pitches and
+expanded in place on `Unmap`). Apple GPUs keep the native 4444 path.
+`tests/test-cyder-dxvk.sh` round-trips the conversion helpers.
+
 ## BlueCG A6 — same-view backing sync
 
 `a6-final-same-view-backing-sync.patch` is the consolidated CrossOver 26.2.0
