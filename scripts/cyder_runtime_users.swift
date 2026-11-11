@@ -66,6 +66,15 @@ enum CyderRuntimeUsers {
     /// with one marker line per process on stderr when in use, 70 when the
     /// process table is unreadable.
     static func run(arguments: [String]) -> Int32 {
+        // CyderSwift dispatches this from main(); the process-table reads must
+        // run off the main thread.
+        if Thread.isMainThread {
+            var status: Int32 = 70
+            let done = DispatchSemaphore(value: 0)
+            DispatchQueue.global(qos: .userInitiated).async { status = run(arguments: arguments); done.signal() }
+            done.wait()
+            return status
+        }
         guard arguments.count == 4, arguments[2].hasPrefix("/"),
               ["moltenvk", "gptk", "engine"].contains(arguments[3]) else {
             FileHandle.standardError.write(Data("usage: CyderSwift --runtime-users ENGINE moltenvk|gptk|engine\n".utf8))

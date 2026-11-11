@@ -73,6 +73,9 @@ DispatchQueue.global().async {
     check(seen?.map(\.pid) == [pid], "running client not found: \(String(describing: seen))")
     check(U.run(arguments: ["CyderSwift", "--runtime-users", link.path, "moltenvk"]) == 75, "busy engine exit status")
     check(U.run(arguments: ["CyderSwift", "--runtime-users", link.path, "other"]) == 64, "unknown component accepted")
+    // CyderSwift calls run() from main(); it must not trap there.
+    check(DispatchQueue.main.sync { U.run(arguments: ["CyderSwift", "--runtime-users", link.path, "engine"]) } == 75,
+          "main-thread run with the engine component")
     process.terminate(); process.waitUntilExit()
     check(U.scan(engineRoot: link) == [], "exited client still reported")
     print("PASS real process table: a running engine client blocks the switch and its exit clears it")
