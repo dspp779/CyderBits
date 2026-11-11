@@ -118,6 +118,8 @@ echo 'PASS final Wine dispatch, original argv/cwd, pristine helper environment, 
 # A live, scoped UNIX listener blocks mutation. A stale socket from a crash
 # must not permanently prevent restoration. Use only a private test directory.
 /usr/bin/ruby -rsocket -rtmpdir -rfileutils -ropen3 - "$manager" "$a" "$tmp/prefix" <<'RUBY'
+# encoding: utf-8
+Encoding.default_external = Encoding::UTF_8
 manager, exe, prefix = ARGV
 Dir.mktmpdir('cyder-sock-', '/tmp') do |root|
   stat = File.stat(prefix)

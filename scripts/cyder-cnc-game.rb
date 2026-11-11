@@ -9,6 +9,8 @@ class CNCLaunchGame < CNCGame
     'Shaders/interpolation/catmull-rom-bilinear.glsl' => '18e89f829f4c82d5b1e0d1fa9b41d6698cf3fbd2d45ef8abb9f6d7a2452c9426'
   }.freeze
   DEFAULTS = { 'filter' => 'bilinear', 'maxfps' => 60 }.freeze
+  # cnc-ddraw built-in upscaling shaders (ddraw.ini `shader=` names).
+  SHADERS = { 'nearest' => 'Nearest neighbor', 'bilinear' => 'Bilinear', 'bicubic' => 'Bicubic', 'lanczos' => 'Lanczos' }.freeze
   CAPABILITY = 'native-ddraw-path-v1'
   MARKER = 'CYDER_NATIVE_DDRAW_PATH_V1'
 
@@ -69,7 +71,7 @@ class CNCLaunchGame < CNCGame
 
   def settings!(settings)
     raise 'DirectDraw 設定格式不正確。' unless settings.is_a?(Hash) && settings.keys.sort == %w[filter maxfps] &&
-      %w[nearest bilinear].include?(settings['filter']) && settings['maxfps'].is_a?(Integer) && (30..240).include?(settings['maxfps'])
+      SHADERS.key?(settings['filter']) && settings['maxfps'].is_a?(Integer) && (30..240).include?(settings['maxfps'])
     settings
   end
 
@@ -227,7 +229,7 @@ class CNCLaunchGame < CNCGame
   end
 
   def config(settings)
-    private_config.sub('shader=Bilinear', 'shader=' + (settings['filter'] == 'nearest' ? 'Nearest neighbor' : 'Bilinear'))
+    private_config.sub('shader=Bilinear', 'shader=' + SHADERS.fetch(settings['filter']))
                   .sub(/maxfps=60\r\n/, '') + "maxfps=#{settings['maxfps']}\r\n"
   end
 
@@ -282,6 +284,10 @@ end
 
 return unless __FILE__ == $PROGRAM_NAME
 begin
+  # Finder-launched apps run without LANG, which makes Ruby read paths as
+  # ASCII-8BIT and fail on non-ASCII game folders.
+  Encoding.default_external = Encoding::UTF_8
+  ARGV.map! { |value| value.dup.force_encoding(Encoding::UTF_8) }
   command, exe, argument, engine, phase = ARGV
   raise '缺少 Windows 執行檔。' unless exe
   game = CNCLaunchGame.new(exe)

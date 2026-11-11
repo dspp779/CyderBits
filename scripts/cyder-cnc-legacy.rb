@@ -158,6 +158,8 @@ class CNCRecipe < CNCGame
 end
 
 begin
+  Encoding.default_external = Encoding::UTF_8
+  ARGV.map! { |value| value.dup.force_encoding(Encoding::UTF_8) }
   action, source, exe, bottle = ARGV
   game = CNCRecipe.new(exe, bottle)
   result = game.guarded { action == 'install' ? game.install(source) : game.uninstall }

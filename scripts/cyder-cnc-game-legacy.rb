@@ -455,6 +455,10 @@ end
 return unless __FILE__ == $PROGRAM_NAME
 
 begin
+  # Finder-launched apps run without LANG, which makes Ruby read paths as
+  # ASCII-8BIT and fail on non-ASCII game folders.
+  Encoding.default_external = Encoding::UTF_8
+  ARGV.map! { |value| value.dup.force_encoding(Encoding::UTF_8) }
   command, exe, argument = ARGV
   raise '缺少 Windows 執行檔。' unless exe
   game = CNCGame.new(exe)
