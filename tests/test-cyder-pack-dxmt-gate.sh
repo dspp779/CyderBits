@@ -18,9 +18,9 @@ assert_contains "$engine_pack" "--exclude 'lib/dxvk'" \
 assert_contains "$engine_pack" "--exclude 'lib/dxvk2'" \
   "engine archive must exclude DXVK2"
 
-graphics_pack_line="$(rg -n -F 'pack-graphics-payloads.sh' \
+graphics_pack_line="$(grep -n -F 'pack-graphics-payloads.sh' \
   "$ROOT/scripts/pack-engine-artifact.sh" | head -n1 | cut -d: -f1)"
-archive_exit_line="$(rg -n -F 'if [[ -f "$ARCHIVE" && "$FORCE" -ne 1 ]]; then' \
+archive_exit_line="$(grep -n -F 'if [[ -f "$ARCHIVE" && "$FORCE" -ne 1 ]]; then' \
   "$ROOT/scripts/pack-engine-artifact.sh" | cut -d: -f1)"
 [[ "$graphics_pack_line" -lt "$archive_exit_line" ]] || {
   echo "ASSERT failed: existing engine archive must not bypass graphics packing" >&2

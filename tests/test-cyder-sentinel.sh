@@ -81,7 +81,11 @@ assert_contains "$app" 'controller.onLifecycleIdle' \
 
 assert_contains "$app" 'statusItemController.beginLaunch(' \
   "Swift must create the LaunchGroup when the Wine relay starts, not wait for helper hello"
-assert_contains "$app" 'statusItemController.attachNativeRoot(proof)' \
+# Native proof arrives through executor receipts and attaches only to the
+# launch whose authority issued it, never to a prefix-only group.
+assert_contains "$status" 'let id = receipt.authority.launch' \
+  "native proof must be keyed by its own launch"
+assert_contains "$status" 'var session = sessions[id], session.authority == receipt.authority' \
   "native proof must attach to its own launch, never a prefix-only group"
 assert_not_contains "$app" 'sentinel.onLaunchEnded = { [weak self] id in
                 self?.statusItemController.endLaunch(id: id)' \

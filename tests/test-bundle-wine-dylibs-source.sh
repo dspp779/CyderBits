@@ -20,12 +20,12 @@ assert_contains "$script" "remove orphan" \
   "bundler should drop leftover dylibs no longer in the seed graph"
 
 crossover_block="$(sed -n '/"crossover": (/,/),/p' "$ROOT/scripts/bundle-wine-dylibs.sh")"
-first_candidate="$(printf '%s\n' "$crossover_block" | rg 'libMoltenVK\.dylib' | head -1)"
+first_candidate="$(printf '%s\n' "$crossover_block" | grep -E 'libMoltenVK\.dylib' | head -1)"
 assert_contains "$first_candidate" 'graphics_lib' \
   "CrossOver mode must prefer the CrossOver graphics artifact over Homebrew"
 
 existing_block="$(sed -n '/"existing": (/,/),/p' "$ROOT/scripts/bundle-wine-dylibs.sh")"
-first_existing="$(printf '%s\n' "$existing_block" | rg 'libMoltenVK\.dylib' | head -1)"
+first_existing="$(printf '%s\n' "$existing_block" | grep -E 'libMoltenVK\.dylib' | head -1)"
 assert_contains "$first_existing" 'unix_lib' \
   "artifact repacking must preserve the already-tested engine renderer"
 
@@ -38,7 +38,7 @@ mkdir -p "$TMP/wine/lib/wine/x86_64-unix" "$TMP/brew/lib" \
   "$TMP/empty-graphics/lib" "$TMP/empty-media/lib"
 # Build a tiny x86_64 dylib with minos 14.0 (above the 10.15 floor).
 echo 'int ogom_bundle_minos_probe=1;' > "$TMP/probe.c"
-arch -x86_64 clang -dynamiclib -mmacosx-version-min=14.0 \
+clang -arch x86_64 -dynamiclib -mmacosx-version-min=14.0 \
   "$TMP/probe.c" -o "$TMP/brew/lib/libffi.8.dylib"
 cp "$TMP/brew/lib/libffi.8.dylib" "$TMP/wine/lib/wine/x86_64-unix/libffi.8.dylib"
 

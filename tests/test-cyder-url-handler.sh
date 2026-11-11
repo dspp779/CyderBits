@@ -32,7 +32,7 @@ assert_contains "$SETTINGS" 'beginURIHandlerScan()' \
 assert_not_contains "$SETTINGS" 'func tabView(_ tabView: NSTabView, didSelect' \
   "switching to the URI tab must not start a new registry scan"
 assert_contains "$APP" 'documentLaunchRequested = true' "uri launches must mark a document-style launch"
-assert_contains "$APP" 'URI launches are already queued' "cold-start uri launches must skip settings environment check"
+assert_contains "$APP" 'if documentLaunchRequested || !pendingFiles.isEmpty {' "cold-start uri launches must skip settings environment check"
 assert_contains "$SETTINGS" 'URI 協定' "settings must include uri handler tab"
 assert_contains "$SETTINGS" '@objc private func rescanURIHandlers()' "settings must keep a manual URI rescan action"
 assert_contains "$SETTINGS" 'uriHandlerTable' "settings must list uri handlers in a table"

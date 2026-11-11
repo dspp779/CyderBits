@@ -127,7 +127,8 @@ enum CyderGptk {
         switch source { case .crossOver(let url), .runtime(let url): root = url }
         let link = engineRoot.appendingPathComponent("lib64/apple_gptk")
         if (try? FileManager.default.destinationOfSymbolicLink(atPath: link.path)) != nil {
-            return link.resolvingSymlinksInPath().standardizedFileURL != root.resolvingSymlinksInPath().standardizedFileURL
+            // Compare paths: a directory URL's trailing slash makes equal URLs unequal.
+            return link.resolvingSymlinksInPath().standardizedFileURL.path != root.resolvingSymlinksInPath().standardizedFileURL.path
         }
         return !isValidGptkRoot(link)
     }
