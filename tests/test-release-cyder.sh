@@ -3,6 +3,10 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "$ROOT/tests/assert.sh"
+TEMP="$(mktemp -d /private/tmp/cyder-release-contract.XXXXXX)"
+trap 'rm -rf "$TEMP"' EXIT
+# Dry-run fixtures do not depend on an ignored engine archive in the checkout.
+: >"$TEMP/engine-fixture.tar.zst"
 
 script="$(cat "$ROOT/scripts/release-cyder.sh")"
 
@@ -50,8 +54,15 @@ assert_contains "$script" 'cyder_pick_release_baseline_zip' \
   "release verify must auto-pick a Cyder-*.zip baseline"
 assert_contains "$(cat "$ROOT/scripts/create-cyder-app.sh")" 'cyder-app-version.txt' \
   "App build must read its version from the shared version file"
-assert_eq "$(tr -d '[:space:]' <"$ROOT/config/cyder-app-version.txt")" "0.13.2" \
-  "current 0.13.2 must be the shared App version"
+assert_eq "$(tr -d '[:space:]' <"$ROOT/config/cyder-app-version.txt")" "0.14.0" \
+  "current 0.14.0 must be the shared App version"
+if CYDER_APP_BUILD=invalid bash "$ROOT/scripts/create-cyder-app.sh" --help >"$TEMP/build-number.log" 2>&1; then
+  echo "Invalid bundle build number accepted" >&2
+  exit 1
+fi
+assert_contains "$(cat "$TEMP/build-number.log")" 'Invalid numeric CYDER_APP_BUILD' \
+  "a malformed bundle build number must be rejected before packaging"
+CYDER_APP_BUILD=140.2 bash "$ROOT/scripts/create-cyder-app.sh" --help >/dev/null
 
 # Dry-run test channel should not require Developer ID or network.
 # Inherit a release-looking SIGN_IDENTITY to ensure test still forces ad-hoc.
@@ -61,13 +72,16 @@ out="$(
 )"
 assert_contains "$out" 'create-cyder-app.sh' "test dry-run should invoke create-cyder-app"
 assert_contains "$out" 'SIGN_IDENTITY=-' "test dry-run should force ad-hoc identity"
+assert_contains "$out" 'CYDER_GRAPHICS_CHANNEL=test' "test build must retain test graphics scope"
 
 release_out="$(
   SIGN_IDENTITY='Developer ID Application: Example' \
-    bash "$ROOT/scripts/release-cyder.sh" --channel release --version 0.13.0 --dry-run --out-dir /tmp/cyder-release-dry 2>&1
+    bash "$ROOT/scripts/release-cyder.sh" --channel release --version 0.13.0 --dry-run --engine-archive "$TEMP/engine-fixture.tar.zst" --out-dir /tmp/cyder-release-dry 2>&1
 )"
 assert_contains "$release_out" 'create-cyder-app.sh' \
   "release dry-run should print the App build command"
+assert_contains "$release_out" 'CYDER_GRAPHICS_CHANNEL=release' \
+  "formal build must require signed graphics"
 assert_contains "$release_out" 'Release dry-run complete' \
   "release dry-run should complete without an existing App"
 

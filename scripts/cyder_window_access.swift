@@ -11,12 +11,16 @@ final class CyderWindowAccess {
         let capability: L.Capability
         let minimized: Bool?
         let focused: Bool?
+        var isProgramWindow = false
     }
     enum Query { case windows([Node]), unavailable(L.Capability) }
     struct Driver {
         let scan: (L.ProcessID) -> Query
         let equal: (AnyObject, AnyObject) -> Bool
         let activate: (L.ProcessID, AnyObject, @escaping () -> Bool) -> L.WindowResult
+        // One compositor read covers every managed PID. nil means the read
+        // failed; an empty successful result means no on-screen surfaces.
+        var readSurfaces: ((Set<Int32>) -> [Int32: [UInt32]]?)? = nil
         var requestPermission: () -> Void = {
             _ = AXIsProcessTrustedWithOptions([kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary)
         }
@@ -32,6 +36,7 @@ final class CyderWindowAccess {
     private var targets: [L.WindowID: Target] = [:]
     private var scanning: [L.ProcessID: UUID] = [:]
     private var scansInFlight = 0, actionsInFlight = 0, cursor = 0
+    private var surfaceReadPending = false
     private var intent: Intent?
     private var closed = false
     private var permissionRequested = false
@@ -87,11 +92,41 @@ final class CyderWindowAccess {
         let processes = snapshot.processes.values.filter { $0.existence == .alive }
             .sorted { ($0.id.pid, $0.id.started) < ($1.id.pid, $1.id.started) }
         guard !processes.isEmpty else { return }
+        scanSurfaces(processes, snapshot: snapshot)
         for offset in 0..<processes.count {
             scan(processes[(cursor + offset) % processes.count])
             if scansInFlight >= 2 { break }
         }
         cursor = (cursor + 1) % processes.count
+    }
+    private func scanSurfaces(_ processes: [L.ProcessRecord], snapshot: L.Snapshot) {
+        guard !surfaceReadPending, let read = driver.readSurfaces else { return }
+        let stamps = processes.compactMap { process -> (L.ProcessID, L.Stamp)? in
+            guard let env = snapshot.environments[process.environment], env.existence != .exited else { return nil }
+            return (process.id, .init(epoch: snapshot.epoch, environment: env.id, generation: env.generation))
+        }
+        guard !stamps.isEmpty else { return }
+        surfaceReadPending = true
+        workers.async { [self] in
+            let before = stamps.filter { CyderProcessEvidence.live($0.0) }
+            let ids = read(Set(before.map { $0.0.pid }))
+            let live = before.filter { CyderProcessEvidence.live($0.0) }
+            queue.async {
+                self.surfaceReadPending = false
+                guard !self.closed, let ids else { return }
+                for (process, stamp) in live {
+                    let prefix = L.WindowID(process: process, source: "coregraphics", token: "")
+                    guard self.valid(prefix, stamp: stamp), let latest = self.snapshot else { continue }
+                    let windows = Set(ids[process.pid] ?? []).filter { $0 != 0 }.map { number in
+                        L.Window(id: .init(process: process, source: prefix.source, token: String(number)),
+                                 title: latest.processes[process]?.name ?? "", capability: .unsupported)
+                    }
+                    let old = Set(latest.windows.keys.filter { $0.process == process && $0.source == prefix.source })
+                    guard old != Set(windows.map(\.id)) else { continue }
+                    self.emit(.windowSnapshot(stamp, process, source: prefix.source, windows: windows, capability: .unsupported))
+                }
+            }
+        }
     }
     private func scan(_ process: L.ProcessRecord) {
         guard !closed, scansInFlight < 2, scanning[process.id] == nil, let snapshot,
@@ -122,14 +157,15 @@ final class CyderWindowAccess {
                         let windowID = existing ?? L.WindowID(process: id, source: "accessibility", token: UUID().uuidString)
                         self.targets[windowID] = .init(stamp: stamp, node: node)
                         windows.append(.init(id: windowID, title: node.title, capability: node.capability,
-                                             minimized: node.minimized, focused: node.focused))
+                                             minimized: node.minimized, focused: node.focused, isProgramWindow: node.isProgramWindow))
                     }
                     self.emit(.windowSnapshot(stamp, id, source: "accessibility", windows: windows, capability: .available))
                 }
             }
         }
     }
-    func activate(stamp: L.Stamp, window: L.WindowID, operation: UUID) {
+    func activate(stamp: L.Stamp, window: L.WindowID, operation: UUID,
+                  foregroundPermitted: @escaping () -> Bool = { true }) {
         queue.async { [self] in
             guard !closed, actionsInFlight < 2, let target = targets[window], target.stamp == stamp,
                   target.node.capability == .available, valid(window, stamp: stamp) else {
@@ -143,7 +179,7 @@ final class CyderWindowAccess {
             }
             queue.asyncAfter(deadline: .now() + 3) { [weak self] in self?.finish(current, .unconfirmed) }
             workers.async { [self] in
-                let allowed = { self.queue.sync { self.canAct(current) } }
+                let allowed = { self.queue.sync { self.canAct(current) } && foregroundPermitted() }
                 let result = allowed() ? driver.activate(window.process, target.node.handle, allowed) : .unconfirmed
                 queue.async {
                     self.actionsInFlight -= 1
@@ -210,8 +246,14 @@ private enum AXBackend {
             let capable = canFront && raised && minimized != nil && (minimized != true || settable(window, kAXMinimizedAttribute))
             let title = (value(window, kAXTitleAttribute) as? String ?? "視窗")
                 .unicodeScalars.filter { !CharacterSet.controlCharacters.contains($0) }.map(String.init).joined()
+            let subrole = value(window, kAXSubroleAttribute) as? String
+            let isProgramWindow = (subrole == kAXStandardWindowSubrole || subrole == kAXDialogSubrole)
+                && (value(window, kAXRoleAttribute) as? String) == kAXWindowRole
+                && flag(window, kAXEnabledAttribute) != false
+                && (settable(window, kAXMainAttribute) || value(window, kAXCloseButtonAttribute) != nil
+                    || flag(window, kAXMainAttribute) == true)
             result.append(.init(handle: window, title: String(title.prefix(100)), capability: capable ? .available : .unsupported,
-                minimized: minimized, focused: focus.map { CFEqual($0, window) }))
+                minimized: minimized, focused: focus.map { CFEqual($0, window) }, isProgramWindow: isProgramWindow))
         }
         guard CyderProcessEvidence.live(process) else { return .unavailable(.temporarilyUnavailable) }
         return .windows(result)

@@ -216,7 +216,7 @@ struct CyderLibrarySnapshot {
 /// Owns library I/O off AppKit. One physical operation is retained across the
 /// observation deadline; repeated refreshes cannot grow a blocked work queue.
 final class CyderLibraryLoader {
-    enum Operation { case refresh, add(URL), setMacApp(String, String) }
+    enum Operation { case refresh, add(URL), addCopy(URL, String), setMacApp(String, String) }
     enum Update { case loading, ready(CyderLibrarySnapshot), unconfirmed, failed }
     typealias Read = (Operation) throws -> CyderLibrarySnapshot
     private let worker = DispatchQueue(label: "local.cyder.library-io", qos: .userInitiated)
@@ -278,6 +278,7 @@ final class CyderLibraryLoader {
             try library.merge(profileRecords: profiles.listRecords())
             _ = try library.importShortcuts()
         case .add(let url): selected = try library.add(executable: url).id
+        case .addCopy(let url, let title): selected = try library.add(executable: url, title: title).id
         case .setMacApp(let id, let path): try library.setMacAppPath(path, forGameID: id)
         }
         return CyderLibrarySnapshot(games: library.games,

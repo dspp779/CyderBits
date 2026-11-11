@@ -23,11 +23,13 @@ func background<T>(_ body: @escaping () -> T) -> T {
     DispatchQueue.global().async { let value = body(); DispatchQueue.main.async { result = value } }
     pump("native read") { result != nil }; return result!
 }
-func procargs(_ args: [String], _ env: [String]) -> [UInt8] {
+func procargs(_ args: [String], _ env: [String], environmentGap: Int = 0) -> [UInt8] {
     var argc = Int32(args.count)
     var bytes = withUnsafeBytes(of: &argc) { Array($0) }
     bytes += Array("/fixture/wine".utf8) + [0, 0, 0]
-    for arg in args + env { bytes += Array(arg.utf8) + [0] }
+    for arg in args { bytes += Array(arg.utf8) + [0] }
+    bytes += [UInt8](repeating: 0, count: environmentGap)
+    for value in env { bytes += Array(value.utf8) + [0] }
     return bytes + [0]
 }
 let valid = procargs(["wine", "", "C:\\path\\Helper.exe", "SECRET_DO_NOT_DISPLAY"], ["SECRET=DO_NOT_RETAIN", "WINEPREFIX=/fixture/prefix"])
@@ -38,7 +40,32 @@ precondition(Inventory.parse(procargs(["wine"], ["WINEPREFIX=/one", "WINEPREFIX=
 precondition(Inventory.parse(Array(valid.dropLast(2))) == nil)
 precondition(Inventory.parse([255,255,255,127,0]) == nil)
 precondition(Inventory.parse(procargs([], ["WINEPREFIX=/one"])) == nil)
+let group = UUID().uuidString, otherGroup = UUID().uuidString
+precondition(Inventory.parse(procargs(["wine", "Game.exe"], ["WINEPREFIX=/fixture", "CYDER_LAUNCH_GROUP=" + group]))?.launchGroup == group)
+precondition(Inventory.parse(procargs(["wine", "Game.exe"], ["WINEPREFIX=/fixture", "CYDER_LAUNCH_GROUP=invalid"]))?.launchGroup == nil)
+precondition(Inventory.parse(procargs(["wine", "Game.exe"], ["WINEPREFIX=/fixture", "CYDER_LAUNCH_GROUP=" + group, "CYDER_LAUNCH_GROUP=" + otherGroup]))?.launchGroup == nil)
 print("PASS bounded native metadata parser: empty argument, Windows basename only, malformed/truncated/count bounds, duplicate prefix, no CX_BOTTLE guessing")
+
+for gap in [0, 1, 2, 127, 129, 4096] {
+    let args = ["wine", "", "C:\\path\\Helper.exe", ""]
+    let env = ["OTHER=not-retained", "WINEPREFIX=/fixture/prefix", "CYDER_LAUNCH_GROUP=" + group]
+    let padded = procargs(args, env, environmentGap: gap)
+    precondition(Inventory.parse(padded) == .init(prefix: "/fixture/prefix", name: "Helper.exe", launchGroup: group))
+    precondition(Inventory.parse(procargs(args, [], environmentGap: gap)) == nil)
+    precondition(Inventory.parse(procargs(args, ["WINEPREFIX=relative"], environmentGap: gap)) == nil)
+    precondition(Inventory.parse(procargs(args, ["WINEPREFIX=/one", "WINEPREFIX=/two"], environmentGap: gap)) == nil)
+    precondition(Inventory.parse(procargs(args, ["WINEPREFIX=/one", "CYDER_LAUNCH_GROUP=" + group,
+        "CYDER_LAUNCH_GROUP=invalid"], environmentGap: gap))?.launchGroup == nil)
+    precondition(Inventory.parse(procargs(args, ["OTHER=1", "", "WINEPREFIX=/hidden"], environmentGap: gap)) == nil)
+    precondition(Inventory.parse(procargs(args, ["WINEPREFIX=/one", "", "WINEPREFIX=/hidden"], environmentGap: gap))?.prefix == "/one")
+    precondition(Inventory.parse(Array(padded.dropLast(2))) == nil)
+}
+// Keep the pre-existing conservative result for a leading empty argv[0]
+// without an extra gap; executable padding makes that first slot ambiguous.
+precondition(Inventory.parse(procargs(["", "Game.exe"], ["WINEPREFIX=/one"])) == nil)
+precondition(Inventory.parse(procargs(["wine", "WINEPREFIX=/argument"], [], environmentGap: 129)) == nil)
+print("PASS observed argv/environment NUL gaps, empty argv slots, empty environment, duplicate scopes/groups and environment termination")
+if CommandLine.arguments.dropFirst().first == "--parser-only" { exit(0) }
 
 let app = NSApplication.shared; app.setActivationPolicy(.accessory)
 let directory = URL(fileURLWithPath: CommandLine.arguments[1])

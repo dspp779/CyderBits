@@ -720,13 +720,31 @@ if [[ "$LAUNCH_ONLY" -eq 1 ]]; then
       }
     fi
   fi
+  case "${CYDER_LAUNCH_PREPARATION_PHASE:-}" in
+    prepare|final)
+      [[ "${CYDER_LAUNCH_PREPARATION_PREFIX:-}" == "$(cd "$prefix" && pwd -P)" ]] || exit 75
+      if [[ "$CYDER_LAUNCH_PREPARATION_PHASE" == prepare ]]; then
+        # Non-correlated preparation owns the native mutation scope, not the
+        # final Wine handoff. The owner exports no one-use ticket in this phase.
+        [[ -z "${CYDER_EXECUTION_OWNER_TICKET:-}" && "${CYDER_EXECUTION_RUNTIME_MUTATION:-}" =~ ^[01]$ ]] || exit 75
+        # This fresh native proof predates every possible preparation client.
+        cyder_launch_preparation_initial_state "$prefix" "$engine/bin/wineserver" || exit $?
+      else
+        [[ -n "${CYDER_EXECUTION_OWNER_TICKET:-}" ]] || exit 75
+      fi
+      ;;
+    "") ;;
+    *) exit 75 ;;
+  esac
   # A per-game bottle may predate the current DXMT payload or have been
   # created independently from the shared prefix. Refresh its DXMT winemetal
   # PE and run the legacy migration before applying launch settings.
+  if [[ "${CYDER_LAUNCH_PREPARATION_PHASE:-}" != final ]]; then
   cyder_prepare_graphics_prefix "$wine" "$engine" "$prefix" || {
     echo "Unable to prepare graphics payload for prefix: $prefix" >&2
     exit 1
   }
+  fi
   cyder_set_stage settings-apply
   cyder_prepare_game_launch_settings "$wine" "$engine" "$prefix" "$exe" || {
     settings_status=$?

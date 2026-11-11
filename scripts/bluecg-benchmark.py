@@ -51,7 +51,7 @@ def sample(args):
         raise ValueError('PID and label must each be unique')
     # Exclusively create, preserving existing evidence.
     with open(args.output, 'x', newline='', encoding='utf-8') as out:
-        writer = csv.writer(out)
+        writer = csv.writer(out, lineterminator='\n')
         writer.writerow(['elapsed_s', 'interval_s', 'label', 'pid', 'cpu_seconds_delta', 'cpu_percent_one_core'])
         previous = {}
         start = time.monotonic()

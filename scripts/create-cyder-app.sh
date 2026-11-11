@@ -14,8 +14,20 @@ CYDER_VERSION_FILE="$SCRIPT_DIR/../config/cyder-app-version.txt"
   exit 1
 }
 CYDER_APP_VERSION="${CYDER_APP_VERSION:-$(tr -d '[:space:]' <"$CYDER_VERSION_FILE")}"
+# Candidate builds may share a marketing version but need distinct bundle builds.
+if [[ -n "${CYDER_APP_BUILD:-}" && ! "$CYDER_APP_BUILD" =~ ^[1-9][0-9]{0,3}(\.[0-9]{1,2}){0,2}$ ]]; then
+  echo "Invalid numeric CYDER_APP_BUILD: expected N, N.N or N.N.N" >&2
+  exit 1
+fi
 # Release identity by default; export SIGN_IDENTITY=- for an unsigned local build.
 SIGN_IDENTITY="${SIGN_IDENTITY:-Developer ID Application: Chun Ho Kwok (3U9565WWM2)}"
+# Developer-ID builds consume signed graphics revisions, even outside the wrapper.
+if [[ "$SIGN_IDENTITY" != "-" ]]; then
+  export CYDER_GRAPHICS_CHANNEL=release
+elif [[ "${CYDER_GRAPHICS_CHANNEL:-test}" == release ]]; then
+  echo "release graphics require a Developer ID App build" >&2
+  exit 1
+fi
 if [[ "$SIGN_IDENTITY" == "-" ]]; then
   TIMESTAMP_FLAG="--timestamp=none"
 else
@@ -202,21 +214,22 @@ cp "$SCRIPT_DIR/cyder-songti-replacements.reg" "$RES/ogom-scripts/"
 cp "$SCRIPT_DIR/install-cyder-font-replacements.sh" "$RES/ogom-scripts/"
 cp "$SCRIPT_DIR/cyder-apply-settings.sh" "$RES/ogom-scripts/"
 cp "$SCRIPT_DIR/cyder-edit-user-reg.sh" "$RES/ogom-scripts/"
+cp "$SCRIPT_DIR/cyder-component-check.sh" "$RES/ogom-scripts/"
+cp "$SCRIPT_DIR/cyder-graphics-update.rb" "$RES/ogom-scripts/"
+cp "$SCRIPT_DIR/cyder-component-integrity.rb" "$RES/ogom-scripts/"
 cp "$SCRIPT_DIR/cyder-winetricks.sh" "$RES/ogom-scripts/"
 cp "$SCRIPT_DIR/cyder-recipe.sh" "$RES/ogom-scripts/"
 cp "$SCRIPT_DIR/cyder-cnc-ddraw.sh" "$RES/ogom-scripts/"
+cp "$SCRIPT_DIR/cyder-cnc-game.rb" "$SCRIPT_DIR/cyder-cnc-game-legacy.rb" "$SCRIPT_DIR/cyder-cnc-legacy.rb" "$RES/ogom-scripts/"
 cp "$OGOM/tools/winetricks/winetricks" "$RES/ogom-scripts/"
 cp "$OGOM/tools/winetricks/COPYING" "$RES/licenses/winetricks-COPYING"
 "$SCRIPT_DIR/cyder-cnc-ddraw.sh" verify \
   "$OGOM/vendor/cnc-ddraw/7.1.0.0" >/dev/null
-cp "$OGOM/vendor/cnc-ddraw/7.1.0.0/cnc-ddraw.zip" \
-  "$RES/Components/cnc-ddraw/7.1.0.0/"
-cp "$OGOM/vendor/cnc-ddraw/7.1.0.0/manifest.json" \
-  "$RES/Components/cnc-ddraw/7.1.0.0/"
-cp "$OGOM/vendor/cnc-ddraw/7.1.0.0/LICENSE" \
-  "$RES/Components/cnc-ddraw/7.1.0.0/"
-cp "$OGOM/vendor/cnc-ddraw/7.1.0.0/LICENSE" \
-  "$RES/licenses/cnc-ddraw-LICENSE"
+python3 "$SCRIPT_DIR/package-cnc-ddraw.py" \
+  "$OGOM/vendor/cnc-ddraw/7.1.0.0" "$RES/Components/cnc-ddraw/7.1.0.0"
+"$SCRIPT_DIR/cyder-cnc-ddraw.sh" verify "$RES/Components/cnc-ddraw/7.1.0.0" >/dev/null
+cp "$OGOM/vendor/cnc-ddraw/7.1.0.0/LICENSE" "$RES/licenses/cnc-ddraw-LICENSE"
+cp "$OGOM/vendor/cnc-ddraw/7.1.0.0/THIRD-PARTY-NOTICES.txt" "$RES/licenses/cnc-ddraw-NOTICES.txt"
 [[ -x "$OGOM/tools/zstd/zstd" ]] || {
   echo "Missing universal zstd at tools/zstd/zstd; run scripts/build-universal-zstd.sh" >&2
   exit 1
@@ -260,7 +273,7 @@ chmod +x "$RES/tools/cabextract/cabextract"
 source "$SCRIPT_DIR/cyder-copy-engine-artifact.sh"
 
 copy_engine_artifact_into_app "$SCRIPT_DIR" "$RES" "$OGOM"
-GRAPHICS_ARTIFACTS="$OGOM/dist/artifacts/graphics"
+GRAPHICS_ARTIFACTS="${CYDER_GRAPHICS_ARTIFACTS_DIR:-$OGOM/dist/artifacts/graphics}"
 if [[ -f "$GRAPHICS_ARTIFACTS/dxvk-version.txt" \
    && -f "$GRAPHICS_ARTIFACTS/dxmt-version.txt" \
    && -f "$GRAPHICS_ARTIFACTS/dxvk-artifact-sha256.txt" \
@@ -280,11 +293,13 @@ else
     echo "==> Warning: $message" >&2
   else
     echo "$message" >&2
-    echo "Pack graphics first (scripts/pack-graphics-payloads.sh) or set CYDER_ALLOW_MISSING_GRAPHICS=1 for local experiments." >&2
+    echo "Pack graphics in cyder-wine-engine and set CYDER_GRAPHICS_ARTIFACTS_DIR; CYDER_ALLOW_MISSING_GRAPHICS=1 is test-only." >&2
     exit 1
   fi
 fi
 rsync -a "$OGOM/tools/libarchive/" "$RES/addons/libarchive/"
+
+/usr/bin/ruby "$SCRIPT_DIR/build-component-manifests.rb" "$RES"
 
 echo "==> Building universal MacOS/Cyder (arm64 + x86_64)"
 SWIFT_BUILD_DIR="$(mktemp -d "${TMPDIR:-/tmp}/cyder-swift.XXXXXX")"
@@ -304,8 +319,12 @@ SWIFT_SOURCES=(
   "$SCRIPT_DIR/cyder_settings.swift"
   "$SCRIPT_DIR/cyder_launch_support.swift"
   "$SCRIPT_DIR/cyder_launch_context.swift"
+  "$SCRIPT_DIR/cyder_environment_readiness.swift"
   "$SCRIPT_DIR/cyder_setup_progress.swift"
   "$SCRIPT_DIR/cyder_process_runner.swift"
+  "$SCRIPT_DIR/cyder_directdraw_operation.swift"
+  "$SCRIPT_DIR/cyder_graphics_runtime.swift"
+  "$SCRIPT_DIR/cyder_component_diagnostics.swift"
   "$SCRIPT_DIR/cyder_operation_gate.swift"
   "$SCRIPT_DIR/cyder_launch_preparation.swift"
   "$SCRIPT_DIR/cyder_launch_observer.swift"
@@ -431,7 +450,7 @@ cat > "$CONTENTS/Info.plist" <<PLIST
   <key>CFBundleShortVersionString</key>
   <string>$CYDER_APP_VERSION</string>
   <key>CFBundleVersion</key>
-  <string>$CYDER_APP_VERSION</string>
+  <string>${CYDER_APP_BUILD:-$CYDER_APP_VERSION}</string>
   <key>LSMinimumSystemVersion</key>
   <string>10.15</string>
   <key>LSUIElement</key>

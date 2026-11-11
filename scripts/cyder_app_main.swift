@@ -19,6 +19,39 @@ private enum CyderLaunchOutcome {
 
 }
 
+// Preparation can start short-lived Wine clients, but owns no launch/session.
+// This is also the exact production ordering seam used by the causal fixture.
+private enum CyderWineLaunchSequence {
+    static func run(prepare: () async -> CyderLaunchOutcome?,
+                    attachAndLaunch: () async -> CyderLaunchOutcome) async -> CyderLaunchOutcome {
+        if let stopped = await prepare() { return stopped }
+        return await attachAndLaunch()
+    }
+}
+
+// A timeout ends observation, not the executor. Keep the caller's lease and
+// snapshot until actual release unless successful preparation hands them back.
+private final class CyderPreparationOwnership {
+    private let lock = NSLock()
+    private var released = false
+    private var advance: Bool?
+    private var cleanup: (() -> Void)?
+    init(cleanup: @escaping () -> Void) { self.cleanup = cleanup }
+    func executorReleased() { resolve(released: true, advance: nil) }
+    func decide(advance: Bool) { resolve(released: false, advance: advance) }
+    private func resolve(released: Bool, advance: Bool?) {
+        lock.lock()
+        self.released = self.released || released
+        if let advance, self.advance == nil { self.advance = advance }
+        let action: (() -> Void)?
+        if self.advance == true { action = nil; cleanup = nil }
+        else if self.advance == false && self.released { action = cleanup; cleanup = nil }
+        else { action = nil }
+        lock.unlock()
+        action?()
+    }
+}
+
 private enum CyderPrefixResolution {
     case success(URL)
     case failure(CyderFailure)
@@ -38,6 +71,7 @@ private enum CyderLaunchIntent: Equatable {
 }
 
 final class CyderAppDelegate: NSObject, NSApplicationDelegate {
+    private var componentDiagnosticsController: CyderComponentDiagnosticsController?
     private let operationGate = CyderOperationGate()
     private let launchPreparation = CyderLaunchPreparation<CyderOperationGate.Scope?>()
     private var diagnosticsOperationInProgress = false
@@ -76,12 +110,38 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
     }
     private var documentLaunchRequested = false
     private var setupPanel: CyderSetupPanel?
+    private var launchPanelOwner: String?
     private let setupProgress = CyderSetupProgress()
     private var terminateWhenSettingsClose = false
     private var openingGameLibrary = false
     private var openingGamesDirectory = false
     private var gamesDirectoryPresentation: UUID?
-    private var environmentPreparationInProgress = false
+    private let environmentPreparationAdmission = CyderEnvironmentPreparationAdmission()
+    private var normalAppEntryVisible = false
+    private var environmentRecoveryCompleted = false
+    private var environmentPreparationInProgress = false {
+        didSet {
+            guard oldValue != environmentPreparationInProgress, !readOnlyMode else { return }
+            onMainThread {
+                if environmentPreparationInProgress { environmentReadiness.beginOperation(clearFailure: false) }
+                else { environmentReadiness.endOperation() }
+            }
+        }
+    }
+    private lazy var environmentReadiness: CyderEnvironmentReadinessObserver = {
+        let observer = CyderEnvironmentReadinessObserver {
+            guard let resources = Bundle.main.resourceURL else { return .unknown }
+            return CyderEnvironmentReadiness.read(.init(resources: resources,
+                engine: CyderPaths.engine, bottle: CyderPaths.sharedBottle))
+        }
+        observer.onUpdate = { [weak self] state in
+            guard let self, !self.quitTransaction, !self.readOnlyMode else { return }
+            self.existingLibraryController?.updateEnvironmentState(state)
+            self.existingSettingsController?.updateEnvironmentState(state)
+            self.prepareEnvironmentAutomaticallyIfNeeded()
+        }
+        return observer
+    }()
     private var wineActivationWaiter: WineActivationWaiter?
     private var wineLaunchObserver: CyderLaunchObserver?
     private var readOnlyMode = false
@@ -132,11 +192,22 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         event: { [weak self] event in self?.statusItemController.receiveLifecycleEvent(event) }
     )
     private lazy var statusItemController: CyderStatusItemController = {
-        let controller = CyderStatusItemController()
+        var windows = CyderWindowAccess.Driver.system
+        windows.readSurfaces = cyderVisibleSurfaces(ownedBy:)
+        let controller = CyderStatusItemController(windowDriver: windows)
         controller.onWindowConfirmed = { [weak self] launchID in
             guard let self, !self.quitTransaction, let waiter = self.wineActivationWaiter,
                   waiter.launchID == launchID else { return }
+            self.dismissLaunchProgress(for: launchID)
             waiter.signal()
+        }
+        controller.onLaunchWindowPresented = { [weak self] launchID in
+            guard let self, self.wineActivationWaiter?.launchID == launchID else { return }
+            self.dismissLaunchProgress(for: launchID)
+        }
+        controller.onActivityChanged = { [weak self] activity in
+            self?.existingLibraryController?.updateProgramActivity(activity.summary)
+            self?.prepareEnvironmentAutomaticallyIfNeeded()
         }
         controller.onOpenPreferences = { [weak self] in self?.showSettings() }
         controller.onOpenGameLibrary = { [weak self] in self?.showGameLibrary() }
@@ -179,6 +250,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
     private lazy var settingsController: CyderSettingsWindowController = {
         let controller = CyderSettingsWindowController()
         controller.maintenanceGate = operationGate
+        controller.onPrepareEnvironment = { [weak self] in self?.prepareEnvironmentFromLibrary() }
         existingSettingsController = controller
         controller.onImmediateSave = { [weak self] registrySetting in
             await self?.applySettingsImmediately(registrySetting: registrySetting) ?? false
@@ -208,6 +280,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         controller.onExportLastGameLog = { [weak self] in
             self?.exportLastGameLog()
         }
+        controller.onInspectComponents = { [weak self] in self?.showComponentDiagnostics() }
         controller.onCleanDebugLogs = { [weak self] in
             self?.cleanDebugLogs()
         }
@@ -246,6 +319,11 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
     private lazy var gameLibraryController: CyderGameLibraryWindowController = {
         let controller = CyderGameLibraryWindowController(readOnly: readOnlyMode)
         existingLibraryController = controller
+        if !readOnlyMode { controller.updateProgramActivity(statusItemController.lifecycleSnapshot.programActivity.summary) }
+        if !readOnlyMode {
+            let state = environmentReadiness.state
+            controller.updateEnvironmentState(state)
+        }
         controller.onPrepareEnvironment = { [weak self] in self?.prepareEnvironmentFromLibrary() }
         controller.onLaunch = { [weak self] executable, settings in
             self?.launchGameFromLibrary(executable, settings: settings)
@@ -392,6 +470,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             )
             DispatchQueue.main.async {
                 self.hideSetup()
+                if result.succeeded { self.environmentReadiness.repairSucceeded() }
                 self.environmentPreparationInProgress = false
                 if result.succeeded {
                     if let completion {
@@ -441,6 +520,8 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
                         self?.environmentMonitor.finishRecovery { [weak self] in
                             guard let self, !self.quitTransaction else { return }
                             self.statusItemController.receiveLifecycleEvent(.restoring(false))
+                            self.environmentRecoveryCompleted = true
+                            self.prepareEnvironmentAutomaticallyIfNeeded()
                         }
                     }
                 }
@@ -754,7 +835,9 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             return
         }
         terminateWhenSettingsClose = true
-        // Browsing the library never waits for or starts Wine preparation.
+        // Show the library immediately; proven first-run readiness may then
+        // start one visible preparation without blocking the main thread.
+        normalAppEntryVisible = true
         showGameLibrary()
     }
 
@@ -852,6 +935,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
     /// Bring the game library forward. Shared by Finder reopen and a secondary
     /// process that forwarded an empty `showUI` request.
     private func presentResidentCyderUI() {
+        normalAppEntryVisible = true
         terminateWhenSettingsClose = true
         showGameLibrary()
     }
@@ -867,7 +951,9 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         quitTransaction = true
         diagnosticsPresentation = nil
         setupProgress.invalidate()
+        componentDiagnosticsController?.close()
         existingLibraryController?.quiesce()
+        environmentReadiness.quiesce()
         CyderGameIconStore.shared.quiesce()
         if isPrimaryInstance {
             statusItemController.quiesce()
@@ -962,9 +1048,12 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
     @objc private func showSettings() {
         guard !readOnlyMode else { showReadOnlyStatus(); return }
         guard !quitTransaction else { return }
+        normalAppEntryVisible = true
         statusItemController.setUIVisible(true)
         activateCyderUI(dockVisible: true)
         settingsController.prepareForDisplay()
+        settingsController.updateEnvironmentState(environmentReadiness.state)
+        environmentReadiness.refresh()
         settingsController.showWindow(nil)
         settingsController.window?.makeKeyAndOrderFront(nil)
         settingsController.window?.orderFrontRegardless()
@@ -974,6 +1063,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         guard !libraryLaunchInProgress, pendingLaunchAcquisitions.isEmpty, queuedLaunches.isEmpty else { return }
         statusItemController.finishLaunchIngress()
         if !environmentPreparationInProgress && activeProcessOperations == 0 { hideSetup() }
+        prepareEnvironmentAutomaticallyIfNeeded()
     }
 
     private func exportLastGameLog() {
@@ -1032,6 +1122,17 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    private func showComponentDiagnostics() {
+        if componentDiagnosticsController == nil {
+            let controller = CyderComponentDiagnosticsController()
+            controller.onClose = { [weak self] in self?.componentDiagnosticsController = nil }
+            componentDiagnosticsController = controller
+        }
+        componentDiagnosticsController?.showWindow(nil)
+        componentDiagnosticsController?.window?.makeKeyAndOrderFront(nil)
+        componentDiagnosticsController?.runScan()
+    }
+
     private func cleanDebugLogs() { Task { @MainActor in await cleanDebugLogsAsync() } }
 
     @MainActor private func cleanDebugLogsAsync() async {
@@ -1066,6 +1167,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func showGameLibrary() {
         guard !quitTransaction else { return }
+        normalAppEntryVisible = true
         if !readOnlyMode { statusItemController.setUIVisible(true) }
         openingGameLibrary = true
         let settingsWasVisible = existingSettingsController?.window?.isVisible == true
@@ -1074,6 +1176,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         gameLibraryController.window?.makeKeyAndOrderFront(nil)
         gameLibraryController.window?.orderFrontRegardless()
         gameLibraryController.prepareForDisplay()
+        if !readOnlyMode { environmentReadiness.refresh() }
         // Keep a visible key window throughout the transition. In particular,
         // accessibility clients can briefly collapse a hidden scroll view to
         // zero width when the settings window is ordered out first.
@@ -1090,8 +1193,9 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         authorization: CyderRequestRegistry.Record? = nil,
         lease: CyderOperationGate.Lease? = nil
     ) {
-        guard !quitTransaction, !readOnlyMode, isPrimaryInstance else {
+        guard !quitTransaction, !readOnlyMode, isPrimaryInstance, !environmentPreparationInProgress else {
             if let lease { operationGate.release(lease) }
+            if environmentPreparationInProgress { finishRequestPart(authorization, failed: true) }
             return
         }
         if authorization == nil {
@@ -1099,7 +1203,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             if let settings { payload.settings = try? JSONEncoder().encode(settings) }
             presentExternalLaunchStarting()
             instanceCoordinator.submit(payload) { [weak self] accepted in
-                if !accepted { self?.hideSetup(); self?.showAlert("無法接受啟動要求", "請查看診斷資訊後重試。") }
+                if !accepted { self?.presentLaunchAcceptanceFailure() }
             }
             return
         }
@@ -1160,7 +1264,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
                 case .environmentNotReady:
                     self.showAlert(
                         "遊戲尚未準備完成",
-                        "請在遊戲庫按「準備 Windows 環境」，完成後再重新啟動遊戲。"
+                        "請開啟 Cyder，等待環境自動準備；若顯示錯誤請按「重試」，有可用引擎更新時請按「更新」。完成後再重新啟動遊戲。"
                     )
                 case .graphicsNotReady:
                     self.showAlert(
@@ -1203,7 +1307,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             } else { return nil }
             guard let snapshot = launch.authorization?.settingsSnapshot,
                   let acceptedSettings = try? JSONDecoder().decode(CyderSettings.self, from: snapshot) else { return nil }
-            return CyderGptk.launchNeedsGlobalScope() || acceptedSettings.moltenvkVariant.launchNeedsGlobalScope()
+            return CyderGraphicsRuntime.needsGlobalScope || CyderGptk.launchNeedsGlobalScope() || acceptedSettings.moltenvkVariant.launchNeedsGlobalScope()
                 ? .allEnvironments : scope
         }) { [weak self] outcome in
             guard let self else { return }
@@ -1240,7 +1344,8 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func launchNextQueuedExecutableIfReady() {
-        guard !quitTransaction, !libraryLaunchInProgress,
+        prepareEnvironmentAutomaticallyIfNeeded()
+        guard !quitTransaction, !environmentPreparationInProgress, !libraryLaunchInProgress,
               wineActivationWaiter == nil, !queuedLaunches.isEmpty else { return }
         libraryLaunchInProgress = true
         let launch = queuedLaunches.removeFirst()
@@ -1252,8 +1357,9 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         instanceCoordinator.authorize(queued) { [weak self] authorization in
             guard let self else { return }
             self.libraryLaunchInProgress = false
-            guard !self.quitTransaction, let authorization else {
+            guard !self.quitTransaction, !self.environmentPreparationInProgress, let authorization else {
                 if let lease = launch.lease { self.operationGate.release(lease) }
+                if self.environmentPreparationInProgress { self.finishRequestPart(launch.authorization, failed: true) }
                 self.launchNextQueuedExecutableIfReady(); return
             }
             if #available(macOS 11.0, *), launch.isURI {
@@ -1355,8 +1461,10 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         var needsBootstrap = !FileManager.default.fileExists(atPath: CyderPaths.bootstrapMarker.path)
             || !FileManager.default.fileExists(atPath: sharedSystemReg)
             || !FileManager.default.fileExists(atPath: sharedBaseline)
+            || CyderEnvironmentReadiness.bootstrapNeedsUpdate(CyderPaths.bootstrapMarker,
+                engineVersion: trimmedFileContents(CyderPaths.engine.appendingPathComponent("version")))
         // CrossOver engines need cxbottle.conf; a half-built
-        // bottle without it must go through a full replace, not an in-place patch.
+        // bottle must go through bootstrap's guarded salvage/replacement path.
         if !needsBootstrap {
             let engineBottleTemplate = CyderPaths.engine
                 .appendingPathComponent("share/crossover/bottle_data/cxbottle.conf").path
@@ -1418,7 +1526,15 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         return nil
     }
 
-    private func ensureEnvironment(context: CyderLaunchContext) async -> CyderFailure? {
+    private func ensureEnvironment(context: CyderLaunchContext, lease: CyderOperationGate.Lease,
+                                   ownership: CyderEnvironmentPreparationOwnership) async -> CyderFailure? {
+        // Permission/format uncertainty is a diagnostic failure, never absence
+        // that authorizes automatic replacement. Recheck after acquiring the gate.
+        if let resources = Bundle.main.resourceURL,
+           CyderEnvironmentReadiness.read(.init(resources: resources, engine: CyderPaths.engine, bottle: CyderPaths.sharedBottle)) == .unknown {
+            return CyderFailure(code: "CYD-ENG-003", stage: .engineExtraction,
+                summary: "無法確認環境檔案或權限；請查看診斷記錄後重試。", technicalDetails: "readiness-unknown-before-preparation")
+        }
         if let rosettaFailure = ensureRosettaForEnvironment() {
             return rosettaFailure
         }
@@ -1434,7 +1550,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
                 context: context,
                 args: [context.launcher, "--engine-src", context.engineSrc, "--ensure-engine-only"],
                 stage: .engineExtraction,
-                operation: "engine-install"
+                operation: "engine-install", lease: lease, retainedEnvironmentPreparation: ownership
             )
             if !result.succeeded {
                 return failure(
@@ -1454,13 +1570,13 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
                 context: context,
                 args: [context.launcher, "--ensure-graphics-only"],
                 stage: .engineExtraction,
-                operation: "graphics-install"
+                operation: "graphics-install", lease: lease, retainedEnvironmentPreparation: ownership
             )
             if !graphics.succeeded {
                 return failure(
                     code: "CYD-GFX-001",
                     stage: .engineExtraction,
-                    summary: "準備圖形元件時發生問題。",
+                    summary: CyderGraphicsRuntime.failureSummary(status: graphics.status, output: graphics.outputTail),
                     result: graphics
                 )
             }
@@ -1479,9 +1595,10 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
                 context: context,
                 args: [context.launcher, "--engine-src", context.engineSrc, "--bootstrap-only"],
                 stage: .bootstrap,
-                operation: "bootstrap",
+                operation: "bootstrap", lease: lease,
                 expectsMachineResult: true,
-                progressPresentation: progressPresentation
+                progressPresentation: progressPresentation,
+                retainedEnvironmentPreparation: ownership
             )
             if !result.succeeded {
                 return failure(
@@ -1504,7 +1621,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
                 context: context,
                 args: [context.launcher, "--engine-src", context.engineSrc, "--health-check"],
                 stage: .engineValidation,
-                operation: "health-check"
+                operation: "health-check", lease: lease, retainedEnvironmentPreparation: ownership
             )
             guard health.succeeded else {
                 return failure(
@@ -1515,32 +1632,84 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
                 )
             }
         }
+        guard let resources = Bundle.main.resourceURL else {
+            return CyderFailure(code: "CYD-ENG-003", stage: .engineValidation,
+                summary: "缺少必要元件；請查看診斷記錄後重試。", technicalDetails: "preparation-postcondition-resources-missing")
+        }
+        let finalReadiness = CyderEnvironmentReadiness.read(.init(resources: resources,
+            engine: CyderPaths.engine, bottle: CyderPaths.sharedBottle))
+        guard finalReadiness == .ready else {
+            return CyderFailure(code: "CYD-ENG-003", stage: .engineValidation,
+                summary: "環境準備仍未完成；請查看診斷記錄後重試。",
+                technicalDetails: "preparation-postcondition: \(finalReadiness)")
+        }
         return nil
     }
 
-    private func prepareEnvironmentFromLibrary() {
-        guard !quitTransaction, !readOnlyMode, isPrimaryInstance, !environmentPreparationInProgress else { return }
+    private func prepareEnvironmentAutomaticallyIfNeeded() {
+        let entry = CyderEnvironmentPreparationAdmission.Entry(primary: isPrimaryInstance,
+            readOnly: readOnlyMode, visible: existingLibraryController?.window?.isVisible == true || existingSettingsController?.window?.isVisible == true,
+            normalAppEntry: normalAppEntryVisible, recoveryCompleted: environmentRecoveryCompleted,
+            pendingLaunches: !pendingFiles.isEmpty || !pendingURLs.isEmpty || !queuedLaunches.isEmpty || !pendingLaunchAcquisitions.isEmpty,
+            operationBusy: environmentPreparationInProgress || libraryLaunchInProgress || activeProcessOperations > 0)
+        // documentLaunchRequested records historical ingress. A later explicit
+        // Dock/library entry uses present intent plus outstanding work instead.
+        guard !quitTransaction, didFinishLaunch, entry.permitsAutomatic else { return }
+        if environmentReadiness.state == .current(.notPrepared), environmentPreparationAdmission.automaticAttempted {
+            environmentReadiness.recordFailure("Windows 環境尚未準備完成；請重試。")
+            return
+        }
+        prepareEnvironmentFromLibrary(automatic: true)
+    }
+
+    private func prepareEnvironmentFromLibrary(automatic: Bool = false) {
+        guard !quitTransaction, !readOnlyMode, isPrimaryInstance, instanceReady,
+              !environmentPreparationInProgress else { return }
+        guard !libraryLaunchInProgress, queuedLaunches.isEmpty,
+              pendingLaunchAcquisitions.isEmpty, activeProcessOperations == 0 else {
+            if !automatic { environmentReadiness.recordFailure("仍有啟動或環境作業進行中；請等待完成後重試。") }
+            return
+        }
+        guard let request = environmentPreparationAdmission.begin(automatic: automatic,
+                readiness: environmentReadiness.state, eligibleForAutomatic: normalAppEntryVisible && environmentRecoveryCompleted) else { return }
         guard let resourcePath = Bundle.main.resourcePath else {
-            existingLibraryController?.updateEnvironmentStatus("缺少必要元件；請查看診斷記錄", busy: false)
+            environmentPreparationAdmission.finish(request)
+            environmentReadiness.recordFailure("缺少必要元件；請查看診斷記錄")
             return
         }
         environmentPreparationInProgress = true
-        existingLibraryController?.updateEnvironmentStatus("正在檢查 Windows 環境…", busy: true)
+        environmentReadiness.beginOperation()
+        environmentReadiness.progress("正在檢查 Windows 環境…")
         Task.detached(priority: .userInitiated) { [weak self] in
             guard let self else { return }
-            let context = await CyderLaunchContext(resourcePath: resourcePath)
-            let failure = await self.ensureEnvironment(context: context)
+            // One global maintenance lease covers extraction, graphics,
+            // bootstrap and health checks. Each executor borrows this lease.
+            let lease = await self.operationGate.acquire(.allEnvironments)
+            let ownership = lease.map { lease in
+                CyderEnvironmentPreparationOwnership { self.operationGate.release(lease) }
+            }
+            let failure: CyderFailure?
+            if let lease, let ownership {
+                let context = await CyderLaunchContext(resourcePath: resourcePath)
+                failure = await self.ensureEnvironment(context: context, lease: lease, ownership: ownership)
+                ownership.finish()
+            } else {
+                failure = CyderFailure(code: "CYD-ENG-003", stage: .engineExtraction,
+                    summary: "環境準備作業未開始；請稍後重試。", technicalDetails: "preparation-gate-unavailable")
+            }
             DispatchQueue.main.async {
+                guard self.environmentPreparationAdmission.finish(request) else { return }
                 self.environmentPreparationInProgress = false
                 guard !self.quitTransaction else { return }
                 self.hideSetup()
+                self.existingSettingsController?.environmentPreparationDidFinish()
                 if let failure {
                     CyderDiagnostics.shared.record(failure)
-                    self.existingLibraryController?.updateEnvironmentStatus("準備未完成；可重試或開啟設定查看記錄", busy: false)
+                    self.environmentReadiness.recordFailure(failure.summary)
                 } else {
-                    self.existingLibraryController?.updateEnvironmentStatus("Windows 環境已準備好", busy: false)
                     self.existingLibraryController?.retryMissingIcons()
                 }
+                self.launchNextQueuedExecutableIfReady()
             }
         }
     }
@@ -1652,7 +1821,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func graphicsPayloadNeedsInstall(context: CyderLaunchContext) -> Bool {
-        graphicsVersionNeedsInstall(name: "dxvk", context: context)
+        CyderGraphicsRuntime.needsGlobalScope || graphicsVersionNeedsInstall(name: "dxvk", context: context)
             || graphicsVersionNeedsInstall(name: "dxmt", context: context)
     }
 
@@ -1745,7 +1914,11 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         }
         let activationWaiter = WineActivationWaiter(prefix: prefix.path, launchID: launchID)
         let observer = CyderLaunchObserver(authority: authority)
-        onMainThread { wineActivationWaiter = activationWaiter; wineLaunchObserver = observer }
+        onMainThread {
+            wineActivationWaiter = activationWaiter
+            wineLaunchObserver = observer
+            if setupPanel?.passive == true { launchPanelOwner = launchID }
+        }
         defer {
             onMainThread {
                 if wineActivationWaiter === activationWaiter {
@@ -1870,6 +2043,58 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             case .exe: return "wine-launch"
             }
         }()
+        var preparationCompleted = false
+        var finalExecutorOwnsLease = false
+        defer {
+            // A failed admission after successful preparation spawned no final
+            // executor. Do not strand the caller's request lease on this path.
+            if preparationCompleted && !finalExecutorOwnsLease, let lease { operationGate.release(lease) }
+        }
+        return await CyderWineLaunchSequence.run(prepare: {
+            guard launchTarget == .exe else { return nil }
+            guard let lease else {
+                return .failure(CyderFailure(code: "CYD-WIN-001", stage: .wineSpawn,
+                    summary: "無法保留啟動作業；尚未啟動 Windows 程式。",
+                    technicalDetails: "EXE preparation requires the request-owned operation lease"))
+            }
+            var preparationEnvironment = CyderLaunchContext.withoutDirectDrawEnvironment(wineLaunchEnvironment)
+            for key in ["CYDER_WINE_DETACH", "CYDER_WINE_PID_FILE", "CYDER_WINE_RESULT_FILE",
+                        "CYDER_WINE_ACTIVATED_FILE", "CYDER_WINE_LIFECYCLE_FILE", "CYDER_ENVIRONMENT_MONITOR",
+                        "CYDER_DDRAW_PATH", "CNC_DDRAW_CONFIG_FILE"] {
+                preparationEnvironment.removeValue(forKey: key)
+            }
+            preparationEnvironment["CYDER_LAUNCH_PREPARATION_PHASE"] = "prepare"
+            preparationEnvironment["CYDER_LAUNCH_PREPARATION_PREFIX"] = prefix.resolvingSymlinksInPath().path
+            let ownership = CyderPreparationOwnership {
+                try? FileManager.default.removeItem(at: snapshotURL)
+                if let path = launchEnvironment["CYDER_TEST_SETTINGS_REQUEST"] {
+                    let request = URL(fileURLWithPath: path).standardizedFileURL
+                    if request.deletingLastPathComponent() == requestDirectory.standardizedFileURL {
+                        try? FileManager.default.removeItem(at: request)
+                    }
+                }
+                self.operationGate.release(lease)
+            }
+            // No authorization correlation, native handoff, recordSpawn or
+            // request completion is attached to this preparatory executor.
+            let prepared = await self.runLauncher(context: context, args: args, stage: .wineSpawn,
+                operation: "wine-prepare", extraEnvironment: preparationEnvironment, lease: lease,
+                operationScope: .prefix(prefix), preparationOnly: true,
+                onRelease: { ownership.executorReleased() })
+            ownership.decide(advance: prepared.succeeded)
+            guard prepared.succeeded else {
+                // Ownership, including a possibly still-running executor, now
+                // belongs to the release callback. The final phase is skipped.
+                snapshotOwnedByExecutor = true
+                if prepared.isUnconfirmed { retainTransport = true; return .unconfirmed }
+                return .failure(self.failure(code: "CYD-WIN-001", stage: .wineSpawn,
+                    summary: "啟動前準備未完成；尚未啟動 Windows 程式。", result: prepared))
+            }
+            preparationCompleted = true
+            wineLaunchEnvironment["CYDER_LAUNCH_PREPARATION_PHASE"] = "final"
+            wineLaunchEnvironment["CYDER_LAUNCH_PREPARATION_PREFIX"] = prefix.resolvingSymlinksInPath().path
+            return nil
+        }, attachAndLaunch: {
         let monitor = onMainThread { environmentMonitor }
         guard let execution = await monitor.beginExecution(prefix: prefix, engine: CyderPaths.engine.appendingPathComponent("bin/wineserver"),
             drained: { [weak observer] scope in observer?.receiveEnvironmentEnded(prefixScope: scope) }) else {
@@ -1920,6 +2145,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             }
         )
         snapshotOwnedByExecutor = result.didStart
+        finalExecutorOwnsLease = result.didStart
         if !result.didStart { monitor.endExecution(execution) }
         if result.isUnconfirmed { lifecycleOutcome = .unconfirmed; retainTransport = true; return .unconfirmed }
         guard result.succeeded else {
@@ -1989,6 +2215,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             CyderDiagnostics.shared.warning("launch observation ended without confirmation; detached executor may remain")
             return .unconfirmed
         }
+        })
     }
 
     private func runPrefixAction(_ action: String, prefix: URL, operation: String) {
@@ -2221,24 +2448,25 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @discardableResult
-    private func showSetup(_ message: String) -> UUID? {
+    private func showSetup(_ message: String, passive: Bool = false) -> UUID? {
         onMainThread {
             guard !quitTransaction else { return nil }
             let presentation = setupProgress.present()
-            renderSetup(message)
+            renderSetup(message, passive: passive)
             return presentation
         }
     }
 
-    private func renderSetup(_ message: String) {
+    private func renderSetup(_ message: String, passive: Bool = false) {
         precondition(Thread.isMainThread)
         guard !quitTransaction else { return }
         if environmentPreparationInProgress, let library = existingLibraryController, library.window?.isVisible == true {
-            library.updateEnvironmentStatus(message, busy: true)
+            environmentReadiness.progress(message)
             return
         }
-        if setupPanel == nil {
-            setupPanel = CyderSetupPanel()
+        if setupPanel?.passive != passive {
+            setupPanel?.close()
+            setupPanel = CyderSetupPanel(passive: passive)
             setupPanel?.show()
         }
         setupPanel?.setMessage(message)
@@ -2274,8 +2502,15 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         return label
     }
 
+    private func dismissLaunchProgress(for launch: String) {
+        precondition(Thread.isMainThread)
+        guard launchPanelOwner == launch, setupPanel?.passive == true else { return }
+        hideSetup()
+    }
+
     private func hideSetup() {
         onMainThread {
+            launchPanelOwner = nil
             setupProgress.invalidate()
             setupPanel?.close()
             setupPanel = nil
@@ -2556,8 +2791,10 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         extraEnvironment: [String: String] = [:],
         lease: CyderOperationGate.Lease? = nil,
         operationScope: CyderOperationGate.Scope? = nil,
+        preparationOnly: Bool = false,
         expectsMachineResult: Bool = false,
         progressPresentation: UUID? = nil,
+        retainedEnvironmentPreparation: CyderEnvironmentPreparationOwnership? = nil,
         validateBeforeSpawn: @escaping () -> Bool = { true },
         onSpawn: @escaping (CyderProcessRunner.Receipt) -> Void = { _ in },
         onRelease: @escaping () -> Void = {}
@@ -2575,7 +2812,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         if isLaunch {
             let accepted = authorization?.settingsSnapshot.flatMap { try? JSONDecoder().decode(CyderSettings.self, from: $0) }
             if lease?.scope == .allEnvironments || (lease == nil &&
-                (CyderGptk.launchNeedsGlobalScope() || (accepted?.moltenvkVariant.launchNeedsGlobalScope() ?? false))) {
+                (CyderGraphicsRuntime.needsGlobalScope || CyderGptk.launchNeedsGlobalScope() || (accepted?.moltenvkVariant.launchNeedsGlobalScope() ?? false))) {
                 scope = .allEnvironments
             }
         }
@@ -2584,8 +2821,27 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         else if let lease { acquired = lease }
         else { acquired = await operationGate.acquire(scope) }
         var transferredLease = false
-        defer { if !transferredLease, let acquired { operationGate.release(acquired) } }
-        guard (isObservation || (acquired != nil && acquired?.scope == scope)), validateBeforeSpawn() else {
+        defer {
+            if !transferredLease {
+                if preparationOnly { onRelease() }
+                else if retainedEnvironmentPreparation == nil, let acquired { operationGate.release(acquired) }
+            }
+        }
+        guard retainedEnvironmentPreparation == nil || (lease?.scope == .allEnvironments && !isLaunch && !isObservation) else {
+            return CyderProcessResult(status: 125, terminationReason: .exit, logURL: operationLog,
+                outputTail: "Invalid environment preparation lease", didStart: false)
+        }
+        guard !preparationOnly || (lease != nil && authorization == nil && isLaunch
+            && extraEnvironment["CYDER_LAUNCH_PREPARATION_PHASE"] == "prepare"
+            && extraEnvironment["CYDER_WINE_DETACH"] == nil
+            && extraEnvironment["CYDER_WINE_PID_FILE"] == nil
+            && extraEnvironment["CYDER_WINE_RESULT_FILE"] == nil
+            && extraEnvironment["CYDER_WINE_LIFECYCLE_FILE"] == nil) else {
+            return CyderProcessResult(status: 125, terminationReason: .exit, logURL: operationLog,
+                outputTail: "Invalid caller-owned preparation contract", didStart: false)
+        }
+        guard !onMainThread({ quitTransaction }),
+              (isObservation || (acquired != nil && acquired?.scope == scope)), validateBeforeSpawn() else {
             return CyderProcessResult(status: 125, terminationReason: .exit, logURL: operationLog,
                 outputTail: "Environment operation cancelled or target changed before dispatch", didStart: false)
         }
@@ -2629,6 +2885,19 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         for (key, value) in extraEnvironment {
             environment[key] = value
         }
+        // BEGIN preparation merged transport fence (also extracted by the pure control).
+        if preparationOnly {
+            environment = CyderLaunchContext.withoutDirectDrawEnvironment(environment)
+            // Removing an extra override cannot remove an inherited context key.
+            // Preparation owns no detached final process or its transport files.
+            for key in ["CYDER_WINE_DETACH", "CYDER_WINE_PID_FILE", "CYDER_WINE_RESULT_FILE",
+                        "CYDER_WINE_ACTIVATED_FILE", "CYDER_WINE_LIFECYCLE_FILE",
+                        "CYDER_ENVIRONMENT_MONITOR", "CYDER_EXECUTION_FINAL",
+                        "CYDER_DDRAW_PATH", "CNC_DDRAW_CONFIG_FILE"] {
+                environment.removeValue(forKey: key)
+            }
+        }
+        // END preparation merged transport fence.
         // These helper paths are internal transport, never per-game overrides.
         environment["CYDER_ENVIRONMENT_HELPER"] = Bundle.main.bundleURL.appendingPathComponent("Contents/MacOS/CyderSwift").path
         environment["CYDER_ENVIRONMENT_SERVER"] = CyderPaths.engine.appendingPathComponent("bin/wineserver").path
@@ -2712,22 +2981,30 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             }
         }
 
+        let execution = CyderProcessRunner.LauncherExecution(preparationOnly: preparationOnly,
+            isLaunch: isLaunch, isObservation: isObservation,
+            isStop: args.contains("--stop-prefix") || args.contains("--stop-all"))
         let started = ProcessInfo.processInfo.systemUptime
+        if preparationOnly, let deadline = execution.deadline {
+            CyderDiagnostics.shared.info("operation=\(operation) preparation_budget_ms=\(Int(deadline * 1000))")
+        }
         onMainThread { activeProcessOperations += 1 }
         transferredLease = true
+        retainedEnvironmentPreparation?.executorStarted()
         let gate = operationGate
         let transportToRemove = handoffCleanupURL
         let outcome = await processRunner.run(process: process,
-            policy: isLaunch ? .launch : (isObservation ? .observation : .mutation),
-            deadline: isLaunch ? 30 : (isObservation ? 5 : ((args.contains("--stop-prefix") || args.contains("--stop-all")) ? 15 : nil)), output: handle,
+            policy: execution.policy, deadline: execution.deadline, output: handle,
             onSpawn: onSpawn, onRelease: { [weak self] in
                 if let transportToRemove { try? FileManager.default.removeItem(at: transportToRemove) }
-                if let acquired { gate.release(acquired) }
+                if !preparationOnly, retainedEnvironmentPreparation == nil, let acquired { gate.release(acquired) }
+                retainedEnvironmentPreparation?.executorReleased()
                 onRelease()
                 guard let self else { return }
                 DispatchQueue.main.async {
                     self.activeProcessOperations -= 1
                     self.instanceCoordinator.refreshExecutionReceipts()
+                    self.prepareEnvironmentAutomaticallyIfNeeded()
                 }
             })
         if let progressWatch { onMainThread { setupProgress.end(progressWatch) } }
@@ -2860,14 +3137,16 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
 
     private func presentExternalLaunchStarting() {
         guard !quitTransaction else { return }
+        normalAppEntryVisible = false
         documentLaunchRequested = true
         terminateWhenSettingsClose = false
-        NSApp.setActivationPolicy(.accessory)
-        statusItemController.markLaunchStarted()
-        showSetup("正在啟動程式…")
-        if existingSettingsController?.window?.isVisible == true {
-            settingsController.close()
+        if existingLibraryController?.window?.isVisible != true && existingSettingsController?.window?.isVisible != true {
+            NSApp.setActivationPolicy(.accessory)
         }
+        statusItemController.markLaunchStarted()
+        guard !environmentPreparationInProgress else { return }
+        launchPanelOwner = nil
+        showSetup("正在啟動程式…", passive: true)
     }
 
     private func launchModeDetail() -> String {
@@ -2879,7 +3158,11 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
     @available(macOS 11.0, *)
     private func launchURI(_ uri: String, authorization: CyderRequestRegistry.Record? = nil,
                            lease: CyderOperationGate.Lease? = nil) {
-        guard !quitTransaction else { if let lease { operationGate.release(lease) }; return }
+        guard !quitTransaction, !readOnlyMode, isPrimaryInstance, !environmentPreparationInProgress else {
+            if let lease { operationGate.release(lease) }
+            if environmentPreparationInProgress { finishRequestPart(authorization, failed: true) }
+            return
+        }
         guard let resourcePath = Bundle.main.resourcePath else {
             if let lease { operationGate.release(lease) }
             hideSetup()
@@ -2957,6 +3240,10 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
 @main
 struct CyderMain {
     static func main() {
+        if ["--graphics-runtime-state", "--graphics-update-guard"].contains(CommandLine.arguments.dropFirst().first ?? "") {
+            DispatchQueue.global(qos: .utility).async { exit(CyderGraphicsRuntime.run(arguments: CommandLine.arguments)) }
+            dispatchMain()
+        }
         if CommandLine.arguments.dropFirst().first == "--environment-state" {
             DispatchQueue.global(qos: .utility).async {
                 exit(CyderEnvironmentCommand.run(arguments: CommandLine.arguments))

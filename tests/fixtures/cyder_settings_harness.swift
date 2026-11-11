@@ -180,6 +180,12 @@ struct CyderSettingsHarness {
         precondition(CyderSettings.isValidEnvironmentKey("GAME_TOKEN"))
         precondition(!CyderSettings.isValidEnvironmentKey("WINEPREFIX"))
         precondition(!CyderSettings.isValidEnvironmentKey("WINEDEBUG"))
+        precondition(!CyderSettings.isValidEnvironmentKey("CYDER_DDRAW_PATH"))
+        precondition(!CyderSettings.isValidEnvironmentKey("CNC_DDRAW_CONFIG_FILE"))
+        for key in ["cyder_ddraw_path", "CyDeR_DdRaW_PaTh", "cnc_ddraw_config_file", "Cnc_Ddraw_Config_File"] {
+            precondition(!CyderSettings.isValidEnvironmentKey(key))
+        }
+        precondition(CyderSettings.isValidEnvironmentKey("game_option"))
         precondition(!CyderSettings.isValidEnvironmentKey("DYLD_INSERT_LIBRARIES"))
         precondition(!CyderSettings.isValidEnvironmentKey("CYDER_WINE_RESULT_FILE"))
         precondition(!CyderSettings.isValidEnvironmentKey("CYDER_WINE_SETTINGS_SNAPSHOT"))

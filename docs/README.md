@@ -10,6 +10,8 @@
 |------|------|
 | [release-pipeline.zh-TW.md](release-pipeline.zh-TW.md) | **測試／正式通道**、引擎 pin、`release-cyder.sh`、檢查清單 |
 | [release-signing.zh-TW.md](release-signing.zh-TW.md) | Developer ID 匯入、notary profile、手做公證步驟 |
+| [component-integrity.zh-TW.md](component-integrity.zh-TW.md) | 逐檔元件清單、唯讀完整性診斷、信任邊界與離線測試 |
+| [dxmt-digest-update.zh-TW.md](dxmt-digest-update.zh-TW.md) | DXMT 0.80 同版 digest／簽章政策更新、閒置切換、離線回歸與測試包 |
 
 | 版本 | 文件 | 重點 |
 |------|------|------|
@@ -66,7 +68,7 @@
 |------|------|
 | [games/compatibility-matrix.md](games/compatibility-matrix.md) | 📋 **遊戲相容性矩陣**：所有已測試單機與線上遊戲狀態、參數與 workaround 總表 |
 | [games/](games/README.md) | 依遊戲與問題類型的總入口 |
-| [games/bluecg/](games/bluecg/README.md) | BlueCG 顯示、runtime、MIDI 問題索引；A6 resize 已解決 |
+| [games/bluecg/](games/bluecg/README.md) | BlueCG 縮放根因、單／三開 HALFTONE／GPU 成本、cnc-ddraw 色深／色彩／無邊框與官方 ☰ 選單；含實驗／產品狀態及未完成項目 |
 | [games/bluecg/audio/midi-underrun.md](games/bluecg/audio/midi-underrun.md) | `dmsynth underrun` 的觀察、判定與診斷計畫 |
 | [games/age-of-empires-rosetta-wine-stutter-research.zh-TW.md](games/age-of-empires-rosetta-wine-stutter-research.zh-TW.md) | 世紀帝國 II／IV 的 Rosetta、Wine 例外處理與 CrossOver 卡頓研究 |
 | [games/pikachu-volleyball/](games/pikachu-volleyball/README.md) | 皮卡丘排球的 MSync／ESync 與 runtime 路徑空白問題 |

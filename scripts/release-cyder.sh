@@ -47,6 +47,7 @@ Options:
 
 Environment:
   CYDER_APP_VERSION       Same as --version
+  CYDER_APP_BUILD         Optional numeric CFBundleVersion for a candidate build
   CYDER_NOTARY_PROFILE    Same as --notary-profile
   SIGN_IDENTITY           Used on release when --sign-identity is omitted;
                           ignored on test unless --sign-identity is passed
@@ -156,7 +157,7 @@ build_app() {
   echo "==> Building Cyder.app (channel=$CHANNEL version=$CYDER_APP_VERSION)"
   run env CYDER_APP_VERSION="$CYDER_APP_VERSION" \
     CYDER_REQUIRE_NATIVE_SWIFT="$([[ "$CHANNEL" == release ]] && echo 1 || echo 0)" \
-    SIGN_IDENTITY="$SIGN_IDENTITY" "${cmd[@]}"
+    CYDER_GRAPHICS_CHANNEL="$CHANNEL" SIGN_IDENTITY="$SIGN_IDENTITY" "${cmd[@]}"
 }
 
 verify_release_app_contract() {
@@ -170,6 +171,14 @@ verify_release_app_contract() {
     echo "Release app version mismatch: expected $CYDER_APP_VERSION, got ${actual_version:-missing}" >&2
     exit 1
   }
+  if [[ -n "${CYDER_APP_BUILD:-}" ]]; then
+    local actual_build
+    actual_build="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$APP/Contents/Info.plist")"
+    [[ "$actual_build" == "$CYDER_APP_BUILD" ]] || {
+      echo "Release app build mismatch: expected $CYDER_APP_BUILD, got $actual_build" >&2
+      exit 1
+    }
+  fi
   /usr/bin/file -b "$swift" | grep -q 'Mach-O' || {
     echo "Release app requires native CyderSwift; shell fallback found." >&2
     exit 1
@@ -292,7 +301,11 @@ case "$CHANNEL" in
     fi
     build_app
     echo "==> Test build ready: $APP"
-    echo "    Ad-hoc / non-notarized. Not for public download."
+    if [[ "$SIGN_IDENTITY" == "-" ]]; then
+      echo "    Ad-hoc / non-notarized. Not for public download."
+    else
+      echo "    Developer ID signed / non-notarized. Local testing only; not published."
+    fi
     ;;
   release)
     if [[ -n "$SIGN_IDENTITY_OVERRIDE" ]]; then

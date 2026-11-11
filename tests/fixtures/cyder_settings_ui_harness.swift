@@ -250,6 +250,61 @@ var afterCancel: CyderOperationGate.Lease?
 operationGate.acquire(.allEnvironments) { afterCancel = $0 }; pump { afterCancel != nil }
 check(!wronglyStarted)
 operationGate.release(afterCancel!); queuedAccess.quiesce(); operationGate.quiesce()
+// Engine updates preserve unsaved draft controls and reject direct actions.
+let updateAccess = CyderSettingsAccess(url: settingsURL)
+let updateUI = CyderSettingsWindowController(settingsAccess: updateAccess)
+updateUI.hasRunningExes = { false }
+let updateViews = views(updateUI.window!.contentView!)
+let updateRetina = updateViews.first { $0.identifier?.rawValue == "settings-retina" } as! NSSwitch
+pump { updateRetina.isEnabled }
+let diskBeforeUpdate = try Data(contentsOf: settingsURL)
+let draftRetina = updateRetina.state == .on ? NSControl.StateValue.off : .on
+updateRetina.state = draftRetina
+var engineUpdates = 0
+updateUI.onPrepareEnvironment = { engineUpdates += 1 }
+updateUI.updateEnvironmentState(.current(.notPrepared))
+check(!updateRetina.isEnabled, "fresh settings did not lock before automatic initialization admission")
+check(updateViews.compactMap { $0 as? NSProgressIndicator }.contains { !$0.isHidden })
+check(updateViews.compactMap { $0 as? NSButton }.filter { $0.title == "初始化環境" }.allSatisfy { $0.isHidden })
+updateUI.updateEnvironmentState(.current(.needsUpdate))
+let updateButton = updateViews.compactMap { $0 as? NSButton }.first { $0.title == "更新" && !$0.isHidden }!
+check(updateButton.isEnabled)
+updateButton.performClick(nil)
+check(engineUpdates == 1 && !updateRetina.isEnabled)
+check(updateRetina.sendAction(updateRetina.action!, to: updateRetina.target))
+updateButton.performClick(nil)
+check(engineUpdates == 1)
+let diskDuringUpdate = try Data(contentsOf: settingsURL)
+check(diskDuringUpdate == diskBeforeUpdate, "busy direct target changed persisted settings")
+check(updateUI.windowShouldClose(updateUI.window!), "environment update prevented closing preferences")
+updateUI.updateEnvironmentState(.failed("fixture failure"))
+check(updateRetina.isEnabled && updateRetina.state == draftRetina)
+let retryUpdate = updateViews.compactMap { $0 as? NSButton }.first { $0.title == "重試" && !$0.isHidden }!
+retryUpdate.performClick(nil); check(engineUpdates == 2)
+updateUI.updateEnvironmentState(.current(.ready))
+var updatedPresentation = CyderSettingsPresentation(); updatedPresentation.engineVersion = "fixture-installed-new-engine"
+updateUI.runtimePresentationReader = { updatedPresentation }
+updateUI.environmentPreparationDidFinish()
+pump { updateViews.contains { ($0 as? NSTextField)?.stringValue == "fixture-installed-new-engine" } }
+check(updateRetina.state == draftRetina, "runtime facts refresh overwrote unsaved draft")
+let diskAfterUpdate = try Data(contentsOf: settingsURL)
+check(diskAfterUpdate == diskBeforeUpdate)
+updateUI.close(); updateAccess.quiesce()
+// A slow settings read completing during preparation cannot reenable controls.
+let lateReadGate = DispatchSemaphore(value: 0)
+let lateReadAccess = CyderSettingsAccess(url: settingsURL, read: { url in
+    lateReadGate.wait(); return try CyderSettingsStore.readValidated(at: url)
+})
+let lateReadUI = CyderSettingsWindowController(settingsAccess: lateReadAccess)
+lateReadUI.updateEnvironmentState(.preparing("fixture preparation"))
+let lateReadViews = views(lateReadUI.window!.contentView!)
+lateReadGate.signal(); pump { !lateReadAccess.isBusy }
+check(lateReadViews.compactMap { $0 as? NSControl }.allSatisfy { !$0.isEnabled }, "late reload unlocked preparing settings")
+lateReadUI.updateEnvironmentState(.current(.ready))
+let restoredRetina = lateReadViews.first { $0.identifier?.rawValue == "settings-retina" } as! NSSwitch
+check(restoredRetina.isEnabled)
+lateReadUI.close(); lateReadAccess.quiesce()
+print("PASS engine settings: shared update/retry callback, busy direct-action refusal, close allowed, draft preservation, installed version refresh, late reload stays locked")
 if let path = ProcessInfo.processInfo.environment["CYDER_TEST_RENDER"] {
     let content = preferences.window!.contentView!
     content.layoutSubtreeIfNeeded()

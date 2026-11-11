@@ -74,6 +74,7 @@ class FramesTest(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertEqual(json.loads(result.stdout)['presentation_backend'], 'gpu-helper')
             self.assertEqual(len((path/'frames.csv').read_text().splitlines()), 4)
+            self.assertNotIn(b'\r', (path/'frames.csv').read_bytes())
 
         with self.assertRaisesRegex(ValueError, 'fewer than two'):
             frames.extract(meta, rows, 100, 100.12, 'abc', 7, (0,0,960,720), 2)

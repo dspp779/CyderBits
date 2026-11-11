@@ -91,7 +91,13 @@ GRAPHICS="$RESOURCES/graphics"
 [[ -d "$GRAPHICS" ]] || die "Missing graphics dir: $GRAPHICS"
 
 pick_one_archive() {
-  local prefix="$1"
+  local prefix="$1" version
+  if [[ -f "$GRAPHICS/$prefix-version.txt" ]]; then
+    version="$(head -n 1 "$GRAPHICS/$prefix-version.txt")"
+    [[ "$version" =~ ^[A-Za-z0-9._-]+$ && -f "$GRAPHICS/$prefix-$version.tar.zst" ]] || return 1
+    printf '%s\n' "$GRAPHICS/$prefix-$version.tar.zst"
+    return 0
+  fi
   local -a matches=()
   local f
   shopt -s nullglob
@@ -133,6 +139,11 @@ DXMT_ARCHIVE="$(pick_one_archive dxmt)" || die "Missing graphics/dxmt-*.tar.zst 
 
 inspect_graphics_archive "$DXVK_ARCHIVE" "dxvk" "$DXVK_MIN_BYTES" "d3d11.dll"
 inspect_graphics_archive "$DXMT_ARCHIVE" "dxmt" "$DXMT_MIN_BYTES" "winemetal.so"
+
+DXMT_PACKAGE_VERSION="$(cat "$GRAPHICS/dxmt-version.txt" 2>/dev/null || true)"
+[[ "$DXMT_PACKAGE_VERSION" =~ ^0\.80-cyder\.[1-9][0-9]*$ ]] || die "Formal DXMT requires a signed Cyder package revision"
+python3 "$OGOM_ROOT/scripts/graphics-signing.py" verify-archive --archive "$DXMT_ARCHIVE" \
+  --zstd "$ZSTD" --package-version "$DXMT_PACKAGE_VERSION" || die "DXMT native signature/provenance verification failed"
 
 ENGINE_VERSION_FILE="$RESOURCES/engine-version.txt"
 [[ -f "$ENGINE_VERSION_FILE" ]] || die "Missing engine-version.txt"

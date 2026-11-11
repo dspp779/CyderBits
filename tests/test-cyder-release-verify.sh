@@ -63,6 +63,6 @@ CYDER_VERIFY_DXVK_MIN_BYTES=1000 CYDER_VERIFY_DXMT_MIN_BYTES=1000 \
   --skip-notarization-checks --baseline "$tmp/Cyder.app.zip"
 ok_status=$?
 set -e
-assert_eq "$ok_status" "0" "valid fake payloads must pass verify when notarization skipped"
+assert test "$ok_status" -ne 0 # Size/layout alone cannot accept unsigned or unprovenanced DXMT.
 
 echo "PASS test-cyder-release-verify"

@@ -549,7 +549,7 @@ enum CyderExecutionOwner {
               renameat(directory.fd, temporary, directory.fd, url.lastPathComponent) == 0,
               fsync(directory.fd) == 0 else { throw Failure.unavailable }
     }
-    private static func spawnWine(_ command: [String]) throws -> Int32 {
+    private static func spawnWine(_ command: [String], correlation: Correlation?) throws -> Int32 {
         // No shell, arch or taskpolicy trampoline may remain after this call.
         // Apple posix_spawn performs the executable-image creation atomically;
         // the x86 preference also handles a future universal Wine executable.
@@ -566,8 +566,11 @@ enum CyderExecutionOwner {
         var architecture = cpu_type_t(CPU_TYPE_X86_64), accepted = 0
         guard posix_spawnattr_setbinpref_np(&attributes, 1, &architecture, &accepted) == 0, accepted == 1 else { throw Failure.unavailable }
         var argv = command.map { strdup($0) } + [nil]
-        var env = ProcessInfo.processInfo.environment.filter { !$0.key.hasPrefix("CYDER_EXECUTION_") }
-            .map { strdup($0.key + "=" + $0.value) } + [nil]
+        var environment = ProcessInfo.processInfo.environment.filter { !$0.key.hasPrefix("CYDER_EXECUTION_") }
+        // This public correlation label is observation-only. Never pass the
+        // executor ticket, even when the Wine child later double-forks.
+        environment["CYDER_LAUNCH_GROUP"] = correlation?.isValid == true ? correlation?.launchID : nil
+        var env = environment.map { strdup($0.key + "=" + $0.value) } + [nil]
         defer { argv.forEach { free($0) }; env.forEach { free($0) } }
         var pid: Int32 = 0
         let error = posix_spawn(&pid, command[0], nil, &attributes, &argv, &env)
@@ -630,7 +633,7 @@ enum CyderExecutionOwner {
                 guard URL(fileURLWithPath: command[0]).resolvingSymlinksInPath().path == handoff.executable else { throw Failure.executableChanged }
                 ticket.nativeSpawn = .init(phase: .claiming, bridge: bridge)
                 try directory.write(ticket)
-                do { pid = try spawnWine([handoff.executable] + command.dropFirst()) }
+                do { pid = try spawnWine([handoff.executable] + command.dropFirst(), correlation: ticket.correlation) }
                 catch {
                     ticket.nativeSpawn?.phase = .failed; ticket.nativeSpawn?.status = 127
                     try directory.write(ticket); throw error

@@ -6,7 +6,7 @@ func check(_ value: @autoclosure () -> Bool, _ message: String) { if !value() { 
 let a = L.EnvironmentID(uid: 501, device: 1, inode: 2, namespace: "test")
 let b = L.EnvironmentID(uid: 501, device: 1, inode: 3, namespace: "test")
 let process = L.ProcessID(boot: "boot", pid: 42, started: 1)
-let window = L.Window(id: .init(process: process, source: "fixture", token: "1"), title: "Fixture", capability: .available)
+let window = L.Window(id: .init(process: process, source: "fixture", token: "1"), title: "Fixture", capability: .available, minimized: false, isProgramWindow: true)
 func environment(_ id: L.EnvironmentID, _ generation: UInt64 = 1) -> L.Environment {
     .init(id: id, prefix: "/isolated/\(id.inode)", engine: "/fixture/engine", generation: generation)
 }
@@ -100,7 +100,19 @@ check(attached.reduce(.executionAttached(attachedStamp, committed, committedLaun
 check(attached.snapshot.requests["committed"]?.phase == .observing && attached.snapshot.launches.count == 1, "actual committed work enters model atomically")
 attached.reduce(.processObserved(attachedStamp, .init(id: process, name: "Fixture", environment: a,
     launch: "committed", ownership: .rootReceipt, existence: .alive)))
-check(attached.reduce(.windowObserved(attachedStamp, window)) == [.windowConfirmed("committed")], "window activation is issued only by the accepting store")
+let splash = L.Window(id: .init(process: process, source: "coregraphics", token: "23"), title: "Splash", capability: .unsupported)
+check(attached.reduce(.windowObserved(attachedStamp, splash)) == [.windowPresented("committed")],
+      "an attributed splash may clear an overlay but cannot complete launch or authorize focus")
+let modal = L.Window(id: .init(process: process, source: "accessibility", token: "dialog"), title: "Program",
+                     capability: .available, minimized: true, focused: false, isProgramWindow: true)
+check(attached.reduce(.windowSnapshot(attachedStamp, process, source: "accessibility", windows: [modal], capability: .available)) == [.windowPresented("committed")],
+      "minimized discovery cannot confirm a new launch")
+var shown = modal; shown.minimized = false
+check(attached.reduce(.windowSnapshot(attachedStamp, process, source: "accessibility", windows: [shown], capability: .available)) == [.windowConfirmed("committed", process)],
+      "an interactive standard AX window confirms its exact launch even without a Wine activation notification")
+check(attached.snapshot.programActivity.running == 1 && attached.snapshot.programActivity.presented == 0,
+      "one process owning CG and AX windows counts once")
+check(attached.reduce(.windowObserved(attachedStamp, window)) == [.windowConfirmed("committed", process)], "window activation is issued only by the accepting store")
 check(attached.reduce(.windowObserved(attached.stamp(for: b)!, window)).isEmpty, "wrong-scope window cannot signal an observation")
 attached.reduce(.executionAttached(attachedStamp, committed, committedLaunch))
 check(attached.snapshot.launches.count == 1, "duplicate attachment cannot create another launch")
@@ -191,3 +203,81 @@ check(!admitted.snapshot.restoring, "quit releases metadata recovery retention")
 
 if !failures.isEmpty { failures.forEach { print("FAIL \($0)") }; exit(1) }
 print("PASS lifecycle environment isolation, generation replacement, drain and uncertain outcomes")
+
+// A launcher can remain alive as several games come and go, and a Windows
+// double fork can discard the Unix parent before the app samples the child.
+var clients = L.State()
+var managed = environment(a)
+managed.existence = .alive; managed.health = .healthy
+clients.reduce(.manage(managed))
+let groupStamp = clients.stamp(for: a)!
+func committedClient(_ id: String, pid: Int32) -> L.ProcessID {
+    clients.reduce(.accepted(.init(id: id, digest: id, environment: a, phase: .queued)))
+    clients.reduce(.dispatchCommitted(groupStamp, request: id, launch: .init(id: id, request: id, environment: a, name: "BlueLauncher", deadline: 30)))
+    let root = L.ProcessID(boot: "boot", pid: pid, started: 100)
+    clients.reduce(.processObserved(groupStamp, .init(id: root, name: "BlueLauncher", environment: a, launch: id, ownership: .rootReceipt, existence: .alive)))
+    clients.reduce(.independentProcess(groupStamp, root, name: "BlueLauncher.exe", existence: .alive, launchGroup: id))
+    return root
+}
+let g1 = UUID().uuidString, g2 = UUID().uuidString
+let parent1 = committedClient(g1, pid: 700), parent2 = committedClient(g2, pid: 701)
+func compositor(_ process: L.ProcessID, _ number: String) -> L.Window {
+    .init(id: .init(process: process, source: "coregraphics", token: number), title: "", capability: .unsupported)
+}
+clients.reduce(.windowObserved(groupStamp, compositor(parent1, "1")))
+precondition(clients.snapshot.programActivity == .init(running: 0, presented: 0, launchers: 1))
+let helpers = L.ProcessID(boot: "boot", pid: 705, started: 200)
+clients.reduce(.independentProcess(groupStamp, helpers, name: "services.exe", existence: .alive, launchGroup: g1))
+precondition(clients.snapshot.processes[helpers]?.launch == nil, "a broker inheriting the tag is not the game")
+let first = L.ProcessID(boot: "boot", pid: 800, started: 201), second = L.ProcessID(boot: "boot", pid: 801, started: 203)
+clients.reduce(.independentProcess(groupStamp, first, name: "bluecg.exe", existence: .alive))
+clients.reduce(.windowObserved(groupStamp, compositor(first, "2"))) // window precedes root correlation
+precondition(clients.reduce(.independentProcess(groupStamp, first, name: "bluecg.exe", existence: .alive, launchGroup: g1)) == [.windowPresented(g1)])
+clients.reduce(.processExited(groupStamp, parent2)) // root exit isn't proof its successor ended
+clients.reduce(.independentProcess(groupStamp, second, name: "bluecg.exe", existence: .alive, launchGroup: g2))
+let hint = clients.reduce(.windowObserved(groupStamp, compositor(second, "3")))
+precondition(hint == [.windowPresented(g2)], "presented target is running; only interactive evidence confirms readiness")
+precondition(clients.snapshot.processes[first]?.ownership == .explicitHandoff && clients.snapshot.processes[second]?.launch == g2)
+precondition(clients.snapshot.programActivity == .init(running: 2, presented: 0, launchers: 1))
+clients.reduce(.windowSnapshot(groupStamp, first, source: "coregraphics", windows: [], capability: .unsupported))
+precondition(clients.snapshot.programActivity.running == 2, "minimizing an identified live game does not end its session")
+clients.reduce(.independentProcess(groupStamp, first, name: "bluecg.exe", existence: .exited))
+precondition(clients.snapshot.programActivity.running == 1 && clients.snapshot.processes[parent1]?.existence == .alive)
+clients.reduce(.independentProcess(groupStamp, second, name: "bluecg.exe", existence: .exited))
+precondition(clients.snapshot.programActivity == .init(running: 0, presented: 0, launchers: 1))
+let impostor = L.ProcessID(boot: "boot", pid: 800, started: 42)
+clients.reduce(.independentProcess(groupStamp, impostor, name: "bluecg.exe", existence: .alive, launchGroup: g1))
+precondition(clients.snapshot.processes[impostor]?.launch == nil, "a reused PID born before the root cannot be a successor")
+precondition(clients.snapshot.requests.count == 2 && clients.snapshot.processes[helpers]?.existence == .alive)
+print("PASS interactive versus splash; two launch groups in one prefix; root exit versus child handoff; multi-client updates 0→2→1→0, minimize, helper retention and PID reuse")
+
+for (offset, image) in ["rundll32.exe", "winedbg.exe", "werfault.exe", "wineconsole.exe"].enumerated() {
+    let service = L.ProcessID(boot: "boot", pid: Int32(920 + offset), started: 219)
+    clients.reduce(.processObserved(groupStamp, .init(id: service, name: "BlueLauncher", environment: a,
+        launch: g1, ownership: .processTree, existence: .alive)))
+    clients.reduce(.independentProcess(groupStamp, service, name: image, existence: .alive, launchGroup: g1))
+    precondition(clients.reduce(.windowObserved(groupStamp, compositor(service, "32"))).isEmpty)
+    let utilityWindow = L.Window(id: .init(process: service, source: "accessibility", token: "utility"),
+        title: "Setup", capability: .available, minimized: false, focused: true, isProgramWindow: true)
+    precondition(clients.reduce(.windowSnapshot(groupStamp, service, source: "accessibility", windows: [utilityWindow], capability: .available)).isEmpty)
+    precondition(clients.snapshot.programActivity.running == 0, "a helper appearing as an interactive dialog may not count as a game")
+}
+let orphan = L.ProcessID(boot: "boot", pid: 901, started: 302)
+clients.reduce(.independentProcess(groupStamp, orphan, name: "bluecg.exe", existence: .alive))
+clients.reduce(.windowObserved(groupStamp, compositor(orphan, "91")))
+precondition(clients.snapshot.programActivity.running == 1)
+clients.reduce(.independentProcess(groupStamp, orphan, name: "bluecg.exe", existence: .unconfirmed))
+precondition(clients.snapshot.programActivity.checking && !clients.snapshot.programActivity.summary.contains("執行中 0"),
+             "unknown liveness must remain visibly distinct from a confirmed exit")
+clients.reduce(.independentProcess(groupStamp, orphan, name: "bluecg.exe", existence: .exited))
+precondition(!clients.snapshot.programActivity.checking)
+print("PASS helper CG surface or AX dialog cannot dismiss progress, activate or increment a game count; unreadable client birth shows pending until reobserved")
+
+clients.reduce(.observationFinished(groupStamp, launch: g2, outcome: .confirmedStarted))
+let laterClient = L.ProcessID(boot: "boot", pid: 907, started: 312)
+clients.reduce(.independentProcess(groupStamp, laterClient, name: "bluecg.exe", existence: .alive, launchGroup: g2))
+precondition(clients.snapshot.processes[laterClient]?.launch == nil,
+             "an obsolete broker label from a completed and drained launch cannot claim a new client")
+clients.reduce(.windowObserved(groupStamp, compositor(laterClient, "99")))
+precondition(clients.snapshot.programActivity.running == 1, "the independently verified client still counts")
+print("PASS stale broker group cannot claim a later game for a completed launch after all its programs exited")

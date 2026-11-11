@@ -34,11 +34,12 @@ def case(name):
     return directory
 
 
-def reserve(directory, handoff=True, prefix=None, executable=native, global_scope=False):
+def reserve(directory, handoff=True, prefix=None, executable=native, global_scope=False, group=None):
     prefix = prefix or directory / 'prefix'
     command = [str(helper), '--prepare-global' if global_scope else '--prepare', str(ledger), str(prefix)]
     if handoff: command += [str(executable), str(directory / 'pid')]
-    return subprocess.check_output(command, text=True, timeout=10).strip()
+    environment = os.environ | ({'FIXTURE_LAUNCH_GROUP': group} if group else {})
+    return subprocess.check_output(command, env=environment, text=True, timeout=10).strip()
 
 
 def receipt(ticket):
@@ -50,7 +51,7 @@ def start(directory, ticket, command, extra_environment=None):
         CYDER_SUPPORT=str(directory / 'support'), CYDER_RUNTIME_ROOT=str(directory / 'runtime'),
         CYDER_WINE_DETACH='1', CYDER_WINE_PID_FILE=str(directory / 'pid'),
         CYDER_WINE_RESULT_FILE=str(directory / 'result'), CYDER_SESSION_GUARD='0',
-        CYDER_CAPTURE_WINE_LOG='1', CYDER_POWER_MODE='normal')
+        CYDER_CAPTURE_WINE_LOG='1', CYDER_POWER_MODE='normal', CYDER_LAUNCH_GROUP='untrusted-parent-value')
     env.update(extra_environment or {})
     with (directory / ('owner-' + ticket + '.log')).open('w') as output:
         process = subprocess.Popen([str(executor), '--execution-owner', str(ledger), ticket, '--'] + command,
@@ -84,7 +85,8 @@ mkfifo() {
 }
 cyder_run_wine_exe "$TEST_ROOT/runtime/bin/wine" "$TEST_ROOT/inert.exe" "$TEST_ROOT/prefix"
 ''')
-    ticket = reserve(delayed)
+    correlated_group = str(uuid.uuid4())
+    ticket = reserve(delayed, group=correlated_group)
     owner = start(delayed, ticket, ['/bin/bash', str(script)])
     wait(lambda: (delayed / 'wrapper.entered').exists(), 'formal log wrapper never entered')
     time.sleep(.3)
@@ -107,6 +109,7 @@ cyder_run_wine_exe "$TEST_ROOT/runtime/bin/wine" "$TEST_ROOT/inert.exe" "$TEST_R
     wait(lambda: conflict.poll() is not None, 'waiting same-prefix operation never ran')
     assert conflict.returncode == 0 and (delayed / 'conflict.ran').exists()
     state = receipt(ticket)
+    assert (delayed / 'native.group').read_text() == correlated_group, "Wine must receive the group from the committed ticket"
     native_pid, architecture = (delayed / 'native.entered').read_text().split()
     assert architecture == 'x86_64'
     assert int((delayed / 'pid').read_text()) == int(native_pid) == state['nativeSpawn']['process']['pid']
@@ -390,6 +393,8 @@ cyder_open_prefix_taskmgr "$TEST_ROOT/runtime/bin/wine" "$TEST_ROOT/prefix"
     assert manager_conflict.poll() is None and not (manager / 'manager-conflict.ran').exists(), 'task manager scope bypassed'
     (manager / 'frontend.release').touch()
     wait(lambda: manager_owner.poll() is not None and (manager / 'native.entered').exists(), 'task manager failed to hand off actual native spawn')
+    assert (manager / 'native.group').read_text() == '', 'an uncorrelated native tool may not inherit a game group'
+    print('PASS native birth receives only the committed launch group; uncorrelated tool clears inherited labels')
     assert manager_owner.returncode == 0 and receipt(manager_ticket)['phase'] == 'handedOff'
     assert receipt(manager_ticket)['nativeSpawn']['process']['pid'] == int((manager / 'pid').read_text())
     wait(lambda: manager_conflict.poll() is not None, 'waiting operation never ran after the task manager handed off')

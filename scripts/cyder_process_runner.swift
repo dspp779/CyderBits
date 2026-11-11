@@ -6,6 +6,21 @@ import Foundation
 /// the actual child exits, even after its caller's observation completes.
 final class CyderProcessRunner {
     enum Policy { case observation, launch, mutation }
+    /// Launch preparation can run several cold Wine registry clients. Keep its
+    /// bounded mutation budget separate from final spawn and window observation.
+    struct LauncherExecution {
+        let policy: Policy
+        let deadline: TimeInterval?
+        init(preparationOnly: Bool, isLaunch: Bool, isObservation: Bool, isStop: Bool) {
+            if preparationOnly {
+                policy = .mutation
+                deadline = 120
+            } else {
+                policy = isLaunch ? .launch : (isObservation ? .observation : .mutation)
+                deadline = isLaunch ? 30 : (isObservation ? 5 : (isStop ? 15 : nil))
+            }
+        }
+    }
     enum Outcome: Equatable {
         case exited(Int32, signalled: Bool)
         case failedToStart(String)

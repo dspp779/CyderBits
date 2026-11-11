@@ -5,7 +5,7 @@ import Darwin
 /// monitor and the native helper. No environment/argv dumps are retained or
 /// logged; only WINEPREFIX and the first .exe argument are extracted.
 enum CyderProcessTable {
-    struct Metadata: Equatable { let prefix: String; let name: String }
+    struct Metadata: Equatable { let prefix: String; let name: String; var launchGroup: String? = nil }
     /// Executables of an engine's Wine client processes (not wineserver).
     static let clientImages = ["bin/wine", "bin/wine64", "bin/wine-preloader", "bin/wine64-preloader",
                                "lib/wine/x86_64-unix/wine", "lib/wine/i386-unix/wine", "lib/wine/aarch64-unix/wine"]
@@ -28,12 +28,13 @@ enum CyderProcessTable {
     }
     /// What KERN_PROCARGS2 shows. Wine overwrites its child processes'
     /// argument area with the Windows command line, so their WINEPREFIX is
-    /// gone while the .exe name remains.
-    struct Arguments: Equatable { let prefix: String?; let name: String? }
+    /// gone while the .exe name remains. `launchGroup` is the executor's
+    /// CYDER_LAUNCH_GROUP label, kept only when exactly one valid UUID is set.
+    struct Arguments: Equatable { let prefix: String?; let name: String?; var launchGroup: String? = nil }
     static func parse(_ bytes: [UInt8]) -> Metadata? {
         guard let fields = arguments(bytes), let prefix = fields.prefix else { return nil }
         // CX_BOTTLE alone is not an absolute prefix identity.
-        return .init(prefix: prefix, name: fields.name ?? "Windows 程序")
+        return .init(prefix: prefix, name: fields.name ?? "Windows 程序", launchGroup: fields.launchGroup)
     }
     static func arguments(_ bytes: [UInt8]) -> Arguments? {
         guard bytes.count > 4, bytes.count <= 2 * 1024 * 1024 else { return nil }
@@ -58,22 +59,35 @@ enum CyderProcessTable {
                 if !clean.isEmpty { name = clean }
             }
         }
-        var prefix: String?
+        // Observed Wine procargs can leave a NUL gap after the exact argc
+        // strings. Skip only this boundary, not empty argv entries or an
+        // environment terminator after the first environment string.
+        while offset < bytes.count && bytes[offset] == 0 { offset += 1 }
+        var prefix: String?, group: String?
+        var groupCount = 0
+        let prefixKey = Array("WINEPREFIX=".utf8), groupKey = Array("CYDER_LAUNCH_GROUP=".utf8)
         var count = 0
         while offset < bytes.count && bytes[offset] != 0 {
             count += 1
             guard count <= 4096, let raw = string() else { return nil }
-            let key = Array("WINEPREFIX=".utf8)
-            if raw.starts(with: key) {
-                guard prefix == nil, let value = String(bytes: raw.dropFirst(key.count), encoding: .utf8),
+            if raw.starts(with: groupKey) {
+                groupCount += 1
+                if let value = String(bytes: raw.dropFirst(groupKey.count), encoding: .utf8), UUID(uuidString: value) != nil {
+                    group = value
+                }
+            }
+            if raw.starts(with: prefixKey) {
+                guard prefix == nil, let value = String(bytes: raw.dropFirst(prefixKey.count), encoding: .utf8),
                       value.hasPrefix("/"), value.utf8.count < 4096 else { return nil }
                 prefix = value
             }
         }
-        return .init(prefix: prefix, name: name)
+        return .init(prefix: prefix, name: name, launchGroup: groupCount == 1 ? group : nil)
     }
     static func metadata(_ pid: Int32) -> Metadata? {
-        arguments(pid).flatMap { fields in fields.prefix.map { .init(prefix: $0, name: fields.name ?? "Windows 程序") } }
+        arguments(pid).flatMap { fields in
+            fields.prefix.map { .init(prefix: $0, name: fields.name ?? "Windows 程序", launchGroup: fields.launchGroup) }
+        }
     }
     static func arguments(_ pid: Int32) -> Arguments? {
         precondition(!Thread.isMainThread)

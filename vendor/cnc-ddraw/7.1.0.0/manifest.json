@@ -8,14 +8,15 @@
   "licenseFile": "LICENSE",
   "licenseSha256": "a705144535bbfccc05e8310c4f8ab5f0b6f0ec2c9371b76ca5a522cf90e031f5",
   "install": {
-    "destination": "executable_directory",
+    "destination": "per_game",
     "include": [
       "ddraw.dll",
       "ddraw.ini",
-      "Shaders/"
-    ],
-    "exclude": [
-      "cnc-ddraw config.exe"
+      "Shaders/interpolation/catmull-rom-bilinear.glsl"
     ]
-  }
+  },
+  "sourceCommit": "541b5de218ec3fbd6ea91e606ebfadc07c1786b0",
+  "archiveRole": "upstream-reference",
+  "licenseScope": "Upstream project. Individual embedded code and shader notices also apply.",
+  "licenseNotices": "THIRD-PARTY-NOTICES.txt"
 }

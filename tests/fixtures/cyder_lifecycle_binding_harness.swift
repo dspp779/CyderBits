@@ -32,7 +32,19 @@ func pump(_ condition: () -> Bool) {
     precondition(condition(), "binding integration deadline")
 }
 let app = NSApplication.shared; app.setActivationPolicy(.accessory)
-let controller = CyderStatusItemController(); controller.setUIVisible(true)
+let handle = NSObject()
+let focusLock = NSLock()
+var focusCount = 0
+let switchAtConfirmation = CommandLine.arguments.contains("--switch-at-confirmation")
+let interactiveWindow = CyderWindowAccess.Driver(scan: { _ in
+    .windows([.init(handle: handle, title: "Native fixture", capability: .available, minimized: false,
+                    focused: true, isProgramWindow: true)])
+}, equal: { $0 === $1 }, activate: { _, target, permitted in
+    precondition(target === handle && permitted())
+    focusLock.lock(); focusCount += 1; focusLock.unlock()
+    return .shown
+})
+let controller = CyderStatusItemController(windowDriver: interactiveWindow, foregroundPID: { 600 }); controller.setUIVisible(true)
 let child = Process(); child.executableURL = URL(fileURLWithPath: CommandLine.arguments[0]); child.arguments = [directory.path, "--child"]
 try child.run()
 defer { child.terminate(); child.waitUntilExit() }
@@ -70,6 +82,7 @@ let activeTicket = CyderExecutionOwner.Ticket(schema: 1, id: UUID(), issuer: com
     correlation: .init(requestID: committed.id, launchID: committed.launchID!, digest: committed.digest), displayName: "Committed fixture")
 controller.receiveHistory([CyderRecoveryObserver.Record(ticket: activeTicket, currentEpoch: committed.executorEpoch!)!])
 let authority = CyderLaunchObserver.Authority(request: committed.id, launch: committed.launchID!, digest: committed.digest, epoch: committed.executorEpoch!)
+controller.markLaunchStarted()
 controller.beginLaunch(id: authority.launch, prefix: prefix, executableName: "Committed fixture", authority: authority, stamp: boundStamp,
     committedRequest: .init(id: committed.id, digest: committed.digest, environment: boundStamp.environment, phase: .dispatching, launch: authority.launch))
 pump { controller.lifecycleSnapshot.requests[committed.id]?.phase == .observing }
@@ -84,7 +97,17 @@ func root(_ phase: CyderSpawnPhase, scope: String) -> CyderLaunchObserver.Native
 controller.attachNativeRoot(root(.spawned, scope: "wrong"))
 precondition(controller.nativeRootPID(id: authority.launch) == 0, "matching request cannot override actual environment scope")
 let observer = CyderLaunchObserver(authority: authority), signal = WineActivationWaiter(prefix: prefix.path)
-controller.onWindowConfirmed = { if $0 == authority.launch { signal.signal() } }
+controller.onWindowConfirmed = {
+    guard $0 == authority.launch else { return }
+    signal.signal()
+    // This fires after the launch intent enters the lifecycle store but before
+    // its activation effect reaches the AppKit adapter. Returning to the
+    // original app must not re-arm the interrupted launch.
+    if switchAtConfirmation {
+        controller.noteFrontmostApplication(601)
+        controller.noteFrontmostApplication(600)
+    }
+}
 controller.attachNativeRoot(root(.spawned, scope: scope))
 observer.receive(root(.spawned, scope: scope))
 var outcome: CyderLaunchObserver.Result?
@@ -96,13 +119,25 @@ Task {
         outcome: outcome == .activated ? .confirmedStarted : .unconfirmed))
 }
 pump { controller.lifecycleSnapshot.requests[committed.id]?.phase == .completed }
+pump { controller.lifecycleSnapshot.windows.keys.contains { $0.source == "coregraphics" } }
 let snapshot = controller.lifecycleSnapshot
 precondition(outcome == .activated && snapshot.launches[authority.launch]?.deadline.isFinite == true)
 precondition(snapshot.processes[identity]?.launch == authority.launch && snapshot.processes[identity]?.ownership == .rootReceipt)
 let window = CyderLifecycle.WindowID(process: identity, source: "coregraphics", token: "77")
 precondition(snapshot.windows[window]?.capability == .unsupported, "CoreGraphics identity alone must not invent a focus capability")
 let menu = NSMenu(); controller.menuNeedsUpdate(menu)
-precondition(menu.items.contains { $0.title.contains("Committed fixture") && $0.title.contains("已確認程式視窗") })
+precondition(menu.items.contains { $0.title.contains("Committed fixture") })
+precondition(snapshot.programActivity.running == 1)
+if switchAtConfirmation {
+    pump { controller.lifecycleSnapshot.windowAction?.result == .unconfirmed }
+    focusLock.lock(); let calls = focusCount; focusLock.unlock()
+    precondition(calls == 0, "an intervening switch during asynchronous handoff must suppress the OS request")
+    print("PASS another app selected during asynchronous window confirmation suppresses foreground handoff even after switching back")
+} else {
+    pump { focusLock.lock(); defer { focusLock.unlock() }; return focusCount == 1 }
+}
+precondition(controller.lifecycleSnapshot.windowAction?.window.process == identity)
+
 windowProbe.hold(); var queried = false
 controller.claimLiveWindows(id: authority.launch) { queried = true }
 pump { windowProbe.hasEntered() }

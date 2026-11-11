@@ -4,6 +4,22 @@ set -euo pipefail
 
 CYDER_COMMON_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+# Windows looks up these internal names without regard to ASCII case. Keep
+# the Unix environment free of every alias before bootstrap/prefix helpers.
+cyder_is_internal_ddraw_environment_key() {
+  case "$1" in
+    [Cc][Yy][Dd][Ee][Rr]_[Dd][Dd][Rr][Aa][Ww]_[Pp][Aa][Tt][Hh]|[Cc][Nn][Cc]_[Dd][Dd][Rr][Aa][Ww]_[Cc][Oo][Nn][Ff][Ii][Gg]_[Ff][Ii][Ll][Ee]) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+cyder_clear_internal_ddraw_environment() {
+  local key
+  while IFS= read -r key; do
+    if cyder_is_internal_ddraw_environment_key "$key"; then unset "$key"; fi
+  done < <(compgen -e || true)
+}
+cyder_clear_internal_ddraw_environment
+
 _rosetta_sh="$CYDER_COMMON_DIR/cyder-ensure-rosetta.sh"
 if [[ -f "$_rosetta_sh" ]]; then
   # shellcheck source=cyder-ensure-rosetta.sh
@@ -17,6 +33,12 @@ if [[ -f "$_graphics_sh" ]]; then
   source "$_graphics_sh"
 fi
 unset _graphics_sh
+
+_integrity_sh="$CYDER_COMMON_DIR/cyder-component-check.sh"
+if [[ -f "$_integrity_sh" ]]; then
+  source "$_integrity_sh"
+fi
+unset _integrity_sh
 
 _migrate_graphics_sh="$CYDER_COMMON_DIR/cyder-migrate-graphics-prefix.sh"
 if [[ -f "$_migrate_graphics_sh" ]]; then
@@ -1135,6 +1157,53 @@ cyder_link_gptk_into_engine() {
   cyder_gptk_root_is_valid "$link"
 }
 
+# GStreamer's compiled-in paths still point at the media build prefix after
+# engine relocation. Configure the bundled stack for this launch and its Wine
+# children, independently of the selected D3D backend.
+cyder_apply_media_launch_environment() {
+  local engine_root="$1" plugins="$1/lib/wine/gstreamer-1.0"
+  local scanner="$1/libexec/gstreamer-1.0/gst-plugin-scanner"
+  # Remove only values previously supplied by Cyder. Explicit caller changes
+  # survive a second launch or an engine switch in the same shell.
+  if [[ -n "${CYDER_MEDIA_PLUGIN_DIR:-}" ]]; then
+    [[ "${GST_PLUGIN_PATH_1_0-}" != "$CYDER_MEDIA_PLUGIN_DIR" ]] || unset GST_PLUGIN_PATH_1_0
+    [[ "${GST_PLUGIN_SYSTEM_PATH_1_0-}" != "$CYDER_MEDIA_PLUGIN_DIR" ]] || unset GST_PLUGIN_SYSTEM_PATH_1_0
+  fi
+  if [[ -n "${CYDER_MEDIA_SCANNER:-}" && "${GST_PLUGIN_SCANNER-}" == "$CYDER_MEDIA_SCANNER" ]]; then
+    unset GST_PLUGIN_SCANNER
+  fi
+  if [[ -n "${CYDER_MEDIA_REGISTRY:-}" && "${GST_REGISTRY_1_0-}" == "$CYDER_MEDIA_REGISTRY" ]]; then
+    unset GST_REGISTRY_1_0
+  fi
+  unset CYDER_MEDIA_PLUGIN_DIR CYDER_MEDIA_SCANNER CYDER_MEDIA_REGISTRY
+  export CYDER_MEDIA_STATUS=unavailable
+  # Respect external stacks, including intentional empty search paths and
+  # GStreamer's unversioned aliases. Do not mix their plugins with our scanner.
+  if [[ "${GST_PLUGIN_PATH_1_0+x}${GST_PLUGIN_SYSTEM_PATH_1_0+x}${GST_PLUGIN_SCANNER_1_0+x}${GST_PLUGIN_SCANNER+x}${GST_PLUGIN_PATH+x}${GST_PLUGIN_SYSTEM_PATH+x}" == *x* ]]; then
+    export CYDER_MEDIA_STATUS=external
+    return 0
+  fi
+  # Old/minimal engines remain launchable without a bundled media stack.
+  [[ -d "$plugins" && -x "$scanner" && -f "$engine_root/lib/wine/x86_64-unix/libgstreamer-1.0.0.dylib" ]] || return 0
+  export GST_PLUGIN_PATH_1_0="$plugins" GST_PLUGIN_SYSTEM_PATH_1_0="$plugins"
+  export GST_PLUGIN_SCANNER="$scanner"
+  export CYDER_MEDIA_PLUGIN_DIR="$plugins" CYDER_MEDIA_SCANNER="$scanner"
+  export CYDER_MEDIA_STATUS=bundled
+  if [[ "${GST_REGISTRY_1_0+x}${GST_REGISTRY+x}" != *x* ]]; then
+    local identity cache_dir version=""
+    [[ ! -f "$engine_root/version" ]] || version="$(head -n 1 "$engine_root/version")"
+    identity="$(printf '%s\n' "$engine_root" "$version" x86_64 | /usr/bin/cksum | awk '{print $1}')"
+    cache_dir="${CYDER_SUPPORT:-$HOME/Library/Application Support/Cyder}/Caches/gstreamer"
+    if mkdir -p "$cache_dir" && [[ -w "$cache_dir" ]]; then
+      export GST_REGISTRY_1_0="$cache_dir/registry-x86_64-$identity.bin"
+      export CYDER_MEDIA_REGISTRY="$GST_REGISTRY_1_0"
+    else
+      # Plugin discovery still works using GStreamer's default cache policy.
+      export CYDER_MEDIA_STATUS=bundled-default-cache
+    fi
+  fi
+}
+
 cyder_apply_gptk_launch_environment() {
   local engine_root="$1" gptk_root=""
   # Do not retain stale paths inherited from a parent process when GPTK was
@@ -1793,6 +1862,7 @@ cyder_ensure_shared_engine() {
     printf '%s\n' "$bundled_sha" >"$dest/.cyder-engine-artifact-sha256"
   fi
   cyder_apply_moltenvk_variant_from_preference "$dest" || exit 1
+  if declare -F cyder_check_components >/dev/null; then cyder_check_components engine full; fi
   echo "$dest"
 }
 
@@ -2440,19 +2510,25 @@ cyder_ensure_font_replacements() {
 # Finder associations and the internal shell launch path receive the same
 # per-game settings.
 CYDER_GAME_ARGUMENTS=()
+CYDER_CNC_GAME_CONFIG=""
+CYDER_CNC_GAME_DLL=""
+CYDER_CNC_GAME_ACTIVE=0
+CYDER_CNC_ENV_APPLIED=0
+CYDER_CNC_GAME_LOCKED=0
 CYDER_GAME_SETTINGS_FOUND=0
 
 cyder_game_environment_key_is_allowed() {
   local key="$1"
   [[ "$key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || return 1
+  if cyder_is_internal_ddraw_environment_key "$key"; then return 1; fi
   case "$key" in
-    BASH_ENV|ENV|IFS|PATH|HOME|TMPDIR|SHELLOPTS|BASHOPTS|CDPATH|GLOBIGNORE) return 1 ;;
+    BASH_ENV|ENV|IFS|PATH|HOME|TMPDIR|SHELLOPTS|BASHOPTS|CDPATH|GLOBIGNORE|CYDER_DDRAW_PATH|CNC_DDRAW_CONFIG_FILE) return 1 ;;
     DYLD_*|LD_*) return 1 ;;
-    CYDER_SCROLLING_PREFERENCE) return 1 ;;
+    CYDER_SCROLLING_PREFERENCE|CYDER_LAUNCH_GROUP|CYDER_LAUNCH_PREPARATION_*) return 1 ;;
     WINEPREFIX|WINESERVER|WINEARCH|WINEDEBUG|CX_ROOT|CX_BOTTLE|CX_APPLEGPTK_LIBD3DSHARED_PATH) return 1 ;;
     CYDER_SUPPORT|CYDER_RUNTIME_ROOT|CYDER_ENGINES|CYDER_ENGINE_NAME|CYDER_ENGINE_SRC|CYDER_SCRIPTS|CYDER_APP|CYDER_MAPLESTORY_FILE_CACHE|CYDER_MAPLESTORY_FILE_CACHE_PREFERENCE) return 1 ;;
     CYDER_WINE_*|CYDER_SESSION_*|CYDER_DIAGNOSTIC_*|CYDER_TEST_*|CYDER_EXECUTION_*|CYDER_RESULT_FILE|CYDER_PROGRESS_FILE) return 1 ;;
-    CYDER_GPTK_ROOT|CYDER_GRAPHICS_*|CYDER_GAME_ARGUMENTS|CYDER_MOLTENVK_VARIANT_PREFERENCE) return 1 ;;
+    CYDER_GPTK_ROOT|CYDER_GRAPHICS_*|CYDER_CNC_*|CYDER_GAME_ARGUMENTS|CYDER_MOLTENVK_VARIANT_PREFERENCE) return 1 ;;
   esac
   return 0
 }
@@ -2736,7 +2812,8 @@ cyder_load_game_settings() {
       return 1
     }
     game_json="$(/bin/cat "$launch_request")" || return 1
-    rm -f "$launch_request"
+    # The same accepted per-launch rule must survive the preparation process.
+    if [[ "${CYDER_LAUNCH_PREPARATION_PHASE:-}" != prepare ]]; then rm -f "$launch_request"; fi
     unset CYDER_TEST_SETTINGS_REQUEST
   else
     [[ -f "$settings_file" ]] || return 0
@@ -2820,23 +2897,111 @@ cyder_load_game_settings() {
   fi
 }
 
+# External DirectDraw is per-launch only. Never expose it to prefix helpers or
+# carry our override into another request in a reusable shell process.
+cyder_clear_cnc_game_environment() {
+  cyder_clear_internal_ddraw_environment
+  if [[ "${CYDER_CNC_ENV_APPLIED:-0}" == 1 ]]; then
+    if [[ "${CYDER_CNC_BASE_OVERRIDES_SET:-0}" == 1 ]]; then
+      export WINEDLLOVERRIDES="$CYDER_CNC_BASE_OVERRIDES"
+    else
+      unset WINEDLLOVERRIDES
+    fi
+  fi
+  CYDER_CNC_ENV_APPLIED=0
+}
+
+cyder_prepare_cnc_game() {
+  local exe="$1" prefix="$2" engine_root="${3:-}" package result mode config
+  cyder_clear_cnc_game_environment
+  if [[ "${CYDER_CNC_GAME_LOCKED:-0}" == 1 ]]; then
+    exec 8<&-
+    CYDER_CNC_GAME_LOCKED=0
+  fi
+  CYDER_CNC_GAME_CONFIG=""
+  CYDER_CNC_GAME_DLL=""
+  CYDER_CNC_GAME_ACTIVE=0
+  case "$exe" in *.[eE][xX][eE]) ;; *) return 0 ;; esac
+  if [[ ! -f "$CYDER_SCRIPTS/cyder-cnc-game.rb" || -L "$CYDER_SCRIPTS/cyder-cnc-game.rb" ]]; then
+    local profile_id rule_root="${CYDER_SUPPORT:-$HOME/Library/Application Support/Cyder}/directdraw"
+    profile_id="$(/usr/bin/ruby -rdigest -e 'p=File.join(File.realpath(File.dirname(ARGV[0])),File.basename(ARGV[0])); puts "profile-"+Digest::SHA256.hexdigest(p)[0,24]' "$exe")" || return $?
+    if [[ -e "${exe%/*}/.cyder-cnc-ddraw" || -L "${exe%/*}/.cyder-cnc-ddraw" || -L "$rule_root" || -e "$rule_root/$profile_id/settings.json" || -L "$rule_root/$profile_id" || -L "$rule_root/$profile_id/settings.json" ]]; then
+      echo 'CYD-CNC-020：DirectDraw 啟動工具遺失，請重新安裝 Cyder。' >&2
+      return 1
+    fi
+    return 0
+  fi
+  result="$(/usr/bin/ruby "$CYDER_SCRIPTS/cyder-cnc-game.rb" launch "$exe" "$prefix" "$engine_root" "${CYDER_LAUNCH_PREPARATION_PHASE:-}")" || return $?
+  mode="$(/usr/bin/plutil -extract mode raw -o - - <<<"$result")" || return $?
+  case "$mode" in
+    off) return 0 ;;
+    on)
+      CYDER_CNC_GAME_ACTIVE=1
+      [[ "${CYDER_LAUNCH_PREPARATION_PHASE:-}" != prepare ]] || return 0
+      CYDER_CNC_GAME_DLL="$(/usr/bin/plutil -extract dllPath raw -o - - <<<"$result")" || return $?
+      CYDER_CNC_GAME_CONFIG="$(/usr/bin/plutil -extract configPath raw -o - - <<<"$result")" || return $?
+      [[ -n "$CYDER_CNC_GAME_DLL" && -n "$CYDER_CNC_GAME_CONFIG" ]] || return 1
+      ;;
+    legacy)
+      if [[ "$(/usr/bin/plutil -extract legacyMode raw -o - - <<<"$result")" != off ]]; then CYDER_CNC_GAME_ACTIVE=1; fi
+      [[ "${CYDER_LAUNCH_PREPARATION_PHASE:-}" != prepare ]] || return 0
+      # Existing managed copies retain their old DLL/receipt/lease semantics.
+      package="${exe%/*}/.cyder-cnc-ddraw"
+      [[ -d "$package" && ! -L "$package" && -f "$package/lock" && ! -L "$package/lock" ]] || return 1
+      exec 8<"$package/lock" || return 1
+      if ! config="$(/usr/bin/ruby "$CYDER_SCRIPTS/cyder-cnc-game-legacy.rb" launch "$exe" "$prefix")"; then
+        exec 8<&-
+        return 1
+      fi
+      CYDER_CNC_GAME_LOCKED=1
+      [[ "$config" != off ]] || return 0
+      CYDER_CNC_GAME_CONFIG="$config"
+      ;;
+    *) echo 'CYD-CNC-020：無法確認 DirectDraw 啟動設定。' >&2; return 1 ;;
+  esac
+}
+
+cyder_apply_cnc_game_environment() {
+  cyder_clear_cnc_game_environment
+  [[ -n "${CYDER_CNC_GAME_CONFIG:-}" ]] || return 0
+  CYDER_CNC_BASE_OVERRIDES_SET=0
+  if [[ "${WINEDLLOVERRIDES+x}" == x ]]; then CYDER_CNC_BASE_OVERRIDES_SET=1; fi
+  CYDER_CNC_BASE_OVERRIDES="${WINEDLLOVERRIDES:-}"
+  export CNC_DDRAW_CONFIG_FILE="$CYDER_CNC_GAME_CONFIG"
+  if [[ -n "${CYDER_CNC_GAME_DLL:-}" ]]; then export CYDER_DDRAW_PATH="$CYDER_CNC_GAME_DLL"; fi
+  export WINEDLLOVERRIDES="${WINEDLLOVERRIDES:+$WINEDLLOVERRIDES;}ddraw=n"
+  CYDER_CNC_ENV_APPLIED=1
+}
+
 cyder_prepare_game_launch_settings() {
   local wine_bin="$1"
   local engine_root="$2"
   local prefix="$3"
   local exe="$4"
+  cyder_clear_cnc_game_environment
   cyder_load_game_settings "$exe" "$engine_root" || return $?
   cyder_apply_maplestory_wz_cache "$exe"
   cyder_resolve_effective_graphics_backend "$engine_root" "$exe"
+  cyder_prepare_cnc_game "$exe" "$prefix" "$engine_root" || return $?
+  # The legacy Perl frontend can replace process-only overrides by reloading
+  # cxbottle.conf. Never edit the shared bottle to force a private profile.
+  if [[ "${CYDER_CNC_GAME_ACTIVE:-0}" == 1 ]] && cyder_wine_is_crossover_frontend "$wine_bin"; then
+    echo "CYD-CNC-020：此遊戲副本需要原生 Wine 啟動工具；舊版 CrossOver 前端會覆寫每遊戲設定。" >&2
+    return 1
+  fi
 
   # Global display/font settings are loaded before the launcher reaches this
   # function.  They must still be applied when the EXE has no per-profile
   # entry; otherwise a newly provisioned prefix keeps the bootstrap Retina
   # Mode/DPI baseline until the user toggles the preference manually.
 
+  # The final native phase reconstructs settings/argv/CNC environment only.
+  # All registry clients and idle cleanup completed before its lifecycle stamp.
+  [[ "${CYDER_LAUNCH_PREPARATION_PHASE:-}" != final ]] || return 0
   local prefix_was_running=0
   cyder_has_running_prefix "$prefix" && prefix_was_running=1
   cyder_apply_user_settings "$wine_bin" "$engine_root" "$prefix" || return $?
+  [[ "${CYDER_LAUNCH_PREPARATION_PHASE:-}" != prepare ]] || return 0
   local wineserver="$engine_root/bin/wineserver"
   if [[ "$prefix_was_running" -eq 0 && -x "$wineserver" ]]; then
     WINEPREFIX="$prefix" /usr/bin/arch -x86_64 "$wineserver" -k || true
@@ -2850,6 +3015,7 @@ cyder_prepare_installer_launch_settings() {
   local wine_bin="$1"
   local engine_root="$2"
   local prefix="$3"
+  cyder_clear_cnc_game_environment
   cyder_load_saved_settings || return $?
   cyder_apply_user_settings "$wine_bin" "$engine_root" "$prefix" || return $?
 }
@@ -3376,6 +3542,49 @@ cyder_apply_scrolling_for_exe() {
   CYDER_EXECUTION_FINAL=0 "$helper" --scrolling "$mode" "$prefix" "$wine_bin" "$name" ${running[@]+"${running[@]}"} >/dev/null
 }
 
+# Each probe is its own read-only native process with a two-second alarm.
+# No Wine process is signalled. Empty means the existing two-sample protocol,
+# not a missing pathname or the preparatory client's own session reservation.
+cyder_launch_preparation_probe() {
+  local prefix="$1" server="$2"
+  [[ -x "${CYDER_ENVIRONMENT_HELPER:-}" ]] || return 75
+  /usr/bin/perl -e 'alarm 2; exec @ARGV; exit 75' --     "$CYDER_ENVIRONMENT_HELPER" --environment-state "$prefix" "$server" 2>/dev/null
+}
+cyder_launch_preparation_initial_state() {
+  local observation status=0
+  observation="$(cyder_launch_preparation_probe "$1" "$2")" || status=$?
+  case "$status:$observation" in
+    '0:cyder-environment-v1 alive') CYDER_LAUNCH_PREPARATION_INITIAL=warm ;;
+    '10:cyder-environment-v1 empty') CYDER_LAUNCH_PREPARATION_INITIAL=idle ;;
+    *) return 75 ;;
+  esac
+}
+cyder_launch_preparation_now_ms() {
+  /usr/bin/perl -MTime::HiRes=clock_gettime,CLOCK_MONOTONIC -e 'printf "%.0f\n", 1000 * clock_gettime(CLOCK_MONOTONIC)'
+}
+cyder_launch_preparation_drain() {
+  local prefix="$1" server="$2" observation status now deadline
+  [[ "${CYDER_LAUNCH_PREPARATION_INITIAL:-}" == warm ]] && return 0
+  [[ "${CYDER_LAUNCH_PREPARATION_INITIAL:-}" == idle ]] || return 75
+  now="$(cyder_launch_preparation_now_ms)" || return 75
+  [[ "$now" =~ ^[0-9]+$ ]] || return 75
+  deadline=$((now + 10000))
+  # Ten seconds of actual monotonic observation, not ten fast replies. Each
+  # own probe is separately bounded by 2s; no Wine client/server is signalled.
+  while (( now < deadline )); do
+    status=0
+    observation="$(cyder_launch_preparation_probe "$prefix" "$server")" || status=$?
+    now="$(cyder_launch_preparation_now_ms)" || return 75
+    [[ "$now" =~ ^[0-9]+$ ]] && (( now <= deadline )) || return 75
+    [[ "$status:$observation" != '10:cyder-environment-v1 empty' ]] || return 0
+    [[ "$status:$observation" == '0:cyder-environment-v1 alive' ]] || return 75
+    sleep 0.2
+    now="$(cyder_launch_preparation_now_ms)" || return 75
+    [[ "$now" =~ ^[0-9]+$ ]] || return 75
+  done
+  return 75
+}
+
 cyder_run_wine_exe() {
   local wine_bin="$1"
   local exe="$2"
@@ -3466,11 +3675,16 @@ cyder_run_wine_exe() {
   local engine_root canonical_prefix engine_version ntdll_sha256="unavailable"
   engine_root="$(cd "$(dirname "$wine_bin")/.." && pwd -P)"
   canonical_prefix="$(cd "$prefix" 2>/dev/null && pwd -P || printf '%s' "$prefix")"
+  cyder_apply_media_launch_environment "$engine_root"
   cyder_apply_moltenvk_variant_from_preference "$engine_root" || return $?
   cyder_apply_gptk_launch_environment "$engine_root" || return $?
   if [[ -f "$prefix/cxbottle.conf" ]] || cyder_wine_is_crossover_frontend "$wine_bin"; then
     export CX_BOTTLE="$prefix" CX_ROOT="$engine_root" WINEARCH=win64
-    cyder_sync_crossover_graphics_environment "$prefix" || return $?
+    # The DirectDraw override and INI belong to this game process. Do not
+    # mirror its graphics choices to the shared bottle on this path.
+    if [[ "${CYDER_CNC_GAME_ACTIVE:-0}" != 1 ]]; then
+      cyder_sync_crossover_graphics_environment "$prefix" || return $?
+    fi
   fi
   cyder_validate_moltenvk_for_backend "$engine_root" "${CYDER_GRAPHICS_BACKEND:-${CX_GRAPHICS_BACKEND:-default}}" || return $?
   engine_version="$(head -n 1 "$engine_root/version" 2>/dev/null || true)"
@@ -3515,12 +3729,20 @@ cyder_run_wine_exe() {
       rm -f "$lifecycle_file" "${lifecycle_file}.tmp"
     fi
   fi
+  if declare -F cyder_check_components >/dev/null; then cyder_check_components all quick "$prefix"; fi
   cyder_exec_game() {
     # Run after sync/session setup, before the one-use final handoff. Registry
     # failures abort this launch instead of silently using a different mode.
     if [[ "$target_kind" == exe ]]; then
-      cyder_apply_scrolling_for_exe "$wine_bin" "$prefix" "$exe" || return $?
+      if [[ "${CYDER_LAUNCH_PREPARATION_PHASE:-}" != final ]]; then
+        cyder_apply_scrolling_for_exe "$wine_bin" "$prefix" "$exe" || return $?
+      fi
     fi
+    if [[ "${CYDER_LAUNCH_PREPARATION_PHASE:-}" == prepare ]]; then
+      cyder_launch_preparation_drain "$prefix" "$wineserver" || return $?
+      return 0
+    fi
+    if [[ "$target_kind" == exe ]]; then cyder_apply_cnc_game_environment || return $?; fi
     # Only the final game call consumes the owner's one-use native handoff.
     # Prefix preparation and standalone CLI calls keep their existing paths.
     export CYDER_EXECUTION_FINAL=1
@@ -3644,7 +3866,12 @@ cyder_run_wine_exe() {
     echo "NTDLL SHA-256: $ntdll_sha256"
     echo "Graphics preference: ${CYDER_GRAPHICS_PREFERENCE:-default}"
     echo "Graphics backend: ${CYDER_GRAPHICS_BACKEND:-default}"
+    [[ -z "${CYDER_CNC_GAME_CONFIG:-}" ]] || echo "DirectDraw config: $CYDER_CNC_GAME_CONFIG"
     echo "GPTK root: ${CYDER_GPTK_ROOT:-<unset>}"
+    echo "Media runtime: ${CYDER_MEDIA_STATUS:-unavailable}"
+    echo "Bundled media plugins: ${CYDER_MEDIA_PLUGIN_DIR:-<not selected>}"
+    echo "Bundled media scanner: ${CYDER_MEDIA_SCANNER:-<not selected>}"
+    echo "Private media registry: ${CYDER_MEDIA_REGISTRY:-<caller or default>}"
     echo "DXVK frame rate: ${DXVK_FRAME_RATE:-<unset>}"
     echo "DXMT config: ${DXMT_CONFIG:-<unset>}"
     echo "DXVK HUD: ${DXVK_HUD:-<unset>}"
