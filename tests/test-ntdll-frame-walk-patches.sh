@@ -47,6 +47,6 @@ patch --reverse --batch -s -p1 -d "$SOURCE" < "$OBSOLETE"
 patch --forward --batch -s -p1 -d "$SOURCE" < "$UPSTREAM"
 patch --forward --batch -s -p1 -d "$SOURCE" < "$CYDER"
 
-rg -Fq 'if (!func) break;' "$FILE"
-rg -q '__EXCEPT_PAGE_FAULT' "$FILE"
+grep -Fq 'if (!func) break;' "$FILE"
+grep -q '__EXCEPT_PAGE_FAULT' "$FILE"
 echo "PASS ntdll frame-walk patch round-trip and Cyder006 migration"
