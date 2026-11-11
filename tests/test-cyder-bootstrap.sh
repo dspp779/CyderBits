@@ -28,7 +28,11 @@ assert_contains "$output" ".cyder-bootstrap-v1" "bootstrap-only should print mar
 assert test -f "$SHARED/drive_c/windows/syswow64/tar.exe" -o \
   -f "$SHARED/drive_c/windows/system32/tar.exe"
 assert test ! -d "$SHARED/drive_c/windows/mono"
-assert test ! -d "$SHARED/drive_c/windows/syswow64/gecko"
+# wine.inf always installs the gecko\plugin\npmshtml.dll stub; only the
+# Gecko engine itself (gecko/<version>/wine_gecko) must not be preinstalled.
+gecko_engines="$(find "$SHARED/drive_c/windows/system32/gecko" "$SHARED/drive_c/windows/syswow64/gecko" \
+  -mindepth 2 -maxdepth 2 -name wine_gecko 2>/dev/null || true)"
+[[ -z "$gecko_engines" ]] || { echo "ASSERT failed: bootstrap must not preinstall Gecko: $gecko_engines" >&2; exit 1; }
 assert test -f "$SHARED/.cyder-bootstrap-v1"
 assert test -f "$SHARED/.cyder-golden-baseline-v2"
 assert test ! -e "$SUPPORT/templates/golden/manifest.json"
