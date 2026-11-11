@@ -3596,11 +3596,13 @@ cyder_apply_scrolling_for_exe() {
 cyder_launch_preparation_probe() {
   local prefix="$1" server="$2"
   [[ -x "${CYDER_ENVIRONMENT_HELPER:-}" ]] || return 75
-  /usr/bin/perl -e 'alarm 2; exec @ARGV; exit 75' --     "$CYDER_ENVIRONMENT_HELPER" --environment-state "$prefix" "$server" 2>/dev/null
+  # A non-zero reply (10 = empty) is an answer, not a failure: '|| return'
+  # keeps it out of the launcher's errtrace ERR trap.
+  /usr/bin/perl -e 'alarm 2; exec @ARGV; exit 75' --     "$CYDER_ENVIRONMENT_HELPER" --environment-state "$prefix" "$server" 2>/dev/null || return $?
 }
 cyder_launch_preparation_initial_state() {
   local observation status=0
-  observation="$(cyder_launch_preparation_probe "$1" "$2")" || status=$?
+  observation="$(cyder_launch_preparation_probe "$1" "$2" || exit $?)" || status=$?
   case "$status:$observation" in
     '0:cyder-environment-v1 alive') CYDER_LAUNCH_PREPARATION_INITIAL=warm ;;
     '10:cyder-environment-v1 empty') CYDER_LAUNCH_PREPARATION_INITIAL=idle ;;
@@ -3621,7 +3623,7 @@ cyder_launch_preparation_drain() {
   # own probe is separately bounded by 2s; no Wine client/server is signalled.
   while (( now < deadline )); do
     status=0
-    observation="$(cyder_launch_preparation_probe "$prefix" "$server")" || status=$?
+    observation="$(cyder_launch_preparation_probe "$prefix" "$server" || exit $?)" || status=$?
     now="$(cyder_launch_preparation_now_ms)" || return 75
     [[ "$now" =~ ^[0-9]+$ ]] && (( now <= deadline )) || return 75
     [[ "$status:$observation" != '10:cyder-environment-v1 empty' ]] || return 0
@@ -4181,7 +4183,8 @@ cyder_session_environment_live() {
     cyder_prefix_has_live_session_pids "$prefix" && return 0
     local server="${2:-${CYDER_ENVIRONMENT_SERVER:-}}" observation status=0
     [[ -x "$CYDER_ENVIRONMENT_HELPER" && "$server" == /* ]] || return 0
-    observation="$("$CYDER_ENVIRONMENT_HELPER" --environment-state "$prefix" "$server" 2>/dev/null)" || status=$?
+    # '|| exit' keeps a non-zero reply out of the errtrace ERR trap in the subshell.
+    observation="$("$CYDER_ENVIRONMENT_HELPER" --environment-state "$prefix" "$server" 2>/dev/null || exit $?)" || status=$?
     # A missing helper, changed prefix, unreadable namespace or invalid reply
     # must retain the guard. Only the paired protocol/status proves emptiness.
     [[ "$status" == 10 && "$observation" == 'cyder-environment-v1 empty' ]] && return 1
