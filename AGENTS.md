@@ -7,7 +7,7 @@ actually runs Windows `.exe` files.
 ## Wine engine / incremental builds / patches
 
 Do that work in **[cyder-wine-engine](https://github.com/dspp779/cyder-wine-engine)**
-(sibling checkout, often `/Users/jjc/cyder-wine-engine` or `../cyder-wine-engine`).
+(sibling checkout, often `~/ogom/cyder-wine-engine` or `../cyder-wine-engine`).
 
 Before any wineserver / ntdll / host `make` / engine pack task:
 
