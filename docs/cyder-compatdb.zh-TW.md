@@ -31,19 +31,10 @@ Cyder App 或放入 YAML/CDB 不會生效。第一次發布此功能時需要：
 
 典型流程：
 
-```bash
-bash scripts/build-wine.sh --cx 26
-
-# 請設定新的 CYDER_ENGINE_VERSION，避免沿用已安裝版本。
-CYDER_ENGINE_VERSION='wine crossover 26.3.0 (wine 11.0) Cyder005' \
-  bash scripts/pack-engine-artifact.sh --force
-
-bash scripts/create-cyder-app.sh \
-  --engine-archive /path/to/new-engine.tar.xz
-```
-
-實際版本名稱與 artifact 路徑應依當次 release 設定調整，不要覆寫既有
-Cyder004 artifact。
+1. 在 cyder-wine-engine：提高 `config/engine-version.txt` 的版本，重建並打包（該 repo 的
+   `engine-release-pack` skill）。不要沿用已發布的版本名稱或覆寫既有 artifact。
+2. 在本 repo：以 `scripts/import-engine-release.sh --manifest <sidecar> --apply` 匯入並 pin，
+   再建置 Cyder.app（見 [release-pipeline](release-pipeline.zh-TW.md)）。
 
 ### 之後哪些變更不需要重包 Engine？
 

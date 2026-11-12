@@ -4,9 +4,9 @@
 
 # CyderBits
 
-**在 Mac 上跑經典 Windows 遊戲 — Cyder 0.13.1 以 DirectDraw 與 GDI 為驗證基準，並提供可選圖形 backend。**
+**在 Mac 上跑經典 Windows 遊戲 — Cyder 0.14.0 以 DirectDraw 與 GDI 為驗證基準，並提供可選圖形 backend。**
 
-驗證路徑仍是傳統 2D Win32 圖形：**DirectDraw → Wine wined3d/OpenGL** 與 GDI。Cyder 0.13.1 使用 `CX26.3.0-W11-Cyder012` engine（dual MoltenVK）；DXVK／DXMT 以獨立 graphics payload 提供，D3DMetal 透過 GPTK 提供。實際遊戲相容性仍需依遊戲、macOS 版本與 backend 個別驗證。
+驗證路徑仍是傳統 2D Win32 圖形：**DirectDraw → Wine wined3d/OpenGL** 與 GDI。Cyder 0.14.0 使用 `CX26.3.0-W11-Cyder013` engine（dual MoltenVK）；DXVK／DXMT 以獨立 graphics payload 提供，D3DMetal 透過 GPTK 提供。實際遊戲相容性仍需依遊戲、macOS 版本與 backend 個別驗證。
 
 本 repo（CyderBits）目前主要是**應用層**：Cyder 啟動器、遊戲庫、設定、CompatDB 與打包器。實際執行 Windows `.exe` 的 Wine 核心在獨立專案 [cyder-wine-engine](https://github.com/dspp779/cyder-wine-engine)。
 
@@ -67,7 +67,7 @@ bash scripts/run-bluecg.sh
 | **線上** | 水藍魔力 (BlueCG) | 🟢 可玩 | 專案驗證基準 (DirectDraw / GDI) |
 | **線上** | 新楓之谷 | 🟡 部分驗證 | 需 MapleStory Launcher、[CitrusGate](https://github.com/dspp779/CitrusGate) 與有效 OTP；CX26 版本仍需完成地圖級驗收 |
 | **線上** | 新楓之谷 經典版 | 🟡 部分驗證 | 需 [CitrusGate](https://github.com/dspp779/CitrusGate) 傳送 OTP；QDO workaround 與背景程序清理仍有已知限制 |
-| **線上** | 爆爆王 | 🟡 歷史驗證 | 服務可用性與目前版本相容性未在 Cyder 0.10.1 重新驗證 |
+| **線上** | 爆爆王 | 🟡 歷史驗證 | 服務可用性與目前版本相容性尚未在目前版本重新驗證 |
 
 ## 圖形 backend 狀態
 
@@ -75,7 +75,7 @@ bash scripts/run-bluecg.sh
 |---|---|---|
 | DirectDraw / GDI | **支援且已驗證** | BlueCG 使用 DirectDraw；預設路徑是 wined3d/OpenGL，GDI 是相容性 fallback。 |
 | wined3d / OpenGL | **目前預設** | BlueCG 驗證用 engine 含已測試的 `winemac.drv` same-view backing 修復，可支援 Retina/DPI resize。 |
-| Vulkan / MoltenVK | **由 Cyder012 engine 提供** | dual-variant：shim + `.real` → `1.4.2`／`1.2.10`；偏好設定可切換；macOS &lt; 12 強制 1.2.10。這不是 BlueCG 的主要繪圖路徑。 |
+| Vulkan / MoltenVK | **由 engine 提供** | dual-variant：shim + `.real` → `1.4.2`／`1.2.10`；偏好設定可切換；macOS &lt; 12 強制 1.2.10。這不是 BlueCG 的主要繪圖路徑。 |
 | DXVK | **已整合 runtime payload** | DXVK 由 Cyder.app 的 `Resources/graphics/` 外部 payload 提供，透過 CompatDB builtin + prepend 載入；DXVK 2 仍暫不出貨。 |
 | dxmt | **已整合 runtime payload** | DXMT 由 Cyder.app 的外部 payload 提供，需 macOS 15+；新楓之谷與經典版在 macOS 15+ 預設優先使用。 |
 | D3DMetal | **已接入產品 backend** | 透過 GPTK／Apple D3DMetal，需 macOS 14+ 與可用 GPTK；實際遊戲相容性需逐款驗證。 |
@@ -85,12 +85,7 @@ bash scripts/run-bluecg.sh
 
 ## Wine 引擎
 
-實際執行 `.exe` 的核心在 [cyder-wine-engine](https://github.com/dspp779/cyder-wine-engine)。Wine 來自 **CrossOver 開源釋出**（見 [CodeWeavers CrossOver Source](https://www.codeweavers.com/crossover/source)）；正式建置、patch 與打包請在該 repo 進行。本 repo 仍留有相容建置腳本副本；archive 放在 `tools/archives/`，建置時解壓至 `build/cx26/`。專案邊界見 [docs/cyder-wine-engine-project.md](docs/cyder-wine-engine-project.md)。
-
-```bash
-bash scripts/build-wine.sh --cx 26
-bash scripts/sign-wine.sh
-```
+實際執行 `.exe` 的核心在 [cyder-wine-engine](https://github.com/dspp779/cyder-wine-engine)。Wine 來自 **CrossOver 開源釋出**（見 [CodeWeavers CrossOver Source](https://www.codeweavers.com/crossover/source)）。引擎的建置、patch、簽署與打包都在該 repo 進行；`Cyder.app` 內嵌 `config/cyder-engine-manifest.json` 指定的引擎版本。專案邊界見 [docs/cyder-wine-engine-project.md](docs/cyder-wine-engine-project.md)。
 
 ## 系統需求
 
@@ -103,89 +98,84 @@ bash scripts/sign-wine.sh
 
 ## 快速開始
 
-### 1. 建 Wine（首次，耗時長；正式流程在 cyder-wine-engine）
+### 1. 取得 Wine 引擎
+
+`Cyder.app` 需要 `config/cyder-engine-archive.txt` 指定的引擎 archive。請在相鄰的 [cyder-wine-engine](https://github.com/dspp779/cyder-wine-engine) checkout 建置並打包（首次建置耗時長，請依該 repo 的從零建置文件），或以 `--engine-archive` 指定現有 archive。
+
+### 2. 建置並開啟 Cyder
 
 ```bash
-bash scripts/build-wine.sh --cx 26 --install-deps   # 首次（含 bootstrap brew）
-bash scripts/build-wine.sh --cx 26
-bash scripts/sign-wine.sh
+bash scripts/release-cyder.sh --channel test --out-dir "${TMPDIR:-/tmp}/cyder-test-build"
+open "${TMPDIR:-/tmp}/cyder-test-build/Cyder.app"
 ```
 
-### 2. 用 BlueCG 驗證
+這個 ad-hoc 版本可以檢查視窗與設定。要啟動遊戲必須以 Developer ID 簽署，見 [docs/development-testing.md](docs/development-testing.md)。
+
+### 3. 用 BlueCG 驗證
 
 ```bash
 bash scripts/run-bluecg.sh
 bash scripts/enable-mac-retina-hires.sh   # 可選：Retina + 200% DPI
 ```
 
-## 已實作 workaround
+逐步檢查項目：[docs/games/bluecg/testing.md](docs/games/bluecg/testing.md)。
 
-- [繁中字體預設](docs/workarounds/font-default.md) — 預設把常見 Windows CJK 字體替代為 Songti TC。
-- [RetinaMode 遊戲視窗設定](docs/workarounds/retina-mode.md) — RetinaMode、DPI 腳本與 resize 注意事項。
-- [BlueCG A6 視窗修復](docs/workarounds/bluecg-a6-resize.md) — 已驗證 resize、Alt+Enter、最小化／還原的 same-view backing sync。
-- [皮卡丘排球相容性](docs/games/pikachu-volleyball/README.md) — 使用無空白 runtime 路徑，並關閉 MSync 與 ESync。
-
-### 3. 執行或包裝 EXE
+### 4. 把 EXE 包成遊戲 App
 
 ```bash
-# Cyder 啟動器 — 直接開 .exe
-bash scripts/create-cyder-app.sh
-open dist/Cyder.app
-
-# CyderBits 打包器 — 包成 game .app
 bash scripts/create-cyderbits-app.sh
 open dist/CyderBits.app
 # 或：python3 scripts/cyder_create_game_app.py --gui
 ```
 
+## 已實作 workaround
+
+- [中文字型預設](docs/workarounds/font-default.md) — 將常見 Windows 中日韓字型預設對應到宋體-繁。
+- [RetinaMode 視窗設定](docs/workarounds/retina-mode.md) — RetinaMode + DPI 腳本與縮放注意事項。
+- [BlueCG A6 縮放修正](docs/workarounds/bluecg-a6-resize.md) — 縮放、Alt+Enter、最小化／還原的 same-view backing sync。
+- [皮卡丘打排球相容性](docs/games/pikachu-volleyball/README.md) — 使用無空格 runtime 路徑並停用 MSync 與 ESync。
+
 ## 目錄結構
 
 ```text
-├── logo/                       # cyderbits.png（app 圖示）、cyderbits-transparent.png（README）
-├── config/entitlements.plist
-├── patches/
-├── scripts/
-├── tests/
-├── docs/
-├── tools/
-│   ├── archives/               # crossover + llvm-mingw 壓縮檔（.gitignore）
-│   └── libarchive/             # GnuWin bsdtar payload
-├── build/                      # 解壓後原始碼與 llvm-mingw（.gitignore）
-├── .brew-x86/                  # .gitignore
-├── install/
-│   └── wine-cx26-x86_64/       # CX26 engine（.gitignore）
-└── BlueCrossgateNew/           # BlueCG（.gitignore）
+├── scripts/                    # Cyder.app 原始碼（Bash + Swift）、建置與發佈腳本
+├── tests/                      # 離線測試；以 tests/run.sh 執行
+├── compatdb/                   # 各遊戲相容性規則與編譯後的資料庫
+├── recipes/                    # CyderBits 打包器的遊戲 App recipe
+├── config/                     # App 版本、引擎 pin、entitlements
+├── patches/                    # 圖形與參考用 patch
+├── vendor/cnc-ddraw/           # 內附的 cnc-ddraw
+├── docs/                       # 文件（見 docs/README.md）
+├── .agents/skills/             # 給 AI agent 的逐步指引（入口：AGENTS.md）
+├── logo/                       # App 圖示與 README logo
+├── build/ install/ .brew-x86/ tools/archives/   # 連結到 cyder-wine-engine checkout（.gitignore）
+└── BlueCrossgateNew/           # BlueCG 遊戲與 prefix（.gitignore）
 ```
 
 ## 測試
 
 ```bash
-bash tests/test-env-x86_64.sh
-bash tests/test-prepare-build-deps.sh
-bash tests/test-build-wine.sh
-bash tests/test-sign-wine.sh
-bash tests/test-run-bluecg.sh
-bash tests/test-verify-bluecg.sh
+bash tests/run.sh <關鍵字>   # 檔名包含關鍵字的測試
+bash tests/run.sh            # 全部測試，約 12 分鐘
 ```
+
+哪種改動該做哪種檢查、測試版建置、簽署與實機檢查：[docs/development-testing.md](docs/development-testing.md)。
 
 ## 文件
 
-- [Cyder 0.7.0 發布說明](docs/releases/v0.7.0.md) — CrossOver bottle 隔離、cabextract、新圖示、MapleStory OEM flavor
-- [Cyder 0.6.0 發布說明](docs/releases/v0.6.0.md) — CX26.3 engine、macOS 10.15 runtime、Winetricks、動態 argv
-- [Cyder 0.13.1 發布說明](docs/releases/v0.13.1.md) — Cyder012 dual MoltenVK、Rosetta 知情同意、GameSir 平台 patch
-- [Cyder 0.13.0 發布說明](docs/releases/v0.13.0.md) — 首次開機加速、不預裝 Mono/Gecko、偏好設定預設入口、.msi／mac 捷徑、Retina 預設關
-- [Cyder 0.12.0 發布說明](docs/releases/v0.12.0.md) — LaunchGroup 選單列、winemenubuilder 遊戲庫圖示、語系選單、捷徑名稱、UI 開啟時顯示 Dock
-- [Cyder 0.11.1 發布說明](docs/releases/v0.11.1.md) — gamaniagames://、open -n file URL、URI 冷啟動不開偏好設定
-- [Cyder 0.10.1 測試版說明](docs/releases/v0.10.1.md) — 強制結束液面動畫、MapleStory WZ adaptive cache、release tooling、測試與文件更新
-- [Cyder 0.10.0 發布說明](docs/releases/v0.10.0.md) — Cyder010 engine、graphics payload、session 與診斷整合
-- [docs/README.md](docs/README.md) — 索引
-- [docs/cyder-wine-engine-project.md](docs/cyder-wine-engine-project.md) — 應用層 vs [cyder-wine-engine](https://github.com/dspp779/cyder-wine-engine)
+- [CHANGELOG.md](CHANGELOG.md) — 各版本變更摘要
+- [Cyder 0.14.0 發布說明](docs/releases/v0.14.0.md) — Cyder013 引擎、退出 Cyder 不結束遊戲、每遊戲 cnc-ddraw、DXVK 黑色貼圖修正；最後支援 macOS 10.15／11 的版本
+- [docs/README.md](docs/README.md) — 所有文件與歷次發布說明的索引
 - [docs/cyder.md](docs/cyder.md) — Cyder 啟動器
 - [docs/cyderbits.md](docs/cyderbits.md) — CyderBits 打包器
+- [docs/games/compatibility-matrix.md](docs/games/compatibility-matrix.md) — 已測試遊戲
+- [docs/development-testing.md](docs/development-testing.md) — 測試、測試版建置、實機與遊戲檢查
+- [docs/release-pipeline.zh-TW.md](docs/release-pipeline.zh-TW.md) — 簽署、公證與發佈流程
+- [docs/cyder-wine-engine-project.md](docs/cyder-wine-engine-project.md) — 應用層 vs [cyder-wine-engine](https://github.com/dspp779/cyder-wine-engine)
 - [docs/bluecg.md](docs/bluecg.md) — BlueCG 流程
 - [docs/scripts.md](docs/scripts.md) — 腳本參考
-- [docs/build-dxvk.zh-TW.md](docs/build-dxvk.zh-TW.md) — DXVK 1.x／2.x 編譯注意事項
-- [docs/superpowers/](docs/superpowers/) — 設計規格
+- [docs/build-dxvk.zh-TW.md](docs/build-dxvk.zh-TW.md) — DXVK 編譯注意事項
+- [AGENTS.md](AGENTS.md) — AI agent 的規則與 skill
 
 ## 授權與原始碼
 

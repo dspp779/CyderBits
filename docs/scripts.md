@@ -71,6 +71,41 @@
 | `create-bluecg-app.sh` | `dist/BlueCG.app`（Wine + prefix） |
 | `cyder_create_game_app.py` | 建立單一遊戲 `.app`（GUI / CLI） |
 
+## 其他腳本
+
+以下腳本先前未列入本頁。
+
+| 腳本 | 用途 |
+|------|------|
+| `import-engine-release.sh` | 驗證 cyder-wine-engine 的 release（sidecar、archive、內嵌 manifest、NTDLL digest）；加 `--apply` 才寫入 pin |
+| `cyder-macos-wrapper.sh` | Cyder.app 的 `MacOS/Cyder` 入口 |
+| `cyder-macos-compat.sh` | macOS 版本檢查與 MoltenVK／Vulkan 最低版本處理 |
+| `cyder-ensure-rosetta.sh` | Apple Silicon 上執行 x86_64 Wine 前確認 Rosetta 2 可用 |
+| `cyder-moltenvk-variant.sh` | 解析並套用雙版本 MoltenVK 的選擇（改寫 `.real` 連結） |
+| `cyder-profile.sh` | 環境（profile／bottle）輔助函式；不會啟動 Wine |
+| `cyder-recipe.sh` | 驗證並套用宣告式遊戲 recipe；不執行 recipe 內的資料 |
+| `cyder-apply-golden-settings.sh` | 以一次 regedit 匯入套用 Cyder 的固定基準設定 |
+| `cyder-apply-settings.sh` | 把驗證過的 UI 設定套用到目前的共用 prefix |
+| `cyder-edit-user-reg.sh` | 快速設定路徑：直接編輯 `user.reg` 中由 Cyder 管理的值 |
+| `cyder-cnc-ddraw.sh` | 為單一 EXE 啟用或還原 cnc-ddraw |
+| `package-cnc-ddraw.py` | 從固定版本的官方 ZIP 產生 App 內附的 cnc-ddraw 子集 |
+| `cyder-compatdb.py` | 驗證 CompatDB YAML，編碼與檢視 CDB v1 檔 |
+| `cyder-component-check.sh` | 唯讀的元件完整性檢查；不修復、不重簽、不阻擋啟動 |
+| `cyder-download-locked.sh` | 下載固定版本檔案（如 MSI）時共用的鎖定輔助 |
+| `install-cyder-font-replacements.sh` | 對目前 prefix 套用宋體-繁字型替換 |
+| `install-dxvk-prefix.sh`／`install-dxmt-prefix.sh` | 把 engine 提供的 DXVK／DXMT DLL 佈署到 prefix |
+| `fetch-dxmt.sh` | 下載固定版本的上游 DXMT 並安裝到 engine 的 `lib/dxmt/` |
+| `graphics-signing.py` | DXMT 簽章驗證（正本在 cyder-wine-engine；此處為相同的驗證端副本） |
+| `install-crossover-app-moltenvk.sh` | 從已安裝的 CrossOver.app 取得 `libMoltenVK.dylib` |
+| `pin-moltenvk-git-rev.py` | 讓 MoltenVK 版本標頭使用自身版本字串，而非外層 repo 的 commit |
+| `build-universal-cabextract.sh` | 建置無外部依賴的 universal `cabextract`（Winetricks 元件解壓用） |
+| `build-media-stack.sh` | 媒體堆疊建置的相容副本；正式流程在 cyder-wine-engine |
+| `build-cyder-lifecycle-test.sh` | 建置使用獨立私有狀態的 ad-hoc 生命週期測試 App |
+| `cyder-extract-exe-icon.sh` | 舊的獨立工具；Cyder.app 已改用 `cyder_pe_icon.swift` |
+| `cyder-power-measure.sh`／`cyder-taskpolicy-benchmark.sh` | 耗電／QoS 量測，以及在三種電源政策下執行同一指令 |
+| `bluecg-benchmark.py`／`bluecg-power-summary.py`／`bluecg-present-frames.py`／`bluecg-scaling-evidence.py`／`bluecg-cnc-profile-shader.py` | BlueCG 量測與分析工具：CPU 取樣、powermetrics 摘要、畫面提交間隔、GDI 縮放紀錄、ICC 對應 shader（實驗） |
+| `run-maplestory-classic-debug.sh` | MapleStory Classic 除錯啟動；需自行提供四個啟動參數 |
+
 ## 依賴關係（簡圖）
 
 ```text

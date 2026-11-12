@@ -75,16 +75,16 @@ pack-engine-artifact.sh  ──►  import-engine-release.sh --apply
 
 ```bash
 # 見該 repo docs/incremental-build-and-patches.md
-CYDER_ENGINE_VERSION_LABEL='CX26.3.0-W11-Cyder009-rc1' \
-SIGN_IDENTITY='Developer ID Application: …' \   # 正式引擎建議 Developer ID
-  bash scripts/pack-engine-artifact.sh --xz --force
+# 正式引擎必須以 Developer ID 簽署
+export SIGN_IDENTITY='Developer ID Application: …'
+CYDER_ENGINE_VERSION_LABEL="$(head -n 1 config/engine-version.txt)" bash scripts/pack-engine-artifact.sh --zst
 ```
 
 在 **本專案** 匯入並 pin（正式發佈前必做）：
 
 ```bash
 bash scripts/import-engine-release.sh \
-  --manifest /path/to/engine-….tar.xz.manifest.json \
+  --manifest /path/to/engine-….tar.zst.manifest.json \
   --apply
 ```
 
@@ -99,13 +99,13 @@ CX25 OEM 產品線與 `--cx 25` 建置已退役。現行路徑是正式 Cyder.ap
 ## 測試／分支通道
 
 ```bash
-# 預設 adhoc、版本 0.13.1-dev、使用 pinned 或 create-cyder-app 預設引擎尋找邏輯
+# 預設 adhoc、版本為 config/cyder-app-version.txt 加上 -dev、使用 pinned 或 create-cyder-app 預設引擎尋找邏輯
 bash scripts/release-cyder.sh --channel test
 
 # 指定本機 rc 引擎與版本字串
 bash scripts/release-cyder.sh --channel test \
-  --version 0.13.1-branch-foo \
-  --engine-archive /path/to/engine-wine-x86_64-….tar.xz
+  --version <版本>-branch-foo \
+  --engine-archive /path/to/engine-….tar.zst
 
 # 測試通道若需暫時用 Developer ID 簽（仍不公證）:
 bash scripts/release-cyder.sh --channel test \
@@ -117,7 +117,7 @@ bash scripts/release-cyder.sh --channel test \
 等價手做：
 
 ```bash
-SIGN_IDENTITY=- CYDER_APP_VERSION=0.13.1-dev \
+SIGN_IDENTITY=- CYDER_APP_VERSION=<版本>-dev \
   bash scripts/create-cyder-app.sh
 ```
 
@@ -131,7 +131,7 @@ SIGN_IDENTITY=- CYDER_APP_VERSION=0.13.1-dev \
 
 ```bash
 # 完整：建置 + Developer ID + 公證 + staple + Cyder.app.zip + Cyder-<version>.zip
-bash scripts/release-cyder.sh --channel release --version 0.13.1
+bash scripts/release-cyder.sh --channel release --version <版本>
 
 # 已有簽好的 App，只做公證／staple／zip
 bash scripts/release-cyder.sh --channel release --skip-build

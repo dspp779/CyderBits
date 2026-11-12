@@ -60,8 +60,8 @@ CrossOver 26.x 的 microstutter 回報。這表示「版本含有某些 AoE IV �
 - `ntdll/unix/virtual.c` 對 Rosetta 可執行頁面修改後的 permission／retranslation
   行為做補償。
 
-可參考目前 source：[signal_x86_64.c](/Users/jjc/cyder-wine-engine/build/cx26/sources/wine/dlls/ntdll/unix/signal_x86_64.c) ·
-[virtual.c](/Users/jjc/cyder-wine-engine/build/cx26/sources/wine/dlls/ntdll/unix/virtual.c)
+可參考目前 source：`dlls/ntdll/unix/signal_x86_64.c` ·
+`dlls/ntdll/unix/virtual.c`（engine checkout 的 `build/cx26/sources/wine/` 下）
 
 另一個公開實驗專案 Endfield_FineWine 也記錄了兩類 Rosetta／Wine 問題：
 
