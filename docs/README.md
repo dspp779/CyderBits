@@ -53,7 +53,9 @@
 | [cyder-wine-engine-project.md](cyder-wine-engine-project.md) | 開發 / 發布 | 應用層 vs Wine 核心邊界；[cyder-wine-engine](https://github.com/dspp779/cyder-wine-engine) manifest 契約與 Cyder 匯入流程 |
 | [upstream-prs/README.zh-TW.md](upstream-prs/README.zh-TW.md) | 開發 / upstream | 各 Wine patch 的 PR dossier、重現方式、嚴重性、完整修正／workaround 判定與提交順序 |
 | [cyderbits.md](cyderbits.md) | 一般使用者 | CyderBits 打包器：建立 game `.app`、選項與疑難排解 |
+| [development-testing.md](development-testing.md) | 開發 / 驗證 | **開發與測試指南**：`tests/run.sh`、測試版建置、何時需要 Developer ID／公證、實機點選與遊戲驗證 |
 | [bluecg.md](bluecg.md) | 開發 / 驗證 | BlueCG 自建 Wine、執行、高解析度與已知問題 |
+| [games/bluecg/testing.md](games/bluecg/testing.md) | 開發 / 驗證 | BlueCG 測試步驟：透過 Cyder.app（cnc-ddraw、多開）與直接用引擎的兩條路徑 |
 | [wine-configure-options.md](wine-configure-options.md) | 開發 / 建置 | Wine `configure` 旗標說明與老遊戲取捨 |
 | [build-dxvk.zh-TW.md](build-dxvk.zh-TW.md) | 開發 / 建置 | DXVK 1.x 工具鏈；2.x 暫停發布與待開發備忘 |
 | [cyder-graphics-runtime-pipeline.zh-TW.md](cyder-graphics-runtime-pipeline.zh-TW.md) | 開發 / 發布 | 引擎安裝、圖形 payload、CompatDB prepend 的步驟關係與圖 |

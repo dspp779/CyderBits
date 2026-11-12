@@ -101,8 +101,11 @@ run-bluecg.sh
 
 ## 測試
 
+整套離線測試：`bash tests/run.sh`（可加名稱關鍵字篩選，如 `bash tests/run.sh graphics`；`--list` 只列出）。前置需求、測試版建置與實機驗證見 [development-testing.md](development-testing.md)。
+
 | 腳本 | 對應 |
 |------|------|
+| `tests/run.sh` | 執行全部 `tests/test-*.sh`／`.py`／`.rb`，逐項輸出 ok／FAIL 與記錄位置 |
 | `tests/test-env-x86_64.sh` | `env-x86_64.sh` |
 | `tests/test-build-wine.sh` | `build-wine.sh`（smoke） |
 | `tests/test-build-media-stack.sh` | 最小 GStreamer feature set 與 media dylib bundling 契約 |

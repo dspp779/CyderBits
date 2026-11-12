@@ -34,6 +34,12 @@ Wine 的 Dock 名稱可只有 `wine`，bundle ID 可為空，AX 可沒有遊戲�
 
 遇到 GStreamer 搬移路徑或 H.264 問題時，再讀 [賽馬娘案例](references/umamusume-case.md)。案例是已驗證環境中的證據，不是所有遊戲的通用修正。
 
+## 各遊戲測試步驟
+
+- BlueCG（DirectDraw、PE32、cnc-ddraw、多開）：`docs/games/bluecg/testing.md`。
+- 其他遊戲先查 `docs/games/README.md` 與 `docs/games/compatibility-matrix.md`；新增遊戲的固定測試步驟時，放在 `docs/games/<game>/testing.md` 並在此列出。
+- 測試版要能啟動遊戲，必須以 Developer ID 簽署（ad-hoc 版會在圖形準備停在 `publisher_unverified`）；建置方式見 `.agents/skills/cyder-dev-test`。測試版共用使用者真正的設定與 Windows 環境。
+
 ## 交付
 
 區分：已重現的現象、紀錄直接支持的原因、受控修正效果、未驗證假說。提供簡短重測指引與必要版本；保留經篩選紀錄和無敏感資訊截圖。說明測試後留下的程序／設定及可還原方式。只有在使用者授權時才建立 PR、留言或關閉 issue；本機通過不自動代表原回報環境已驗證。
