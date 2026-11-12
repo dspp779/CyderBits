@@ -35,3 +35,4 @@ BlueCG 是本專案的主要 DirectDraw PE32 驗證遊戲。
 - 重現歷史 Retina+DPI／resize 結果時，依 [A6 final engine](../../bluecg-winemac-a6-engine.md) artifact 流程核對版本；新的測試請記錄實際引擎版本與模組，不把 Cyder008 當成現行版本。
 - 不要把測試 runtime 的 `winemac.so` 或 GPU helper 直接覆蓋所有遊戲共用 engine；產品整合與正式打包仍需獨立驗收。
 - 一般建置與啟動流程見 [BlueCG 建置與執行](../../bluecg.md)。
+- 驗證改動時依 [BlueCG 測試步驟](testing.md)：App 層走 Cyder.app，引擎／renderer 對照直接用引擎與隔離副本。

@@ -11,7 +11,7 @@ description: >-
 This Cyder (ogom) repo does not own the Wine build. For incremental builds,
 patches, host minOS, or `pack-engine-artifact`:
 
-1. Work in `../cyder-wine-engine` (or `/Users/jjc/cyder-wine-engine`).
+1. Work in `../cyder-wine-engine` (normally `~/ogom/cyder-wine-engine`).
 2. Read that repo’s `AGENTS.md` and `docs/incremental-build-and-patches.md`.
 3. Prefer its `.agents/skills/incremental-wine-build` skill when available.
 
@@ -22,3 +22,5 @@ Formal paths:
 - **Full formal Cyder release** (import pin → notarize → verify) →
   `.agents/skills/cyder-release` in this repo.
 - **Post-build acceptance only** → `.agents/skills/cyder-release-verify`.
+- **App-layer tests, test builds, real-app and game checks** →
+  `.agents/skills/cyder-dev-test`.

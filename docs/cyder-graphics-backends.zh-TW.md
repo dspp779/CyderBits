@@ -138,7 +138,7 @@ engine 端另有 `cxcompatdb.so` 的編譯、PE machine/signature、MoltenVK／D
 dependency、builtin prepend 與 Wine smoke test；執行：
 
 ```bash
-cd /Users/jjc/cyder-wine-engine
+cd ../cyder-wine-engine
 bash tests/run.sh
 ```
 

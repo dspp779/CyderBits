@@ -362,7 +362,7 @@ bash tests/test-cyder-ensure-graphics.sh
 bash tests/test-cyder-graphics-prepend.sh
 
 # engine 端 plugin／Wine runtime 測試
-(cd /Users/jjc/cyder-wine-engine && bash tests/run.sh)
+(cd ../cyder-wine-engine && bash tests/run.sh)
 ```
 
 ## 9. 搬移後的媒體 runtime

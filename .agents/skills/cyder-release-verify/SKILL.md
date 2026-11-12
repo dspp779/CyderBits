@@ -14,8 +14,8 @@ Run from ogom:
 ```bash
 bash .agents/skills/cyder-release-verify/scripts/verify-cyder-release.sh \
   --app dist/Cyder.app \
-  --zip dist/Cyder.app.zip \
-  --baseline dist/Cyder-0.13.0.zip
+  --zip dist/Cyder-<version>.zip \
+  --baseline dist/Cyder-<previous-version>.zip
 ```
 
 Before notarization checks: add `--skip-notarization-checks`.
