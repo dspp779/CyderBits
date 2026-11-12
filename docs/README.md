@@ -8,6 +8,8 @@
 
 | 文件 | 說明 |
 |------|------|
+| [CHANGELOG.md](../CHANGELOG.md) | 各版本變更摘要（Keep a Changelog 格式） |
+| [release-notes-guide.md](release-notes-guide.md) | 發佈說明的撰寫格式與參考 |
 | [release-pipeline.zh-TW.md](release-pipeline.zh-TW.md) | **測試／正式通道**、引擎 pin、`release-cyder.sh`、檢查清單 |
 | [release-signing.zh-TW.md](release-signing.zh-TW.md) | Developer ID 匯入、notary profile、手做公證步驟 |
 | [component-integrity.zh-TW.md](component-integrity.zh-TW.md) | 逐檔元件清單、唯讀完整性診斷、信任邊界與離線測試 |
@@ -16,6 +18,9 @@
 | 版本 | 文件 | 重點 |
 |------|------|------|
 | 下一版（規劃） | [預計改進](releases/next.md) | DXMT 初始化資料遺失、紋理批次上傳、buffer 回收、CPU／提交同步計時與新楓之谷驗收條件 |
+| 0.14.0 | [繁中](releases/v0.14.0.md) · [English](releases/v0.14.0.en.md) | 正式版：Cyder013、退出與停止環境分離、每遊戲 cnc-ddraw、DXVK 黑色貼圖修正；**最後支援 macOS 10.15／11** |
+| 0.13.2 | [繁中](releases/v0.13.2.md) | 正式版：引擎升級原地更新環境、DXVK 的 MoltenVK 偏好設定 |
+| 0.13.1 | [繁中](releases/v0.13.1.md) | 正式版：Cyder012、雙版本 MoltenVK、Apple Silicon Rosetta 安裝 |
 | 0.13.0 | [繁中](releases/v0.13.0.md) | 正式版：首次開機加速、不預裝 Mono/Gecko、偏好設定預設入口、.msi／.bat／.lnk／.reg／mac 捷徑、Retina 預設關、無聲失敗提示 |
 | 0.12.0 | [繁中](releases/v0.12.0.md) | 正式版：LaunchGroup 選單列、winemenubuilder 遊戲庫圖示、語系選單、捷徑名稱、UI 開啟時顯示 Dock |
 | 0.11.1 | [繁中](releases/v0.11.1.md) | 正式版：gamaniagames://、URI 協定清單、open -n file URL、URI 冷啟動不開偏好設定 |
