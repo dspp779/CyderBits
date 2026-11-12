@@ -13,6 +13,10 @@ Orchestrate the shipping channel end-to-end. Do **not** skip verify.
 
 ## Checklist
 
+0. Write the release notes by `docs/release-notes-guide.md`: `docs/releases/vX.Y.Z.md`
+   (and `.en.md`), the `CHANGELOG.md` entry and the `docs/README.md` release row, in
+   one change. Fill sizes and SHA-256 from the final notarized zip only.
+
 1. Read `config/cyder-app-version.txt`. For `--channel release` require a clean
    semver (no `-dev` / branch suffix unless the user explicitly overrides).
 2. Follow `.agents/skills/engine-release-pack` in the sibling `cyder-wine-engine` checkout
