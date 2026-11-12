@@ -39,10 +39,13 @@
     "cyder-winemac-missing-order-anchor.patch",
     "cyder-winemac-ax-unminimize.patch",
     "cyder-kernelbase-disk-free-space-fallback.patch",
+    "cyder-wined3d-gl-sm5-feature-level-11.patch",
     "wine-winemac-initialize-style-masks.patch",
     "wine-win32u-full-client-visible-rect.patch",
     "cyder-ntdll-native-ddraw-path.patch",
     "maplestory-cx26-message-wait-handoff.patch",
+    "maplestory-cx26-kernelbase-charprev-null.patch",
+    "maplestory-cx26-win32u-spi-sticky-filter-keys.patch",
     "maplestory-cx26-core.patch",
     "maplestory-cx26-window-resizable-flag.patch",
     "maplestory-cx26-tmp-module-name.patch",
@@ -62,11 +65,11 @@
   "components": [
     "runtime/cxcompatdb/cxcompatdb.c"
   ],
-  "notes": "Cyder uses an open cxcompatdb.so loaded by the original CrossOver ntdll hook. It owns current-process CompatDB arguments, DLL overrides, graphics backend validation and runtime prepend; Cyder no longer patches ntdll for CompatDB. The MapleStory stack is D3DMetal-neutral; MoltenVK feature-level validation applies only to the optional DXVK path. Graphics payloads are shipped separately. The release stack includes only the MapleStory adaptive read-ahead cache for read-only WZ files and its 512-slot capacity tuning; ring, summary, timeline, cache-stats, section-map, mmap and prewarm patches remain development diagnostics and are not shipped in the release engine. Dual-variant MoltenVK ships libMoltenVK-1.4.2.dylib and libMoltenVK-1.2.10.dylib with a wait-poll shim as libMoltenVK.dylib and libMoltenVK.real.dylib selecting the active real; 1.4.2 reals keep capability plus present patches (timeline-wait is shim-owned). Native-ddraw-path-v1 captures CYDER_DDRAW_PATH once at PE startup before imports, redirects only bare ddraw names to an absolute native DLL candidate, and preserves Wine native/builtin load-order policy. Private provider configuration is owned by the application and inherited through the normal process environment.",
+  "notes": "Cyder uses an open cxcompatdb.so loaded by the original CrossOver ntdll hook. It owns current-process CompatDB arguments, DLL overrides, graphics backend validation and runtime prepend; Cyder no longer patches ntdll for CompatDB. The MapleStory stack is D3DMetal-neutral; MoltenVK feature-level validation applies only to the optional DXVK path. Graphics payloads are shipped separately. Every CX26 build includes the GE-Proton MapleStory launch fixes for CharPrevA/CharPrevExA NULL start (Wine bug 59926) and SPI_SETSTICKYKEYS/SPI_SETFILTERKEYS success stubs (Wine bug 59927). The release stack includes the MapleStory adaptive read-ahead cache and 512-slot capacity. FAST_HIT, host page-cache prewarm, and H2 in-process hit-prewarm are not shipped after 2026-09 playtest／ablation (no material first-hit／feel benefit vs complexity). Ring, summary, timeline, cache-stats, section-map, mmap and Skill-pack／FAST_HIT／H2 probes remain development diagnostics. Dual-variant MoltenVK ships libMoltenVK-1.4.2.dylib and libMoltenVK-1.2.10.dylib with a wait-poll shim as libMoltenVK.dylib and libMoltenVK.real.dylib selecting the active real; 1.4.2 reals keep capability plus present patches (timeline-wait is shim-owned). Native-ddraw-path-v1 captures CYDER_DDRAW_PATH once at PE startup before imports, redirects only bare ddraw names to an absolute native DLL candidate, and preserves Wine native/builtin load-order policy. Private provider configuration is owned by the application and inherited through the normal process environment.",
   "capabilities": [
     "native-ddraw-path-v1"
   ],
-  "ntdllSHA256": "5cfcbbfb0ff0e20ec2821cc151a077a80ca295bf07c0a4838171d3cd419f6d95",
+  "ntdllSHA256": "d64952d36f091c5601f1dea65c285e934798358a227ac96b6b052ce929866bff",
   "artifact": "engine-CX26-3-0-W11-Cyder013.tar.zst",
-  "artifactSHA256": "b5566d99c06a984a553c1a4566facaa111628cab3d1d7314d46561ea5ecd13e6"
+  "artifactSHA256": "a806eebcfce8aae8da65391109cd93188013eed31c7c09cba6310e29c1fade43"
 }
