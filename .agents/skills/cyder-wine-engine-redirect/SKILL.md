@@ -1,26 +1,31 @@
 ---
 name: cyder-wine-engine-redirect
 description: >-
-  Redirect Wine engine, wineserver, ntdll, minOS, and pack work to the
-  cyder-wine-engine sibling repository. Use when the user asks about Wine
-  engine builds, patches, or packing from the Cyder app repo.
+  Send Wine engine work (wineserver, ntdll, Wine patches, host builds, minOS,
+  MoltenVK, engine or graphics packing) to the cyder-wine-engine sibling repo.
+  Use when such a task is asked from the CyderBits repo.
 ---
 
-# Use cyder-wine-engine for engine work
+# Engine work belongs in cyder-wine-engine
 
-This Cyder (ogom) repo does not own the Wine build. For incremental builds,
-patches, host minOS, or `pack-engine-artifact`:
+CyderBits does not build Wine. For any engine task:
 
-1. Work in `../cyder-wine-engine` (normally `~/ogom/cyder-wine-engine`).
-2. Read that repo’s `AGENTS.md` and `docs/incremental-build-and-patches.md`.
-3. Prefer its `.agents/skills/incremental-wine-build` skill when available.
+1. Work in `../cyder-wine-engine` (`~/ogom/cyder-wine-engine`). Run its scripts
+   from there so its `.env` and paths apply.
+2. Read its `AGENTS.md`, then the skill for the task:
 
-Formal paths:
+| Task | Skill in the engine repo |
+|---|---|
+| Build, patch, rebuild ntdll or wineserver, direct engine tests | `.agents/skills/incremental-wine-build` |
+| Developer ID engine and graphics pack for a release | `.agents/skills/engine-release-pack` |
 
-- **Developer ID / shipping engine pack** → cyder-wine-engine
-  `.agents/skills/engine-release-pack` (never adhoc `SIGN_IDENTITY=-` for release).
-- **Full formal Cyder release** (import pin → notarize → verify) →
-  `.agents/skills/cyder-release` in this repo.
-- **Post-build acceptance only** → `.agents/skills/cyder-release-verify`.
-- **App-layer tests, test builds, real-app and game checks** →
-  `.agents/skills/cyder-dev-test`.
+3. Come back to CyderBits for what follows:
+
+| Next step | Skill here |
+|---|---|
+| Import the packed engine, notarize, publish | `cyder-release` |
+| Check a built app | `cyder-release-verify` |
+| Try the engine in Cyder.app or with a game | `cyder-dev-test` |
+
+Use absolute paths or `git -C <repo>` when a command must hit a specific
+checkout: the working directory can change between the two.

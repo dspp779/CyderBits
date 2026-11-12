@@ -1,84 +1,113 @@
 ---
 name: cyder-dev-test
 description: >-
-  Check a change to the Cyder app layer: run the offline test suite
-  (tests/run.sh), typecheck Swift, make a local test build, decide whether it
-  needs ad-hoc, Developer ID or notarized signing, click through the real app,
-  and launch a real game (for example BlueCG). Use after editing scripts/ or
-  tests/, when asked to "run the tests", "build and try it", "test it in the
-  real Cyder", or "test <game>". Not for shipping a release (cyder-release) or
-  Wine engine builds (cyder-wine-engine repo).
+  Check a change to the Cyder app layer: run the offline tests (tests/run.sh),
+  typecheck Swift, make a local test build with the right signature, check the
+  real app, and launch a game. Use after editing scripts/ or tests/, or when
+  asked to "run the tests", "build and try it", "test it in the real Cyder" or
+  "test <game>". Not for shipping (cyder-release) or Wine engine builds
+  (cyder-wine-engine repo).
 ---
 
 # Cyder development testing
 
-Full reference: `docs/development-testing.md`. Per-game steps:
-`docs/games/<game>/testing.md` (BlueCG: `docs/games/bluecg/testing.md`).
+Reference with full detail: `docs/development-testing.md`.
 
-## 1. Offline tests
+Do the steps in order and stop at the first one that fails. Steps 3–5 are
+needed only when the change is visible in the app or affects launching.
+
+## 1. Run the tests
 
 ```bash
-bash tests/run.sh <words-from-test-names>   # narrow first
-bash tests/run.sh                           # whole suite before committing
+bash tests/run.sh <word-from-the-test-names>
 ```
 
-The whole suite takes about 12 minutes: run it in the background and keep
-working. Report failures with the log path the runner prints. Rerun a lone
-failure of the known-noise tests (`test-cyder-window-native`,
-`test-cyder-launch-generation`) by itself before
-calling it a regression. A suite that stops producing output is usually a test showing a
-real alert: stub `osascript`/`open` in that test instead of waiting.
+```bash
+bash tests/run.sh
+```
 
-After editing Swift, typecheck all app sources (command in the reference doc)
-and grep `tests/` for every test that compiles the file you split or renamed.
+1. Run the narrow set first, then the whole suite in the background (about
+   12 minutes). The runner prints each failing test's log path.
+2. After editing Swift, typecheck every app source (command in the reference)
+   and grep `tests/` for tests that compile a file you split or renamed. They
+   compile a subset of the app, so a new file must be added to each of them.
+3. If a test fails: rerun it alone three times and read its assertion.
+   - Fails every time → a regression or a stale assertion. Fix it; do not call
+     it flaky.
+   - `test-cyder-window-native` and `test-cyder-launch-generation` depend on
+     window focus and load; they may fail while the Mac is in use.
+4. If the suite prints nothing for minutes, a test has opened a real alert.
+   Stub `osascript` and `open` in that test; do not wait or click it away.
 
-## 2. Test build
+When writing tests:
+
+- Call Swift helpers from the main thread, as the app does. A harness that only
+  used a background queue hid a main-thread crash (exit 133) that would have
+  refused every MoltenVK switch in the shipped app.
+- Do not copy `/bin/sleep` or other Apple binaries as test processes; macOS
+  kills them outside their system location.
+- In the launcher (`set -E` + `ERR` trap), a helper that answers with a
+  non-zero status inside `$(...)` logs a false error. End the substitution with
+  `|| exit $?`.
+- Do not read Wine's output through a pipe: its background services keep the
+  pipe open and the read never ends. Write to a file with a time limit.
+- Compare timings with a control run, never with an absolute number.
+- Use `grep`, not `rg`.
+
+## 2. Build a test app
 
 ```bash
 DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer bash scripts/release-cyder.sh --channel test --out-dir "${TMPDIR:-/tmp}/cyder-test-build"
 ```
 
-Never build a test into `dist/`: that holds the last release build.
+- Always pass `--out-dir` outside `dist/`; `dist/` holds the last release build.
+- `DEVELOPER_DIR` is required when `xcode-select` points at Command Line Tools,
+  which cannot link the Intel half of the app.
+- To **launch a game**, add `--sign-identity "Developer ID Application"`. An
+  ad-hoc build stops at graphics preparation (`CYD-WIN-001`,
+  `publisher_unverified`) because the DXMT updater only trusts an app signed by
+  the Cyder team. That is intended; never weaken it.
+- If the pinned engine archive is missing, pass `--engine-archive` with one
+  whose SHA-256 matches `config/cyder-engine-manifest.json`.
 
-Pick the signature by what the build must do:
+## 3. Check the app without clicking
 
-| Need | Signature |
-|---|---|
-| Inspect UI only | ad-hoc (default) |
-| Launch a game | add `--sign-identity "Developer ID Application"`; needs the signed `dxmt-0.80.tar.zst` in `CYDER_GRAPHICS_ARTIFACTS_DIR` |
-| Leave this Mac | not a test build: `cyder-release` (notarized) |
+```bash
+APP="${TMPDIR:-/tmp}/cyder-test-build/Cyder.app"; codesign --verify --deep --strict "$APP" && lipo -info "$APP/Contents/MacOS/CyderSwift" && "$APP/Contents/MacOS/CyderSwift" --runtime-users "$HOME/.cyder/runtime/Engines/wine-x86_64" engine; echo "runtime-users=$?"
+```
 
-Ad-hoc builds stop at graphics preparation (`CYD-WIN-001`,
-`publisher_unverified`). That is by design; do not weaken the check.
+`runtime-users` must print 0 (idle) or 75 (in use). Anything else is a crash;
+fix it before going on.
 
-## 3. Real app
+## 4. Click through the app
 
-- The test build shares the user's real settings and Windows environment. Open
-  destructive dialogs (修復, 完全重設) only to read them, then cancel.
-- First run the no-click checks (`codesign --verify`, `lipo -info`,
-  `CyderSwift --runtime-users`); a crash there (exit 133) blocks everything else.
-- Clicking needs Screen Recording and Accessibility, which only the user can
-  grant. Ask once, name the setting, and wait. Until then, list the screens for
-  the user to click and verify from screenshots.
-- Bring Cyder to the front before each click and take a new screenshot after it.
-- Afterwards read `~/Library/Application Support/Cyder/Logs/last-launch.log`
-  and the newest file in `Logs/sessions/`; any `diagnostic event=error` needs
-  an explanation.
+The test build uses the user's **real** settings and Windows environment.
 
-## 4. Real game
+1. Quit the normal Cyder, then open the test build.
+2. Screenshots need Screen Recording; clicks need Accessibility. Only the user
+   can grant them: name the setting, ask once, and wait. Meanwhile give the
+   user the list of screens to open.
+3. Before each click bring Cyder to the front (answering a prompt puts another
+   window in front, and a first click on a background window only focuses it).
+   Take a new screenshot after each action.
+4. Open 修復 and 完全重設 only to read them, then cancel. Change game options
+   only if asked, and restore anything changed for the test.
+5. Quit the test build when done.
 
-Follow `.agents/skills/wine-game-compat-testing` and the game's `testing.md`.
-Stop at the screen the user asked about. Logging in, spending in-game currency,
-deleting data and public comments need the user's explicit go-ahead.
+## 5. Launch a game
 
-## Report
+1. Follow `docs/games/<game>/testing.md` (BlueCG has one) and the
+   `wine-game-compat-testing` skill.
+2. Stop at the screen the user asked about. Logging in, spending in-game
+   currency and deleting data need the user's explicit go-ahead.
+3. Read `~/Library/Application Support/Cyder/Logs/last-launch.log` and the
+   newest file in `Logs/sessions/`. Explain every `diagnostic event=error`.
 
-State separately: tests run and their result, what was checked in the real app,
-which game was launched and how far, and what was **not** tested. Never write
-"tested" for something only covered by a hash match or a passing suite.
+## 6. Report
 
-## New knowledge
+List separately: tests run and result; screens checked; game launched and how
+far; and what was **not** tested. If no game was launched, say so.
 
-When a test session teaches something reusable (a new prerequisite, a flaky
-test, a game's launch steps), add it to `docs/development-testing.md` or the
-game's `testing.md` in the same change.
+If the session taught something reusable (a prerequisite, a trap, a game's
+steps), add it to `docs/development-testing.md`, the game's `testing.md` or
+this skill in the same change.
