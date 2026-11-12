@@ -89,6 +89,10 @@ fi
 
 GRAPHICS="$RESOURCES/graphics"
 [[ -d "$GRAPHICS" ]] || die "Missing graphics dir: $GRAPHICS"
+# DXVK 2 is not a supported Cyder payload until it passes game testing.
+if compgen -G "$GRAPHICS/dxvk2*" >/dev/null; then
+  die "Unsupported DXVK 2 graphics payload bundled: $GRAPHICS/dxvk2*"
+fi
 
 pick_one_archive() {
   local prefix="$1" version
@@ -159,6 +163,12 @@ for f in "$RESOURCES"/engine-*.tar.zst; do
 done
 shopt -u nullglob
 [[ ${#ENGINE_ARCHIVES[@]} -ge 1 ]] || die "Missing Resources/engine-*.tar.zst"
+for f in "${ENGINE_ARCHIVES[@]}"; do
+  listing="$("$ZSTD" -dc "$f" | tar -tf -)" || die "Cannot list engine archive: $f"
+  if grep -Eq '(^|/)lib/dxvk2(/|$)' <<<"$listing"; then
+    die "Engine archive contains unsupported DXVK 2 payload (lib/dxvk2): $f"
+  fi
+done
 
 PIN_FILE="$OGOM_ROOT/config/cyder-engine-version.txt"
 if [[ -f "$PIN_FILE" ]]; then

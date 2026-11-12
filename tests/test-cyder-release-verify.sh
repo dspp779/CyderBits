@@ -65,4 +65,23 @@ ok_status=$?
 set -e
 assert test "$ok_status" -ne 0 # Size/layout alone cannot accept unsigned or unprovenanced DXMT.
 
+# DXVK 2 is unsupported until game-tested: a bundled dxvk2 payload must fail first.
+verify_src="$(cat "$VERIFY")"
+assert_contains "$verify_src" 'Unsupported DXVK 2 graphics payload bundled' \
+  "verify must reject a bundled DXVK 2 graphics payload"
+assert_contains "$verify_src" 'Engine archive contains unsupported DXVK 2 payload' \
+  "verify must reject an engine archive containing lib/dxvk2"
+assert_contains "$(cat "$ROOT/scripts/create-cyder-app.sh")" 'Refusing to bundle unsupported DXVK 2' \
+  "app packaging must refuse a DXVK 2 graphics payload"
+cp "$tmp/Cyder.app/Contents/Resources/graphics/dxvk-1.10.3.tar.zst" \
+  "$tmp/Cyder.app/Contents/Resources/graphics/dxvk2-2.7.1.tar.zst"
+set +e
+dxvk2_out="$(CYDER_VERIFY_DXVK_MIN_BYTES=1000 CYDER_VERIFY_DXMT_MIN_BYTES=1000 \
+  bash "$VERIFY" --app "$tmp/Cyder.app" --skip-notarization-checks 2>&1)"
+dxvk2_status=$?
+set -e
+assert test "$dxvk2_status" -ne 0
+assert_contains "$dxvk2_out" 'Unsupported DXVK 2 graphics payload' \
+  "a bundled dxvk2 archive must be the reported failure"
+
 echo "PASS test-cyder-release-verify"

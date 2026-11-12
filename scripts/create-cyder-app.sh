@@ -297,6 +297,11 @@ else
     exit 1
   fi
 fi
+# DXVK 2 is not a supported Cyder payload until it passes game testing.
+if compgen -G "$RES/graphics/dxvk2*" >/dev/null; then
+  echo "Refusing to bundle unsupported DXVK 2 graphics payload into $RES/graphics" >&2
+  exit 1
+fi
 rsync -a "$OGOM/tools/libarchive/" "$RES/addons/libarchive/"
 
 /usr/bin/ruby "$SCRIPT_DIR/build-component-manifests.rb" "$RES"
