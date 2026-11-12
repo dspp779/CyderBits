@@ -1,7 +1,7 @@
 # Cyder Wine Engine 專案拆分
 
 公開 repo：[cyder-wine-engine](https://github.com/dspp779/cyder-wine-engine)。  
-本 repo（CyderBits / ogom）目前主要是**應用層**（啟動器、遊戲庫、設定、CompatDB、打包）；實際執行 Windows `.exe` 的核心在該引擎專案。
+本 repo（CyderBits）目前主要是**應用層**（啟動器、遊戲庫、設定、CompatDB、打包）；實際執行 Windows `.exe` 的核心在該引擎專案。
 
 ## 第一階段狀態
 
@@ -12,7 +12,7 @@ Wine 引擎的 source preparation、patch、建置、runtime 測試、strip、�
 
 責任邊界如下：
 
-| Wine 核心（[cyder-wine-engine](https://github.com/dspp779/cyder-wine-engine)） | 應用層（CyderBits / ogom） |
+| Wine 核心（[cyder-wine-engine](https://github.com/dspp779/cyder-wine-engine)） | 應用層（CyderBits） |
 |---|---|
 | CrossOver source 與工具鏈準備 | App UI、遊戲庫與偏好設定 |
 | Wine patch set 與套用順序 | Prefix 建立與生命週期 |
@@ -45,21 +45,17 @@ Cyder 的 [`scripts/import-engine-release.sh`](../scripts/import-engine-release.
 驗證包含 sidecar schema、archive digest、archive 內的 `version`、embedded manifest，以及
 實際解出的 `ntdll.dll` digest。任一項不一致即停止，不會部分更新 pin。
 
-Cyder 0.9.3 已 pin `CX26.3.0-W11-Cyder008`（含完整 frame-walk／wineserver teardown
-防護、DXVK payload、host
-minOS ≤ 10.15）。匯入時已驗證 archive、sidecar、內嵌 manifest、版本與 packaged
-`ntdll.dll` digest；對外發布前仍必須完成 Developer ID 簽章、公證與遊戲 smoke test
+目前 pin 的引擎版本記錄在 `config/cyder-engine-version.txt`（Cyder 0.14.0 為
+`CX26.3.0-W11-Cyder013`）；各版本對應的引擎見 [CHANGELOG](../CHANGELOG.md)。對外發布前
+仍必須完成 Developer ID 簽章、公證與遊戲 smoke test
 （見 [`release-pipeline.zh-TW.md`](release-pipeline.zh-TW.md)）。
-
-Cyder008 加入 leave／強制結束 teardown soft-guard（async／pipe／completion）；細節在
-引擎 repo `docs/wineserver-teardown-hardening-cyder008.md`。正式 archive 已由引擎 repo
-封裝並透過 manifest 契約匯入本專案。
 
 ## 保留相容副本
 
-第一階段不立即刪除 Cyder repository 的 `patches/`、`scripts/build-wine.sh` 與相關測試，
-原因是既有 0.8.3 發布與本機增量 source tree 仍依賴這些路徑。Cyder007 已完成首次
-release artifact 匯入；下一階段再進行：
+Cyder repository 仍保留 `patches/`、`scripts/build-wine.sh` 等建置腳本與相關測試的
+相容副本，但它們不是正式流程：引擎一律在 cyder-wine-engine 建置與打包。本 checkout 的
+`build/`、`install/`、`.brew-x86`、`tools/archives` 是指向引擎 checkout 的連結。
+尚未進行的整理：
 
 1. 將 Cyder 內的建置腳本改為明確的 forwarding wrapper，或完全移除。
 2. 將引擎專屬測試移出 Cyder CI。

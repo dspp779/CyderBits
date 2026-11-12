@@ -4,9 +4,9 @@
 
 # CyderBits
 
-**Run legacy Windows games on Mac — Cyder 0.13.1 uses DirectDraw and GDI as its validation baseline, with selectable graphics backends.**
+**Run legacy Windows games on Mac — Cyder 0.14.0 uses DirectDraw and GDI as its validation baseline, with selectable graphics backends.**
 
-The validated path remains classic 2D Win32 graphics: **DirectDraw → Wine wined3d/OpenGL** and GDI. Cyder 0.13.1 uses the `CX26.3.0-W11-Cyder012` engine (dual MoltenVK); DXVK and DXMT are delivered as separate graphics payloads, while D3DMetal is available through GPTK. Actual compatibility still depends on the game, macOS version, and selected backend.
+The validated path remains classic 2D Win32 graphics: **DirectDraw → Wine wined3d/OpenGL** and GDI. Cyder 0.14.0 uses the `CX26.3.0-W11-Cyder013` engine (dual MoltenVK); DXVK and DXMT are delivered as separate graphics payloads, while D3DMetal is available through GPTK. Actual compatibility still depends on the game, macOS version, and selected backend.
 
 This repo (CyderBits) is currently the **application layer**: the Cyder launcher, game library, settings, CompatDB, and packager. The Wine engine that actually runs Windows `.exe` files lives in [cyder-wine-engine](https://github.com/dspp779/cyder-wine-engine).
 
@@ -67,7 +67,7 @@ Below is a summary of tested games on Cyder / CyderBits. For detailed configurat
 | **Online** | BlueCG (水藍魔力) | 🟢 Playable | Project baseline validation (DirectDraw / GDI) |
 | **Online** | MapleStory (新楓之谷) | 🟡 Partially validated | Requires the MapleStory Launcher, [CitrusGate](https://github.com/dspp779/CitrusGate), and a valid OTP; CX26 still needs map-level validation |
 | **Online** | MapleStory Classic | 🟡 Partially validated | Requires [CitrusGate](https://github.com/dspp779/CitrusGate); QDO workaround and background-process cleanup remain limited |
-| **Online** | Crazy Arcade (爆爆王) | 🟡 Historical validation | Service availability and current-version compatibility were not revalidated for Cyder 0.10.1 |
+| **Online** | Crazy Arcade (爆爆王) | 🟡 Historical validation | Service availability and current-version compatibility have not been revalidated on current releases |
 
 ## Graphics backend status
 
@@ -75,7 +75,7 @@ Below is a summary of tested games on Cyder / CyderBits. For detailed configurat
 |---|---|---|
 | DirectDraw / GDI | **Supported and validated** | BlueCG uses DirectDraw; the default path is wined3d/OpenGL. GDI is a compatibility fallback. |
 | wined3d / OpenGL | **Active default** | BlueCG's validated engine includes the tested `winemac.drv` same-view backing fix for Retina/DPI resize. |
-| Vulkan / MoltenVK | **Provided by the Cyder012 engine** | Dual-variant: wait-poll shim + `.real` → `1.4.2` / `1.2.10`; Preferences can switch; macOS &lt; 12 forces 1.2.10. Not the primary BlueCG path. |
+| Vulkan / MoltenVK | **Provided by the engine** | Dual-variant: wait-poll shim + `.real` → `1.4.2` / `1.2.10`; Preferences can switch; macOS &lt; 12 forces 1.2.10. Not the primary BlueCG path. |
 | DXVK | **Integrated as a runtime payload** | DXVK is delivered under `Resources/graphics/` and loaded through CompatDB builtin + prepend; DXVK 2 is still deferred. |
 | dxmt | **Integrated as a runtime payload** | DXMT is delivered as a separate Cyder payload and requires macOS 15+; MapleStory.exe and Maplestory_Classic.exe prefer it automatically on macOS 15+. |
 | D3DMetal | **Product backend** | Available through GPTK / Apple D3DMetal on macOS 14+ with a usable GPTK; game compatibility must be validated per title. |
@@ -84,12 +84,7 @@ See [Wine configure and graphics options](docs/wine-configure-options.md) for bu
 
 ## Wine engine
 
-The runtime that actually executes `.exe` files is [cyder-wine-engine](https://github.com/dspp779/cyder-wine-engine). Wine is built from the **CrossOver open-source release** (see [CodeWeavers CrossOver Source](https://www.codeweavers.com/crossover/source)); canonical build, patch, and pack work happens in that repo. This tree still keeps compatibility copies of the build scripts; place archives in `tools/archives/` and builds extract into `build/cx26/`. See [docs/cyder-wine-engine-project.md](docs/cyder-wine-engine-project.md).
-
-```bash
-bash scripts/build-wine.sh --cx 26
-bash scripts/sign-wine.sh
-```
+The runtime that actually executes `.exe` files is [cyder-wine-engine](https://github.com/dspp779/cyder-wine-engine). Wine is built from the **CrossOver open-source release** (see [CodeWeavers CrossOver Source](https://www.codeweavers.com/crossover/source)). Build, patch, sign and pack the engine in that repo; `Cyder.app` bundles the engine release pinned in `config/cyder-engine-manifest.json`. See [docs/cyder-wine-engine-project.md](docs/cyder-wine-engine-project.md).
 
 ## Requirements
 
@@ -102,19 +97,34 @@ bash scripts/sign-wine.sh
 
 ## Quick start
 
-### 1. Build Wine (first time; slow; canonical flow is in cyder-wine-engine)
+### 1. Get a Wine engine
+
+`Cyder.app` needs the pinned engine archive named in `config/cyder-engine-archive.txt`. Build and pack it in a sibling checkout of [cyder-wine-engine](https://github.com/dspp779/cyder-wine-engine) (first build is slow; follow its from-scratch guide), or pass an existing archive with `--engine-archive`.
+
+### 2. Build and open Cyder
 
 ```bash
-bash scripts/build-wine.sh --cx 26 --install-deps
-bash scripts/build-wine.sh --cx 26
-bash scripts/sign-wine.sh
+bash scripts/release-cyder.sh --channel test --out-dir "${TMPDIR:-/tmp}/cyder-test-build"
+open "${TMPDIR:-/tmp}/cyder-test-build/Cyder.app"
 ```
 
-### 2. Validate with BlueCG
+This ad-hoc build shows windows and settings. Launching a game needs a Developer ID signature; see [docs/development-testing.md](docs/development-testing.md).
+
+### 3. Validate with BlueCG
 
 ```bash
 bash scripts/run-bluecg.sh
 bash scripts/enable-mac-retina-hires.sh   # optional Retina + 200% DPI
+```
+
+Step-by-step checks: [docs/games/bluecg/testing.md](docs/games/bluecg/testing.md).
+
+### 4. Wrap any EXE as a game app
+
+```bash
+bash scripts/create-cyderbits-app.sh
+open dist/CyderBits.app
+# or: python3 scripts/cyder_create_game_app.py --gui
 ```
 
 ## Implemented workarounds
@@ -124,66 +134,46 @@ bash scripts/enable-mac-retina-hires.sh   # optional Retina + 200% DPI
 - [BlueCG A6 resize fix](docs/workarounds/bluecg-a6-resize.md) — tested same-view backing sync for resize, Alt+Enter, and minimize/restore.
 - [Pikachu Volleyball compatibility](docs/games/pikachu-volleyball/README.md) — use a no-space runtime path with MSync and ESync disabled.
 
-### 3. Run or wrap any EXE
-
-```bash
-# Cyder launcher — open .exe directly
-bash scripts/create-cyder-app.sh
-open dist/Cyder.app
-
-# CyderBits packager — wrap .exe as a game .app
-bash scripts/create-cyderbits-app.sh
-open dist/CyderBits.app
-# or: python3 scripts/cyder_create_game_app.py --gui
-```
-
 ## Repository layout
 
 ```text
-├── logo/                       # cyderbits.png (app icon), cyderbits-transparent.png (README)
-├── config/entitlements.plist   # Wine JIT / dyld signing entitlements
-├── patches/                    # Optional source patches
-├── scripts/                    # Build, run, packaging
-├── tests/                      # Script smoke tests
+├── scripts/                    # Cyder.app sources (Bash + Swift), build and release scripts
+├── tests/                      # Offline tests; run with tests/run.sh
+├── compatdb/                   # Per-game compatibility rules and compiled database
+├── recipes/                    # Game app recipes for the CyderBits packager
+├── config/                     # App version, pinned engine manifest, entitlements
+├── patches/                    # Graphics and reference patches
+├── vendor/cnc-ddraw/           # Bundled cnc-ddraw
 ├── docs/                       # Guides (see docs/README.md)
-├── tools/
-│   ├── archives/               # CrossOver + llvm-mingw archives (.gitignore)
-│   └── libarchive/             # GnuWin bsdtar payload
-├── build/                      # Extracted sources + llvm-mingw (.gitignore)
-├── .brew-x86/                  # Project-local x86_64 Homebrew (.gitignore)
-├── install/
-│   └── wine-cx26-x86_64/       # CX26 engine (.gitignore)
+├── .agents/skills/             # Step-by-step guides for AI agents (entry: AGENTS.md)
+├── logo/                       # App icon and README logo
+├── build/ install/ .brew-x86/ tools/archives/   # Links into the cyder-wine-engine checkout (.gitignore)
 └── BlueCrossgateNew/           # BlueCG game + prefix (.gitignore)
 ```
 
 ## Tests
 
 ```bash
-bash tests/test-env-x86_64.sh
-bash tests/test-prepare-build-deps.sh
-bash tests/test-build-wine.sh
-bash tests/test-sign-wine.sh
-bash tests/test-run-bluecg.sh
-bash tests/test-verify-bluecg.sh
+bash tests/run.sh <word>   # tests whose name contains <word>
+bash tests/run.sh          # whole suite, about 12 minutes
 ```
+
+Which check fits which change, test builds, signing and real-app checks: [docs/development-testing.md](docs/development-testing.md).
 
 ## Documentation
 
-- [Cyder 0.13.1 release notes](docs/releases/v0.13.1.md) — Cyder012 dual MoltenVK, Rosetta consent, GameSir platform patches
-- [Cyder 0.13.0 release notes](docs/releases/v0.13.0.md) — faster first open, no Mono/Gecko preload, Preferences-first launch, .msi / mac shortcuts, Retina off by default
-- [Cyder 0.12.0 release notes](docs/releases/v0.12.0.md) — LaunchGroup menu bar, winemenubuilder library icons, locale menu, shortcut titles, Dock while UI is open
-- [Cyder 0.11.1 release notes](docs/releases/v0.11.1.md) — gamaniagames:// URI handler, open -n file URLs, and URI cold-start Preferences skip
-- [Cyder 0.10.1 test release notes](docs/releases/v0.10.1.md) — forced-stop liquid animation, MapleStory WZ adaptive cache, release tooling, tests, and documentation updates
-- [Cyder 0.10.0 release notes](docs/releases/v0.10.0.md) — Cyder010 engine, graphics payloads, session lifecycle, and diagnostics
-- [Cyder 0.7.0 release notes](docs/releases/v0.7.0.en.md) — CrossOver bottle isolation, cabextract, new icon, MapleStory OEM flavor
-- [Cyder 0.6.0 release notes](docs/releases/v0.6.0.en.md) — CX26.3 engine, macOS 10.15 runtime, Winetricks, dynamic argv
-- [docs/README.md](docs/README.md) — index
-- [docs/cyder-wine-engine-project.md](docs/cyder-wine-engine-project.md) — application layer vs [cyder-wine-engine](https://github.com/dspp779/cyder-wine-engine)
+- [CHANGELOG.md](CHANGELOG.md) — changes per version
+- [Cyder 0.14.0 release notes](docs/releases/v0.14.0.en.md) — Cyder013 engine, quit without stopping games, per-game cnc-ddraw, DXVK black-texture fix; last release for macOS 10.15 and 11
+- [docs/README.md](docs/README.md) — index of all guides and earlier release notes
 - [docs/cyder.md](docs/cyder.md) — Cyder launcher
 - [docs/cyderbits.md](docs/cyderbits.md) — CyderBits packager
+- [docs/games/compatibility-matrix.md](docs/games/compatibility-matrix.md) — tested games
+- [docs/development-testing.md](docs/development-testing.md) — tests, test builds, real-app and game checks
+- [docs/release-pipeline.zh-TW.md](docs/release-pipeline.zh-TW.md) — signing, notarizing and publishing a release
+- [docs/cyder-wine-engine-project.md](docs/cyder-wine-engine-project.md) — application layer vs [cyder-wine-engine](https://github.com/dspp779/cyder-wine-engine)
 - [docs/bluecg.md](docs/bluecg.md) — BlueCG workflow
 - [docs/scripts.md](docs/scripts.md) — script reference
-- [docs/superpowers/](docs/superpowers/) — design specs
+- [AGENTS.md](AGENTS.md) — rules and skills for AI agents
 
 ## Sources and licensing
 

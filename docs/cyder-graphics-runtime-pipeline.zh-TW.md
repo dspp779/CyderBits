@@ -32,7 +32,7 @@ flowchart TB
     INSTALL --> PACKG["pack-graphics-payloads.sh"]
     PACKG --> GART["dist/artifacts/graphics/<br/>dxvk / dxmt *.tar.zst"]
     INSTALL --> PACKE["pack-engine-artifact.sh<br/>排除 lib/dxvk|dxmt（另排除舊 dxvk2）"]
-    PACKE --> EART["engine-*-Cyder011-*.tar.xz<br/>含 MoltenVK，無圖形 PE"]
+    PACKE --> EART["engine-*-CyderNNN.tar.zst<br/>含 MoltenVK，無圖形 PE"]
   end
 
   subgraph pin["ogom pin"]
@@ -138,7 +138,7 @@ flowchart LR
 | `scripts/import-engine-release.sh --apply` | 驗證 manifest／NTDLL SHA，寫入 `config/cyder-engine-*` |
 | `scripts/create-cyder-app.sh` | 複製 pin 住的 engine tar **與** DXVK／DXMT graphics sidecar；缺一則失敗（`CYDER_ALLOW_MISSING_GRAPHICS=1` 除外） |
 
-Engine 升級（例如 `Cyder011`）會更新 Wine 與 engine 內的
+Engine 升級會更新 Wine 與 engine 內的
 `cxcompatdb.so`；圖形 payload 版本仍由 `lib/*/version` 與 sidecar 獨立演進。
 
 ---
@@ -304,8 +304,8 @@ MapleStory 平台策略只在 `cyder_prepare_game_launch_settings` 知道實際 
 - 它目前處理 current-process append arguments、DLL overrides 與 graphics backend；`set_env`、`unset_env`、executable replacement、WineD3D renderer records 會記錄 unsupported 並忽略，不應當成可用規則發布。
 
 舊版已發布、未內含 `cxcompatdb.so` 的 engine 必須重新打包升級；不能藉由更新
-app 端環境變數讓舊 engine 自動取得此 plugin。現行 pin：
-`CX26.3.0-W11-Cyder011`。
+app 端環境變數讓舊 engine 自動取得此 plugin。現行 pin 見
+`config/cyder-engine-version.txt`。
 
 ---
 
