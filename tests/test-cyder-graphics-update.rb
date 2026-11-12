@@ -55,6 +55,17 @@ class GraphicsUpdateTest < Minitest::Test
     stamp=File.stat(File.join(@prefix,'drive_c/windows/system32/winemetal.dll')).mtime
     configure('B', 'policy-v3'); assert_equal 'ok', apply['status']; assert_equal stamp,File.stat(File.join(@prefix,'drive_c/windows/system32/winemetal.dll')).mtime; refute_equal second, current; assert File.directory?(second); assert_settings
   end
+  def test_retired_cyder_revision_install_moves_to_upstream_version_without_downgrade
+    # Installed by 0.14.0 as 0.80-cyder.2; the next app ships the same code as plain 0.80.
+    configure('A'); @manifest['source']['version'] = '0.80-cyder.2'
+    assert_equal 'ok', apply['status']; old = current
+    configure('A2'); @manifest['source']['version'] = '0.80'
+    result = apply
+    assert_equal 'ok', result['status']; assert result['changed']; assert_equal '0.80', result['version']
+    refute_equal old, current; assert File.directory?(old); assert_settings
+    again = apply(probe: -> { :busy }, extract: ->(*) { flunk 'no re-extraction once migrated' })
+    assert_equal false, again['changed']
+  end
   def test_busy_and_unknown_never_change_current_install
     apply; old = current; configure('B'); before=snapshot
     [:busy, :unknown].each do |state|

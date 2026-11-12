@@ -31,7 +31,7 @@ staple/zip (unless `RELEASE_SKIP_VERIFY=1`).
 - `graphics/dxmt-*.tar.zst` ≥ 8 MiB (override `CYDER_VERIFY_DXMT_MIN_BYTES`)
 - Archive top entry must not be a symlink (`tar -tv`); must contain `d3d11.dll` / `winemetal.so`
 - Select the active archive from `dxmt-version.txt`, not an arbitrary old glob match.
-- DXMT must use `0.80-cyder.N` and pass `graphics-signing.py verify-archive`:
+- DXMT uses the upstream version `0.80` (retired `0.80-cyder.N` still accepted) and must pass `graphics-signing.py verify-archive`:
   provenance, complete file set/hashes, reviewed upstream digests, expected
   Developer ID Team and secure timestamp. This gate remains enabled with
   `--skip-notarization-checks`. Missing proof stops release; do not auto-repair.

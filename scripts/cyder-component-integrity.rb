@@ -335,6 +335,10 @@ module CyderIntegrity
      'provenance' => provenance}.reject { |_, v| v.nil? }
   end
 
+  # Signed DXMT keeps the upstream version (0.80). Older installs carry the retired
+  # 0.80-cyder.N package names and must keep verifying.
+  DXMT_SIGNED_VERSION = /\A0\.80(?:-cyder\.[1-9][0-9]*)?\z/
+
   # No broad unsigned exception: one reviewed upstream file/version/digest only.
   def self.upstream_unsigned?(row, source)
     source['component'] == 'dxmt' && source['version'] == '0.80' && row['path'] == DXMT_NATIVE &&
@@ -347,7 +351,7 @@ module CyderIntegrity
     if provenance
       raise Unknown, 'invalid_graphics_provenance' unless provenance['schemaVersion'] == 1 &&
         provenance['component'] == 'dxmt' && provenance['channel'] == 'release' &&
-        provenance['packageVersion'] == version && version.match(/\A0\.80-cyder\.[1-9][0-9]*\z/) &&
+        provenance['packageVersion'] == version && version.match(DXMT_SIGNED_VERSION) &&
         provenance['teamIdentifier'] == TEAM && provenance['requireTimestamp'] == true && provenance['upstream'] == DXMT_UPSTREAM &&
         provenance['signingIdentifier'] == "local.cyder.dxmt.#{version}.winemetal"
       files = provenance['files']
@@ -384,7 +388,7 @@ module CyderIntegrity
     when 'verify' then true
     when 'upstream-unsigned' then upstream_unsigned?(row, source)
     when 'developer-id'
-      source['component'] == 'dxmt' && source['version'].match(/\A0\.80-cyder\.[1-9][0-9]*\z/) &&
+      source['component'] == 'dxmt' && source['version'].match(DXMT_SIGNED_VERSION) &&
         row['path'] == DXMT_NATIVE && row['architectures'] == ['x86_64'] && row['teamIdentifier'] == TEAM &&
         row['requireTimestamp'] == true && row['upstream'] == DXMT_UPSTREAM
     else false
@@ -392,7 +396,7 @@ module CyderIntegrity
   end
 
   def self.developer_signature(path, deadline, package_version)
-    raise Unknown, 'invalid_package_revision' unless package_version.match(/\A0\.80-cyder\.[1-9][0-9]*\z/)
+    raise Unknown, 'invalid_package_revision' unless package_version.match(DXMT_SIGNED_VERSION)
     raise Unknown, 'unsafe_signature_path' if path.match(/[\x00-\x1f\x7f]/)
     requirement = "=anchor apple generic and certificate leaf[subject.OU] = \"#{TEAM}\" and certificate leaf[field.1.2.840.113635.100.6.1.13] exists"
     requirement += " and identifier \"local.cyder.dxmt.#{package_version}.winemetal\""

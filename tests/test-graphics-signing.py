@@ -40,6 +40,7 @@ class SigningTests(unittest.TestCase):
         self.bad_requirement = False
         self.timestamp = True
         self.invalid = False
+        self.expected_version = '0.80'
         self.command_patch = patch.object(g, 'command', self.command)
         self.command_patch.start()
         self.decoder = self.base / 'decoder'
@@ -63,12 +64,12 @@ class SigningTests(unittest.TestCase):
         if '-R' in args:
             self.assertTrue(args[args.index('-R')+1].startswith('=anchor apple generic'))
             self.assertIn(g.TEAM, args[args.index('-R')+1])
-            self.assertIn('identifier "local.cyder.dxmt.0.80-cyder.1.winemetal"', args[args.index('-R')+1])
+            self.assertIn('identifier "local.cyder.dxmt.' + self.expected_version + '.winemetal"', args[args.index('-R')+1])
             return subprocess.CompletedProcess(args, int(self.bad_requirement or self.invalid), '')
         return subprocess.CompletedProcess(args, 0, 'Timestamp=fixture-secure-time\n' if self.timestamp else 'Signature=adhoc\n')
 
     def prepare(self):
-        return g.prepare(self.root, '0.80-cyder.1', 'Developer ID Application: Fixture')
+        return g.prepare(self.root, '0.80', 'Developer ID Application: Fixture')
 
     def test_sign_staging_only_and_record_both_hashes(self):
         before = {n: g.digest(p) for n, p in g.files(self.original).items()}
@@ -78,10 +79,31 @@ class SigningTests(unittest.TestCase):
         self.assertEqual(native['sourceSHA256'], self.upstream['fileSHA256'])
         self.assertNotEqual(native['sourceSHA256'], native['sha256'])
         self.assertEqual(native['signature'], 'developer-id')
-        g.verify_root(self.root, '0.80-cyder.1', self.original)
+        g.verify_root(self.root, '0.80', self.original)
 
-    def test_no_adhoc_or_same_revision_name(self):
-        for version, identity in [('0.80', 'Developer ID Application: Fixture'), ('0.80-cyder.1','-')]:
+    def test_package_version_is_the_upstream_version(self):
+        result = self.prepare()
+        self.assertEqual(result['packageVersion'], '0.80')
+        self.assertEqual(result['signingIdentifier'], 'local.cyder.dxmt.0.80.winemetal')
+        sign = next(args for args in self.calls if '--force' in args)
+        self.assertEqual(sign[sign.index('--identifier') + 1], 'local.cyder.dxmt.0.80.winemetal')
+
+    def test_legacy_cyder_revision_still_verifies_but_is_never_produced(self):
+        self.prepare()
+        meta = self.root / g.META
+        data = json.loads(meta.read_text())
+        data['packageVersion'] = '0.80-cyder.2'
+        data['signingIdentifier'] = 'local.cyder.dxmt.0.80-cyder.2.winemetal'
+        meta.write_text(json.dumps(data))
+        self.expected_version = '0.80-cyder.2'
+        g.verify_root(self.root, '0.80-cyder.2', self.original)
+        with self.assertRaises(g.Invalid):
+            g.verify_root(self.root, '0.80')
+        with self.assertRaises(g.Invalid):
+            g.verify_root(self.root, '0.80-cyder.0')
+
+    def test_no_adhoc_or_retired_revision_name(self):
+        for version, identity in [('0.80-cyder.1', 'Developer ID Application: Fixture'), ('0.81', 'Developer ID Application: Fixture'), ('0.80','-')]:
             with self.assertRaises(g.Invalid):
                 g.prepare(self.root, version, identity)
         self.assertEqual(self.calls, [])
@@ -109,11 +131,11 @@ class SigningTests(unittest.TestCase):
         self.prepare()
         self.bad_requirement = True
         with self.assertRaises(g.Invalid):
-            g.verify_root(self.root, '0.80-cyder.1')
+            g.verify_root(self.root, '0.80')
         self.bad_requirement = False
         self.timestamp = False
         with self.assertRaises(g.Invalid):
-            g.verify_root(self.root, '0.80-cyder.1')
+            g.verify_root(self.root, '0.80')
 
     def test_modified_contents_provenance_and_cached_source_rejected(self):
         self.prepare()
@@ -123,19 +145,19 @@ class SigningTests(unittest.TestCase):
         data['files'][0]['sourceSHA256'] = '0' * 64
         meta.write_text(json.dumps(data))
         with self.assertRaises(g.Invalid):
-            g.verify_root(self.root, '0.80-cyder.1')
+            g.verify_root(self.root, '0.80')
         forged = json.loads(original)
         forged['signingIdentifier'] = 'local.cyder.other-component'
         meta.write_text(json.dumps(forged))
         with self.assertRaises(g.Invalid):
-            g.verify_root(self.root, '0.80-cyder.1')
+            g.verify_root(self.root, '0.80')
         meta.write_text(original)
         (self.original / g.NATIVE).write_bytes(b'changed source')
         with self.assertRaises(g.Invalid):
-            g.verify_root(self.root, '0.80-cyder.1', self.original)
+            g.verify_root(self.root, '0.80', self.original)
         (self.root / g.NATIVE).write_bytes(b'changed after signature')
         with self.assertRaises(g.Invalid):
-            g.verify_root(self.root, '0.80-cyder.1')
+            g.verify_root(self.root, '0.80')
 
     def test_archive_roundtrip_and_verification_never_signs(self):
         self.prepare()
@@ -143,10 +165,10 @@ class SigningTests(unittest.TestCase):
         with tarfile.open(archive, 'w') as tar:
             tar.add(self.root, arcname='dxmt')
         self.calls.clear()
-        g.verify_archive(archive, str(self.decoder), '0.80-cyder.1', self.original)
+        g.verify_archive(archive, str(self.decoder), '0.80', self.original)
         self.assertFalse(any('--force' in args for args in self.calls))
         with self.assertRaises(g.Invalid):
-            g.verify_archive(archive, str(self.decoder), '0.80-cyder.2')
+            g.verify_archive(archive, str(self.decoder), '0.80-cyder.1')
 
     def test_archive_paths_links_and_duplicates_rejected(self):
         for kind in ['traversal', 'symlink', 'duplicate']:
@@ -163,7 +185,7 @@ class SigningTests(unittest.TestCase):
                     if kind == 'duplicate':
                         tar.addfile(info, io.BytesIO(b'x'))
             with self.assertRaises(g.Invalid):
-                g.verify_archive(archive, str(self.decoder), '0.80-cyder.1')
+                g.verify_archive(archive, str(self.decoder), '0.80')
         self.assertFalse((self.base / 'outside').exists())
 
 if __name__ == '__main__':
