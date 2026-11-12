@@ -25,6 +25,8 @@ open dist/Cyder.app
 
 ### 系統版本
 
+> **支援政策：** Cyder 0.14／engine Cyder013 是最後支援 macOS 10.15 與 11 的版本；之後的版本僅支援 macOS 12+。下表描述 0.14 系列。
+
 | 層級 | 最低版本 | 說明 |
 |------|----------|------|
 | **Cyder.app（plist）** | **10.15** | 與目前 CX26 Wine engine 對齊 |
@@ -45,7 +47,7 @@ Cyder012 引擎同時內建：
 | `libMoltenVK.dylib` | wait-poll **shim**（修 DXVK 長跑 Mach Ports；marker `cyder-moltenvk-timeline-wait-poll`） |
 | `libMoltenVK.real.dylib` | symlink → 選中的 versioned real |
 | `libMoltenVK-1.4.2.dylib` | 上游 1.4.2 + capability／present；**minos 12.0** |
-| `libMoltenVK-1.2.10.dylib` | crossover-foss 1.2.10；minos ≤ 10.15 |
+| `libMoltenVK-1.2.10.dylib` | crossover-foss 1.2.10；minos 10.15（Cyder013 沿用 Cyder012 的同版 binary，因 Xcode 27 SDK 最低只能建置 macOS 12） |
 
 偏好設定 → **圖形 → MoltenVK** 可選 `1.4.2` 或 `1.2.10`（無 auto）。macOS &lt; 12 強制 1.2.10。儲存設定不會改動 engine；下一次啟動（或 ensure）才在共用 runtime 鎖內改寫 `.real` symlink。Cyder.app 不再另外建置 shim。
 

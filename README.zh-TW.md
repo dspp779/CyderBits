@@ -94,6 +94,7 @@ bash scripts/sign-wine.sh
 
 ## 系統需求
 
+- **支援政策：** Cyder **0.14**（engine **Cyder013**）是**最後支援 macOS 10.15 與 11 的版本**；之後的版本僅支援 **macOS 12+**。
 - **Cyder.app：** macOS 10.15+（`LSMinimumSystemVersion`）；遊戲庫／設定 UI 需 **11+**（10.15 首次安裝會顯示終端機，完成後以 bash 選檔／啟動）
 - **遊戲位置：** 建議放在 `~/Games`；Documents、Desktop、Downloads、雲端或外接磁碟可能只授權 EXE，卻阻擋同資料夾的 DLL
 - **開發／建置：** 建議 macOS 12+（日常開發建議 13+）

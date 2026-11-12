@@ -93,6 +93,7 @@ bash scripts/sign-wine.sh
 
 ## Requirements
 
+- **Support policy:** Cyder **0.14** (engine **Cyder013**) is the **last release that supports macOS 10.15 and 11**. Later releases require **macOS 12+**.
 - **Cyder.app:** macOS 10.15+ (`LSMinimumSystemVersion`); Game Library / settings UI on **11+** (10.15 performs first-run setup in a visible Terminal, then uses Bash file selection / launch)
 - **Game location:** `~/Games` is recommended; macOS may allow the selected EXE but deny sibling DLLs under Documents, Desktop, Downloads, cloud storage, or external volumes
 - **Development / build:** macOS 12+ recommended (13+ for day-to-day work)
