@@ -1,78 +1,91 @@
-# Agent instructions (Cyder / ogom)
+# Agent instructions (CyderBits)
 
-This repository (CyderBits / ogom) owns the **application layer**: the Cyder
-app, bottles, CompatDB, and game UX. It does **not** own the Wine engine that
-actually runs Windows `.exe` files.
+This repo is the **application layer**: Cyder.app, bottles, CompatDB, game UX.
+The Wine engine that runs `.exe` files is the sibling repo
+[cyder-wine-engine](https://github.com/dspp779/cyder-wine-engine).
 
-## Wine engine / incremental builds / patches
+| Checkout | Path |
+|---|---|
+| CyderBits (this repo) | `~/ogom/Cyderbits` |
+| Engine | `~/ogom/cyder-wine-engine` (`../cyder-wine-engine`) |
 
-Do that work in **[cyder-wine-engine](https://github.com/dspp779/cyder-wine-engine)**
-(sibling checkout, often `~/ogom/cyder-wine-engine` or `../cyder-wine-engine`).
+`build/`, `install/`, `.brew-x86` and `tools/archives` here are links into the
+engine checkout.
 
-Before any wineserver / ntdll / host `make` / engine pack task:
+## Rules
 
-1. Prefer opening that repo as the workspace.
-2. Read `cyder-wine-engine/AGENTS.md`.
-3. Read `cyder-wine-engine/docs/incremental-build-and-patches.md`.
+1. **Engine work goes to the engine repo.** Anything about wineserver, ntdll,
+   Wine patches, host `make`, minOS or engine packing: open
+   `../cyder-wine-engine`, read its `AGENTS.md`, and run its scripts from there
+   so `.env` and paths resolve.
+2. **Commit on a `claude/<topic>` branch. Merge, push, tag, publish and delete
+   only when the user asks**, and only what they named.
+3. **Never commit** `.local/`, `.research/`, `.tmp-*/`, `auth/`, `.env`. Never
+   print values from `.env` or `auth/`.
+4. **Unmerged work lives on a branch**, never only in an ignored folder. Before
+   deleting or pruning anything, look at it: `git status`, `git stash list`,
+   `git worktree list`, and the folder's contents.
+5. **Say what was not tested.** A passing suite, a hash match or a notarized
+   zip is not a game test.
+6. **Every behaviour change gets a test** in the narrowest `tests/test-*`.
+7. **Docs:** user-facing docs are zh-TW; agent and process guides are English.
+   When a session teaches something reusable, update the matching skill or doc
+   in the same change.
 
-Large trees (`build/`, `install/`, `tools/archives`, `.brew-x86`) may be
-symlinks into `cyder-wine-engine`; still run build/pack scripts from the engine
-repo so `.env` and scripts resolve correctly.
+## How to
 
-## Everyday development
+| Task | Steps |
+|---|---|
+| Run tests | `bash tests/run.sh <word>` for matching tests, then `bash tests/run.sh` (about 12 minutes; run it in the background). |
+| Try a change in the app | Skill `cyder-dev-test`: build with `--channel test` into a folder outside `dist/`, pick the signature, check the app, read the logs. |
+| Test a game | Skills `cyder-dev-test` then `wine-game-compat-testing`; per-game steps in `docs/games/<game>/testing.md`. |
+| Ship a release | Skill `cyder-release`, start to finish. Never skip `cyder-release-verify`. |
+| Write release notes | `docs/release-notes-guide.md`. |
 
-Full guide: `docs/development-testing.md`. Skill: `.agents/skills/cyder-dev-test`.
+Which signature a build needs (the reason is the DXMT updater: it installs
+graphics only from an app it can verify as signed by the Cyder team):
 
-- **Tests:** `bash tests/run.sh` (whole suite, about 12 minutes; run it in the
-  background) or `bash tests/run.sh <word>` for tests whose name contains a
-  word. Add or extend the narrowest `tests/test-*` with every behaviour change.
-- **Test build:** `bash scripts/release-cyder.sh --channel test --out-dir <dir outside dist/>`;
-  prefix with `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer` when
-  the universal Swift link fails.
-- **Signing level:** ad-hoc for UI checks only; Developer ID
-  (`--sign-identity "Developer ID Application"`, not notarized) to launch a
-  game on this Mac; notarized (`--channel release`) for anything that leaves
-  this Mac. Ad-hoc builds cannot launch games by design.
-- **Real app:** a test build shares the user's real settings and Windows
-  environment; do not run 修復／完全重設 or change game options unless asked.
-- **Games:** `.agents/skills/wine-game-compat-testing`, plus the per-game steps
-  in `docs/games/<game>/testing.md` (BlueCG: `docs/games/bluecg/testing.md`).
-- **Claims:** a passing suite, a hash match or a notarized zip is not a game
-  test. Report what was not tested.
-- **Git:** work on a `claude/<topic>` branch; merge, push, tag and publish only
-  when the user asks. Never commit `.local/`, `.research/`, `.tmp-*/`, `auth/`
-  or `.env`.
-- **Docs:** user-facing docs are zh-TW; agent and process guides are English.
-  When a session teaches something reusable, update the matching doc or skill
-  in the same change.
+| The build must… | Sign | Notarize |
+|---|---|---|
+| show windows and settings | ad-hoc | no |
+| launch a game on this Mac | Developer ID | no |
+| leave this Mac | Developer ID | yes |
 
-## Cyder.app release channels
+## Traps that have cost time before
 
-- Test vs release (sign / notarize): `docs/release-pipeline.zh-TW.md`
-- Wrapper: `bash scripts/release-cyder.sh --channel test|release`
-- Signing credentials detail: `docs/release-signing.zh-TW.md`
-- Formal release: `.agents/skills/cyder-release` (preflight, notarize, verify,
-  publish); notes format: `docs/release-notes-guide.md`
-- Not shipped until game-tested: DXVK 2. DXMT keeps the upstream version
-  (`0.80`); Cyder only adds a Developer ID signature.
-- 0.14 / engine Cyder013 is the last line for macOS 10.15 and 11; later
-  releases need macOS 12+.
+| Symptom | Cause | Do |
+|---|---|---|
+| A command that works in bash fails oddly | The shell is zsh (no word splitting, different globs, BSD tools) | Wrap bash syntax in `bash -c '…'`; avoid GNU-only flags |
+| A `cmd1 && cmd2 && …` chain "did nothing" | An early step failed and the rest never ran | After any error, check what actually ran before continuing |
+| A command acts on the wrong repo | The working directory moves between the two checkouts | Use absolute paths or `git -C <repo>` |
+| Universal Swift link fails for x86_64 | `xcode-select` points at Command Line Tools | Prefix the build with `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer` |
+| Test build stops at `CYD-WIN-001`, log says `publisher_unverified` | Ad-hoc build cannot install graphics | Rebuild with `--sign-identity "Developer ID Application"`; do not weaken the check |
+| Suite stops printing for minutes | A test opened a real alert or app | Stub `osascript` and `open` in that test |
+| A test fails once | Could be load, focus, or a stale assertion | Rerun it alone three times and read the assertion before calling it flaky |
+| Wrong archive ended up in the app | The app bundles every archive in the graphics folder; packers reuse old archives | Keep only what ships in that folder; repack with `--force` after a DXVK change |
+| Settings show `1.4.2` / `1.2.10` | Those are **MoltenVK** versions | DXVK is always 1.10.3; DXMT is upstream 0.80 with a Developer ID signature |
+| Long build hangs with no output | Checkout under `~/Documents`, `~/Desktop` or `~/Downloads` | Keep checkouts under `~/ogom` |
+
+Fixed product facts: DXVK 2 is not shipped until it passes game testing.
+0.14 / engine Cyder013 is the last line for macOS 10.15 and 11; later releases
+need macOS 12+.
 
 ## Skills
 
-Skills live in `.agents/skills/`. Tools that do not load them automatically
-(Claude Code) should read the matching `SKILL.md` before that kind of work:
+Skills are in `.agents/skills/`. Claude Code does not load them automatically:
+read the `SKILL.md` before starting that kind of work.
 
-| When | Read |
-|------|------|
-| Running tests, test builds, checking the real app or a game | `.agents/skills/cyder-dev-test/SKILL.md` |
-| Diagnosing a game (backend, video, launcher chain) | `.agents/skills/wine-game-compat-testing/SKILL.md` |
-| Cutting, notarizing or publishing a release | `.agents/skills/cyder-release/SKILL.md` |
-| Checking a built `Cyder.app` / zip | `.agents/skills/cyder-release-verify/SKILL.md` |
-| Anything about the Wine engine | `.agents/skills/cyder-wine-engine-redirect/SKILL.md` |
+| Work | Skill |
+|---|---|
+| Tests, test builds, checking the real app | `cyder-dev-test` |
+| Diagnosing or testing a game | `wine-game-compat-testing` |
+| Building, notarizing, publishing a release | `cyder-release` |
+| Checking a built `Cyder.app` or zip | `cyder-release-verify` |
+| Wine engine work | `cyder-wine-engine-redirect` |
 
-## Entry files
+References: `docs/development-testing.md`, `docs/release-pipeline.zh-TW.md`,
+`docs/release-signing.zh-TW.md`.
 
-`AGENTS.md` is the single source of instructions in both repos. `CLAUDE.md` is
-a one-line `@AGENTS.md` import, kept only because Claude Code reads `CLAUDE.md`
-and not `AGENTS.md`. Do not add other per-tool files; put rules here.
+`AGENTS.md` is the only instruction file. `CLAUDE.md` is a one-line
+`@AGENTS.md` import because Claude Code reads `CLAUDE.md`; add no other
+per-tool files.
