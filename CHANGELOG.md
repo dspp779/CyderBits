@@ -24,7 +24,7 @@ Full notes: [繁中](docs/releases/v0.14.0.md) · [English](docs/releases/v0.14.
 - Component integrity diagnostics cover the environment's Wine system files (#20).
 
 ### Changed
-- Quitting Cyder no longer stops the Windows environment; stopping it is a separate action.
+- Quitting Cyder no longer requires ending running games; stopping the Windows environment is a separate action.
 - Launch preparation takes about 0.4 s instead of about 1.8 s; menus and the Game Library do their I/O in the background.
 - State updates are event-driven instead of polled every second.
 - MoltenVK/GPTK cannot be switched while programs are running on the engine.
@@ -37,9 +37,10 @@ Full notes: [繁中](docs/releases/v0.14.0.md) · [English](docs/releases/v0.14.
 - MapleStory launch: Wine bugs [59926](https://bugs.winehq.org/show_bug.cgi?id=59926) and [59927](https://bugs.winehq.org/show_bug.cgi?id=59927), from GE-Proton (engine #12).
 - BlueCG HD colored stripes with cnc-ddraw (#19).
 - Windowed DirectDraw black screen (upstream Wine `b5ab3b15` backport, engine #2); Dock-minimized window restore (engine #10); native fullscreen ordering (engine #6).
-- Video playback after the engine is moved (GStreamer paths, #13).
+- Umamusume: Pretty Derby blank login background: GStreamer now finds its H.264 decoder from the installed engine (#13).
 - Interrupted environment setup no longer needs a reboot; a damaged record no longer makes Cyder read-only.
-- Launches no longer queue when GPTK is installed; Command Line Tools are no longer needed.
+- With GPTK installed, every launch took exclusive control of all environments (trailing-slash path mismatch), so games started one at a time.
+- Apple Command Line Tools are no longer needed.
 
 ### Removed
 - DXVK 2: not shipped until it passes game testing.

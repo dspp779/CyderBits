@@ -16,34 +16,38 @@ is the reference example.
 
 ## Release notes layout
 
-1. **Title and summary table**: version, release date, engine label and its base
-   (CrossOver FOSS version, Wine version), supported macOS, previous release.
-   Link the other language and the GitHub compare view.
+1. **Title and summary table**: release date, engine label and its base
+   (CrossOver FOSS version, Wine version), supported macOS. Link the other
+   language and the GitHub compare view. Signing and notarization are standard
+   for every release and are not repeated here.
 2. **Important callout** (`> [!IMPORTANT]`) only for things a user must act on or
    know before upgrading: dropped macOS versions, data migrations.
-3. **Highlights**: three to five bullets a player cares about. No internal terms.
-4. **Upgrading**: what happens to existing environments, settings and components
-   when they install this version.
+3. **Highlights**: up to six bullets a player cares about, each with its PR link
+   where one exists. Compare against the previous release's actual behavior, not
+   an assumption. No internal terms.
+4. **Game fixes**, right after the highlights: `**Game:** what was wrong, why, and
+   what changed (link)`. Name the hardware or macOS limits of a fix.
 5. **New features and improvements**, grouped by area (Lifecycle, Graphics,
-   DirectDraw, Scrolling, Settings and UI, Media and diagnostics, CompatDB).
-6. **Game fixes**: `**Game:** what was wrong and what changed (link)`. Name the
-   hardware or macOS limits of a fix.
-7. **Engine changes**: a table of change and origin (Cyder, upstream Wine backport,
+   DirectDraw, Scrolling, Settings and UI, Diagnostics and security). When a fix's
+   cause is not obvious, explain it in one or two plain sentences. Introduce a
+   bundled third-party component with a link and what it does for the player.
+   Skip anything that happens automatically and needs no action.
+6. **Engine changes**: a table of change and origin (Cyder, upstream Wine backport,
    GE-Proton, CrossOver), each with its engine PR.
-8. **Component versions**: Wine/CrossOver, engine archive and SHA-256, DXVK,
+7. **Component versions**: Wine/CrossOver, engine archive and SHA-256, DXVK,
    MoltenVK, DXMT, cnc-ddraw, and anything deliberately not included.
-9. **Known issues**: honest limits, including what has not been tested on real
+8. **Known issues**: honest limits, including what has not been tested on real
    hardware. Do not claim performance gains that were not measured.
-10. **Download and verification**: file, size, SHA-256, and the `shasum` command.
-11. **Acknowledgements**: upstream projects with links, and reporters.
+9. **Download and verification**: file, size, SHA-256, and the `shasum` command.
+10. **Acknowledgements**: upstream projects with links, and reporters.
 
 ## Style
 
 - Lead each bullet with the user-visible effect in bold, then the cause in plain words.
 - Link every claim that has one: PR, issue, Wine bug, upstream commit.
 - Say where a fix comes from; never present an upstream fix as our own.
-- Keep implementation detail (file names, internal flags) out of the highlights and
-  upgrade sections; it belongs in the engine table or the linked PR.
+- Keep implementation detail (file names, internal flags) out of the highlights;
+  it belongs in the engine table or the linked PR.
 - Numbers (sizes, hashes, timings) come from the actual release build, never estimates.
 - Update `CHANGELOG.md` and the release table in [`docs/README.md`](README.md) in the
   same change as the release notes.
