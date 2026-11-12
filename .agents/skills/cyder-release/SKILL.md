@@ -20,7 +20,8 @@ Orchestrate the shipping channel end-to-end. Do **not** skip verify.
 3. Import the packed engine into this repo. Also set
    `CYDER_GRAPHICS_ARTIFACTS_DIR` to the engine repo's `dist/artifacts/graphics`;
    importing the engine manifest does not import independent graphics archives.
-   Require a signed `dxmt-0.80-cyder.N.tar.zst` revision, not legacy `dxmt-0.80`.
+   Require a Developer ID signed `dxmt-0.80.tar.zst` (verified by signature and
+   provenance — the legacy unsigned archive has the same name).
    Read `docs/graphics-signing-policy.zh-TW.md` for the current supported policy.
 
 Import the engine:
@@ -79,9 +80,10 @@ by an abandoned UI observation. Never claim the game was tested from a hash matc
 
 Skip unchanged engine rebuild if the pin is already correct, but still:
 
-1. Pack real graphics in the engine repo with `--channel release --revision cyder.N`
-   and exported Developer ID identity. Use a new revision for changed DXMT bytes;
-   `--force` cannot overwrite an existing signed DXMT revision.
+1. Pack real graphics in the engine repo with `--channel release` and exported
+   Developer ID identity. Unchanged upstream DXMT reuses the existing signed
+   `dxmt-0.80.tar.zst`; `--force` never overwrites it. Re-sign only when the
+   upstream source or signing policy changes, after moving the old archive aside.
 2. Re-run `release-cyder.sh --channel release` (auto-runs verify after zip).
 3. If verify was skipped or you need a custom baseline, run `cyder-release-verify` manually.
 

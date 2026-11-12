@@ -2,7 +2,7 @@
 
 DXMT 對使用者顯示上游版本 **0.80**。安裝識別 `installKey` 由封存 SHA-256、逐檔內容與簽章政策產生，包含 Team、時間戳與上游來源政策；同版內容或政策改變也會重新評估。版本 marker 不能單獨證明已更新。
 
-既有正式封存的 `0.80-cyder.1` 名稱及 native signing identifier 保留作不可變的內部追溯資訊，不用它來比較更新先後，也不顯示成新的 DXMT 上游版本。本次重用已完成真實 Developer ID 簽署的封存，沒有重新簽署上游原件或重建 Wine。
+既有正式封存的 `0.80-cyder.1`／`0.80-cyder.2` 名稱及 native signing identifier 是已停用的內部命名，不用它來比較更新先後，也不顯示成新的 DXMT 上游版本；之後的簽署套件直接使用上游版本 `0.80`（見 [graphics 簽署政策](graphics-signing-policy.zh-TW.md)）。本次重用已完成真實 Developer ID 簽署的封存，沒有重新簽署上游原件或重建 Wine。
 
 ## 套用流程
 

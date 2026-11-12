@@ -328,6 +328,30 @@ class ComponentIntegrityTest < Minitest::Test
     assert_raises(C::Unknown) { C.apply_graphics_policy(rows, 'dxmt', '0.80-cyder.1', forged) }
     assert_raises(C::Unknown) { C.apply_graphics_policy(rows, 'dxmt', '0.80-cyder.2', meta) }
   end
+  def test_signed_dxmt_uses_upstream_version_and_legacy_revisions_still_verify
+    rows = Marshal.load(Marshal.dump(@manifest['files']))
+    native = rows.find { |r| r['format'] == 'Mach-O' }
+    native.merge!('path' => C::DXMT_NATIVE, 'architectures' => ['x86_64'])
+    meta = {'schemaVersion' => 1, 'component' => 'dxmt', 'channel' => 'release', 'packageVersion' => '0.80',
+      'upstream' => C::DXMT_UPSTREAM, 'teamIdentifier' => C::TEAM, 'requireTimestamp' => true,
+      'signingIdentifier' => 'local.cyder.dxmt.0.80.winemetal',
+      'files' => rows.map { |r| {'path' => r['path'], 'size' => r['size'], 'sha256' => r['sha256'],
+        'sourceSHA256' => r['path'] == C::DXMT_NATIVE ? C::DXMT_UPSTREAM['fileSHA256'] : r['sha256'],
+        'signature' => r['path'] == C::DXMT_NATIVE ? 'developer-id' : 'not-required'} }}
+    C.apply_graphics_policy(rows, 'dxmt', '0.80', meta)
+    assert_equal 'developer-id', native['signature']
+    assert C.valid_signature_policy?(native, {'component' => 'dxmt', 'version' => '0.80'})
+    assert C.valid_signature_policy?(native, {'component' => 'dxmt', 'version' => '0.80-cyder.2'})
+    refute C.valid_signature_policy?(native, {'component' => 'dxmt', 'version' => '0.81'})
+    # Signed 0.80 must never be confused with the unsigned upstream exception.
+    refute C.upstream_unsigned?(native, {'component' => 'dxmt', 'version' => '0.80'})
+    seen = nil
+    check = lambda { |args, _| seen ||= args[args.index('-R') + 1] if args.include?('-R'); [true, args.include?('-dv') ? 'Timestamp=valid' : ''] }
+    C.stub(:command, check) { assert_equal 'valid', C.developer_signature('/safe/path', C.now + 1, '0.80') }
+    assert_includes seen, 'identifier "local.cyder.dxmt.0.80.winemetal"'
+    assert_raises(C::Unknown) { C.developer_signature('/safe/path', C.now + 1, '0.80-cyder.0') }
+    assert_raises(C::Unknown) { C.apply_graphics_policy(rows, 'dxmt', '0.80-cyder.1', meta) }
+  end
   def test_install_identity_binds_digest_policy_and_signer_without_changing_display_version
     rows = [{'path'=>'x86_64-unix/winemetal.so', 'format'=>'Mach-O', 'signature'=>'developer-id', 'teamIdentifier'=>C::TEAM, 'requireTimestamp'=>true}]
     key = C.dxmt_install_key('a'*64, 'v2', rows, '0.80')

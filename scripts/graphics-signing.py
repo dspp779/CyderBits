@@ -35,6 +35,19 @@ UPSTREAM_FILES = {'i386-windows/d3d10core.dll': 'c5a26310d14a30c3e1700a4d0c9865b
  'x86_64-windows/nvngx.dll': '18d5847ee524ba6eeb2eee656817ddc00a45c46759a753854335a765e997e5fe',
  'x86_64-windows/winemetal.dll': '514245d533c750599614311a792c45ed600aef52948571d98c0fc70fd3df16e0'}
 
+# The package version is the unmodified upstream version. Cyder only adds a
+# Developer ID signature to the native library, so it does not invent its own
+# version suffix. Earlier packages used 0.80-cyder.N; those stay verifiable for
+# already-installed copies but are never produced again.
+LEGACY_VERSION = re.compile(r'0\.80-cyder\.[1-9][0-9]*')
+
+def release_version():
+    version = UPSTREAM['version']
+    return version[1:] if version.startswith('v') else version
+
+def accepted_version(version):
+    return version == release_version() or bool(LEGACY_VERSION.fullmatch(version))
+
 class Invalid(ValueError):
     pass
 
@@ -86,7 +99,7 @@ def verify_native(path, package_version, team=TEAM):
                                        for line in display.stdout.splitlines()), 'secure timestamp missing')
 
 def prepare(root, package_version, identity):
-    need(re.fullmatch(r'0\.80-cyder\.[1-9][0-9]*', package_version), 'new DXMT package revision required (0.80-cyder.N)')
+    need(package_version == release_version(), 'DXMT package version must be the upstream version (' + release_version() + '); cyder.N revisions are retired')
     need(identity.startswith('Developer ID Application: ') and identity != '-', 'release requires Developer ID Application')
     need(not (root / META).exists(), 'use original upstream input, not an already packaged tree')
     entries = files(root)
@@ -116,7 +129,7 @@ def verify_root(root, package_version, source_root=None):
     need(path.is_file() and not path.is_symlink() and path.stat().st_size < 1048576, 'release provenance missing/invalid')
     meta = json.loads(path.read_text())
     need(meta.get('schemaVersion') == 1 and meta.get('component') == 'dxmt' and meta.get('channel') == 'release'
-         and meta.get('packageVersion') == package_version and re.fullmatch(r'0\.80-cyder\.[1-9][0-9]*', package_version)
+         and meta.get('packageVersion') == package_version and accepted_version(package_version)
          and meta.get('upstream') == UPSTREAM and meta.get('teamIdentifier') == TEAM
          and meta.get('requireTimestamp') is True and meta.get('signingIdentifier') == signing_identifier(package_version), 'release provenance policy mismatch')
     entries = files(root)
@@ -142,7 +155,7 @@ def verify_root(root, package_version, source_root=None):
     if source_root:
         original = files(source_root)
         need(set(original) == set(entries) and all(digest(original[r['path']]) == r['sourceSHA256'] for r in rows),
-             'cached package source changed; use a new revision')
+             'upstream DXMT source changed; move the existing signed archive aside before re-signing')
     return meta
 
 def verify_archive(archive, zstd, package_version, source_root=None):

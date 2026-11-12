@@ -145,7 +145,9 @@ inspect_graphics_archive "$DXVK_ARCHIVE" "dxvk" "$DXVK_MIN_BYTES" "d3d11.dll"
 inspect_graphics_archive "$DXMT_ARCHIVE" "dxmt" "$DXMT_MIN_BYTES" "winemetal.so"
 
 DXMT_PACKAGE_VERSION="$(cat "$GRAPHICS/dxmt-version.txt" 2>/dev/null || true)"
-[[ "$DXMT_PACKAGE_VERSION" =~ ^0\.80-cyder\.[1-9][0-9]*$ ]] || die "Formal DXMT requires a signed Cyder package revision"
+# Signed DXMT uses the upstream version; 0.80-cyder.N is the retired naming.
+# The signature/provenance check below is what separates it from legacy unsigned 0.80.
+[[ "$DXMT_PACKAGE_VERSION" =~ ^0\.80(-cyder\.[1-9][0-9]*)?$ ]] || die "Unexpected DXMT package version: $DXMT_PACKAGE_VERSION"
 python3 "$OGOM_ROOT/scripts/graphics-signing.py" verify-archive --archive "$DXMT_ARCHIVE" \
   --zstd "$ZSTD" --package-version "$DXMT_PACKAGE_VERSION" || die "DXMT native signature/provenance verification failed"
 

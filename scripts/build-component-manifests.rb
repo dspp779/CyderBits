@@ -27,7 +27,7 @@ index = {'schemaVersion' => 1, 'components' => {}}
   raise 'Invalid archive path' unless File.dirname(archive) == (component == 'engine' ? resources : File.join(resources, 'graphics'))
   manifest = CyderIntegrity.inventory(archive, sha, prefix, component, version, File.join(resources, 'tools/zstd/zstd'))
   if component == 'dxmt' && ENV['CYDER_GRAPHICS_CHANNEL'] == 'release'
-    raise 'Formal DXMT requires a signed package revision/provenance' unless manifest['provenance']
+    raise 'Formal DXMT requires a Developer ID signed package with provenance' unless manifest['provenance']
     verifier = File.join(__dir__, 'graphics-signing.py')
     raise 'DXMT release verification failed' unless system('python3', verifier, 'verify-archive',
       '--archive', archive, '--zstd', File.join(resources, 'tools/zstd/zstd'), '--package-version', version)

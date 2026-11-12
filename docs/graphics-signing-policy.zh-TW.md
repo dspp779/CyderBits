@@ -20,24 +20,22 @@ Cyder runtime 的 Ruby 診斷器只為以下組合允許 `upstream-unsigned`：D
 
 1. 從原始已驗證 DXMT 樹複製 staging，保持來源／install tree 不變。
 2. 只在 staging 對已稽核、原本未簽的 `winemetal.so` 使用 Cyder Developer ID Application 與安全時間戳。無 adhoc fallback，不複製 Wine loader entitlement 到 library。
-3. 驗證 Apple Developer ID 憑證種類、Team `3U9565WWM2`、時間戳，以及綁定元件／revision 的 `local.cyder.dxmt.<package-version>.winemetal` signing identifier，記錄原始／最終 digest、來源與 package revision 至 `cyder-graphics-provenance.json`。
+3. 驗證 Apple Developer ID 憑證種類、Team `3U9565WWM2`、時間戳，以及綁定元件／版本的 `local.cyder.dxmt.<package-version>.winemetal` signing identifier，記錄原始／最終 digest、來源與 package version 至 `cyder-graphics-provenance.json`。
 4. 建立 archive，再在隔離目錄安全解壓並驗證整份檔案集合、內容與簽章。拒絕越界、連結、重複與超出大小預算的 member；驗證流程不呼叫簽署。
 5. 驗證成功才以不覆寫方式發布 archive，再原子更新 checksum／version sidecar。若中斷導致 sidecar 不一致，消費端應失敗，重跑同一有效 package 可重建 sidecar；不可將不一致當作成功。
 6. Cyder App 建置再次驗證實際 archive，產生對應**最終簽署後內容**的逐檔 manifest。簽署後 package 的 runtime 診斷要求預期 Team 與時間戳。正式 release 驗收也重驗 native payload；略過公證檢查不會略過此項。
 
-新內容必須用 `0.80-cyder.N` package revision（N 為正整數），保留 provenance 裡的 upstream v0.80。即使 `--force`，既有正式 DXMT archive 也只可驗證後重用，不能覆寫或重新簽成不同位元組。快取來源／內容不同或驗章失敗時停止並使用新 revision。此政策目前針對 DXMT；不宣稱整個 Wine runtime 的版本不可變政策已全部完成。
+簽署後的 DXMT 套件**沿用上游版本**：封存為 `dxmt-0.80.tar.zst`、`dxmt-version.txt` 為 `0.80`、signing identifier 為 `local.cyder.dxmt.0.80.winemetal`。Cyder 沒有修改 DXMT 程式碼，只在 `winemetal.so` 加上 Developer ID 簽章（因此該檔位元組與上游不同，provenance 同時記錄上游與簽署後 digest），所以不另加版本後綴。上游未變時重用既有、驗證通過的簽署封存，不重新簽署；只有上游來源或簽署政策改變時才重新簽署，且需先手動移開舊封存——即使 `--force` 也不覆寫已簽署封存，test channel 也不會覆寫它。舊的 `0.80-cyder.N` 命名已停用：不再產生，但已安裝的 `cyder.1`／`cyder.2` 仍可驗證，更新依 `installKey`（digest＋簽章政策）判斷，顯示版本相同不會被視為降版。與舊的未簽署 `dxmt-0.80.tar.zst` 同名，正式 release 以簽章與 provenance（而非檔名）區分。此政策目前針對 DXMT；不宣稱整個 Wine runtime 的版本不可變政策已全部完成。
 
 範例（在引擎 repo，**只有使用者要求產生正式包時才實際執行**）：
 
 ```bash
 export OGOM="$PWD"
 export SIGN_IDENTITY='Developer ID Application: …'
-export CYDER_GRAPHICS_PACKAGE_REVISION=cyder.1 # changed content must use an unused N
-bash scripts/pack-graphics-payloads.sh --engine "$WINE_INSTALL" \
-  --channel release --revision "$CYDER_GRAPHICS_PACKAGE_REVISION"
+bash scripts/pack-graphics-payloads.sh --engine "$WINE_INSTALL" --channel release
 ```
 
-對 Developer ID 的 engine pack，`pack-engine-artifact.sh` 會傳遞 release 模式並要求 revision。預設的 test graphics pack 保留原有行為，不冒充正式簽署包。
+對 Developer ID 的 engine pack，`pack-engine-artifact.sh` 會傳遞 release 模式。`--revision` 與 `CYDER_GRAPHICS_PACKAGE_REVISION` 已停用。預設的 test graphics pack 保留原有行為，不冒充正式簽署包。
 
 把 engine manifest 匯入 CyderBits 後，另設定 `CYDER_GRAPHICS_ARTIFACTS_DIR` 指向引擎 repo 的 `dist/artifacts/graphics`。匯入 engine 不等於匯入獨立 graphics。`release-cyder.sh` 傳遞通道；直接以 Developer ID 呼叫 `create-cyder-app.sh` 也會啟用正式 graphics gate。
 
