@@ -148,11 +148,34 @@ Taught steps as found:
 
 Tools: the game window has no bundle ID, so computer use cannot grant it.
 Use `wine-windows.swift` (IDs), `screencapture -l <window>` (view),
-`guarded-click.swift` / `guarded-key.swift` (input). Frame gaps were taken
-with a ScreenCaptureKit recorder that logs the time of every changed frame
-(idle frames skipped).
+`guarded-click.swift` / `guarded-key.swift` (input).
 
-Run log:
+**Measurement correction (2026-11-13, later the same day): every frame-gap
+number in runs 1–4 below is invalid.** They came from a ScreenCaptureKit
+recorder that logged "complete" frames of the game window. A check with
+`kill -STOP` on the game for 0.5 s showed the recorder still logging ~60
+frames/s with no gap, so it does not follow the game's presents. Hashing
+the pixels does not fix it either: the game area and the Metal HUD both stay
+unchanged for up to ~1 s on a quiet screen, which looks like a stall.
+
+The valid method is the one the engine-side experiments used
+(`../cyder-wine-engine/docs/maplestory-cx26-first-hit-prewarm-design.zh-TW.md`):
+an Instruments **Metal System Trace**, reading the gaps between the game's
+`ca-client-present-request` events. From the shell:
+
+```bash
+xcrun xctrace record --template "Metal System Trace" --attach <pid> --time-limit 12s --output run.trace
+xcrun xctrace export --input run.trace --xpath '/trace-toc/run[@number="1"]/data/table[@schema="ca-client-present-request"]' > presents.xml
+```
+
+The same 0.5 s `kill -STOP` shows up there as a present gap starting within
+30 ms of the stop. Caveats found so far: attaching causes a ~3 s present gap
+at the start of every trace (act at least 4 s after it starts); one warm
+air-swing cast of A was followed by a 994 ms gap that still needs an idle
+baseline to interpret; and one 10 s trace hung while saving and was lost.
+
+Run log (frame-gap columns invalid, see above; what happened in game is still
+true):
 
 | Run | Scene | Result | Notes |
 |---|---|---|---|
@@ -164,16 +187,66 @@ Run log:
 
 | 3 | S1 | **Longest gap 40 ms**, 358 frames / 6 s | Cold process **and cold file cache** (`sudo purge` after a full quit, then relaunch). First attack killed a mushroom (+12 EXP). HUD showed a short run of ~35 ms frames right after the hit. DXVK + MoltenVK |
 | 3 | S0 | Longest gap 31 ms, 362 frames / 6 s | Second hit, same process |
+| 4 | S2 (skill A) | Longest gap 40 ms (invalid) | Safe spot on the samurai map chosen by the user; warm cache. Two air casts first (faced right), then the first damaging cast (28605 / 28503) |
 
-Reading of runs 2–3: on DXVK, the first hit showed **no stall** either with a
-warm file cache (39 ms) or after `purge` (40 ms), against 31–32 ms for the
-second hit. The 0.65–0.75 s first-hit stall did not reproduce, so on this
-backend disk reads are not causing one. The recorder does catch stalls of
-this size: it saw 200–240 ms gaps when the window was re-activated.
+No conclusion about the first-hit stall can be drawn from runs 1–4.
 
-Still open: DXMT (the earlier 0.65–0.75 s evidence may come from that
-backend), repeats (one run per condition so far), and the monster hit taken
-at login before the first attack in every run.
+### Run 5: first damaging cast under a Metal System Trace (valid)
+
+Fresh process (PID 45627), DXVK + MoltenVK, warm file cache (no `purge`),
+楓葉丘陵 / 紅葉原3, CH.7. Trace: `Metal System Trace` + `Time Profiler`,
+attached to the game. First cast of A hit three samurai (MULTIKILL 3).
+
+Presents of the game (`ca-client-present-request`), per 200 ms:
+
+| Time (epoch, s) | Presents / 200 ms | What happened |
+|---|---|---|
+| 202.6–203.0 | 0 | Trace attach disturbance (before any input) |
+| 203.0–203.6 | 11–12 (≈60 fps) | Normal |
+| 203.617 | — | Key down: first cast of A |
+| **203.664–204.749** | **2 presents in 1.09 s** | **First-hit stall** |
+| 204.8 onward | 11–12 | Normal; the second cast (air, 207.178) shows no dip |
+
+Main game thread (`0x169ddee`) during equal 1.085 s windows, from the Time
+Profiler (1 ms samples; only on-CPU time is sampled):
+
+| Window | On CPU | Game code (Rosetta JIT) | Wine syscall path (`ntdll.so`) | of which `NtReadFile` |
+|---|---|---|---|---|
+| First-hit stall | 555 ms | 354 ms | **201 ms** | **≥ 76 ms** |
+| Normal second | 292 ms | 289 ms | 3 ms | 0 |
+| Normal second #2 | 359 ms | 353 ms | 6 ms | 0 |
+| Trace attach gap (run 5) | 130 ms | — | 0 | 0 |
+| Trace attach gap (run 6) | 27 ms | — | 2 ms | 0 |
+| Warm damaging cast (run 6, inside attach noise) | 454 ms | — | 10 ms | 0 |
+
+`dxvk-submit` ran 26 ms during the stall vs 375 ms in a normal second: the
+graphics thread was idle because the main thread stopped producing frames.
+
+Reading (one valid run so far):
+
+- The stall is **not graphics**: the render/submit path goes quiet, and the
+  main game thread is busy instead. This matches the user's report that DXMT,
+  D3DMetal and DXVK all stall.
+- The main thread spends a large, new share of the stall in **file-read
+  syscalls through Wine (`NtReadFile`)**, which a normal second and a warm
+  cast never show. With a warm file cache these reads cost CPU in the
+  syscall path, not disk wait.
+- About half the stall (≈ 530 ms) is off-CPU and not explained by this
+  profile; it may be blocking inside those reads, wineserver round-trips, or
+  locks. A syscall-duration trace (`System Call Trace` instrument, or
+  `fs_usage`) is the next measurement.
+- The earlier "read wait is not the main cost" (warming 119 MiB changed
+  nothing) is about disk latency; this run points at the per-read cost on
+  the main thread instead, the topic of
+  `../cyder-wine-engine/docs/maplestory-cx26-small-read-fast-path-plan.zh-TW.md`.
+
+Method notes: attaching `xctrace` disturbs presents for 0.5–4 s at the start
+of a trace and the length varies, so check that presents are back at ~60 fps
+before the action. The run 6 warm control was lost to that. A long trace
+(10 s idle, no Time Profiler) once hung while saving.
+
+Still open: repeat run 5 (and a clean warm damaging control), off-CPU time in
+the stall, cold vs warm file cache, DXMT.
 
 Side finding: relaunching ~40 s after a full quit failed once with
 `CYD-WIN-001` "Unable to reserve native executor ownership: busy" (exit 75,
