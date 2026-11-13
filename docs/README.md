@@ -18,6 +18,7 @@
 | 版本 | 文件 | 重點 |
 |------|------|------|
 | 下一版（規劃） | [預計改進](releases/next.md) | DXMT 初始化資料遺失、紋理批次上傳、buffer 回收、CPU／提交同步計時與新楓之谷驗收條件 |
+| 0.14.1（Draft） | [繁中](releases/v0.14.1.md) · [English](releases/v0.14.1.en.md) | Cyder013 相容性修正重包、改善遊戲重新啟動；保留 macOS 10.15／11 支援 |
 | 0.14.0 | [繁中](releases/v0.14.0.md) · [English](releases/v0.14.0.en.md) | 正式版：Cyder013、退出與停止環境分離、每遊戲 cnc-ddraw、DXVK 黑色貼圖修正；**最後支援 macOS 10.15／11** |
 | 0.13.2 | [繁中](releases/v0.13.2.md) | 正式版：引擎升級原地更新環境、DXVK 的 MoltenVK 偏好設定 |
 | 0.13.1 | [繁中](releases/v0.13.1.md) | 正式版：Cyder012、雙版本 MoltenVK、Apple Silicon Rosetta 安裝 |
