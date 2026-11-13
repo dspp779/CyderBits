@@ -39,7 +39,23 @@ swift scripts/guarded-click.swift 12345 678 '遊戲實際視窗標題' 400 300 -
 
 執行前需有新的指定視窗截圖，確認點位語意。`--click` 不構成對消費或其他未授權行為的許可。Wine 沒有 AXWindowNumber 時，腳本仍可依 CGWindow topmost 驗證，但若無法讓精確目標到前景便拒絕。overlay／modal 出現或 PID、ID、標題變動時重新擷取並觀測。空標題視窗也要由已觀測的 PID／ID 選定。
 
-發送事件仍有極短的前景變動競態；操作期間不要同時操作桌面。每次點擊後看新截圖，避免長串固定座標腳本。鍵盤輸入、拖曳或長按需要另外採用具有同等目標驗證的工具；此技能的點擊腳本不提供這些能力。
+發送事件仍有極短的前景變動競態；操作期間不要同時操作桌面。每次點擊後看新截圖，避免長串固定座標腳本。拖曳需要另外採用具有同等目標驗證的工具。
+
+## 原生單次按鍵
+
+```bash
+swift scripts/guarded-key.swift --list-keys            # 可送出的鍵名
+# 預覽：不啟動／抬升視窗，不送輸入
+swift scripts/guarded-key.swift 12345 678 '遊戲實際視窗標題' left --hold 1500
+# 明確執行：驗證後抬升／聚焦，按下 left 1.5 秒後放開
+swift scripts/guarded-key.swift 12345 678 '遊戲實際視窗標題' left --hold 1500 --send
+```
+
+- 目標驗證與點擊腳本相同（PID、window ID、完整標題、layer 0、最前方、bounds 未變）。
+- 一次只送一個鍵；`--hold` 為 0–10000 毫秒，預設 80。長按期間每 50 ms 重新驗證，失焦或視窗移動就立刻放開並拒絕。Ctrl-C／終止訊號也會先放開按鍵。
+- 單獨的 `shift`、`control`／`ctrl`、`option`／`alt` 以 flags-changed 事件送出（遊戲常用作跳躍或攻擊鍵）。
+- 不提供 Command 鍵，也不提供組合鍵，避免觸發 macOS 快捷鍵（結束、隱藏、切換 App）。
+- 不輸入文字；不要用逐鍵方式在遊戲內聊天或填表。
 
 ## 權限與停止
 
