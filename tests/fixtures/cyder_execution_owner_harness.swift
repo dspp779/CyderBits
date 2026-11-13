@@ -291,6 +291,19 @@ let preservedInvalidSpawn = try Data(contentsOf: invalidSpawnURL)
 check(invalidSnapshot.isEmpty && preservedInvalidSpawn == invalidSpawnBytes, "unknown native spawn state was treated as a confirmed handoff")
 print("PASS handoff schema: unknown native spawn proof is excluded and original bytes remain intact")
 
+// A launch's reservation must wait out a brief catalog holder (the app's
+// watch snapshots right after the preparation step's ticket changes) instead
+// of failing with busy.
+let catalogFD = open(ledger.appendingPathComponent("catalog.lock").path, O_RDWR | O_CLOEXEC)
+check(catalogFD >= 0 && flock(catalogFD, LOCK_EX | LOCK_NB) == 0, "could not hold the catalog lock")
+DispatchQueue.global().asyncAfter(deadline: .now() + 0.5) { flock(catalogFD, LOCK_UN); close(catalogFD) }
+let heldStart = ProcessInfo.processInfo.systemUptime
+let afterHeldCatalog = try reserve("held-catalog")
+check(ProcessInfo.processInfo.systemUptime - heldStart >= 0.4, "reservation did not wait for the catalog holder")
+let heldLaunch = try start(afterHeldCatalog, name: "held-catalog"); pump { !heldLaunch.isRunning }
+check(heldLaunch.terminationStatus == 0 && exists("held-catalog", "finished"), "launch after a released catalog holder failed")
+print("PASS catalog contention: reservation waits for a held-then-released catalog lock and the launch runs")
+
 let corrupt = ledger.appendingPathComponent(UUID().uuidString + ".json")
 let corruptBytes = Data("broken receipt".utf8)
 try corruptBytes.write(to: corrupt); chmod(corrupt.path, 0o600)
