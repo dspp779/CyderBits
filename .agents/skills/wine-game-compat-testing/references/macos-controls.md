@@ -53,9 +53,15 @@ swift scripts/guarded-key.swift 12345 678 '遊戲實際視窗標題' left --hold
 
 - 目標驗證與點擊腳本相同（PID、window ID、完整標題、layer 0、最前方、bounds 未變）。
 - 一次只送一個鍵；`--hold` 為 0–10000 毫秒，預設 80。長按期間每 50 ms 重新驗證，失焦或視窗移動就立刻放開並拒絕。Ctrl-C／終止訊號也會先放開按鍵。
-- 單獨的 `shift`、`control`／`ctrl`、`option`／`alt` 以 flags-changed 事件送出（遊戲常用作跳躍或攻擊鍵）。
-- 不提供 Command 鍵，也不提供組合鍵，避免觸發 macOS 快捷鍵（結束、隱藏、切換 App）。
+- 單獨的 `command`／`cmd`、`shift`、`control`／`ctrl`、`option`／`alt` 以 flags-changed 事件送出（遊戲常用作跳躍或攻擊鍵；例如楓之谷測試角色以 Command 跳躍）。
+- 一次只有一個鍵按下、不提供組合鍵，所以單獨的 Command 不會變成 macOS 快捷鍵（結束、隱藏、切換 App）。
 - 不輸入文字；不要用逐鍵方式在遊戲內聊天或填表。
+- 輸出含 `down_at`（epoch 秒），可與畫格或 I/O 時間軸對齊。
+- 遊戲已在最前方時不重新啟動視窗：重新 activate 會讓 MapleStory 停頓約 200 ms，污染卡頓量測。
+- 遊戲自己的小彈出視窗（完全落在主視窗內）可在主視窗之上；其他 App 的視窗在上方則拒絕。
+- 需要「移動＋跳躍」時，可同時跑兩個指令（一個 `--hold` 方向鍵、稍後另一個送跳躍鍵）；兩者各自驗證並各自放開。
+
+已驗證（MapleStory，DXVK，2026-11）：方向鍵需帶 Fn／NumPad 旗標、單獨修飾鍵需帶左側 device bit，Wine 才會收到；兩者已內建。
 
 ## 權限與停止
 

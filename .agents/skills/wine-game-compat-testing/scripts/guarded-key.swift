@@ -11,8 +11,8 @@ func refuse(_ message: String) -> Never {
     fputs("REFUSED: \(message)\n", stderr); exit(2)
 }
 
-// macOS virtual key codes (ANSI layout). Command is left out on purpose:
-// Cmd+key reaches macOS shortcuts (quit, hide, switch app), not the game.
+// macOS virtual key codes (ANSI layout). Only one key is ever down, so a
+// lone Command (some games map it to jump) cannot form a macOS shortcut.
 let keyCodes: [String: CGKeyCode] = [
     "a": 0, "s": 1, "d": 2, "f": 3, "h": 4, "g": 5, "z": 6, "x": 7, "c": 8, "v": 9,
     "b": 11, "q": 12, "w": 13, "e": 14, "r": 15, "y": 16, "t": 17,
@@ -21,13 +21,20 @@ let keyCodes: [String: CGKeyCode] = [
     "l": 37, "j": 38, "'": 39, "k": 40, ";": 41, "\\": 42, ",": 43, "/": 44, "n": 45,
     "m": 46, ".": 47, "`": 50,
     "return": 36, "tab": 48, "space": 49, "backspace": 51, "escape": 53,
-    "shift": 56, "option": 58, "alt": 58, "control": 59, "ctrl": 59,
+    "command": 55, "cmd": 55, "shift": 56, "option": 58, "alt": 58, "control": 59, "ctrl": 59,
     "f1": 122, "f2": 120, "f3": 99, "f4": 118, "f5": 96, "f6": 97, "f7": 98, "f8": 100,
     "f9": 101, "f10": 109, "f11": 103, "f12": 111,
     "insert": 114, "home": 115, "pageup": 116, "delete": 117, "end": 119, "pagedown": 121,
     "left": 123, "right": 124, "down": 125, "up": 126,
 ]
-let modifierFlags: [CGKeyCode: CGEventFlags] = [56: .maskShift, 58: .maskAlternate, 59: .maskControl]
+// Generic modifier flag plus the left-key device bit (NX_DEVICEL*KEYMASK);
+// Wine decides which key changed from the device bits.
+let modifierFlags: [CGKeyCode: CGEventFlags] = [
+    55: [.maskCommand, CGEventFlags(rawValue: 0x08)],
+    56: [.maskShift, CGEventFlags(rawValue: 0x02)],
+    58: [.maskAlternate, CGEventFlags(rawValue: 0x20)],
+    59: [.maskControl, CGEventFlags(rawValue: 0x01)],
+]
 let maxHoldMS = 10_000
 let usage = "usage: swift guarded-key.swift PID WINDOW_ID 'EXACT_TITLE' KEY [--hold MS] [--send] | --list-keys"
 
@@ -51,7 +58,7 @@ guard args.count == 4, let pid = Int32(args[0]), pid > 0,
 let expectedTitle = args[2]
 let keyName = args[3].lowercased()
 guard let keyCode = keyCodes[keyName] else {
-    refuse("unknown key '\(args[3])'; see --list-keys (Command is never sent)")
+    refuse("unknown key '\(args[3])'; see --list-keys (one key only, no combos)")
 }
 
 func rows() -> [[String: Any]] {
@@ -75,6 +82,9 @@ guard execute else {
 }
 guard AXIsProcessTrusted(), CGPreflightPostEventAccess() else { refuse("Accessibility or PostEvent permission missing") }
 guard let app = NSRunningApplication(processIdentifier: pid) else { refuse("target process absent") }
+// Re-activating an already frontmost game stalls its frames for ~200 ms
+// (measured on MapleStory), which would pollute frame-gap measurements.
+if !targetStillValid() {
 app.activate(options: [])
 let axApp = AXUIElementCreateApplication(pid)
 AXUIElementSetAttributeValue(axApp, kAXFrontmostAttribute as CFString, kCFBooleanTrue)
@@ -93,9 +103,20 @@ for _ in 0..<20 {
     if NSWorkspace.shared.frontmostApplication?.processIdentifier == pid { break }
     RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.05))
 }
+}
+// The game's own small popups (tooltips, menus) may sit above its main
+// window; they are skipped only when they lie fully inside it. Any other
+// app's window above the target fails the check.
+func isOwnPopup(_ row: [String: Any]) -> Bool {
+    guard row[kCGWindowOwnerPID as String] as? Int == Int(pid),
+          row[kCGWindowNumber as String] as? Int != windowID,
+          let raw = row[kCGWindowBounds as String] as? [String: Any],
+          let b = CGRect(dictionaryRepresentation: raw as CFDictionary) else { return false }
+    return initialBounds.contains(b)
+}
 func targetStillValid() -> Bool {
     guard NSWorkspace.shared.frontmostApplication?.processIdentifier == pid,
-          let top = rows().first(where: { $0[kCGWindowLayer as String] as? Int == 0 }),
+          let top = rows().first(where: { $0[kCGWindowLayer as String] as? Int == 0 && !isOwnPopup($0) }),
           let bounds = boundsFor(top) else { return false }
     return bounds == initialBounds
 }
@@ -109,7 +130,14 @@ if let flag = modifierFlags[keyCode] {
     down.type = .flagsChanged; down.flags = flag
     up.type = .flagsChanged; up.flags = []
 } else {
-    down.flags = []; up.flags = []
+    // Arrow and function keys carry Fn (and arrows NumPad) on real keyboards;
+    // Wine's key mapping expects that. Never inherit other held modifiers.
+    var flags: CGEventFlags = []
+    if (122...126).contains(keyCode) || [96, 97, 98, 99, 100, 101, 103, 109, 111, 114, 115, 116, 117, 118, 119, 120, 121].contains(keyCode) {
+        flags.insert(.maskSecondaryFn)
+    }
+    if (123...126).contains(keyCode) { flags.insert(.maskNumericPad) }
+    down.flags = flags; up.flags = flags
 }
 
 // From key down on, every exit path must release the key.
@@ -126,6 +154,7 @@ let signalSources: [DispatchSourceSignal] = [SIGINT, SIGTERM, SIGHUP].map { sig 
 }
 
 down.post(tap: .cghidEventTap)
+let downAt = Date().timeIntervalSince1970
 let deadline = Date(timeIntervalSinceNow: Double(holdMS) / 1000)
 while Date() < deadline {
     RunLoop.current.run(until: min(deadline, Date(timeIntervalSinceNow: 0.05)))
@@ -135,4 +164,6 @@ while Date() < deadline {
     }
 }
 release()
-print("SENT ONE KEY: pid=\(pid) window=\(windowID) key=\(keyName) hold_ms=\(holdMS); verify with a fresh screenshot")
+// Epoch time of key down, for lining input up with frame or I/O timelines.
+print(String(format: "SENT ONE KEY: pid=%d window=%d key=%@ hold_ms=%d down_at=%.3f; verify with a fresh screenshot",
+             pid, windowID, keyName, holdMS, downAt))
