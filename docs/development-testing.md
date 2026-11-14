@@ -145,7 +145,7 @@ Ask, then wait; do not edit the TCC database. Once granted:
   agent's own window in front.
 - Take a new screenshot after each action. Wine windows have no bundle ID or
   accessibility tree, so use `.agents/skills/wine-game-compat-testing/scripts/`
-  (`wine-windows.swift`, `guarded-click.swift`) for them.
+  (`wine-windows.swift`, `guarded-click.swift`, `guarded-key.swift`) for them.
 - Restore anything changed for the test (for example a language choice).
 
 ### Measuring launch time

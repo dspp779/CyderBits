@@ -124,6 +124,13 @@ enum CyderExecutionOwner {
                 catch Failure.busy where ProcessInfo.processInfo.systemUptime < end { usleep(100_000) }
             }
         }
+        /// The catalog lock only covers short ledger reads and writes, but the
+        /// app's watch snapshots (and prunes) right after every ticket change,
+        /// such as the preparation step finishing just before a launch. Wait
+        /// out that holder instead of failing the launch with `busy`.
+        func catalogLock() throws -> Int32 {
+            try waitLock("catalog.lock", exclusive: true, deadline: CyderExecutionOwner.catalogWait)
+        }
         func names() throws -> [String] {
             let copy = dup(fd)
             guard copy >= 0 else { throw Failure.unavailable }
@@ -198,7 +205,7 @@ enum CyderExecutionOwner {
         precondition(!Thread.isMainThread)
         guard correlation?.isValid != false else { throw Failure.invalid }
         let directory = try Directory(root)
-        let serial = try directory.lock("catalog.lock"); defer { Darwin.close(serial) }
+        let serial = try directory.catalogLock(); defer { Darwin.close(serial) }
         if try directory.names().count >= 128 { try prune(directory, confirmed: []) }
         guard try directory.names().count < 512 else { throw Failure.full }
         let identity = try identify(scope)
@@ -222,7 +229,7 @@ enum CyderExecutionOwner {
     static func snapshot(root: URL) throws -> [Ticket] {
         precondition(!Thread.isMainThread)
         let directory = try Directory(root)
-        let serial = try directory.lock("catalog.lock"); defer { Darwin.close(serial) }
+        let serial = try directory.catalogLock(); defer { Darwin.close(serial) }
         return try directory.names().compactMap { name in
             do { return try directory.read(name) } catch Failure.invalid { return nil }
         }
@@ -232,7 +239,7 @@ enum CyderExecutionOwner {
     static func prune(root: URL, confirmed: [Ticket]) throws {
         precondition(!Thread.isMainThread)
         let directory = try Directory(root)
-        let serial = try directory.lock("catalog.lock"); defer { Darwin.close(serial) }
+        let serial = try directory.catalogLock(); defer { Darwin.close(serial) }
         try prune(directory, confirmed: confirmed)
     }
     private static func prune(_ directory: Directory, confirmed: [Ticket]) throws {
@@ -265,7 +272,7 @@ enum CyderExecutionOwner {
     static func recover(root: URL) throws -> [String] {
         precondition(!Thread.isMainThread)
         let directory = try Directory(root)
-        let serial = try directory.lock("catalog.lock"); defer { Darwin.close(serial) }
+        let serial = try directory.catalogLock(); defer { Darwin.close(serial) }
         let currentBoot = Birth.current()?.boot
         var quarantined: [String] = []
         for name in try directory.names() {
@@ -429,6 +436,9 @@ enum CyderExecutionOwner {
         fputs("\(leftoverMarker)\(ticket.id.uuidString) group=\(ticket.group.map(String.init) ?? "-")\n", stderr)
     }
 
+    /// Seconds a catalog operation waits for another one to finish. Holders
+    /// never wait on anything while holding it, so this is generous.
+    static let catalogWait: TimeInterval = 5
     /// Seconds a helper waits for another helper's operation on its scope.
     static let scopeWait: TimeInterval = 25 // below the app's 30 s launch observation
 

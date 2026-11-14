@@ -27,7 +27,7 @@ Wine 視窗在 Dock 可能只叫 `wine`，沒有 bundle ID，也沒有 AX 按鈕
 
 ## 3. 操作
 
-1. `scripts/guarded-click.swift` 先不加 `--click` 預覽；確認目標後才加 `--click` 送出一次點擊。
+1. `scripts/guarded-click.swift` 先不加 `--click` 預覽；確認目標後才加 `--click` 送出一次點擊。按鍵（移動、攻擊、技能）用 `scripts/guarded-key.swift`，先預覽，確認後加 `--send` 送出一次按鍵或一次 `--hold` 長按。
 2. 腳本會拒絕不符的 PID／window ID／標題與超界座標，且要求目標視窗在最前方。驗證失敗就回到步驟 2 重新觀測，不要盲目重試或改點其他 Wine 視窗。
 3. 點擊回傳成功只代表事件已送出；一定要再截圖確認畫面變化。
 4. 使用者允許遊玩，不等於允許消費、抽卡、刪檔或公開發文；這些要另外取得同意。
