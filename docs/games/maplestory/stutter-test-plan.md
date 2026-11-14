@@ -432,6 +432,34 @@ repeats needed before drawing a firmer conclusion.
 Run 12's first attempt missed (one `left` press did not turn the character;
 press it twice) and was retried in the same process before any hit.
 
+### Runs 13–14: D3DMetal, read-ahead off vs on (valid)
+
+Same test engine copy, `CYDER_GRAPHICS_BACKEND=d3dmetal` with Cyder's GPTK
+variables (launch log: `graphics backend=d3dmetal … apple_gptk`; HUD shows
+Game Porting Toolkit 4.0b3), files cold before each launch, CH.12, same
+pillar. Both first casts landed (run 13: two kills; run 14: one kill).
+
+| | Run 13: D3DMetal, read-ahead off | Run 14: D3DMetal, read-ahead on |
+|---|---|---|
+| Fills in the first hit | 5,730, **379 ms** (66 µs each) | 5,728, **112 ms** (20 µs each) |
+| Longest present gaps | 372 ms + 403 ms | **279 ms + 190 ms** |
+| Presents per 200 ms after the key | 3, 0, 12, 4, 0, 8 | 3, 5, 12, 2, 12, 11 |
+| Main thread on CPU, 1.1 s after the key | 585 ms | 572 ms |
+
+With equal CPU work, read-ahead shortened the D3DMetal freeze by about the
+read time it removed (two freezes of ~0.4 s → ~0.28 s and ~0.19 s). One run each.
+
+**Summary across backends (one cold run per cell):**
+
+| Backend | Read waiting off → on | Longest freeze off → on |
+|---|---|---|
+| DXVK | 388 → 108 ms | ~1.0 s → 0.29 s |
+| DXMT | 379 → 135 ms | 0.38 s → 0.44 s (run with more CPU work) |
+| D3DMetal | 379 → 112 ms | 0.40 s → 0.28 s |
+
+Read-ahead removes ~250–270 ms of read waiting on every backend; how much of
+that shows as a shorter freeze depends on the backend's own first-use CPU work.
+
 Run 9 (discarded): the engine copy fell back to wined3d because its
 `lib/dxvk` and `lib/dxmt` links are relative to `~/.cyder/runtime`. A copied
 engine needs those links made absolute before testing; check the
