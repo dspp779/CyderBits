@@ -283,10 +283,104 @@ Reading:
   ~530 ms when the main thread is off the CPU. What it waits on is the open
   question.
 
-Still open: what the main thread waits on during the stall (a `sample` run
-shows blocked stacks; it slows the game but the blocking frames should still
-show), repeat run 5 (and a clean warm damaging control), cold vs warm file
-cache, DXMT.
+### What the main thread waits on: cache-window fills that miss the page cache (2026-11-15)
+
+**`sample` during a first hit** (fresh process, DXVK): of the main game
+thread's waiting samples, 124 of 192 sit in a kernel call made from
+`cyder_maplestory_file_cache_read + 1011`. That call is the `pread` that
+refills the cache window (`file.c`, `pread( fd, entry->data, window_size,
+window_offset )`, done while holding the cache's global mutex). Most other
+waits are file-position calls (`NtSetInformationFile`,
+`NtQueryInformationFile`) and other spots in `NtReadFile`.
+
+**I/O log around the casts** (`CYDER_IO cache_fill` events with timestamps,
+aligned to `guarded-key`'s `down_at`; 1.2 s after each key):
+
+| Window | Cache fills | Time in fills |
+|---|---|---|
+| Quiet baseline | 1 | 0 ms |
+| First damaging cast | 5,501 on 7 handles | 366 ms (≈ 67 µs each) |
+| Warm damaging cast (same process) | 17 | 0.8 ms |
+
+99 % of the first-hit fills are distinct 8 KiB windows, not re-reads. The
+files (from the fds via `lsof`):
+
+| File | Size | Fills | Time |
+|---|---|---|---|
+| `Data/Sound/Sound_030.wz` | 370 MB | 4,048, scattered over the whole file | 276 ms |
+| `Data/Etc/_Canvas/_Canvas_009.wz` | 94 MB | 770 | 78 ms |
+| `Data/Etc/Etc_000.wz` | 14 MB | 579 | 3 ms |
+| `Data/Sound/Sound_033.wz`, `Sound_040.wz` | 38 / 299 MB | 56 / 32 | 9 ms |
+
+67 µs per 8 KiB `pread` is an SSD random read: natively, random 8 KiB reads
+of `Sound_030.wz` cost 86 µs on the first pass and 1 µs on the second. The
+files are not APFS-compressed.
+
+**The read set is fixed.** Two sessions read exactly the same windows on the
+first hit (Jaccard 1.00 per file): 5,463 windows, 43 MB.
+
+**Page-cache residency is short.** A `cat` of the five files (815 MB, 0.28 s)
+keeps them resident only for minutes on this 16 GB Mac under load: a file read
+6 minutes earlier answered random reads in 72 µs again. Warming 4 minutes
+before the hit (run 7) changed nothing: 5,728 fills, 388 ms, stall unchanged.
+The earlier H1 prewarm also targeted Skill/Effect ranges, not these files.
+
+### Run 8: warm the files just before the first hit (valid)
+
+Fresh process, CH.7, same pillar. The five files were read with `cat` about
+6 s before the cast (random reads on `Sound_030.wz` then cost 1.8 µs). Metal
+System Trace + Time Profiler + I/O log.
+
+| | Run 7 (files evicted) | Run 8 (files warmed just before) |
+|---|---|---|
+| Fills in the first hit | 5,728, 388 ms (68 µs each) | 5,728, **12.7 ms** (2.2 µs each) |
+| Longest present gap | ~1.0 s with 0–1 frames per 200 ms | **295 ms**, then one 140 ms gap |
+| Presents per 200 ms after the key | 1, 1, 12, 0, 0, 9 | 5, 3, 12, 6, 11, 12 |
+
+The cast hit in both runs (EXP rose, MP spent). One run each.
+
+**Reading:** about two thirds of the first-hit freeze is the main thread
+waiting for ~5,500 scattered 8 KiB SSD reads, one at a time, through Cyder's
+single-window WZ cache. With those 43 MB resident, the freeze drops from about
+1 s to about 0.3 s. The remaining ~0.3 s is the game's own first-use work on
+the CPU (and Rosetta), which no file change will remove.
+
+## Proposed fixes (ranked)
+
+1. **Learned hit-path prefetch (Cyder, no engine change).** Record the
+   windows the first hit reads (from `CYDER_IO cache_fill` with
+   `CYDER_MAPLESTORY_IO_TRACE`), keyed by game version and file size/mtime.
+   On later launches, once the game window is up, a low-priority helper
+   `pread`s those 43 MB (random reads stay resident better than one big
+   streaming read) and re-touches them every minute or two while the game
+   runs, so they are not evicted. Expected: ~1 s → ~0.3 s. Cost: ~43 MB of
+   page cache and a few ms of I/O per minute. Risks: list goes stale after a
+   game patch (detect by size/mtime and relearn); other classes, maps or
+   skills read other files (learn per character/session, union the lists).
+2. **Engine: read-ahead for scattered access in large WZ files.** When a
+   handle refills its window many times far apart (as `Sound_030.wz` does),
+   start a background thread that reads the whole file (or the region
+   around the misses) sequentially at SSD speed (370 MB ≈ 0.1 s), so the
+   main thread's later misses hit memory. Works without a learned list, but
+   the first misses still wait and it can read far more than needed.
+3. **Engine: several windows per handle and no fills under the global
+   mutex.** Today one 8–32 KiB window per handle is refilled under a global
+   lock. More windows help repeated access; moving the `pread` out of the
+   lock helps other threads. Small gain for this stall (its reads are new
+   data), but cheap and safe.
+4. **Engine: drop the two `lseek`s per cache hit** (track the file position
+   for cached handles). The cache is slower than no cache for file-pointer
+   reads (0.81 vs 0.62 µs). General CPU win, not the stall.
+5. **Keep M0** (hint: hit a monster once after entering a map) for the
+   remaining ~0.3 s, which is CPU work inside the game.
+
+Not worth doing: bulk `cat`/prewarm of whole files at launch (evicted within
+minutes), more prewarm of Skill/Effect ranges, renderer changes for this
+stall.
+
+Still open: repeat run 8 (one run so far), learn the read set for other
+characters/classes and maps, measure memory pressure with prefetch running,
+DXMT and D3DMetal with the same warm-up.
 
 Side finding: relaunching ~40 s after a full quit failed once with
 `CYD-WIN-001` "Unable to reserve native executor ownership: busy" (exit 75,
