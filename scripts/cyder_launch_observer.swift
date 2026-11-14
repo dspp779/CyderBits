@@ -8,6 +8,7 @@ final class WineActivationWaiter {
     private var activated = false
     private var presented = false
     private var handler: (() -> Void)?
+    private var presentedHandler: (() -> Void)?
     init(prefix: String, launchID: String? = nil) { self.prefix = (prefix as NSString).standardizingPath; self.launchID = launchID }
     func signal() {
         lock.lock(); activated = true; let callback = handler; lock.unlock()
@@ -15,10 +16,17 @@ final class WineActivationWaiter {
     }
     /// A window of this launch is on screen, though it may never become the
     /// active app (a launch from the background cannot take focus).
-    func markPresented() { lock.lock(); presented = true; lock.unlock() }
+    func markPresented() {
+        lock.lock(); let first = !presented; presented = true; let callback = presentedHandler; lock.unlock()
+        if first { callback?() }
+    }
     var wasPresented: Bool { lock.lock(); defer { lock.unlock() }; return presented }
     func observe(_ callback: (() -> Void)?) {
         lock.lock(); handler = callback; let ready = activated; lock.unlock()
+        if ready { callback?() }
+    }
+    func observePresented(_ callback: (() -> Void)?) {
+        lock.lock(); presentedHandler = callback; let ready = presented; lock.unlock()
         if ready { callback?() }
     }
 }
@@ -47,7 +55,12 @@ final class CyderLaunchObserver {
     /// `exitedAfterWindow`: the root exited non-zero after one of its windows
     /// was on screen, so the user saw the program (an installer returns 1 on
     /// Cancel). It is not a launch that failed before showing a window.
-    enum Result: Equatable { case activated, finishedWithoutWindow, rootFailed(Int32), exitedAfterWindow(Int32), unconfirmed }
+    /// `presented`: a window was on screen for `presentationGrace` without the
+    /// program becoming active (opened from the background, or the user moved
+    /// on). The launch has visibly started; holding the observation for the
+    /// full deadline only kept the next queued launch waiting (up to 30 s).
+    enum Result: Equatable { case activated, presented, finishedWithoutWindow, rootFailed(Int32), exitedAfterWindow(Int32), unconfirmed }
+    static let presentationGrace: TimeInterval = 1
     private final class ReadPool {
         let lock = NSLock()
         var count = 0
@@ -148,6 +161,11 @@ final class CyderLaunchObserver {
                     guard let self else { return }
                     self.queue.async { self.finish(.activated) }
                 }
+                // Activation usually follows the first window; let it win.
+                signal.observePresented { [weak self] in
+                    guard let self else { return }
+                    self.queue.asyncAfter(deadline: .now() + Self.presentationGrace) { self.finish(.presented) }
+                }
                 let remaining = max(0, deadline - ProcessInfo.processInfo.systemUptime)
                 queue.asyncAfter(deadline: .now() + remaining) { [weak self] in self?.finish(.unconfirmed) }
                 if let read, authority == nil {
@@ -183,7 +201,7 @@ final class CyderLaunchObserver {
         if case .rootFailed(let status) = result, signal?.wasPresented == true { result = .exitedAfterWindow(status) }
         timer?.cancel(); timer = nil
         drainRequest = nil
-        signal?.observe(nil); signal = nil
+        signal?.observe(nil); signal?.observePresented(nil); signal = nil
         let callback = completion; completion = nil
         let expired = observationDeadline.map { ProcessInfo.processInfo.systemUptime >= $0 } ?? false
         callback?(expired ? .unconfirmed : result)

@@ -2209,6 +2209,12 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             CyderDiagnostics.shared.enter(.wineActivation, detail: "notification-received")
             onMainThread { statusItemController.markActivated(id: launchID) }
             return .success
+        case .presented:
+            // The window is on screen; the next queued launch need not wait
+            // for the full observation deadline.
+            lifecycleOutcome = .confirmedStarted
+            CyderDiagnostics.shared.info("wine launch window presented; observation ended without activation")
+            return .success
         case .finishedWithoutWindow:
             lifecycleOutcome = .finishedWithoutWindow
             CyderDiagnostics.shared.info("wine launch completed without activation; root receipt ended")

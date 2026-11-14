@@ -3609,14 +3609,32 @@ cyder_launch_preparation_probe() {
   # keeps it out of the launcher's errtrace ERR trap.
   /usr/bin/perl -e 'alarm 2; exec @ARGV; exit 75' --     "$CYDER_ENVIRONMENT_HELPER" --environment-state "$prefix" "$server" 2>/dev/null || return $?
 }
+# Every wineserver start appends a line to this engine log (Cyder013's exit
+# diagnostics patch). Size and mtime unchanged since the paired "empty" probe
+# mean no server, so no Wine client, started in between.
+cyder_wineserver_start_stamp() {
+  local log="${1%/}/cyder-wineserver-diag.log"
+  [[ -f "$log" && ! -L "$log" ]] || { echo missing; return 0; }
+  /usr/bin/stat -f '%z:%m:%i' "$log" 2>/dev/null || echo missing
+}
 cyder_launch_preparation_initial_state() {
-  local observation status=0
+  local observation status=0 stamp
+  # Taken before the probe, so a server starting during the probe changes it.
+  stamp="$(cyder_wineserver_start_stamp "$1")"
   observation="$(cyder_launch_preparation_probe "$1" "$2" || exit $?)" || status=$?
   case "$status:$observation" in
     '0:cyder-environment-v1 alive') CYDER_LAUNCH_PREPARATION_INITIAL=warm ;;
-    '10:cyder-environment-v1 empty') CYDER_LAUNCH_PREPARATION_INITIAL=idle ;;
+    '10:cyder-environment-v1 empty') CYDER_LAUNCH_PREPARATION_INITIAL=idle; CYDER_LAUNCH_PREPARATION_SERVER_STAMP="$stamp" ;;
     *) return 75 ;;
   esac
+}
+# The paired "empty" proof from the start of this preparation still holds: no
+# wineserver has started for the prefix since. A missing or changed log, or a
+# warm start, never counts.
+cyder_launch_preparation_still_idle() {
+  [[ "${CYDER_LAUNCH_PREPARATION_PHASE:-}" == prepare && "${CYDER_LAUNCH_PREPARATION_INITIAL:-}" == idle ]] || return 1
+  local recorded="${CYDER_LAUNCH_PREPARATION_SERVER_STAMP:-missing}"
+  [[ "$recorded" != missing && "$(cyder_wineserver_start_stamp "$1")" == "$recorded" ]]
 }
 cyder_launch_preparation_now_ms() {
   /usr/bin/perl -MTime::HiRes=clock_gettime,CLOCK_MONOTONIC -e 'printf "%.0f\n", 1000 * clock_gettime(CLOCK_MONOTONIC)'
@@ -3625,6 +3643,9 @@ cyder_launch_preparation_drain() {
   local prefix="$1" server="$2" observation status now deadline
   [[ "${CYDER_LAUNCH_PREPARATION_INITIAL:-}" == warm ]] && return 0
   [[ "${CYDER_LAUNCH_PREPARATION_INITIAL:-}" == idle ]] || return 75
+  # Preparation usually starts no Wine at all; the paired probe would only
+  # re-prove the initial "empty" (0.5 s).
+  cyder_launch_preparation_still_idle "$prefix" && return 0
   now="$(cyder_launch_preparation_now_ms)" || return 75
   [[ "$now" =~ ^[0-9]+$ ]] || return 75
   deadline=$((now + 10000))
@@ -4283,7 +4304,8 @@ cyder_session_acquire() {
         # One calibration for the shared prefix while this session lock is
         # held, rather than one helper / half-second pair per old launch.
         if [[ -z "$environment_live" ]]; then
-          if cyder_session_environment_live "$prefix" "${5:-}"; then environment_live=1; else environment_live=0; fi
+          if ! cyder_prefix_has_live_session_pids "$prefix" && cyder_launch_preparation_still_idle "$prefix"; then environment_live=0
+          elif cyder_session_environment_live "$prefix" "${5:-}"; then environment_live=1; else environment_live=0; fi
         fi
         if [[ "$environment_live" == 0 ]]; then rm -f "$file"; continue; fi
       else
