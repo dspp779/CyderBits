@@ -118,7 +118,10 @@ final class CyderSetupPanel {
 
     func show() {
         if passive {
-            window.orderFront(nil)
+            // Finder launches leave Cyder inactive; orderFront(nil) then put
+            // the panel behind the frontmost app and the launch looked stalled.
+            // orderFrontRegardless shows it above other apps without taking focus.
+            window.orderFrontRegardless()
         } else {
             activateCyderUI(dockVisible: false)
             window.makeKeyAndOrderFront(nil)
