@@ -172,6 +172,23 @@ costs about 3 s plus the wineserver drain. Do not judge a Finder launch by
 coincidence with a 30–40 s launch whose progress panel was hidden behind the
 frontmost app.
 
+Where a cold launch spent its time on an Apple Silicon Mac (macOS 27.2) before
+and after the November 2026 changes, to compare against:
+
+| Stage | Before | After |
+|---|---|---|
+| Cyder starts and accepts the request | 0.4 s | 0.4 s |
+| Prepare phase | 2.7 s | 1.6 s |
+| Final phase | 0.5 s | 0.5 s |
+| Wine start to first window | 1.6–1.9 s | 1.6–1.9 s |
+| Window to panel closing | 0.7–1.1 s (BlueLauncher 2.5 s) | 0.4–0.6 s |
+| Second program while another is starting | waited up to 30 s | starts at once |
+
+Each `CyderSwift --environment-state` answer of "empty" includes a 0.5 s
+second sample. A launch that proves "empty" more than once, or waits for one
+launch's observation before starting the next, shows up as whole half-seconds
+or a 20–30 s gap in the session log.
+
 ### Checking how a launch is detected
 
 | Need | Do |

@@ -41,6 +41,11 @@ final class CyderWindowAccess {
     private var closed = false
     private var permissionRequested = false
     private var timer: DispatchSourceTimer?
+    /// While a launch is still starting, look for its first window every
+    /// 0.5 s (a cheap window-list read). The 2 s scan closed the progress
+    /// panel 0.7–1.1 s after the window appeared. Accessibility stays at 2 s.
+    private var startingTimer: DispatchSourceTimer?
+    static let startingSurfaceInterval: TimeInterval = 0.5
 
     init(driver: Driver = .system, event: @escaping (L.Event) -> Void) { self.driver = driver; emit = event }
     func update(_ snapshot: L.Snapshot) {
@@ -55,6 +60,16 @@ final class CyderWindowAccess {
                 source.schedule(deadline: .now() + 2, repeating: 2, leeway: .milliseconds(100))
                 source.setEventHandler { [weak self] in self?.scanNext() }
                 timer = source; source.resume()
+            }
+            let starting = snapshot.launches.values.contains { $0.outcome == nil }
+            if starting, startingTimer == nil {
+                let source = DispatchSource.makeTimerSource(queue: queue)
+                let interval = Self.startingSurfaceInterval
+                source.schedule(deadline: .now() + interval, repeating: interval, leeway: .milliseconds(50))
+                source.setEventHandler { [weak self] in self?.scanStartingSurfaces() }
+                startingTimer = source; source.resume()
+            } else if !starting, let source = startingTimer {
+                source.cancel(); startingTimer = nil
             }
             // New processes are discovered immediately. Existing processes are
             // refreshed by the timer, not recursively by every published scan.
@@ -72,7 +87,8 @@ final class CyderWindowAccess {
     }
     func stop() { queue.async { [self] in close() } }
     private func close() {
-        closed = true; timer?.cancel(); timer = nil; intent = nil; targets.removeAll()
+        closed = true; timer?.cancel(); timer = nil; startingTimer?.cancel(); startingTimer = nil
+        intent = nil; targets.removeAll()
     }
     func focusChanged(to pid: Int32) {
         queue.async { [self] in
@@ -98,6 +114,12 @@ final class CyderWindowAccess {
             if scansInFlight >= 2 { break }
         }
         cursor = (cursor + 1) % processes.count
+    }
+    private func scanStartingSurfaces() {
+        guard !closed, let snapshot else { return }
+        let processes = snapshot.processes.values.filter { $0.existence == .alive }
+        guard !processes.isEmpty else { return }
+        scanSurfaces(processes.sorted { ($0.id.pid, $0.id.started) < ($1.id.pid, $1.id.started) }, snapshot: snapshot)
     }
     private func scanSurfaces(_ processes: [L.ProcessRecord], snapshot: L.Snapshot) {
         guard !surfaceReadPending, let read = driver.readSurfaces else { return }

@@ -34,6 +34,23 @@ let shown = WineActivationWaiter(prefix: root.path); shown.markPresented()
 var shownExit: CyderLaunchObserver.Result?
 start(CyderLaunchObserver(), shown, duration: 1, read: { .init(rootStatus: 1, lifecycle: "background") }) { shownExit = $0 }
 pump { shownExit != nil }; precondition(shownExit == .exitedAfterWindow(1), "a presented window was reported as an early exit")
+// A window on screen that never activates ends the observation after the
+// short grace instead of the full deadline, so the next queued launch can go.
+let onScreen = WineActivationWaiter(prefix: root.path)
+var onScreenResult: CyderLaunchObserver.Result?
+let onScreenStart = ProcessInfo.processInfo.systemUptime
+start(CyderLaunchObserver(), onScreen, duration: 4, read: { .init(rootStatus: nil, lifecycle: "background") }) { onScreenResult = $0 }
+DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { onScreen.markPresented() }
+pump { onScreenResult != nil }
+precondition(onScreenResult == .presented, "a presented window held the observation: \(String(describing: onScreenResult))")
+precondition(ProcessInfo.processInfo.systemUptime - onScreenStart < 3, "presented ended at the deadline, not after the grace")
+// Activation inside the grace still wins.
+let activatesLate = WineActivationWaiter(prefix: root.path)
+var lateResult: CyderLaunchObserver.Result?
+start(CyderLaunchObserver(), activatesLate, duration: 4, read: { .init(rootStatus: nil, lifecycle: "background") }) { lateResult = $0 }
+DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { activatesLate.markPresented() }
+DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { activatesLate.signal() }
+pump { lateResult != nil }; precondition(lateResult == .activated, "activation within the grace was lost")
 var windowless: CyderLaunchObserver.Result?
 start(CyderLaunchObserver(), WineActivationWaiter(prefix: root.path), duration: 1, read: { .init(rootStatus: 0, lifecycle: "stopped") }) { windowless = $0 }
 pump { windowless != nil }; precondition(windowless == .finishedWithoutWindow)
