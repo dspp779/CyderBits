@@ -10,7 +10,7 @@ release notes in [`docs/releases/`](docs/releases/); the engine column refers to
 ### Removed
 - Support for macOS 10.15 and 11. Releases after 0.14 require macOS 12 or later.
 
-## [0.14.1] - 2026-11-13
+## [0.14.1] - 2026-11-14
 
 Engine `CX26.3.0-W11-Cyder013`, rebuilt for older macOS compatibility.
 Draft notes: [繁中](docs/releases/v0.14.1.md) · [English](docs/releases/v0.14.1.en.md).
