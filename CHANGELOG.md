@@ -18,6 +18,7 @@ Draft notes: [繁中](docs/releases/v0.14.1.md) · [English](docs/releases/v0.14
 ### Fixed
 - Environment update crashes caused by system functions unavailable on older macOS (engine #14); engine archive fingerprints trigger the same-version update.
 - Relaunch failures when a background status update briefly holds the executor catalog.
+- The launch progress window hidden behind the active app when an .exe is opened from Finder; the component integrity check runs once per launch ([#24](https://github.com/dspp779/CyderBits/pull/24)).
 
 ## [0.14.0] - 2026-11-12
 
