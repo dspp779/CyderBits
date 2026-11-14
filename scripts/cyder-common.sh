@@ -3194,12 +3194,14 @@ cyder_open_prefix_taskmgr() {
 # Wine stores the per-prefix server socket under $TMPDIR (macOS LaunchServices
 # uses /var/folders/.../T) with /tmp as fallback. Check both, and treat a live
 # Cyder session pid as in-use even if the socket path differs.
+# An optional second argument names a session file to ignore (the caller's own).
 cyder_prefix_has_live_session_pids() {
-  local prefix="$1" dir file pid
+  local prefix="$1" skip="${2:-}" dir file pid
   dir="$(cyder_session_dir "$prefix")"
   [[ -d "$dir" ]] || return 1
   for file in "$dir"/*.session; do
     [[ -f "$file" && ! -L "$file" ]] || continue
+    [[ -z "$skip" || ! "$file" -ef "$skip" ]] || continue
     pid="$(sed -n 's/^pid=//p' "$file" | head -1)"
     if [[ "$pid" =~ ^[1-9][0-9]*$ ]] && kill -0 "$pid" 2>/dev/null; then
       return 0
@@ -3209,7 +3211,7 @@ cyder_prefix_has_live_session_pids() {
 }
 
 cyder_has_running_prefix() {
-  local prefix="$1"
+  local prefix="$1" skip_session="${2:-}"
   [[ -d "$prefix" ]] || return 1
   local resolved device inode socket_dir tmp_root uid
   resolved="$(cd "$prefix" && pwd -P)" || resolved="$prefix"
@@ -3224,9 +3226,9 @@ cyder_has_running_prefix() {
     # Wine removes the socket when the prefix wineserver exits; the lock file may remain.
     [[ -S "$socket_dir/socket" ]] && return 0
   done
-  cyder_prefix_has_live_session_pids "$resolved" && return 0
+  cyder_prefix_has_live_session_pids "$resolved" "$skip_session" && return 0
   if [[ "$resolved" != "$prefix" ]]; then
-    cyder_prefix_has_live_session_pids "$prefix"
+    cyder_prefix_has_live_session_pids "$prefix" "$skip_session"
     return $?
   fi
   return 1
@@ -3587,7 +3589,11 @@ cyder_apply_scrolling_for_exe() {
     [[ "$mode" == restore ]] || echo "Cyder scrolling helper (CyderSwift) not found; leaving UsePreciseScrolling unchanged" >&2
     return 0
   fi
-  cyder_has_running_prefix "$prefix" && running=(--prefix-running)
+  # This launch's own session is acquired before this runs and is not a running
+  # prefix. Counting it sent every launch down the reg.exe path, which started
+  # a wineserver (about 3 s, plus the preparation drain) to rewrite a value
+  # user.reg already held, and kept the helper's pending-live marker from clearing.
+  cyder_has_running_prefix "$prefix" "${CYDER_SESSION_FILE:-}" && running=(--prefix-running)
   CYDER_EXECUTION_FINAL=0 "$helper" --scrolling "$mode" "$prefix" "$wine_bin" "$name" ${running[@]+"${running[@]}"} >/dev/null
 }
 

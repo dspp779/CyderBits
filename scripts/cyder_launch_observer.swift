@@ -6,12 +6,17 @@ final class WineActivationWaiter {
     let launchID: String?
     private let lock = NSLock()
     private var activated = false
+    private var presented = false
     private var handler: (() -> Void)?
     init(prefix: String, launchID: String? = nil) { self.prefix = (prefix as NSString).standardizingPath; self.launchID = launchID }
     func signal() {
         lock.lock(); activated = true; let callback = handler; lock.unlock()
         callback?()
     }
+    /// A window of this launch is on screen, though it may never become the
+    /// active app (a launch from the background cannot take focus).
+    func markPresented() { lock.lock(); presented = true; lock.unlock() }
+    var wasPresented: Bool { lock.lock(); defer { lock.unlock() }; return presented }
     func observe(_ callback: (() -> Void)?) {
         lock.lock(); handler = callback; let ready = activated; lock.unlock()
         if ready { callback?() }
@@ -39,7 +44,10 @@ final class CyderLaunchObserver {
         var prefixScope: String? = nil
     }
     struct Sample { let rootStatus: Int32?; let lifecycle: String? }
-    enum Result: Equatable { case activated, finishedWithoutWindow, rootFailed(Int32), unconfirmed }
+    /// `exitedAfterWindow`: the root exited non-zero after one of its windows
+    /// was on screen, so the user saw the program (an installer returns 1 on
+    /// Cancel). It is not a launch that failed before showing a window.
+    enum Result: Equatable { case activated, finishedWithoutWindow, rootFailed(Int32), exitedAfterWindow(Int32), unconfirmed }
     private final class ReadPool {
         let lock = NSLock()
         var count = 0
@@ -171,6 +179,8 @@ final class CyderLaunchObserver {
     private func finish(_ result: Result) {
         guard !finished else { return }
         finished = true
+        var result = result
+        if case .rootFailed(let status) = result, signal?.wasPresented == true { result = .exitedAfterWindow(status) }
         timer?.cancel(); timer = nil
         drainRequest = nil
         signal?.observe(nil); signal = nil

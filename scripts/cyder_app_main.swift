@@ -202,7 +202,9 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             waiter.signal()
         }
         controller.onLaunchWindowPresented = { [weak self] launchID in
-            guard let self, self.wineActivationWaiter?.launchID == launchID else { return }
+            guard let self, let waiter = self.wineActivationWaiter, waiter.launchID == launchID else { return }
+            if !waiter.wasPresented { CyderDiagnostics.shared.info("wine launch window presented without activation") }
+            waiter.markPresented()
             self.dismissLaunchProgress(for: launchID)
         }
         controller.onActivityChanged = { [weak self] activity in
@@ -2210,6 +2212,10 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         case .finishedWithoutWindow:
             lifecycleOutcome = .finishedWithoutWindow
             CyderDiagnostics.shared.info("wine launch completed without activation; root receipt ended")
+            return .success
+        case .exitedAfterWindow(let status):
+            lifecycleOutcome = .confirmedStarted
+            CyderDiagnostics.shared.info("wine launch window was shown; root exited without activation status=\(status)")
             return .success
         case .rootFailed(let status):
             return earlyWineExitFailure(executablePath: exe, winePID: onMainThread { statusItemController.nativeRootPID(id: launchID) }, exitStatus: status, fallbackLogURL: result.logURL)
