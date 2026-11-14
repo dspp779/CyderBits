@@ -172,6 +172,24 @@ costs about 3 s plus the wineserver drain. Do not judge a Finder launch by
 coincidence with a 30–40 s launch whose progress panel was hidden behind the
 frontmost app.
 
+### Checking how a launch is detected
+
+| Need | Do |
+|---|---|
+| Whether the program ended up in front | Read `NSWorkspace.runningApplications` `isActive`, not `frontmostApplication`: an accessory Cyder can be active without owning the menu bar. Window order alone is not focus. |
+| A real double-click | Finder must open the file (`tell application "Finder" to open … using …`); only then does Finder hand activation to Cyder. `open -a` from a shell offers none, so the program correctly stays behind. Finder refuses an unnotarized test build ("應用程式「(null)」沒有權限打開"); this check needs a notarized build or a person double-clicking. Never click through a Gatekeeper prompt. |
+| Known outcomes | Build tiny test programs with `../cyder-wine-engine/build/llvm-mingw-*/bin/x86_64-w64-mingw32-clang`: exit with a code, import a missing DLL (`dlltool -d`), crash after a delay, show a window after a delay, run without a window. |
+| Wine's own error text | Quiet launches keep `err+module`; `last-launch.log` names a missing DLL and the full status (`c0000135`). The exit status keeps only its low byte (53). |
+
+What the session log says: `wine activation yielded pid=… accepted=…` (Cyder
+passed activation on), `wine launch window presented without activation` (a
+window was seen but the program never became active), `wine crash dialog
+shown` (Wine's crash report closed the progress panel).
+
+If `release-cyder.sh` prints `universal Swift build failed; CyderSwift falls
+back to shell launcher`, the build is not usable: a source file changed during
+the build or did not compile. Rebuild without touching the tree.
+
 Logs for a launch are in `~/Library/Application Support/Cyder/Logs/`:
 `last-launch.log` (latest game run), `sessions/` (app sessions),
 `last-error.json`, `engine-install.log`. A clean launch has no

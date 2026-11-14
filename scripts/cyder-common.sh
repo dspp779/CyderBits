@@ -3510,7 +3510,9 @@ cyder_bounded_wine_log() {
     }
 
     while (1) {
-      my $n = read STDIN, my $buf, 65536;
+      # sysread returns what is available; read() waited for 64 KiB or EOF,
+      # and Wine helpers keep stderr open, so nothing reached the file live.
+      my $n = sysread STDIN, my $buf, 65536;
       last unless $n;
       if (!$using_ring) {
         if ($size + $n <= $max) {
@@ -3711,7 +3713,8 @@ cyder_run_wine_exe() {
   cyder_wine_locale_exports
   local capture_log="${CYDER_CAPTURE_WINE_LOG:-0}"
   local wine_diagnostics="${CYDER_WINE_DIAGNOSTICS:-quiet}"
-  local wine_debug="-all"
+  # err+module names a missing DLL and the full loader status for the launch error.
+  local wine_debug="-all,err+module"
   case "$wine_diagnostics" in
     errors)
       wine_debug="-all,err+all,+timestamp,+pid,+tid"
