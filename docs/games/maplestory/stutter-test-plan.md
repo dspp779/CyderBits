@@ -390,6 +390,29 @@ With read-ahead the scan becomes bandwidth-bound (the stride spans the whole
 file, so all of it is read at about 3.5 GB/s) instead of latency-bound. Deeper
 look-ahead does not help further.
 
+### Run 10: engine read-ahead prototype (valid)
+
+Patch `maplestory-cx26-wz-readahead.patch` (engine branch
+`claude/wz-readahead`), built into a copy of the installed engine with only
+`ntdll.so` replaced, run with `CYDER_MAPLESTORY_READAHEAD=1`. Before the run
+the hit-path files were confirmed out of memory (random 8 KiB reads ≈ 95 µs).
+Fresh process, DXVK confirmed in the launch log, CH.7, same pillar; the first
+cast killed a samurai.
+
+| | Run 7: no read-ahead, files evicted | Run 8: files warmed by hand just before | **Run 10: read-ahead on, files evicted** |
+|---|---|---|---|
+| Fills in the first hit | 5,728, 388 ms | 5,728, 12.7 ms | 5,501, **108 ms** (20 µs each) |
+| Longest present gap | ~1.0 s | 295 ms (+140 ms) | **291 ms (+208 ms)** |
+| Presents per 200 ms after the key | 1, 1, 12, 0, 0, 9 | 5, 3, 12, 6, 11, 12 | 2, 4, 11, 3, 10, 12 |
+
+Read-ahead brings the cold first hit to about the same frame pattern as
+fully warmed files, with no learned list. One run each.
+
+Run 9 (discarded): the engine copy fell back to wined3d because its
+`lib/dxvk` and `lib/dxmt` links are relative to `~/.cyder/runtime`. A copied
+engine needs those links made absolute before testing; check the
+`graphics backend=` line in the launch log.
+
 ## Proposed fixes (ranked)
 
 1. **Engine: Windows-style read-ahead in `NtReadFile` (better, general fix).**
