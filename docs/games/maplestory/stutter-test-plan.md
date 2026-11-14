@@ -345,24 +345,74 @@ single-window WZ cache. With those 43 MB resident, the freeze drops from about
 1 s to about 0.3 s. The remaining ~0.3 s is the game's own first-use work on
 the CPU (and Rosetta), which no file change will remove.
 
+### Why Windows does not stall here (2026-11-15)
+
+**The pattern is a forward scan, not random access.** In the first hit:
+
+| File | Reads | Direction | Step between reads | Cost per fill |
+|---|---|---|---|---|
+| `Sound_030.wz` | 4,048 in 0.39 s | 100 % forward, from offset 8 KiB | 8–208 KiB (median 40 KiB) | 68 µs |
+| `_Canvas_009.wz` | 770 | 99 % forward | median 104 KiB | 101 µs |
+| `Etc_000.wz` | 579 | forward | exactly 8 KiB (contiguous) | **5 µs** |
+
+macOS read-ahead only engages for contiguous reads: `Etc_000.wz` is
+contiguous and its fills cost 5 µs; the strided scans miss it, so each 8 KiB
+read waits for the SSD alone (queue depth 1).
+
+**Windows (from its documented design, not measured here):**
+
+- The NT cache manager's *intelligent read-ahead* keeps a short history of
+  reads per handle and recognises forward (and strided) progress, then reads
+  ahead in larger units asynchronously on system worker threads. A strided
+  forward scan like this one becomes mostly cache hits on the game thread.
+- File pages are kept on the standby list until memory is really needed, and
+  SysMain (Superfetch) prefetches what an application usually reads. Game data
+  read in earlier sessions tends to still be in memory.
+- Each cached `ReadFile` is a short kernel copy. Here every call also goes
+  through Rosetta and Wine, and Cyder's cache refills one 8–32 KiB window per
+  handle at a time, under a global lock.
+
+So on Windows the same reads are usually in memory, and if not, read-ahead
+fetches them in bulk in the background. On macOS under Wine they become
+thousands of blocking 8 KiB SSD reads, and pages from earlier sessions are
+evicted within minutes on a 16 GB Mac.
+
+**Native replay** (`scripts/replay-readahead.c`): the real `Sound_030.wz`
+step sequence replayed on large Sound files nobody had read recently:
+
+| Mode | Per 8 KiB read | Total (scaled to 4,048 reads) |
+|---|---|---|
+| Plain `pread` (cold) | 72 µs | ≈ 290 ms (matches the 276 ms in game) |
+| `fcntl(F_RDADVISE)` read-ahead, 1–8 MiB chunks, 1–32 queued | 30–33 µs | ≈ 120–130 ms |
+| Plain `pread`, data already cached | 5.5 µs | ≈ 22 ms |
+
+With read-ahead the scan becomes bandwidth-bound (the stride spans the whole
+file, so all of it is read at about 3.5 GB/s) instead of latency-bound. Deeper
+look-ahead does not help further.
+
 ## Proposed fixes (ranked)
 
-1. **Learned hit-path prefetch (Cyder, no engine change).** Record the
+1. **Engine: Windows-style read-ahead in `NtReadFile` (better, general fix).**
+   Keep the last few read offsets per file handle. When reads progress forward
+   (contiguous or strided, gaps up to ~1 MiB), call `fcntl(fd, F_RDADVISE)` for
+   the next 1–2 MiB beyond a moving frontier, the way the NT cache manager
+   reads ahead. It is asynchronous and costs no syscall per read on the hit
+   path, needs no learned data, and works for any game file and any
+   class/map. Expected for this stall: fill time 366 ms → ~130 ms (native
+   replay), i.e. the freeze from ~1 s to ~0.75 s. Can be limited to cached
+   (non-`FILE_FLAG_NO_BUFFERING`) handles and disabled for
+   `FILE_FLAG_RANDOM_ACCESS`, matching Windows semantics. Belongs in the
+   engine repo, behind a flag first.
+2. **Learned hit-path prefetch (Cyder, no engine change).** Record the
    windows the first hit reads (from `CYDER_IO cache_fill` with
    `CYDER_MAPLESTORY_IO_TRACE`), keyed by game version and file size/mtime.
    On later launches, once the game window is up, a low-priority helper
-   `pread`s those 43 MB (random reads stay resident better than one big
-   streaming read) and re-touches them every minute or two while the game
-   runs, so they are not evicted. Expected: ~1 s → ~0.3 s. Cost: ~43 MB of
-   page cache and a few ms of I/O per minute. Risks: list goes stale after a
-   game patch (detect by size/mtime and relearn); other classes, maps or
-   skills read other files (learn per character/session, union the lists).
-2. **Engine: read-ahead for scattered access in large WZ files.** When a
-   handle refills its window many times far apart (as `Sound_030.wz` does),
-   start a background thread that reads the whole file (or the region
-   around the misses) sequentially at SSD speed (370 MB ≈ 0.1 s), so the
-   main thread's later misses hit memory. Works without a learned list, but
-   the first misses still wait and it can read far more than needed.
+   `pread`s those 43 MB with many reads in flight, and re-touches them every
+   minute or two so they are not evicted. Measured effect (run 8): ~1 s →
+   ~0.3 s. Cost: ~43 MB of page cache and a few ms of I/O per minute. Risks:
+   list goes stale after a game patch (detect by size/mtime and relearn);
+   other classes, maps or skills read other files (learn per session, union
+   the lists). Complements fix 1: fix 1 covers what has not been learned.
 3. **Engine: several windows per handle and no fills under the global
    mutex.** Today one 8–32 KiB window per handle is refilled under a global
    lock. More windows help repeated access; moving the `pread` out of the
