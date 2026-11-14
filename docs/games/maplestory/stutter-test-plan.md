@@ -460,6 +460,38 @@ read time it removed (two freezes of ~0.4 s → ~0.28 s and ~0.19 s). One run ea
 Read-ahead removes ~250–270 ms of read waiting on every backend; how much of
 that shows as a shorter freeze depends on the backend's own first-use CPU work.
 
+### What the remaining freeze is made of (read-ahead on)
+
+Main game thread, 1.1 s after the first damaging cast (Time Profiler, runs
+10/12/14), compared with a normal second (~250–310 ms on CPU, almost all game
+code):
+
+| Part | DXVK | DXMT | D3DMetal | Fixable? |
+|---|---|---|---|---|
+| Game code under Rosetta (first-use decode, plus translating new code paths) | ~420 ms | ~400 ms | ~360 ms | No (game + Rosetta); ~170 ms more than a normal second |
+| Wine syscall entry/exit (`__wine_syscall_dispatcher`) | ~100 ms | ~220 ms | ~110 ms | Partly: fewer calls |
+| `NtReadFile` / WZ cache work (fills now from page cache, cache hits) | ~85 ms | ~120 ms | ~95 ms | Yes |
+| I/O trace logging (`wine_dbg_log`) | ~25 ms | ~25 ms | ~25 ms | Test artefact only (`+cyderio`) |
+| Metal driver | ~0 | ~2 ms | ~8 ms | — |
+
+A `sample` of a DXVK first hit with read-ahead on shows no read waits left on
+the game thread. DXMT's larger dispatcher share is its graphics unix calls.
+
+Engine options for the remaining part:
+
+1. Larger fill windows once a handle is in read-ahead mode (e.g. 256 KiB
+   instead of 8–32 KiB, buffer allocated separately): ~5,500 fills → under
+   1,000. Expected ~60–90 ms.
+2. Serve cache hits without the two `lseek`s (track the file position for
+   cached handles): ~35 % less per cached read (0.81 → 0.53 µs measured).
+   Expected ~20–40 ms, plus a general CPU win.
+3. Fill outside the global cache mutex: helps other threads, little for this
+   stall.
+
+Together about 100–130 ms of the ~0.5 s DXVK freeze. The ~170 ms of extra game
+code is the game's own first-use work under Rosetta and stays; for it the
+"hit a monster once after entering a map" hint (M0) remains the only remedy.
+
 Run 9 (discarded): the engine copy fell back to wined3d because its
 `lib/dxvk` and `lib/dxmt` links are relative to `~/.cyder/runtime`. A copied
 engine needs those links made absolute before testing; check the
