@@ -28,6 +28,12 @@ pump { handoffResult != nil }; precondition(handoffResult == .activated, "clean 
 var rootFailure: CyderLaunchObserver.Result?
 start(CyderLaunchObserver(), WineActivationWaiter(prefix: root.path), duration: 1, read: { .init(rootStatus: 53, lifecycle: "background") }) { rootFailure = $0 }
 pump { rootFailure != nil }; precondition(rootFailure == .rootFailed(53))
+// A window that was on screen but never activated (background launch): an
+// installer cancelled with status 1 ended a program the user saw.
+let shown = WineActivationWaiter(prefix: root.path); shown.markPresented()
+var shownExit: CyderLaunchObserver.Result?
+start(CyderLaunchObserver(), shown, duration: 1, read: { .init(rootStatus: 1, lifecycle: "background") }) { shownExit = $0 }
+pump { shownExit != nil }; precondition(shownExit == .exitedAfterWindow(1), "a presented window was reported as an early exit")
 var windowless: CyderLaunchObserver.Result?
 start(CyderLaunchObserver(), WineActivationWaiter(prefix: root.path), duration: 1, read: { .init(rootStatus: 0, lifecycle: "stopped") }) { windowless = $0 }
 pump { windowless != nil }; precondition(windowless == .finishedWithoutWindow)

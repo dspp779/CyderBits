@@ -186,7 +186,7 @@ assert_contains "$(cat "$TMP/run-support/Logs/last-launch.log")" "DXVK_HUD=" \
 assert_contains "$(cat "$TMP/run-support/Logs/last-launch.log")" "Wine diagnostics: quiet" \
   "captured launches should record the default quiet diagnostics profile"
 assert_contains "$(cat "$TMP/run-support/Logs/last-launch.log")" \
-  "WINEDEBUG=-all" \
+  "WINEDEBUG=-all,err+module" \
   "captured quiet launches should not enable Wine tracing"
 assert_contains "$(cat "$TMP/run-support/Logs/last-launch.log")" "Engine version:" \
   "captured launches should record the actual engine identity"
@@ -586,6 +586,18 @@ fi
 assert_contains "$(cat "$bounded_log")" "truncated" "capped quiet Wine log should record truncation"
 assert_contains "$(cat "$bounded_log")" "KEEP-TAIL" "capped quiet Wine log should keep the newest output"
 assert_not_contains "$(cat "$bounded_log")" "KEEP-HEAD" "capped quiet Wine log should drop the oldest output"
+
+# The log is read while Wine is still running (a launch error names the missing
+# DLL from it). Wine helpers keep stderr open, so output must reach the file
+# before end of input, not when a 64 KiB buffer fills.
+live_log="$TMP/live-wine.log"
+{ printf 'LIVE-LINE\n'; sleep 3; } | bash -c \
+  'source "$1/scripts/cyder-common.sh"; cyder_bounded_wine_log "$2"' _ "$ROOT" "$live_log" &
+live_writer=$!
+for _ in $(seq 20); do grep -q LIVE-LINE "$live_log" 2>/dev/null && break; sleep 0.1; done
+live_seen="$(grep -c LIVE-LINE "$live_log" 2>/dev/null || true)"
+wait "$live_writer"
+assert_eq "$live_seen" "1" "quiet Wine log should show output while the writer's input is still open"
 
 CYDER_SUPPORT="$TMP/quiet-cap-support" \
 CYDER_SCRIPTS="$ROOT/scripts" \
