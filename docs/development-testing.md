@@ -163,7 +163,11 @@ wait; sort -n /tmp/timeline.txt | awk '$2 >= 0.25'
 ```
 
 Columns: start offset, lifetime, pid, parent, command. `open -b` reaches a
-translocated app that `open -a <path>` rejects. Do not judge a Finder launch by
+translocated app that `open -a <path>` rejects. The preparation phase of a
+launch whose settings are unchanged should start no Wine process: a
+`wine reg add … UsePreciseScrolling` there means the scrolling helper took
+the running-prefix path (in 0.14.1 it counted the launch's own session) and
+costs about 3 s plus the wineserver drain. Do not judge a Finder launch by
 "the window appeared after I clicked Cyder": in 0.14.1 the click was a
 coincidence with a 30–40 s launch whose progress panel was hidden behind the
 frontmost app.
