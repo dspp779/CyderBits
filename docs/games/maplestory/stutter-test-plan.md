@@ -408,6 +408,30 @@ cast killed a samurai.
 Read-ahead brings the cold first hit to about the same frame pattern as
 fully warmed files, with no learned list. One run each.
 
+### Runs 11–12: DXMT, read-ahead off vs on (valid)
+
+Same test engine copy, `CYDER_GRAPHICS_BACKEND=dxmt` (launch log:
+`graphics backend=dxmt … dxmt/0.80`), hit-path files confirmed out of memory
+before each launch, CH.7, same pillar. Both first casts landed (run 11: one
+kill; run 12: two kills).
+
+| | Run 11: DXMT, read-ahead off | Run 12: DXMT, read-ahead on |
+|---|---|---|
+| Fills in the first hit | 5,728, **379 ms** (66 µs each) | 5,904, **135 ms** (23 µs each) |
+| Longest present gaps | 382 ms + 310 ms | 437 ms + 227 ms |
+| Presents per 200 ms after the key | 5, 1, 11, 5, 0, 7 | 5, 0, 7, 4, 7, 12 |
+| Main thread on CPU, 1.1 s after the key | 542 ms | 733 ms |
+
+On DXMT read-ahead removes the same ~250 ms of read waiting as on DXVK, but in
+this pair the freeze did not get shorter: the main thread spent the time on
+the CPU instead (run 12 also killed two monsters, so it had more first-use
+work). The DXMT first hit has a larger CPU-bound part than DXVK (DXVK with
+warm reads: ~0.3 s), so reads are a smaller share of its stall. One run each;
+repeats needed before drawing a firmer conclusion.
+
+Run 12's first attempt missed (one `left` press did not turn the character;
+press it twice) and was retried in the same process before any hit.
+
 Run 9 (discarded): the engine copy fell back to wined3d because its
 `lib/dxvk` and `lib/dxmt` links are relative to `~/.cyder/runtime`. A copied
 engine needs those links made absolute before testing; check the
