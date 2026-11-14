@@ -63,6 +63,8 @@ cyder_on_exit() {
       "${CYDER_DIAGNOSTIC_SESSION_ID:-cli}" "$CYDER_DIAGNOSTIC_STAGE" \
       "$status" "${CYDER_DIAGNOSTIC_LAST_ERROR:-explicit-exit}" >&2
   fi
+  # An early exit must not leave the background integrity scan behind.
+  if declare -F cyder_check_components_wait >/dev/null; then cyder_check_components_wait; fi
 }
 
 trap 'cyder_on_error "$?" "$LINENO" "$BASH_COMMAND"' ERR
@@ -764,6 +766,10 @@ if [[ "$LAUNCH_ONLY" -eq 1 ]]; then
     echo "Unable to prepare graphics payload for prefix: $prefix" >&2
     exit 1
   }
+  fi
+  # After the graphics update, so the scan never reads a payload mid-update.
+  if [[ "${CYDER_LAUNCH_PREPARATION_PHASE:-}" == prepare ]] && declare -F cyder_check_components_start >/dev/null; then
+    cyder_check_components_start all quick "$prefix"
   fi
   cyder_set_stage settings-apply
   cyder_prepare_game_launch_settings "$wine" "$engine" "$prefix" "$exe" || {

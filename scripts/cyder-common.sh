@@ -2979,7 +2979,8 @@ cyder_prepare_cnc_game() {
     fi
     return 0
   fi
-  result="$(/usr/bin/ruby "$CYDER_SCRIPTS/cyder-cnc-game.rb" launch "$exe" "$prefix" "$engine_root" "${CYDER_LAUNCH_PREPARATION_PHASE:-}")" || return $?
+  # SDKROOT skips the system Ruby's xcrun probe (see cyder-component-check.sh).
+  result="$(SDKROOT="${SDKROOT:-}" /usr/bin/ruby "$CYDER_SCRIPTS/cyder-cnc-game.rb" launch "$exe" "$prefix" "$engine_root" "${CYDER_LAUNCH_PREPARATION_PHASE:-}")" || return $?
   mode="$(/usr/bin/plutil -extract mode raw -o - - <<<"$result")" || return $?
   case "$mode" in
     off) return 0 ;;
@@ -3779,7 +3780,12 @@ cyder_run_wine_exe() {
       rm -f "$lifecycle_file" "${lifecycle_file}.tmp"
     fi
   fi
-  if declare -F cyder_check_components >/dev/null; then cyder_check_components all quick "$prefix"; fi
+  case "${CYDER_LAUNCH_PREPARATION_PHASE:-}" in
+    # Started by the launcher after graphics preparation; one scan per launch.
+    prepare) if declare -F cyder_check_components_wait >/dev/null; then cyder_check_components_wait; fi ;;
+    final) ;;
+    *) if declare -F cyder_check_components >/dev/null; then cyder_check_components all quick "$prefix"; fi ;;
+  esac
   cyder_exec_game() {
     # Run after sync/session setup, before the one-use final handoff. Registry
     # failures abort this launch instead of silently using a different mode.

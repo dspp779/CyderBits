@@ -148,6 +148,26 @@ Ask, then wait; do not edit the TCC database. Once granted:
   (`wine-windows.swift`, `guarded-click.swift`) for them.
 - Restore anything changed for the test (for example a language choice).
 
+### Measuring launch time
+
+The session log gives `operation=wine-prepare elapsed_ms=` and
+`operation=wine-launch elapsed_ms=` per launch; compare them with an earlier
+version's session logs on the same Mac, not with an absolute number. To see
+where the time goes, record every process Cyder starts:
+
+```bash
+clang -O1 -o /tmp/launch-timeline .agents/skills/cyder-dev-test/scripts/launch-timeline.c
+/tmp/launch-timeline "$(pgrep -x CyderSwift | head -1)" 45 >/tmp/timeline.txt &
+open -b local.cyder.app "$HOME/Library/Application Support/Cyder/bottles/shared/drive_c/windows/system32/winver.exe"
+wait; sort -n /tmp/timeline.txt | awk '$2 >= 0.25'
+```
+
+Columns: start offset, lifetime, pid, parent, command. `open -b` reaches a
+translocated app that `open -a <path>` rejects. Do not judge a Finder launch by
+"the window appeared after I clicked Cyder": in 0.14.1 the click was a
+coincidence with a 30–40 s launch whose progress panel was hidden behind the
+frontmost app.
+
 Logs for a launch are in `~/Library/Application Support/Cyder/Logs/`:
 `last-launch.log` (latest game run), `sessions/` (app sessions),
 `last-error.json`, `engine-install.log`. A clean launch has no
