@@ -245,8 +245,48 @@ of a trace and the length varies, so check that presents are back at ~60 fps
 before the action. The run 6 warm control was lost to that. A long trace
 (10 s idle, no Time Profiler) once hung while saving.
 
-Still open: repeat run 5 (and a clean warm damaging control), off-CPU time in
-the stall, cold vs warm file cache, DXMT.
+### How much the reads can cost (2026-11-14)
+
+**Read volume.** One session with the engine's own I/O log
+(`WINEDEBUG=-all,+cyderio CYDER_MAPLESTORY_IO_TRACE=1
+CYDER_MAPLESTORY_IO_PROFILE=1`, summaries written as handles close) covered
+login, character select and map load. It made 981,889 `NtReadFile` calls on
+`.wz` files:
+
+- 845,051 tiny reads; the `_Canvas_000.wz` files average about 3.5 bytes per
+  call (e.g. `Character/Hair/_Canvas/_Canvas_000.wz`: 124,111 calls, 434 KB).
+- 965,234 (98 %) were served from Cyder's file cache.
+- Real host reads were 16,842 calls taking 0.78 s in total; cache fills
+  were 581 taking 64 ms.
+
+**Per-call cost.** `scripts/readbench.c` in the testing skill (built with the
+engine's llvm-mingw, run with the shipped engine on
+`Data/Character/Hair/_Canvas/_Canvas_000.wz`, 100,000 calls):
+
+| Read style | Cyder cache on | Cache off |
+|---|---|---|
+| File pointer (how MapleStory reads: `offs=0 unknown=N` in the summaries) | 0.81 µs | 0.62 µs |
+| Explicit offset | 0.53 µs | 0.86 µs |
+| Empty seek (one Wine call, baseline) | 0.64 µs | 0.63 µs |
+
+Reading:
+
+- A cached tiny read costs under 1 µs. Even 100,000 of them cost about 80 ms,
+  so faster reads can remove at most the 76–201 ms of syscall time seen in
+  the stall, never the whole 1.09 s. This matches the earlier FAST_HIT and
+  prewarm results: no perceptible change.
+- For file-pointer reads, Cyder's cache is **slower** than no cache (0.81 vs
+  0.62 µs): the cache path adds `lseek( SEEK_CUR )` and `lseek( SEEK_SET )`
+  around every hit (`dlls/ntdll/unix/file.c`, `NtReadFile`). Worth fixing for
+  general CPU use, but it is not the stall.
+- The stall is therefore mostly the ~354 ms of game code on the CPU and the
+  ~530 ms when the main thread is off the CPU. What it waits on is the open
+  question.
+
+Still open: what the main thread waits on during the stall (a `sample` run
+shows blocked stacks; it slows the game but the blocking frames should still
+show), repeat run 5 (and a clean warm damaging control), cold vs warm file
+cache, DXMT.
 
 Side finding: relaunching ~40 s after a full quit failed once with
 `CYD-WIN-001` "Unable to reserve native executor ownership: busy" (exit 75,
