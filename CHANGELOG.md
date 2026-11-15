@@ -10,6 +10,21 @@ release notes in [`docs/releases/`](docs/releases/); the engine column refers to
 ### Removed
 - Support for macOS 10.15 and 11. Releases after 0.14 require macOS 12 or later.
 
+## [0.14.1] - 2026-11-15
+
+Engine `CX26.3.0-W11-Cyder013`, rebuilt for older macOS compatibility.
+Draft notes: [繁中](docs/releases/v0.14.1.md) · [English](docs/releases/v0.14.1.en.md).
+
+### Fixed
+- Updating the Windows environment crashed on older macOS such as 15.8 (engine #14).
+- Slow launches, and a long wait when opening a second program while another was starting.
+- The "正在啟動程式…" window hidden behind other apps, left open after a crash, and the program not coming to the front.
+- A missing Windows component reported only as an exit code.
+- Reopening a game right after it exited sometimes failed.
+- The status stuck at "正在確認執行狀態…" after a restart.
+- Background processes left running after a program exited.
+- DXVK not updating with the app.
+
 ## [0.14.0] - 2026-11-12
 
 Engine `CX26.3.0-W11-Cyder013` (CrossOver 26.3.0 FOSS, Wine 11.0). Last release for macOS 10.15 and 11.
@@ -78,7 +93,8 @@ Engine `CX26.3.0-W11-Cyder011`. [Notes](docs/releases/v0.13.0.md).
 
 Older releases: see the release table in [`docs/README.md`](docs/README.md).
 
-[Unreleased]: https://github.com/dspp779/CyderBits/compare/v0.14.0...HEAD
+[Unreleased]: https://github.com/dspp779/CyderBits/compare/claude/release-0.14.1...HEAD
+[0.14.1]: https://github.com/dspp779/CyderBits/compare/v0.14.0...claude/release-0.14.1
 [0.14.0]: https://github.com/dspp779/CyderBits/compare/v0.13.2...v0.14.0
 [0.13.2]: https://github.com/dspp779/CyderBits/compare/v0.13.1...v0.13.2
 [0.13.1]: https://github.com/dspp779/CyderBits/compare/v0.13.0...v0.13.1

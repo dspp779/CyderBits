@@ -54,8 +54,8 @@ assert_contains "$script" 'cyder_pick_release_baseline_zip' \
   "release verify must auto-pick a Cyder-*.zip baseline"
 assert_contains "$(cat "$ROOT/scripts/create-cyder-app.sh")" 'cyder-app-version.txt' \
   "App build must read its version from the shared version file"
-assert_eq "$(tr -d '[:space:]' <"$ROOT/config/cyder-app-version.txt")" "0.14.0" \
-  "current 0.14.0 must be the shared App version"
+assert_eq "$(tr -d '[:space:]' <"$ROOT/config/cyder-app-version.txt")" "0.14.1" \
+  "current 0.14.1 must be the shared App version"
 if CYDER_APP_BUILD=invalid bash "$ROOT/scripts/create-cyder-app.sh" --help >"$TEMP/build-number.log" 2>&1; then
   echo "Invalid bundle build number accepted" >&2
   exit 1
