@@ -19,6 +19,8 @@ Draft notes: [繁中](docs/releases/v0.14.1.md) · [English](docs/releases/v0.14
 - Environment update crashes caused by system functions unavailable on older macOS (engine #14); engine archive fingerprints trigger the same-version update.
 - Relaunch failures when a background status update briefly holds the executor catalog.
 - The launch progress window hidden behind the active app when an .exe is opened from Finder; the component integrity check runs once per launch ([#24](https://github.com/dspp779/CyderBits/pull/24)).
+- Slow launches from repeated environment checks: first launch to window about 4 s instead of 5.4 s on Apple Silicon; a second launch while another starts no longer waits about 20 s ([#24](https://github.com/dspp779/CyderBits/pull/24)).
+- The launch progress window staying open after a program crashed; a missing DLL reported only as exit code 53 ([#24](https://github.com/dspp779/CyderBits/pull/24)).
 
 ## [0.14.0] - 2026-11-12
 
