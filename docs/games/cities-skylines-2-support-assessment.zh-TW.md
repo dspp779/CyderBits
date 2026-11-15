@@ -86,8 +86,26 @@ Steam UI 和登入要分開驗收：上游 stock 11.16 曾有黑色 storefront�
 
 判斷：問題在 engine 與 Mono 的介面，不在遊戲檔案；優先找 engine 修正，遊戲 DLL 修補保留為最後手段。
 
-下一步：同一遊戲檔在其他 Wine 11.0 engine（GameToMac 0.1.5、Cyder011）上對照，或用上游的
-`monohost` + `filetest_net` probe 直接量 `Marshal.GetLastWin32Error`，不需啟動遊戲。
+### Engine 對照（2026-11-15）
+
+同一份遊戲檔（以 symlink 指向 shared bottle 的安裝目錄）、各自全新的測試 prefix、不開 Steam、WineD3D：
+
+| Engine | 結果 |
+|---|---|
+| Cyder013（CX26.3／Wine 11.0） | `[FATAL] IOException`，與 shared bottle 相同 |
+| Cyder011 | 相同 |
+| CrossOver 26.3 官方 engine（直接用其 `wineloader`） | 相同 |
+| GameToMac 0.1.5 | 未測：本機只有 engine，缺少它的 `deps/Frameworks`（`libinotify.dylib`），wineserver 無法啟動 |
+
+結論：不是 Cyder 的回歸；CrossOver 26.3 本身也一樣。要讓未修改的遊戲通過，需要在 CX26 的 Wine／Rosetta 路徑找出
+last error 被改掉的原因，成本高、沒有現成 patch。上游雖測得 stock Wine 11.0 修正了 R1 的 probe，仍保留
+`patch_colossal_io`。
+
+CrossOver 自帶目錄 `crossover.tie` 的 Steam 項目只有 Win10 bottle 範本與
+`HKCU\Software\Valve\Steam\GPUAccelWebViews=0`；逐程式的執行期規則在下載後的 `compatdb-N.dat`，本機沒有。
+
+可能方向：(1) 第三階段的遊戲 DLL 修補工具（只修 `Colossal.IO.dll` 的列舉錯誤判斷，須照上方交易契約）；
+(2) 用上游 `monohost` + `filetest_net` probe 在 CX26 上量 `Marshal.GetLastWin32Error`，再決定是否值得追 engine。
 
 ## 遊戲修補判斷與前置條件
 

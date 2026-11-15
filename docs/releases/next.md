@@ -34,7 +34,7 @@
 |---|---|---|---|
 | C1 | Steam 在目前 engine 上從登入、遊戲庫、下載到啟動遊戲 | 2026-11-15：圖形為 WineD3D 時可登入並下載 CS2；全域圖形選 DXVK 時不出現視窗（[說明](../games/steam/README.md)），不修改程式 | 登入、商店／遊戲庫畫面、下載、啟動一款遊戲、退出，逐步記錄 |
 | C2 | CS2 第一階段：CompatDB 規則（`Cities2.exe` 使用 DXMT）與使用指引（不經 Paradox Launcher、Steam 保持背景登入、遊戲內用 Fullscreen Window） | 設計完成，未出貨 | 規則有測試；指引文件完成；不修改遊戲檔案 |
-| C3 | CS2 第二階段：不修改遊戲檔案的實測 | 2026-11-15：DXMT 正常初始化，但遊戲在檔案列舉 `IOException` 後卡在黑畫面，未進主選單（[紀錄](../games/cities-skylines-2-support-assessment.zh-TW.md)） | 進主選單、新建城市、存讀檔、遊玩 20 分鐘、退出；記錄是否需要遊戲 DLL 修補 |
+| C3 | CS2 第二階段：不修改遊戲檔案的實測 | 2026-11-15：DXMT 正常初始化，但遊戲在檔案列舉 `IOException` 後卡在黑畫面，未進主選單；Cyder011 與 CrossOver 26.3 官方 engine 相同（[紀錄](../games/cities-skylines-2-support-assessment.zh-TW.md)） | 進主選單、新建城市、存讀檔、遊玩 20 分鐘、退出；記錄是否需要遊戲 DLL 修補 |
 
 不納入：CS2 遊戲 DLL 修補工具（第三階段）。未通過 C3 前，不宣稱 CS2 可玩。
 
