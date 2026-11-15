@@ -41,6 +41,29 @@ is the reference example.
 9. **Download and verification**: file, size, SHA-256, and the `shasum` command.
 10. **Acknowledgements**: upstream projects with links, and reporters.
 
+## GitHub release page
+
+- **Title:** the tag, e.g. `v0.14.1`.
+- **Minor release (x.y.0):** a download block (zip link and engine label), a
+  `---` line, then the zh-TW notes from the compare link on.
+- **Patch release (x.y.z):** the same download block and `---`, then one collapsed
+  section per patch release, newest first, followed by the x.y.0 notes unchanged:
+
+  ```markdown
+  <details>
+  <summary>0.14.1：一句話說明這版修了什麼</summary>
+
+  - **使用者看得到的改變。** 一句話補充，不寫內部名稱。
+  </details>
+  ```
+
+  Keep the patch bullets short and user-facing; the full detail stays in
+  `docs/releases/vX.Y.Z.md`.
+- In the x.y.0 notes below it, update what describes the build: the English and
+  compare links (`vX.Y.(z-1)...vX.Y.Z` and the full range), the release date,
+  the engine label and archive SHA-256, an engine-table row for a repacked
+  engine, and the download table (file, size, SHA-256). Feature text stays.
+
 ## Style
 
 - Lead each bullet with the user-visible effect in bold, then the cause in plain words.

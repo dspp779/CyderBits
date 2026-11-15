@@ -121,8 +121,10 @@ and regenerate `dist/SHA256SUMS.txt`.
 3. `gh release view vX.Y.Z`: if a draft exists, check its assets and target
    commit; an old draft carries a stale zip. Upload `Cyder-<version>.zip` and
    `SHA256SUMS.txt`, replacing anything else.
-4. Body: the zh-TW notes with a download section on top (copy the previous
-   release's layout) and a link to the English notes.
+4. Title `vX.Y.Z`. Body as in "GitHub release page" in
+   `docs/release-notes-guide.md`: a patch release is a collapsed `<details>`
+   section above the x.y.0 notes. Bodies fetched with `gh` use CRLF line
+   endings; strip `\r` before editing them.
 5. Download the published zip and run `shasum -a 256 -c SHA256SUMS.txt`. Open
    the English-notes and compare links.
 
