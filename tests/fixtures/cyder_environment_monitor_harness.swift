@@ -101,6 +101,33 @@ recoveryStore.send(.visibleUI(true))
 pump { restored.visibleUI }
 precondition(restored.environments[current.id]!.existence == .alive)
 recovery.stop()
+// A reboot can renumber the volume. A record whose prefix now identifies
+// differently is dropped: kept, it probed as prefix-identity-changed forever.
+let movedRoot = root.appendingPathComponent("moved")
+try FileManager.default.createDirectory(at: movedRoot, withIntermediateDirectories: true)
+var movedJSON = try JSONSerialization.jsonObject(with: retainedHistory) as! [String: Any]
+var movedRecords = movedJSON["records"] as! [[String: Any]]
+precondition(movedRecords.count == 2)
+var renumbered = movedRecords[0]["identity"] as! [String: Any]
+var renumberedEnvironment = renumbered["environment"] as! [String: Any]
+renumberedEnvironment["device"] = (renumberedEnvironment["device"] as! NSNumber).uint64Value + 1
+renumbered["environment"] = renumberedEnvironment
+movedRecords[0]["identity"] = renumbered
+movedJSON["records"] = movedRecords
+let movedFile = movedRoot.appendingPathComponent("managed-environments-v1.json")
+try JSONSerialization.data(withJSONObject: movedJSON).write(to: movedFile)
+try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: movedFile.path)
+let movedEpoch = UUID()
+var moved = CyderLifecycle.State(epoch: movedEpoch).snapshot
+let movedStore = CyderLifecycleStore(epoch: movedEpoch) { s, _ in moved = s }
+let movedMonitor = CyderEnvironmentMonitor(epoch: movedEpoch, directory: movedRoot, expectedEngine: engine, waitersEnabled: false,
+    clock: input.time, probe: input.result, event: movedStore.send)
+var movedReady = false
+movedMonitor.restore { movedReady = true }
+pump { movedReady && moved.environments.count == 1 && moved.environments.values.allSatisfy { $0.existence == .alive } }
+pump { ((try? JSONSerialization.jsonObject(with: Data(contentsOf: movedFile))) as? [String: Any])
+    .flatMap { $0["records"] as? [[String: Any]] }?.count == 1 }
+movedMonitor.stop()
 let corruptRoot = root.appendingPathComponent("corrupt")
 try FileManager.default.createDirectory(at: corruptRoot, withIntermediateDirectories: true)
 let corruptFile = corruptRoot.appendingPathComponent("managed-environments-v1.json")
@@ -112,4 +139,4 @@ corrupt.onIssue = { _ in issue = true }
 corrupt.restore { corruptReady = true }
 pump { issue && corruptReady }
 corrupt.stop()
-print("PASS formal monitor/store: restoration revalidation, old epoch rejection, corrupt registry isolation; blocked probe isolation, coalescing, server generation, old event rejection, two-sample empty calibration, quit")
+print("PASS formal monitor/store: restoration revalidation, renumbered-volume record dropped, old epoch rejection, corrupt registry isolation; blocked probe isolation, coalescing, server generation, old event rejection, two-sample empty calibration, quit")

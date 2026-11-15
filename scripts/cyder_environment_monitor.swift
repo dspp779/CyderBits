@@ -133,6 +133,14 @@ final class CyderEnvironmentMonitor {
                           }) else { throw CocoaError(.fileReadCorruptFile) }
                 }
             } catch { valid = false; records.removeAll() }
+            // A volume's device number can change across a reboot (an Intel
+            // Mac moved from 16777220 to 16777221). A record whose prefix now
+            // identifies differently is probed as prefix-identity-changed
+            // forever, so the UI stayed "checking". Its server cannot be alive;
+            // bottle recovery finds a live one under the current identity.
+            records = records.filter {
+                identify(URL(fileURLWithPath: $0.identity.prefix), URL(fileURLWithPath: $0.identity.engine)) == $0.identity
+            }
             queue.async {
                 self.canonicalExpectedEngine = expected
                 self.registryReading = false; self.registryLoaded = true
