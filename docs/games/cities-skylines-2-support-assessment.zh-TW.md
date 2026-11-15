@@ -70,7 +70,24 @@ Steam UI 和登入要分開驗收：上游 stock 11.16 曾有黑色 storefront�
 
 未測：主選單之後的所有項目、Paradox Mods、Cmd-Tab、從 Steam 啟動、其他 engine。
 
-下一步：以 `WINEDEBUG=+file` 找出列舉失敗的路徑與錯誤碼，判斷是 engine 修正（較佳）還是只能靠遊戲 DLL 修補。
+### `+file` 追蹤結果
+
+以 `WINEDEBUG=+file,+seh` 重跑（同一 bottle、同樣未修改的檔案），失敗點是遊戲列舉
+`\\?\C:\…\Cities Skylines II\Cities2_Data\Content\*`：
+
+- Wine 端正確：`FindFirstFileExW` 成功，`FindNextFileW` 依序回傳 `.`、`..`、`DeluxeRelaxRadio`、`Game`，
+  最後 `NtQueryDirectoryFile` 回 `STATUS_NO_MORE_FILES`（`80000006`），對應 `ERROR_NO_MORE_FILES`（18），是正常結束。
+- 遊戲隨即拋出沒有訊息的 `IOException`。表示 managed 端讀到的 last error 不是 18，與上游
+  [R1](https://github.com/macgameport/cities-skylines-2-macos/blob/main/cities-skylines-2/docs/wine-bugs/R1-getlasterror-garbage.md)
+  相同：Win32 層正確，錯誤發生在 Unity Mono 的 P/Invoke last-error 擷取（`Marshal.GetLastWin32Error`）。
+  上游以 `patch_colossal_io` 修改 `Colossal.IO.dll` 的 `EnumerateFileSystemIterator` 容忍此值。
+- 上游量測稱 stock Wine 11.0 已修正（10.0 為亂值、11.0 為 0），但 Cyder 的 CX26（Wine 11.0 基底）仍重現。
+  差異可能在 CrossOver／Cyder 的 ntdll 或 Rosetta 路徑，尚未確認。
+
+判斷：問題在 engine 與 Mono 的介面，不在遊戲檔案；優先找 engine 修正，遊戲 DLL 修補保留為最後手段。
+
+下一步：同一遊戲檔在其他 Wine 11.0 engine（GameToMac 0.1.5、Cyder011）上對照，或用上游的
+`monohost` + `filetest_net` probe 直接量 `Marshal.GetLastWin32Error`，不需啟動遊戲。
 
 ## 遊戲修補判斷與前置條件
 
