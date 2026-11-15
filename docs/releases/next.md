@@ -1,15 +1,57 @@
-# 下一版預計改進
+# 0.15.0 規劃
+
+> 更新：2026-11-15
+> 狀態：範圍已選定，開發中。列入不代表一定出貨；每項需通過下方驗收才進正式 release note。
+
+0.15.0 需要 macOS 12 以上（0.14 系列是最後支援 macOS 10.15／11 的版本）。
+
+## 範圍
+
+### A. 新楓之谷首次命中卡頓（[#22](https://github.com/dspp779/CyderBits/issues/22)、[#25](https://github.com/dspp779/CyderBits/issues/25)）
+
+| 項目 | 內容 | 目前狀態 | 驗收 |
+|---|---|---|---|
+| A1 | WZ read-ahead（`CYDER_MAPLESTORY_READAHEAD`）正式納入 engine：patch 套用清單、`build-wine.sh`、`engine-release.json` 與測試；決定是否預設開啟 | engine 分支 `claude/wz-readahead` 原型；各後端各量一次，讀取等待約減少 70%（DXVK 388 → 108 ms） | 有 patch 測試；A5 量測確認效果後再決定預設值 |
+| A5 | 各後端（DXVK／DXMT／D3DMetal）多次冷快取量測，並在舊款 Intel Mac 量測 | 目前每格只有一次 | 同角色、地圖、技能，每格至少 3 次；記錄讀取等待、最長 Present 空窗與 p95／p99 幀時間 |
+| A11 | 舊款 Intel Mac 走圖卡頓：型態、WZ cache 開／關、DXVK state cache 是否寫入並在下次生效 | 從未量測 | 有量測紀錄與結論；若需修改另開項目 |
+
+不納入：read-ahead 後 256 KiB 補讀視窗、cache 命中去除 `lseek`、mutex 外補讀，以及下方 DXMT resource lab 各項。
+
+### B. Wine engine Cyder014
+
+| 項目 | 內容 | 目前狀態 | 驗收 |
+|---|---|---|---|
+| B1 | 不以高於 minOS 下限的函式建置 engine（`pipe2`、`strchrnul`、`pcap_init`），打包時檢查 weak import（[engine PR #14](https://github.com/dspp779/cyder-wine-engine/pull/14)） | 程式與離線測試完成；待在 macOS 27／Xcode 27 建置機重建 | `nm -m` 無 `_pipe2`／`_strchrnul`；兩道打包檢查通過；封存不含 `ntdll.so.pre-qdo`；macOS 15.8 bottle 更新（`wineboot -u`）成功 |
+| B2 | 程式被 signal 結束時 wineserver 不再當掉（[engine #15](https://github.com/dspp779/cyder-wine-engine/issues/15)／[PR #16](https://github.com/dspp779/cyder-wine-engine/pull/16)） | Apple Silicon 上修正版 SIGTERM 3/3、SIGKILL 1/1 未當掉 | Intel／macOS 15.8 重測；強制結束一款真實遊戲後 server 與 Cyder 啟動流程正常收尾 |
+| B3 | [#23](https://github.com/dspp779/CyderBits/issues/23)：MacBook Neo（A18 Pro）／macOS 26.6 的 `wineboot` Segmentation fault | 推測與 B1 同因（macOS 26 沒有 `pipe2`），未確認 | 以 Cyder014 在 macOS 26 建立環境成功，或請回報者驗證 |
+| B4 | engine 標籤升為 Cyder014、打包並匯入 CyderBits | 未開始 | 依 `cyder-release` 流程；記錄 engine 版本與 ntdll SHA-256 |
+
+### C. Steam 與 Cities: Skylines II（[#10](https://github.com/dspp779/CyderBits/issues/10)）
+
+依據：[CS2 支援可行性與驗收方案](../games/cities-skylines-2-support-assessment.zh-TW.md)、[Steam 相容設定](../games/steam/README.md)。CS2 免費遊玩期至 2026-11-16。
+
+| 項目 | 內容 | 目前狀態 | 驗收 |
+|---|---|---|---|
+| C1 | Steam 在目前 engine 上從登入、遊戲庫、下載到啟動遊戲 | 黑畫面相容規則已出貨；目前 engine 未有完整紀錄 | 登入、商店／遊戲庫畫面、下載、啟動一款遊戲、退出，逐步記錄 |
+| C2 | CS2 第一階段：CompatDB 規則（`Cities2.exe` 使用 DXMT）與使用指引（不經 Paradox Launcher、Steam 保持背景登入、遊戲內用 Fullscreen Window） | 設計完成，未出貨 | 規則有測試；指引文件完成；不修改遊戲檔案 |
+| C3 | CS2 第二階段：不修改遊戲檔案的實測 | 未執行 | 進主選單、新建城市、存讀檔、遊玩 20 分鐘、退出；記錄是否需要遊戲 DLL 修補 |
+
+不納入：CS2 遊戲 DLL 修補工具（第三階段）。未通過 C3 前，不宣稱 CS2 可玩。
+
+## 延後（未納入 0.15.0）
+
+以下為先前規劃，保留作後續版本依據。
 
 > 更新：2026-10-03  
 > 狀態：第一階段已實作並完成建置／CPU 測試，待 GPU 驗收；版本號與正式納入範圍待定。
 
-## 新楓之谷：DXMT 資源建立與繪圖卡頓
+### DXMT 資源建立與繪圖卡頓（原 2026-10-03 規劃）
 
 目標是降低首次使用圖形資源時的 CPU 配置、資料上傳與提交等待成本，並修正已重現的初始化資料遺失。引擎與 renderer 修改在 sibling `cyder-wine-engine` 完成；Cyder 應用層負責驗收後的 engine／graphics payload 匯入與版本整合。
 
 依據：[完整程式分析與測量](../../../cyder-wine-engine/docs/maplestory-dxmt-resource-cpu-submit-study.zh-TW.md)、[重現工具與原始證據](../../../cyder-wine-engine/tools/dxmt-resource-study/README.md)、[GameToMac／PSO archive 研究](../games/gametomac-maplestory-pipeline-study.zh-TW.md)。分析基準為 DXMT v0.80 與本機獨立 PSO archive 實驗版本，不能推論其他 DXMT 版本或 D3DMetal 有相同缺陷。
 
-### 預計工作與順序
+#### 預計工作與順序
 
 | 順序 | 預計改進 | 具體修改與目前證據 | 對新楓之谷的預期／限制 |
 |---:|---|---|---|
@@ -20,13 +62,13 @@
 | 5 | **避免 archive 寫入占住編譯 worker** | 前輪實驗 cache 的 save 雖在 ready/notify 後，仍占 compilation worker；評估獨立、有界、低優先權寫入佇列，滿載時放棄此次持久化，確保生命期與 shutdown join。依量測評估 compiler 執行緒數與優先權。 | 適用於啟用 archive 的 cold pipeline burst；不會減少遊戲解壓、紋理配置或必要 GPU 同步成本。 |
 | 6 | **依量測縮小初始化等待範圍** | 若 trace 顯示整個 chunk 等待全部 upload 是主因，再研究按 allocation／subresource 記錄初始化 event，在最早使用資源前等待，保留跨 queue 相依性與 untracked resource hazard 追蹤。 | 有機會避免無關繪圖一起被擋住；屬較大改造，先量測再決定是否納入。不能直接移除 wait 或以增加 queue 深度代替修正。 |
 
-### 目前效能證據
+#### 目前效能證據
 
 - 同版 DLL、相同內容的 64 張 257×512 RGBA8 紋理，暖機後 tight row pitch 1028 的建立時間約 **1.3–1.6 ms**，padded row pitch 1280 約 **2.5–2.8 ms**；全部逐列 GPU 讀回正確。這是輸入 layout 比較，**不是優化前後的加速結果**，不可外推為遊戲 FPS 增幅。
 - 抽出原始 ring allocator、以 fake allocator 模擬 20 批已完成工作：現行邊界配置 **2 個 block**，包含相等邊界後為 **1 個**。這證實配置差異，尚未驗證所有 GPU 生命期情境。
 - 既有遊戲紀錄的首次命中 Present 空窗約 **655–749 ms**；目前沒有新的遊戲內 A/B。執行緒名稱含 `AGXBuffer init…` 不足以證明 allocator 是根因。
 
-### 2026-10-03 執行進度
+#### 2026-10-03 執行進度
 
 實作入口：[DXMT resource lab 第一階段](../../../cyder-wine-engine/tools/dxmt-resource-lab/README.md)。
 
@@ -41,7 +83,7 @@
 
 獨立 overlay 標籤：`v0.80-cyder-resource-lab-5bec39a47b2ff778`。建置與 CPU 測試通過不代表 GPU 正確性已通過，不能宣告新楓之谷卡頓已改善；未變更正式 runtime 或 engine pin。
 
-### 納入版本前的驗收條件
+#### 納入版本前的驗收條件
 
 - [ ] 初始化修正後，8,192 與 16,384 個子資源全部逐像素讀回正確；新增 heap-full、不同配置失敗點與永久失敗測試，不能把既知失敗重現算成 graphics pass。
 - [ ] 上傳修改涵蓋 tight／padded、BC、mip／array、3D 與部分更新，並確認 API 返回前已取走來源資料；i386 無法安全存取映射位址時保留回退。
