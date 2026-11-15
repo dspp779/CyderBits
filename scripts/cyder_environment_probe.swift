@@ -52,18 +52,18 @@ struct CyderEnvironmentProbe {
                         process: (Int32) -> CyderLifecycle.ProcessID? = processIdentity,
                         image: (Int32) -> String? = processPath) -> Result {
         precondition(!Thread.isMainThread, "environment calibration belongs to an observer worker")
-        guard let current = identify(prefix: URL(fileURLWithPath: identity.prefix), engine: URL(fileURLWithPath: identity.engine)),
-              current == identity else { return .unknown("prefix-identity-changed") }
+        // The server namespace is keyed by the identity's device and inode, so
+        // it is probed even when the prefix now identifies differently (a
+        // reboot can renumber the volume; a bottle can be deleted or replaced).
+        // No server there means that environment has ended. A live server
+        // there serves a prefix that moved away; it stays unknown.
+        let current = identify(prefix: URL(fileURLWithPath: identity.prefix), engine: URL(fileURLWithPath: identity.engine))
         guard FileManager.default.isExecutableFile(atPath: identity.engine) else { return .unknown("engine-unavailable") }
-        func emptyIfUnchanged() -> Result {
-            identify(prefix: URL(fileURLWithPath: identity.prefix), engine: URL(fileURLWithPath: identity.engine)) == identity
-                ? .empty : .unknown("prefix-identity-changed")
-        }
         let directory = serverDirectory(identity)
         var info = stat()
         for path in [directory.deletingLastPathComponent().path, directory.path] {
             if lstat(path, &info) != 0 {
-                return errno == ENOENT ? emptyIfUnchanged() : .unknown("namespace-unreadable")
+                return errno == ENOENT ? .empty : .unknown("namespace-unreadable")
             }
             guard info.st_mode & S_IFMT == S_IFDIR, info.st_uid == identity.environment.uid,
                   info.st_mode & 0o077 == 0 else { return .unknown("namespace-invalid") }
@@ -73,7 +73,7 @@ struct CyderEnvironmentProbe {
         if fd < 0 {
             // A socket-only server is possible when POSIX locks are unavailable.
             guard errno == ENOENT else { return .unknown("lock-unreadable") }
-            return socketAbsent(directory.appendingPathComponent("socket").path) ? emptyIfUnchanged() : .unknown("socket-without-lock")
+            return socketAbsent(directory.appendingPathComponent("socket").path) ? .empty : .unknown("socket-without-lock")
         }
         defer { Darwin.close(fd) }
         guard fstat(fd, &info) == 0, info.st_mode & S_IFMT == S_IFREG,
@@ -95,6 +95,7 @@ struct CyderEnvironmentProbe {
             // the server exits. A live server endpoint distinguishes that
             // waiter from an actual environment and excludes stale lock owners.
             guard socketState(directory.appendingPathComponent("socket").path) == .connected else { return .unknown("lock-without-live-socket") }
+            guard current == identity else { return .unknown("prefix-identity-changed") }
             result = .alive(owner)
         } else {
             guard socketAbsent(directory.appendingPathComponent("socket").path) else { return .unknown("socket-may-be-live") }
@@ -102,7 +103,7 @@ struct CyderEnvironmentProbe {
         }
         guard holder() == before, lstat(lockPath, &info) == 0,
               info.st_dev == lockDevice, info.st_ino == lockInode,
-              identify(prefix: URL(fileURLWithPath: identity.prefix), engine: URL(fileURLWithPath: identity.engine)) == identity
+              identify(prefix: URL(fileURLWithPath: identity.prefix), engine: URL(fileURLWithPath: identity.engine)) == current
         else { return .unknown("observation-raced") }
         return result
     }
