@@ -37,8 +37,7 @@ DispatchQueue.global().async {
     let observed = CyderEnvironmentProbe.inspect(identity)
     guard case .alive(let owner) = observed else { fatalError("actual POSIX lock holder not recognized: \(observed), path=\(String(describing: CyderEnvironmentProbe.processPath(child.processIdentifier))), identity=\(String(describing: CyderEnvironmentProbe.processIdentity(child.processIdentifier)))") }
     precondition(owner.pid == child.processIdentifier && owner.started > 0)
-    // A live server in this namespace whose prefix path now identifies as
-    // another directory serves a bottle that moved away: not ours to wait on.
+    // A live server whose prefix path now identifies as another directory.
     let elsewhere = root.appendingPathComponent("elsewhere")
     try! FileManager.default.createDirectory(at: elsewhere, withIntermediateDirectories: true)
     let movedAway = CyderEnvironmentProbe.Identity(environment: identity.environment, prefix: elsewhere.path, engine: identity.engine)
@@ -75,12 +74,11 @@ DispatchQueue.global().async {
     precondition(CyderEnvironmentProbe.inspect(identity) == .unknown("lock-invalid"))
     try! FileManager.default.removeItem(at: lockURL)
     let changed = CyderEnvironmentProbe.Identity(environment: .init(uid: getuid(), device: identity.environment.device, inode: identity.environment.inode + 1, namespace: "wine-user"), prefix: identity.prefix, engine: identity.engine)
-    // A reboot can renumber the volume, and a bottle can be deleted or
-    // replaced. No server in the recorded namespace means that environment
-    // ended; "unknown" here kept the status at checking forever.
-    precondition(CyderEnvironmentProbe.inspect(changed) == .empty, "a changed identity with no server must be empty")
+    // A restart can renumber the volume, and a bottle can be deleted or
+    // replaced: with no server in the recorded namespace the probe says so.
+    precondition(CyderEnvironmentProbe.inspect(changed) == .unknown(CyderEnvironmentProbe.identityChangedNoServer))
     let deleted = CyderEnvironmentProbe.Identity(environment: identity.environment, prefix: root.appendingPathComponent("gone").path, engine: identity.engine)
-    precondition(CyderEnvironmentProbe.inspect(deleted) == .empty, "a deleted bottle with no server must be empty")
+    precondition(CyderEnvironmentProbe.inspect(deleted) == .unknown(CyderEnvironmentProbe.identityChangedNoServer))
     let missing = CyderEnvironmentProbe.Identity(environment: identity.environment, prefix: identity.prefix, engine: "/nonexistent/wineserver")
     precondition(CyderEnvironmentProbe.inspect(missing) == .unknown("engine-unavailable"))
     print("PASS environment calibration: native POSIX lock, process birth/image, PID reuse, socket-only server, stale socket, empty, replaced prefix, missing engine")
