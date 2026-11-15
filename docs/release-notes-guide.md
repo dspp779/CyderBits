@@ -47,14 +47,18 @@ is the reference example.
 - **Minor release (x.y.0):** a download block (zip link and engine label), a
   `---` line, then the zh-TW notes from the compare link on.
 - **Patch release (x.y.z):** the same download block and `---`, then one collapsed
-  section per patch release, newest first, followed by the x.y.0 notes unchanged:
+  section per patch release, newest first, another `---`, then the x.y.0 notes:
 
   ```markdown
+  ---
+
   <details>
   <summary>0.14.1：一句話說明這版修了什麼</summary>
 
   - **使用者看得到的改變。** 一句話補充，不寫內部名稱。
   </details>
+
+  ---
   ```
 
   Keep the patch bullets short and user-facing; the full detail stays in
