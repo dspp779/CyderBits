@@ -117,9 +117,43 @@ cyder_update_signed_dxmt() {
   fi
 }
 
+cyder_graphics_expected_digest() {
+  local source_dir="$1" name="$2" expected listed_name
+  read -r expected listed_name <"$source_dir/$name-artifact-sha256.txt" || true
+  [[ "$expected" =~ ^[0-9a-fA-F]{64}$ ]] || return 1
+  tr '[:upper:]' '[:lower:]' <<<"$expected"
+}
+
+# A same-version payload whose archive changed replaces files that running
+# Wine processes may load (DXVK DLLs are read when a game creates a device).
+# Like the MoltenVK and GPTK switches, it needs the all-environments scope and
+# no Wine client of the engine; otherwise the installed payload stays and the
+# update waits for a later launch. A missing or busy check never blocks the
+# launch: the previous payload still works.
+cyder_graphics_refresh_permitted() {
+  local name="$1" runtime_root="$2" engine
+  engine="${CYDER_ENGINES:-$runtime_root/Engines}/${CYDER_ENGINE_NAME:-wine-x86_64}"
+  if [[ -n "${CYDER_EXECUTION_RUNTIME_MUTATION:-}${CYDER_EXECUTION_OWNER_TICKET:-}" &&
+        "${CYDER_EXECUTION_RUNTIME_MUTATION:-0}" != 1 ]]; then
+    echo "$name update deferred: global runtime scope required; it installs on a later launch." >&2
+    return 1
+  fi
+  [[ -d "$engine" ]] || return 0
+  if declare -F cyder_shared_runtime_idle >/dev/null 2>&1; then
+    cyder_shared_runtime_idle "$engine" engine >&2 || {
+      echo "$name update deferred: Windows programs are running; it installs on a later launch." >&2
+      return 1
+    }
+  elif [[ -n "${CYDER_EXECUTION_RUNTIME_MUTATION:-}${CYDER_EXECUTION_OWNER_TICKET:-}" ]]; then
+    echo "$name update deferred: cannot check for running Windows programs." >&2
+    return 1
+  fi
+  return 0
+}
+
 cyder_install_graphics_payload() {
   local source_dir="$1" runtime_root="$2" name="$3"
-  local graphics_dir version archive target current temp_link staging
+  local graphics_dir version archive target current temp_link staging digest installed_digest="" retired
   graphics_dir="$runtime_root/graphics"
   version="$(cyder_graphics_read_version "$source_dir" "$name")"
   archive="$source_dir/$name-$version.tar.zst"
@@ -129,10 +163,19 @@ cyder_install_graphics_payload() {
     echo "Missing bundled $name archive: $archive" >&2
     return 1
   }
+  digest="$(cyder_graphics_expected_digest "$source_dir" "$name")" || {
+    echo "Invalid graphics checksum sidecar: $source_dir/$name-artifact-sha256.txt" >&2
+    return 1
+  }
 
   mkdir -p "$graphics_dir/$name"
+  # The install is keyed on the archive digest, not only the version: DXVK
+  # stays 1.10.3 while its payload is rebuilt between releases.
+  [[ -f "$target/.cyder-graphics-archive-sha256" ]] &&
+    installed_digest="$(awk 'NF { print tolower($1); exit }' "$target/.cyder-graphics-archive-sha256")"
   if [[ ! -f "$target/.cyder-graphics-version" ]] ||
-     [[ "$(<"$target/.cyder-graphics-version")" != "$version" ]]; then
+     [[ "$(<"$target/.cyder-graphics-version")" != "$version" ]] ||
+     { [[ "$installed_digest" != "$digest" ]] && cyder_graphics_refresh_permitted "$name" "$runtime_root"; }; then
     cyder_graphics_verify_archive "$source_dir" "$archive" "$name"
     staging="$(mktemp -d "$graphics_dir/.${name}.XXXXXX")"
     if ! cyder_graphics_extract "$archive" "$staging" || [[ ! -d "$staging/$name" ]]; then
@@ -141,9 +184,16 @@ cyder_install_graphics_payload() {
       return 1
     fi
     printf '%s\n' "$version" >"$staging/$name/.cyder-graphics-version"
-    rm -rf "$target"
+    printf '%s\n' "$digest" >"$staging/$name/.cyder-graphics-archive-sha256"
+    retired=""
+    if [[ -e "$target" ]]; then
+      retired="$graphics_dir/.${name}-retired.$$"
+      rm -rf "$retired"
+      mv "$target" "$retired"
+    fi
     mv "$staging/$name" "$target"
     rmdir "$staging" 2>/dev/null || true
+    [[ -z "$retired" ]] || rm -rf "$retired"
     if declare -F cyder_check_components >/dev/null; then cyder_check_components "$name" full; fi
   fi
 
