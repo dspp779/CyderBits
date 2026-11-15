@@ -47,6 +47,31 @@ Steam UI 和登入要分開驗收：上游 stock 11.16 曾有黑色 storefront�
 
 候選規則 `game.cities-skylines-2.dxmt` 保持 `enabled: false`，只有 graphics_backend，不強加 Unity 參數。偏好設定的全域圖形若不是「預設」，engine 會以使用者設定為準、略過此規則；測試時請在 `Cities2.exe` 的遊戲設定直接選 DXMT。全域選 DXVK 也會讓 Steam 不出現視窗，見 [Steam](steam/README.md)。名稱匹配不足以作 DLL 修補授權；即使名稱被偽裝，也不能進入任何寫入流程。
 
+## 2026-11-15 原檔實測（C3）
+
+環境：Apple M4、macOS 27.2、Cyder 0.14.1（Developer ID）、engine Cyder013、shared bottle。CS2 Steam build `26404411`，未修改任何遊戲檔案：
+
+| 檔案 | SHA-256 |
+|---|---|
+| `Cities2.exe` | `c881146bac498fd7ef64d3aa2119bdeb74d8f4fa665e6d065372d29d4d451290` |
+| `UnityPlayer.dll` | `1da82d19c9b19b8b923e6018f2caab0d416e84916efba02eb58de9171b40529f` |
+| `Cities2_Data/Plugins/x86_64/cohtml_Unity3DPlugin.dll` | `a6f398a2e9371bf2730300093fffed4f628896dd81c0f679c270dfe54c6c7eb5` |
+| `Cities2_Data/Managed/mscorlib.dll` | `952703a7a04ee3711f2942c43839684f99220732814dd23d77a867673b894734` |
+
+步驟：Steam 在同一 bottle 已登入並保持背景執行；以 Cyder launcher 直接啟動 `Cities2.exe`，該次啟動圖形設為 DXMT。
+
+結果：
+
+- 圖形：遊戲程序載入的 `d3d11.dll`／`dxgi.dll`／`winemetal.dll` 均來自 DXMT 0.80 payload；視窗 1680×945，Metal HUD 顯示約 60 FPS，但畫面全黑。
+- **啟動失敗**：`GameManager.InitializePlatformManager` 中 `ContentHelper.ListContent` → `System.IO.LongDirectory.EnumerateFileSystemIterator` 拋出沒有訊息的 `IOException`，記錄為 `A platform service integration failed to initialize` 與 `[FATAL] IOException`；之後每一幀 `NullReferenceException`，無法進入主選單。
+- 這與上游修補清單中 Mono／Colossal.IO 檔案列舉類的修補對應；上游稱 Wine 11 已不需要的 errno 修補，在 Cyder 的 Wine 11.0（CX26）上仍會失敗。尚未確認是哪個資料夾、哪個 Win32 呼叫回傳了錯誤。
+- 直接啟動時 Steam 另外跳出「選擇啟動選項」視窗（一般／停用 code mods）；本次未點選。
+- 遊戲卡住後 `taskkill`（WM_CLOSE）無效，`taskkill /f` 可結束；Steam 與 wineserver 維持正常。
+
+未測：主選單之後的所有項目、Paradox Mods、Cmd-Tab、從 Steam 啟動、其他 engine。
+
+下一步：以 `WINEDEBUG=+file` 找出列舉失敗的路徑與錯誤碼，判斷是 engine 修正（較佳）還是只能靠遊戲 DLL 修補。
+
 ## 遊戲修補判斷與前置條件
 
 以 [2026-10 修補清單](https://github.com/macgameport/cities-skylines-2-macos/blob/main/docs/patch-inventory.md) 為準，1.6.2f1／Steam build 25127643 的十項為 cohtml、colossal_io、longfile、asset_database、fshandle，以及 PDX.SDK 的 mkparent、lockbypass、longdelete、createfile、lockleak。它們跨 native plugin、Colossal.IO、AssetDatabase、mscorlib 與 PDX.SDK；不能沿用 Issue 中「4 個核心 DLL」的簡化描述或舊偏移量。
