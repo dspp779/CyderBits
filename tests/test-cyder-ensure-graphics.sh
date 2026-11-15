@@ -103,6 +103,73 @@ assert_eq "$(cat "$prefix/drive_c/windows/system32/winemetal.dll")" \
   "dxmt x86_64 winemetal" \
   "ensure-graphics must overwrite a stale prefix winemetal builtin"
 
+# The install is keyed on the archive digest. DXVK stays 1.10.3 across
+# releases while its payload is rebuilt; a version-only key never replaced an
+# older install, so every launch reported a d3d11/dxgi mismatch.
+ensure() {
+  env -u CYDER_ZSTD PATH=/usr/bin:/bin CYDER_OGOM="$resources_root" CYDER_GRAPHICS_SRC="$resources" \
+    CYDER_RUNTIME_ROOT="$runtime" CYDER_ENGINES="$runtime/Engines" CYDER_ENGINE_NAME="$engine_name" \
+    CYDER_SHARED_PREFIX="$prefix" "$@" bash "$ROOT/scripts/cyder-ensure-graphics.sh"
+}
+# Runs the installer as a launch would, with cyder_shared_runtime_idle answering $1.
+ensure_with_idle() {
+  local idle="$1"; shift
+  env -u CYDER_ZSTD PATH=/usr/bin:/bin CYDER_OGOM="$resources_root" CYDER_GRAPHICS_SRC="$resources" \
+    CYDER_RUNTIME_ROOT="$runtime" CYDER_ENGINES="$runtime/Engines" CYDER_ENGINE_NAME="$engine_name" \
+    CYDER_SHARED_PREFIX="$prefix" "$@" bash -c '
+      cyder_shared_runtime_idle() { echo "idle-check $1 $2" >>"$IDLE_LOG"; return "$IDLE_STATUS"; }
+      source "$1/scripts/cyder-ensure-graphics.sh"
+      cyder_install_graphics_payload "$CYDER_GRAPHICS_SRC" "$CYDER_RUNTIME_ROOT" dxvk
+    ' _ "$ROOT"
+}
+rebuild_dxvk() {
+  printf '%s\n' "$1" >"$tmp/staging/dxvk/d3d11.dll"
+  tar -cf "$resources/dxvk-1.2.4.tar.zst" -C "$tmp/staging" dxvk
+  printf '%s  %s\n' "$(shasum -a 256 "$resources/dxvk-1.2.4.tar.zst" | awk '{print $1}')" \
+    "dxvk-1.2.4.tar.zst" >"$resources/dxvk-artifact-sha256.txt"
+}
+installed="$runtime/graphics/dxvk/1.2.4"
+assert_eq "$(<"$installed/.cyder-graphics-archive-sha256")" "$(awk '{print $1}' "$resources/dxvk-artifact-sha256.txt")" \
+  "an install records its archive digest"
+
+# Same archive: nothing is reinstalled.
+printf 'marker\n' >"$installed/kept-marker"
+ensure
+assert test -f "$installed/kept-marker"
+
+# Same version, rebuilt archive, run from a checkout (no launch scope): replaced.
+rebuild_dxvk "rebuilt dxvk payload"
+ensure
+assert_eq "$(<"$engine/lib/dxvk/d3d11.dll")" "rebuilt dxvk payload" "a rebuilt same-version archive replaces the install"
+assert test ! -e "$installed/kept-marker"
+assert_eq "$(<"$installed/.cyder-graphics-archive-sha256")" "$(awk '{print $1}' "$resources/dxvk-artifact-sha256.txt")" "the replacement records the new digest"
+assert_eq "$(find "$runtime/graphics" -maxdepth 1 -name '.dxvk*' | wc -l | tr -d ' ')" "0" "no staging or retired copies are left"
+
+# A launch without the all-environments scope keeps the old payload and goes on.
+rebuild_dxvk "second rebuild"
+scoped_out="$(ensure CYDER_EXECUTION_RUNTIME_MUTATION=0 2>&1)"
+assert_eq "$(<"$engine/lib/dxvk/d3d11.dll")" "rebuilt dxvk payload" "a scoped launch must not replace DLLs Wine may load"
+assert_contains "$scoped_out" "dxvk update deferred: global runtime scope required" "the deferral is reported"
+
+# With the scope but Windows programs running: deferred, launch not failed.
+ensure_with_idle 75 CYDER_EXECUTION_RUNTIME_MUTATION=1 IDLE_LOG="$tmp/idle-calls" IDLE_STATUS=75 2>"$tmp/busy.err"
+assert_eq "$(<"$engine/lib/dxvk/d3d11.dll")" "rebuilt dxvk payload" "running Wine keeps the old payload"
+assert_contains "$(cat "$tmp/busy.err")" "dxvk update deferred: Windows programs are running" "the busy deferral is reported"
+assert_contains "$(cat "$tmp/idle-calls")" "idle-check $engine engine" "the check covers every Wine client of the engine"
+
+# With the scope and no Wine: replaced.
+ensure_with_idle 0 CYDER_EXECUTION_RUNTIME_MUTATION=1 IDLE_LOG="$tmp/idle-calls" IDLE_STATUS=0
+assert_eq "$(<"$engine/lib/dxvk/d3d11.dll")" "second rebuild" "an idle runtime takes the rebuilt payload"
+
+# An install from before digests (no stamp) is refreshed once, then kept.
+rm -f "$installed/.cyder-graphics-archive-sha256"
+printf 'hand-swapped\n' >"$installed/d3d11.dll"
+ensure
+assert_eq "$(<"$engine/lib/dxvk/d3d11.dll")" "second rebuild" "an unstamped install is refreshed"
+printf 'marker\n' >"$installed/kept-marker"
+ensure
+assert test -f "$installed/kept-marker"
+
 # I6: refuse to rm -rf a real lib/dxvk outside managed Engines.
 outside_engine="$tmp/foreign-engine"
 mkdir -p "$outside_engine/lib/dxvk"
