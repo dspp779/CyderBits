@@ -45,7 +45,7 @@ Steam UI 和登入要分開驗收：上游 stock 11.16 曾有黑色 storefront�
 4. 遊戲選 Fullscreen Window。若啟動前無法設定，可單獨試 Unity `-screen-fullscreen 0` 作視窗模式診斷；它不等同 borderless，尚未在 Cyder CS2 驗證，不加入自動規則。不要用 explorer virtual desktop 作預設。
 5. Steam 與遊戲要有分開的生命週期；若 App 結束一個遊戲會清掉整個 bottle，先解決執行擁有權問題再提供一鍵雙程序啟動。不可用固定 sleep 宣稱已登入；需逾時、可取消、失敗提示，沿用既有 Steam 程序，不儲存憑證。
 
-候選規則 `game.cities-skylines-2.dxmt` 保持 `enabled: false`，只有 graphics_backend，不強加 Unity 參數。名稱匹配不足以作 DLL 修補授權；即使名稱被偽裝，也不能進入任何寫入流程。
+候選規則 `game.cities-skylines-2.dxmt` 保持 `enabled: false`，只有 graphics_backend，不強加 Unity 參數。偏好設定的全域圖形若不是「預設」，engine 會以使用者設定為準、略過此規則；測試時請在 `Cities2.exe` 的遊戲設定直接選 DXMT。全域選 DXVK 也會讓 Steam 不出現視窗，見 [Steam](steam/README.md)。名稱匹配不足以作 DLL 修補授權；即使名稱被偽裝，也不能進入任何寫入流程。
 
 ## 遊戲修補判斷與前置條件
 

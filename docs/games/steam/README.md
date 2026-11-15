@@ -39,3 +39,41 @@ CYDER_COMPATDB=0
 `libMoltenVK.dylib`；Steam 黑畫面不應以「缺少 Vulkan Loader」作為已確認
 根因。DXVK 尚未成為 Cyder 的預設圖形路徑，個別 Windows 遊戲的相容性仍需
 逐款驗證。
+
+## 偏好設定的圖形選 DXVK 時 Steam 不出現視窗
+
+偏好設定 > 圖形若選 **DXVK**，Steam 會在背景執行，但登入視窗與主視窗都不會出現
+（WebHelper 的子程序約 15 秒後結束，沒有任何頁面）。
+
+原因：全域圖形選項會套用到 Cyder 啟動的每個程序，包括 `steamwebhelper.exe`。
+engine 的 CompatDB 讓使用者選的圖形（`CYDER_GRAPHICS_BACKEND`）優先於所有規則，
+所以不能用規則把 WebHelper 固定在 WineD3D。
+
+處理方式（擇一）：
+
+- 偏好設定 > 圖形選「預設」。
+- 只把 Steam 這一項的圖形設為 WineD3D（或預設），其他遊戲另外指定 DXVK。
+
+2026-11-15 在 macOS 27.2、Apple M4、engine Cyder013 以同一份 Steam 檔案對照：
+
+| 條件 | Steam 視窗 |
+|---|---|
+| 圖形 = DXVK（Cyder 啟動或直接強制） | 不出現（3 次） |
+| 圖形 = WineD3D，全新 prefix | 登入畫面正常 |
+| 圖形 = WineD3D，原本的 shared bottle | 主視窗正常，可登入與下載 |
+| 圖形 = DXVK，加上 WebHelper 指定 `graphics_backend: wined3d` 的規則 | 不出現：規則被全域設定蓋過 |
+
+每種條件各測 1 次；DXVK 失敗一致重現。沒有追查 DXVK 為何會讓 WebHelper 停住。
+
+從 Steam 內啟動的遊戲會繼承 Steam 的圖形設定。需要 DXMT／DXVK 的遊戲，
+建議保持 Steam 在背景，再從 Cyder 直接開啟遊戲執行檔並在該遊戲設定圖形。
+
+### 其他工具的做法
+
+| 來源 | WebHelper 處理 |
+|---|---|
+| Cyder CompatDB | `--no-sandbox --in-process-gpu --disable-gpu`（排除 crashpad） |
+| GameHub（GameSir Wine） | `--no-sandbox --single-process --disable-gpu` |
+| GameToMac 0.1.5（Wine 原始碼） | 預設不改；`AOELAB_STEAM_SINGLEPROCESS=1` 時只對 browser 程序加 `--disable-gpu --single-process` |
+| sommelier `steam-webhelper-v1` | winmm.dll proxy，只對 browser 程序加 `--in-process-gpu` |
+| CrossOver | 規則在封閉的 `cxcompatdb.so`／資料庫內，本機無法確認；圖形選「Auto」時依資料庫逐程式選擇 |
