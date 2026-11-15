@@ -16,14 +16,14 @@ Engine `CX26.3.0-W11-Cyder013`, rebuilt for older macOS compatibility.
 Draft notes: [繁中](docs/releases/v0.14.1.md) · [English](docs/releases/v0.14.1.en.md).
 
 ### Fixed
-- Environment update crashes caused by system functions unavailable on older macOS (engine #14); engine archive fingerprints trigger the same-version update.
-- Relaunch failures when a background status update briefly holds the executor catalog.
-- The status stuck at "正在確認執行狀態…" after a restart renumbered the disk ([#24](https://github.com/dspp779/CyderBits/pull/24)).
-- Launch-monitor helper processes left running after a program exited, until Cyder quit ([#24](https://github.com/dspp779/CyderBits/pull/24)).
-- A rebuilt DXVK in a new app never replacing the installed DXVK while its version stayed 1.10.3; it now installs on the next launch with no Windows program running.
-- The launch progress window hidden behind the active app when an .exe is opened from Finder; the component integrity check runs once per launch ([#24](https://github.com/dspp779/CyderBits/pull/24)).
-- Slow launches from repeated environment checks: first launch to window about 4 s instead of 5.4 s on Apple Silicon; a second launch while another starts no longer waits about 20 s ([#24](https://github.com/dspp779/CyderBits/pull/24)).
-- The launch progress window staying open after a program crashed; a missing DLL reported only as exit code 53 ([#24](https://github.com/dspp779/CyderBits/pull/24)).
+- Updating the Windows environment crashed on older macOS such as 15.8 (engine #14).
+- Slow launches, and a long wait when opening a second program while another was starting.
+- The "正在啟動程式…" window hidden behind other apps, left open after a crash, and the program not coming to the front.
+- A missing Windows component reported only as an exit code.
+- Reopening a game right after it exited sometimes failed.
+- The status stuck at "正在確認執行狀態…" after a restart.
+- Background processes left running after a program exited.
+- DXVK not updating with the app.
 
 ## [0.14.0] - 2026-11-12
 
