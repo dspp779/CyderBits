@@ -138,6 +138,38 @@ CrossOver 自帶目錄 `crossover.tie` 的 Steam 項目只有 Win10 bottle 範�
 
 建議：D 進 0.15.0（每遊戲環境變數已可設定；需確認只靠環境變數、不寫 `steam_appid.txt` 是否足夠）。A 先做 probe 判斷成本；B 只在 A 不可行時再評估。
 
+## 2026-11-15 根因：Mono 從 `%gs:0x68` 讀 last error
+
+用不啟動遊戲的 probe（`.local/cs2/probe/`，以 llvm-mingw 建置，直接載入遊戲的 `mono-2.0-bdwgc.dll` 與 `mscorlib`）在 Cyder013 量到：
+
+| 呼叫 | 結果 |
+|---|---|
+| 原生 `FindNextFile` 結束後 `GetLastError()` | 18（正確） |
+| 原生 `GetFileAttributes(不存在)` 後 `GetLastError()` | 2（正確） |
+| Mono `Marshal.GetLastWin32Error()` | `-417309568`（`0xE720A280`，像指標的亂值） |
+
+原因：
+
+1. Unity Mono 的 `mono_marshal_set_last_error`（`mono-2.0-bdwgc.dll`）第一行是 `movl %gs:0x68, %eax`，直接從 TEB 讀 `LastErrorValue`，不呼叫 `GetLastError()`。在 Windows 上 `%gs` 指向 TEB，所以沒問題。
+2. CrossOver 在 macOS x86_64 上 `%gs` 是 macOS 的 pthread TSD 區，不是 Wine 的 TEB。`dlls/ntdll/unix/signal_x86_64.c` 的 `init_syscall_frame` 只把 `Self`（0x30）、`ThreadLocalStoragePointer`（0x58）、`Peb`（0x60）寫到 `%gs`；`LastErrorValue`（0x68，即 macOS TSD slot 13）沒有同步。
+3. 驗證：`SetLastError(18)` 後 `GetLastError()`=18，但 `%gs:0x68` 在 Cyder013 是 `0xf8f04590`、CrossOver 26.3 官方 engine 是 `0x0391e4a0`。
+4. 因此 CS2 的 `IOException`、`.priority`、JetBrains `settings.json` 錯誤都是同一件事；上游 6 個 errno 修補也是。上游在 stock Wine 11.0 量到 0，應是該 slot 剛好為 0；0 仍不等於 18，所以上游仍需要 `patch_colossal_io`。
+
+相關但無關此錯誤：CW HACK 18756（`dlls/ntdll/loader.c`）在 macOS 把 64 個一般 TLS slot 全部佔用，程式只拿到 ≥64 的 expansion slot；以 `%gs:0x1780` 讀取 expansion slot 在主執行緒與新執行緒都正確。
+
+Win32 寫入 last error 的地方只有 `dlls/ntdll/error.c`（`RtlSetLastWin32Error`、`RtlSetLastWin32ErrorAndNtStatusFromNtStatus`）與 `dlls/ntdll/unix/env.c` 兩處（另有 WoW64 helper）。
+
+### 修正方式比較
+
+| 方式 | 內容 | 優點 | 缺點／風險 |
+|---|---|---|---|
+| E1. engine 同步 `%gs:0x68` | 上述寫入點在 macOS x86_64 同時寫 `%gs:0x68` | 所有用 inline TEB 讀 last error 的程式一次修好（Unity Mono 全系列）；不改遊戲 | slot 13 是 macOS libc 的 `gmtime` key；寫入小整數後若 macOS 端呼叫非 reentrant 的 `gmtime()` 可能崩潰。CrossOver 已覆寫 slot 11、12（`ttyname`、`localtime`），需先確認 slot 13 在 macOS 15–27 是否仍被使用 |
+| E2. 載入時修補 Mono 記憶體 | 載入 `mono-*.dll` 時，把 `mov r32, %gs:0x68` 改成呼叫保存暫存器的 thunk（回傳 `GetLastError()`） | 不碰 macOS TSD；不改磁碟上的檔案；可限定在 Mono DLL | 要掃描與改寫程式碼，需處理多個位置與暫存器；Mono 版本更新時要驗證 |
+| E3. 修補磁碟上的 `mono-2.0-bdwgc.dll` | 同 E2 但改檔案 | 簡單 | 與遊戲 DLL 修補有同樣的維護與 Steam 驗證問題 |
+| B. 修補遊戲 DLL（目前做法） | `Colossal.IO*.dll` 2 處 | 已到主選單 | 只修 CS2 的兩個點；其他 managed 檔案操作仍會出錯 |
+
+建議先評估 E1：確認 macOS TSD slot 13 的使用者，在 engine repo 寫最小 patch 與 probe 測試，再用 CS2 原檔驗證。
+
 ## 遊戲修補判斷與前置條件
 
 以 [2026-10 修補清單](https://github.com/macgameport/cities-skylines-2-macos/blob/main/docs/patch-inventory.md) 為準，1.6.2f1／Steam build 25127643 的十項為 cohtml、colossal_io、longfile、asset_database、fshandle，以及 PDX.SDK 的 mkparent、lockbypass、longdelete、createfile、lockleak。它們跨 native plugin、Colossal.IO、AssetDatabase、mscorlib 與 PDX.SDK；不能沿用 Issue 中「4 個核心 DLL」的簡化描述或舊偏移量。
