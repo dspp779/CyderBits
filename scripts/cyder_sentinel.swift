@@ -385,7 +385,6 @@ enum CyderSentinelConnect {
         let queue = DispatchQueue(label: "local.cyder.sentinel-connect")
         let finished = DispatchSemaphore(value: 0)
         var pidSource: DispatchSourceFileSystemObject?
-        var fifoSource: DispatchSourceRead?
 
         var processSource: DispatchSourceProcess?
         var fifoClosed = false
@@ -479,38 +478,27 @@ enum CyderSentinelConnect {
             }
 
             if fifoFD >= 0 {
+                // A dispatch read source never reports EOF on a macOS FIFO
+                // whose last writer closes without writing, so the helper (and
+                // the launcher shell waiting on it) outlived every launch whose
+                // PID was already published. A blocking read on its own thread
+                // returns 0 as soon as the last writer closes, or at once when
+                // none is left (a writer closed before this helper started).
                 let flags = fcntl(fifoFD, F_GETFL)
-                if flags >= 0 {
-                    _ = fcntl(fifoFD, F_SETFL, flags | O_NONBLOCK)
-                }
-                let source = DispatchSource.makeReadSource(fileDescriptor: fifoFD, queue: queue)
-                func readFIFO() {
-                    guard !fifoClosed else { return }
+                if flags >= 0 { _ = fcntl(fifoFD, F_SETFL, flags & ~O_NONBLOCK) }
+                Thread.detachNewThread {
                     var buffer = [UInt8](repeating: 0, count: 64)
                     while true {
                         let count = read(fifoFD, &buffer, buffer.count)
-                        if count == 0 {
-                            fifoClosed = true
-                            source.cancel()
-                            finishIfIdle()
-                            return
-                        }
-                        if count < 0 {
-                            if errno == EAGAIN || errno == EWOULDBLOCK { return }
-                            fifoClosed = true
-                            source.cancel()
-                            finishIfIdle()
-                            return
-                        }
+                        if count > 0 || (count < 0 && errno == EINTR) { continue }
+                        break
+                    }
+                    close(fifoFD)
+                    queue.async {
+                        fifoClosed = true
+                        finishIfIdle()
                     }
                 }
-                source.setEventHandler(handler: readFIFO)
-                source.setCancelHandler { close(fifoFD) }
-                fifoSource = source
-                source.resume()
-                // EOF already present when the source was registered may not
-                // generate a new edge. Inspect once on the same serialized queue.
-                queue.async(execute: readFIFO)
             } else {
                 finished.signal()
             }
@@ -522,7 +510,6 @@ enum CyderSentinelConnect {
         finished.wait()
         queue.sync {
             pidSource?.cancel()
-            fifoSource?.cancel()
             processSource?.cancel()
             socketSource.cancel()
         }
