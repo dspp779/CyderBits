@@ -55,7 +55,49 @@ non_steam="$(
 assert_eq "$non_steam" '<-windowed>' \
   "non-Steam applications should not receive Steam compatibility arguments"
 
+cs2_env="$(
+  env -u SteamAppId -u SteamGameId -u SteamOverlayGameId bash -c '
+    source "$1/scripts/cyder-common.sh"
+    cyder_apply_steam_game_environment "/games/Cities Skylines II/CITIES2.EXE"
+    printf "<%s|%s|%s>" "${SteamAppId:-}" "${SteamGameId:-}" "${SteamOverlayGameId:-}"
+  ' _ "$ROOT"
+)"
+assert_eq "$cs2_env" '<949230|949230|949230>' \
+  "Cities2.exe started directly should get its Steam app ID"
+
+cs2_user_value="$(
+  SteamAppId=123 bash -c '
+    source "$1/scripts/cyder-common.sh"
+    cyder_apply_steam_game_environment "/games/Cities2.exe"
+    printf "<%s|%s>" "$SteamAppId" "$SteamGameId"
+  ' _ "$ROOT"
+)"
+assert_eq "$cs2_user_value" '<123|949230>' \
+  "a Steam app ID the user already set should be kept"
+
+other_game_env="$(
+  env -u SteamAppId bash -c '
+    source "$1/scripts/cyder-common.sh"
+    cyder_apply_steam_game_environment "/games/Cities.exe"
+    printf "<%s>" "${SteamAppId:-}"
+  ' _ "$ROOT"
+)"
+assert_eq "$other_game_env" '<>' \
+  "other executables (including the first Cities: Skylines) should not get an app ID"
+
+cs2_opted_out="$(
+  env -u SteamAppId CYDER_STEAM_COMPAT=0 bash -c '
+    source "$1/scripts/cyder-common.sh"
+    cyder_apply_steam_game_environment "/games/Cities2.exe"
+    printf "<%s>" "${SteamAppId:-}"
+  ' _ "$ROOT"
+)"
+assert_eq "$cs2_opted_out" '<>' \
+  "CYDER_STEAM_COMPAT=0 should also turn off the Steam app ID"
+
 common="$(cat "$ROOT/scripts/cyder-common.sh")"
+assert_contains "$common" 'cyder_apply_steam_game_environment "$exe"' \
+  "the Bash Wine launch path should apply the Steam game environment"
 assert_contains "$common" 'cyder_apply_steam_compatibility_arguments "$exe"' \
   "the Bash Wine launch path should apply the Steam compatibility profile"
 assert_contains "$common" 'for required in -system-composer -no-cef-sandbox' \

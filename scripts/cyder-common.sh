@@ -2832,6 +2832,26 @@ cyder_apply_steam_compatibility_arguments() {
   done
 }
 
+# A Steam game started directly (not through Steam's Play button) only finds
+# the running Steam client when it knows its app ID.  Without it, Cities:
+# Skylines II stops at "platform service integration failed".  Values the user
+# set (for example in the game's own environment settings) are kept.
+cyder_steam_app_id_for_executable() {
+  case "$(basename "$1" | tr '[:upper:]' '[:lower:]')" in
+    cities2.exe) echo 949230 ;;
+    *) return 1 ;;
+  esac
+}
+
+cyder_apply_steam_game_environment() {
+  local exe="$1" app_id name
+  [[ "${CYDER_STEAM_COMPAT:-1}" != 0 ]] || return 0
+  app_id="$(cyder_steam_app_id_for_executable "$exe")" || return 0
+  for name in SteamAppId SteamGameId SteamOverlayGameId; do
+    [[ -n "${!name:-}" ]] || export "$name=$app_id"
+  done
+}
+
 cyder_load_game_settings() {
   local exe="$1"
   local engine_root="${2:-${CYDER_ENGINES:-}/${CYDER_ENGINE_NAME:-}}"
@@ -3690,6 +3710,7 @@ cyder_run_wine_exe() {
       else
         cyder_apply_steam_compatibility_arguments "$exe"
       fi
+      cyder_apply_steam_game_environment "$exe"
       game_args=()
       if (( ${#CYDER_STEAM_ARGUMENTS[@]} > 0 )); then
         game_args=("${CYDER_STEAM_ARGUMENTS[@]}")
