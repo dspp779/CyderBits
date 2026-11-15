@@ -34,6 +34,9 @@ final class CyderEnvironmentMonitor {
         var admissions: Set<UUID> = [] // registered, but not yet allowed to spawn
         var drains: [UUID: DrainObservation] = [:]
         var calibration = UUID()
+        /// Installed from the registry of an earlier session and not used by
+        /// a launch since.
+        var restored = false
         init(_ saved: Saved, grace: TimeInterval) {
             identity = saved.identity; generation = saved.generation; graceUntil = grace
         }
@@ -143,6 +146,7 @@ final class CyderEnvironmentMonitor {
                 // prevents a new write from erasing external-prefix recovery.
                 for record in records {
                     self.install(Saved(identity: record.identity, generation: record.generation + 1), grace: 0)
+                    self.entries[record.identity.environment]?.restored = true
                 }
                 if !valid { DispatchQueue.main.async { self.onIssue?("無法讀取先前的 Windows 環境紀錄；可從遊戲庫重新檢查。") } }
                 self.save(); self.startTimer(); self.tick()
@@ -292,6 +296,7 @@ final class CyderEnvironmentMonitor {
                         }
                         if let execution, let entry = self.entries[identity.environment] {
                             entry.executions.insert(execution)
+                            entry.restored = false
                             entry.admissions.insert(execution)
                             awaitingProbe = true
                             entry.emptySince = nil; entry.calibration = UUID()
@@ -419,6 +424,14 @@ final class CyderEnvironmentMonitor {
                 // Timeout may have consumed this token; start a fresh revision
                 // before applying a late but identity-checked calibration.
                 self.emit(.reconcileStarted(observedStamp, token))
+                // A restart can renumber the volume, so a record from an
+                // earlier session can stop matching its bottle while no server
+                // is left in its namespace. Kept unknown, it held the status
+                // at "checking" forever. A record this session launched into
+                // stays unknown: its prefix was replaced under a launch.
+                var result = result
+                if case .unknown(CyderEnvironmentProbe.identityChangedNoServer) = result, entry.restored,
+                   entry.executions.isEmpty, entry.admissions.isEmpty, entry.drains.isEmpty { result = .empty }
                 switch result {
                 case .alive(let owner):
                     entry.emptySince = nil

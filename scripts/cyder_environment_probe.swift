@@ -48,16 +48,31 @@ struct CyderEnvironmentProbe {
     }
     /// Injectable lookups allow native lock/socket fixtures to exercise this
     /// exact production calibration without impersonating a Wine server.
+    /// The prefix no longer identifies as recorded (a restart can renumber
+    /// the volume; a bottle can be deleted or replaced), and the recorded
+    /// server namespace has no server. Still unknown: only a record restored
+    /// from an earlier session may treat it as ended (CyderEnvironmentMonitor).
+    static let identityChangedNoServer = "prefix-identity-changed-no-server"
     static func inspect(_ identity: Identity,
                         process: (Int32) -> CyderLifecycle.ProcessID? = processIdentity,
                         image: (Int32) -> String? = processPath) -> Result {
         precondition(!Thread.isMainThread, "environment calibration belongs to an observer worker")
-        guard let current = identify(prefix: URL(fileURLWithPath: identity.prefix), engine: URL(fileURLWithPath: identity.engine)),
-              current == identity else { return .unknown("prefix-identity-changed") }
+        let current = identify(prefix: URL(fileURLWithPath: identity.prefix), engine: URL(fileURLWithPath: identity.engine))
+        guard current == identity else {
+            return inspectNamespace(identity, expected: current, process: process, image: image) == .empty
+                ? .unknown(identityChangedNoServer) : .unknown("prefix-identity-changed")
+        }
+        return inspectNamespace(identity, expected: identity, process: process, image: image)
+    }
+    /// `expected` is the prefix identity that must hold until the observation
+    /// ends; a change while observing is a race, never a result.
+    private static func inspectNamespace(_ identity: Identity, expected: Identity?,
+                                         process: (Int32) -> CyderLifecycle.ProcessID?,
+                                         image: (Int32) -> String?) -> Result {
         guard FileManager.default.isExecutableFile(atPath: identity.engine) else { return .unknown("engine-unavailable") }
         func emptyIfUnchanged() -> Result {
-            identify(prefix: URL(fileURLWithPath: identity.prefix), engine: URL(fileURLWithPath: identity.engine)) == identity
-                ? .empty : .unknown("prefix-identity-changed")
+            identify(prefix: URL(fileURLWithPath: identity.prefix), engine: URL(fileURLWithPath: identity.engine)) == expected
+                ? .empty : .unknown("observation-raced")
         }
         let directory = serverDirectory(identity)
         var info = stat()
@@ -102,7 +117,7 @@ struct CyderEnvironmentProbe {
         }
         guard holder() == before, lstat(lockPath, &info) == 0,
               info.st_dev == lockDevice, info.st_ino == lockInode,
-              identify(prefix: URL(fileURLWithPath: identity.prefix), engine: URL(fileURLWithPath: identity.engine)) == identity
+              identify(prefix: URL(fileURLWithPath: identity.prefix), engine: URL(fileURLWithPath: identity.engine)) == expected
         else { return .unknown("observation-raced") }
         return result
     }

@@ -51,7 +51,9 @@ When writing tests:
   `|| exit $?`.
 - Do not read Wine's output through a pipe: its background services keep the
   pipe open and the read never ends. Write to a file with a time limit.
-- Compare timings with a control run, never with an absolute number.
+- Compare timings with a control run, never with an absolute number. For
+  launch time, use `scripts/launch-timeline.c` (steps in the reference,
+  "Measuring launch time").
 - Use `grep`, not `rg`.
 
 ## 2. Build a test app

@@ -6,14 +6,42 @@ final class WineActivationWaiter {
     let launchID: String?
     private let lock = NSLock()
     private var activated = false
+    private var presented = false
+    private var presentedPIDs: Set<Int32> = []
+    private var frontmostPID: Int32 = 0
     private var handler: (() -> Void)?
+    private var presentedHandler: (() -> Void)?
     init(prefix: String, launchID: String? = nil) { self.prefix = (prefix as NSString).standardizingPath; self.launchID = launchID }
     func signal() {
         lock.lock(); activated = true; let callback = handler; lock.unlock()
         callback?()
     }
+    /// A window of this launch is on screen, though it may never become the
+    /// active app (a launch from the background cannot take focus).
+    /// `process` is the program whose window is on screen, when known.
+    func markPresented(process: Int32 = 0) {
+        lock.lock()
+        let first = !presented; presented = true
+        if process > 0 { presentedPIDs.insert(process) }
+        let nowActive = process > 0 && process == frontmostPID
+        let callback = presentedHandler; lock.unlock()
+        if nowActive { signal() }
+        if first { callback?() }
+    }
+    /// The frontmost app changed to `pid`. Wine asks Cyder to yield before
+    /// its window is on screen, so activation and presentation arrive in
+    /// either order; the launch is activated once one process has both.
+    func noteFrontmost(_ pid: Int32) {
+        lock.lock(); frontmostPID = pid; let match = pid > 0 && presentedPIDs.contains(pid); lock.unlock()
+        if match { signal() }
+    }
+    var wasPresented: Bool { lock.lock(); defer { lock.unlock() }; return presented }
     func observe(_ callback: (() -> Void)?) {
         lock.lock(); handler = callback; let ready = activated; lock.unlock()
+        if ready { callback?() }
+    }
+    func observePresented(_ callback: (() -> Void)?) {
+        lock.lock(); presentedHandler = callback; let ready = presented; lock.unlock()
         if ready { callback?() }
     }
 }
@@ -39,7 +67,15 @@ final class CyderLaunchObserver {
         var prefixScope: String? = nil
     }
     struct Sample { let rootStatus: Int32?; let lifecycle: String? }
-    enum Result: Equatable { case activated, finishedWithoutWindow, rootFailed(Int32), unconfirmed }
+    /// `exitedAfterWindow`: the root exited non-zero after one of its windows
+    /// was on screen, so the user saw the program (an installer returns 1 on
+    /// Cancel). It is not a launch that failed before showing a window.
+    /// `presented`: a window was on screen for `presentationGrace` without the
+    /// program becoming active (opened from the background, or the user moved
+    /// on). The launch has visibly started; holding the observation for the
+    /// full deadline only kept the next queued launch waiting (up to 30 s).
+    enum Result: Equatable { case activated, presented, finishedWithoutWindow, rootFailed(Int32), exitedAfterWindow(Int32), unconfirmed }
+    static let presentationGrace: TimeInterval = 1
     private final class ReadPool {
         let lock = NSLock()
         var count = 0
@@ -140,6 +176,11 @@ final class CyderLaunchObserver {
                     guard let self else { return }
                     self.queue.async { self.finish(.activated) }
                 }
+                // Activation usually follows the first window; let it win.
+                signal.observePresented { [weak self] in
+                    guard let self else { return }
+                    self.queue.asyncAfter(deadline: .now() + Self.presentationGrace) { self.finish(.presented) }
+                }
                 let remaining = max(0, deadline - ProcessInfo.processInfo.systemUptime)
                 queue.asyncAfter(deadline: .now() + remaining) { [weak self] in self?.finish(.unconfirmed) }
                 if let read, authority == nil {
@@ -171,9 +212,11 @@ final class CyderLaunchObserver {
     private func finish(_ result: Result) {
         guard !finished else { return }
         finished = true
+        var result = result
+        if case .rootFailed(let status) = result, signal?.wasPresented == true { result = .exitedAfterWindow(status) }
         timer?.cancel(); timer = nil
         drainRequest = nil
-        signal?.observe(nil); signal = nil
+        signal?.observe(nil); signal?.observePresented(nil); signal = nil
         let callback = completion; completion = nil
         let expired = observationDeadline.map { ProcessInfo.processInfo.systemUptime >= $0 } ?? false
         callback?(expired ? .unconfirmed : result)

@@ -62,8 +62,8 @@ assert_not_contains "$sentinel" 'usleep(400_000)' \
   "the sentinel helper must not poll Wine windows on an interval"
 assert_not_contains "$sentinel" 'func currentHolders' \
   "the sentinel helper must not scan every onscreen window for WINEPREFIX"
-assert_contains "$sentinel" 'makeReadSource' \
-  "fifo EOF must wake the helper through kqueue rather than a sleep loop"
+assert_contains "$sentinel" 'Thread.detachNewThread' \
+  "fifo EOF must wake the helper through a blocking read; a dispatch read source never reports it"
 assert_contains "$status" 'makeProcessSource' \
   "the menu bar must watch Wine PIDs with process-exit/fork events"
 assert_contains "$status" 'forMode: .default' \

@@ -201,8 +201,15 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             self.dismissLaunchProgress(for: launchID)
             waiter.signal()
         }
-        controller.onLaunchWindowPresented = { [weak self] launchID in
-            guard let self, self.wineActivationWaiter?.launchID == launchID else { return }
+        controller.onLaunchWindowPresented = { [weak self] launchID, pid in
+            guard let self, let waiter = self.wineActivationWaiter, waiter.launchID == launchID else { return }
+            if let front = NSWorkspace.shared.frontmostApplication?.processIdentifier { waiter.noteFrontmost(front) }
+            if !waiter.wasPresented {
+                // Activation may still follow (wine-activation stage); this
+                // line no longer means the program stayed in the background.
+                CyderDiagnostics.shared.info("wine launch window presented pid=\(pid)")
+            }
+            waiter.markPresented(process: pid)
             self.dismissLaunchProgress(for: launchID)
         }
         controller.onActivityChanged = { [weak self] activity in
@@ -2207,9 +2214,19 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             CyderDiagnostics.shared.enter(.wineActivation, detail: "notification-received")
             onMainThread { statusItemController.markActivated(id: launchID) }
             return .success
+        case .presented:
+            // The window is on screen; the next queued launch need not wait
+            // for the full observation deadline.
+            lifecycleOutcome = .confirmedStarted
+            CyderDiagnostics.shared.info("wine launch window presented; observation ended without activation")
+            return .success
         case .finishedWithoutWindow:
             lifecycleOutcome = .finishedWithoutWindow
             CyderDiagnostics.shared.info("wine launch completed without activation; root receipt ended")
+            return .success
+        case .exitedAfterWindow(let status):
+            lifecycleOutcome = .confirmedStarted
+            CyderDiagnostics.shared.info("wine launch window was shown; root exited without activation status=\(status)")
             return .success
         case .rootFailed(let status):
             return earlyWineExitFailure(executablePath: exe, winePID: onMainThread { statusItemController.nativeRootPID(id: launchID) }, exitStatus: status, fallbackLogURL: result.logURL)
@@ -2327,12 +2344,32 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             ))
         }
         let statusDetail = exitStatus.map(String.init) ?? "unavailable"
+        let launchLog = CyderPaths.support.appendingPathComponent("Logs", isDirectory: true)
+            .appendingPathComponent("last-launch.log")
+        // Wine's log reaches the file through a bounded writer a moment after
+        // the process exits; on this failure path only, wait for it briefly.
+        var loader = cyderWineLoaderFailure(logURL: launchLog)
+        for _ in 0..<6 where loader == nil && !Thread.isMainThread {
+            usleep(250_000)
+            loader = cyderWineLoaderFailure(logURL: launchLog)
+        }
+        let logURL = FileManager.default.fileExists(atPath: launchLog.path) ? launchLog : fallbackLogURL
+        if let library = loader?.missingLibrary {
+            return .failure(CyderFailure(
+                code: "CYD-WIN-004",
+                stage: .wineSpawn,
+                summary: "程式需要的 Windows 元件「\(library)」不存在，無法啟動。請確認遊戲檔案完整，或安裝遊戲需要的執行環境。",
+                technicalDetails: "Wine loader could not import \(library) for \(executable.lastPathComponent) (status: \(loader?.status ?? statusDetail)); detached Wine PID \(winePID).",
+                logURL: logURL
+            ))
+        }
+        let shownStatus = loader?.status ?? exitStatus.map { "結束代碼 \($0)" }
         return .failure(CyderFailure(
             code: "CYD-WIN-002",
             stage: .wineSpawn,
-            summary: "Wine 啟動後在顯示遊戲視窗前結束。",
-            technicalDetails: "Detached Wine PID \(winePID) exited before activation (status: \(statusDetail)).",
-            logURL: fallbackLogURL
+            summary: shownStatus.map { "程式在顯示視窗前就結束了（\($0)）。" } ?? "程式在顯示視窗前就結束了。",
+            technicalDetails: "Detached Wine PID \(winePID) exited before activation (status: \(loader?.status ?? statusDetail)).",
+            logURL: logURL
         ))
     }
 
@@ -2367,6 +2404,22 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         // process-tree ownership and a current visible window off AppKit.
         DispatchQueue.main.async { [weak self] in
             guard let self, !self.quitTransaction else { return }
+            if cyderShouldYieldActivation(requestPrefix: prefix, requesterPID: pid,
+                                          ownPID: ProcessInfo.processInfo.processIdentifier, isActive: NSApp.isActive,
+                                          bottlesRoot: CyderPaths.support.appendingPathComponent("bottles").path,
+                                          sharedBottle: CyderPaths.sharedBottle.path) {
+                let accepted = yieldCyderActivation(toProcess: pid)
+                CyderDiagnostics.shared.info("wine activation yielded pid=\(pid) accepted=\(accepted)")
+            }
+            // The crash dialog is the program's own error report; the
+            // "starting" panel must not stay on top of it, and a second Cyder
+            // alert after the user closes it would only repeat it. It never
+            // confirms the launch.
+            if let owner = self.launchPanelOwner, isWineCrashReporterProcess(pid) {
+                CyderDiagnostics.shared.warning("wine crash dialog shown pid=\(pid); closing launch progress")
+                if let waiter = self.wineActivationWaiter, waiter.launchID == owner { waiter.markPresented() }
+                self.dismissLaunchProgress(for: owner)
+            }
             self.statusItemController.adoptWindowedProcess(pid: pid, prefix: prefix, name: nil)
         }
     }
@@ -2378,6 +2431,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         DispatchQueue.main.async { [weak self] in
             guard let self, !self.quitTransaction, pid > 0 else { return }
             self.statusItemController.noteFrontmostApplication(pid)
+            self.wineActivationWaiter?.noteFrontmost(pid)
             guard isWine else { return }
             // No WINEPREFIX read or fallback to whichever request is waiting.
             // The actual root/descendant birth is the ownership evidence.
@@ -3151,6 +3205,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             NSApp.setActivationPolicy(.accessory)
         }
         statusItemController.markLaunchStarted()
+        acceptCyderLaunchActivation()
         guard !environmentPreparationInProgress else { return }
         launchPanelOwner = nil
         showSetup("正在啟動程式…", passive: true)

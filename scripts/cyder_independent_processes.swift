@@ -65,6 +65,11 @@ final class CyderIndependentProcesses {
     private let event: (L.Event) -> Void
     private var snapshot: L.Snapshot?
     private var timer: DispatchSourceTimer?
+    /// A starting launch's program is often a process Cyder finds only through
+    /// this scan (a launcher's child, a .NET host); at 3 s its first window
+    /// waited up to 3 s to count. Scan every second until the launch settles.
+    private var startingTimer: DispatchSourceTimer?
+    static let startingRefreshInterval: TimeInterval = 1
     private var inventoryRunning = false
     private var pending: [Int32] = []
     private var jobs: [Int32: Job] = [:]
@@ -92,13 +97,23 @@ final class CyderIndependentProcesses {
                 timer.setEventHandler { [weak self] in self?.refreshOnQueue() }
                 self.timer = timer; timer.resume()
             }
+            let starting = snapshot.launches.values.contains { $0.outcome == nil }
+            if starting, startingTimer == nil {
+                let source = DispatchSource.makeTimerSource(queue: queue)
+                let interval = Self.startingRefreshInterval
+                source.schedule(deadline: .now() + interval, repeating: interval, leeway: .milliseconds(100))
+                source.setEventHandler { [weak self] in self?.refreshOnQueue() }
+                startingTimer = source; source.resume()
+            } else if !starting, let source = startingTimer {
+                source.cancel(); startingTimer = nil
+            }
             if oldScopes != scopes(snapshot) { refreshOnQueue() }
         }
     }
     func refresh() { queue.async { [self] in refreshOnQueue() } }
     func stop() { queue.async { [self] in close() } }
     private func close() {
-        closed = true; timer?.cancel(); timer = nil; pending.removeAll()
+        closed = true; timer?.cancel(); timer = nil; startingTimer?.cancel(); startingTimer = nil; pending.removeAll()
         for source in sources.values { source.cancel() }; sources.removeAll()
     }
     private func scopes(_ snapshot: L.Snapshot) -> [L.EnvironmentID: L.Stamp] {

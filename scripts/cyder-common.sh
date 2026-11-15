@@ -2979,7 +2979,8 @@ cyder_prepare_cnc_game() {
     fi
     return 0
   fi
-  result="$(/usr/bin/ruby "$CYDER_SCRIPTS/cyder-cnc-game.rb" launch "$exe" "$prefix" "$engine_root" "${CYDER_LAUNCH_PREPARATION_PHASE:-}")" || return $?
+  # SDKROOT skips the system Ruby's xcrun probe (see cyder-component-check.sh).
+  result="$(SDKROOT="${SDKROOT:-}" /usr/bin/ruby "$CYDER_SCRIPTS/cyder-cnc-game.rb" launch "$exe" "$prefix" "$engine_root" "${CYDER_LAUNCH_PREPARATION_PHASE:-}")" || return $?
   mode="$(/usr/bin/plutil -extract mode raw -o - - <<<"$result")" || return $?
   case "$mode" in
     off) return 0 ;;
@@ -3193,12 +3194,14 @@ cyder_open_prefix_taskmgr() {
 # Wine stores the per-prefix server socket under $TMPDIR (macOS LaunchServices
 # uses /var/folders/.../T) with /tmp as fallback. Check both, and treat a live
 # Cyder session pid as in-use even if the socket path differs.
+# An optional second argument names a session file to ignore (the caller's own).
 cyder_prefix_has_live_session_pids() {
-  local prefix="$1" dir file pid
+  local prefix="$1" skip="${2:-}" dir file pid
   dir="$(cyder_session_dir "$prefix")"
   [[ -d "$dir" ]] || return 1
   for file in "$dir"/*.session; do
     [[ -f "$file" && ! -L "$file" ]] || continue
+    [[ -z "$skip" || ! "$file" -ef "$skip" ]] || continue
     pid="$(sed -n 's/^pid=//p' "$file" | head -1)"
     if [[ "$pid" =~ ^[1-9][0-9]*$ ]] && kill -0 "$pid" 2>/dev/null; then
       return 0
@@ -3208,7 +3211,7 @@ cyder_prefix_has_live_session_pids() {
 }
 
 cyder_has_running_prefix() {
-  local prefix="$1"
+  local prefix="$1" skip_session="${2:-}"
   [[ -d "$prefix" ]] || return 1
   local resolved device inode socket_dir tmp_root uid
   resolved="$(cd "$prefix" && pwd -P)" || resolved="$prefix"
@@ -3223,9 +3226,9 @@ cyder_has_running_prefix() {
     # Wine removes the socket when the prefix wineserver exits; the lock file may remain.
     [[ -S "$socket_dir/socket" ]] && return 0
   done
-  cyder_prefix_has_live_session_pids "$resolved" && return 0
+  cyder_prefix_has_live_session_pids "$resolved" "$skip_session" && return 0
   if [[ "$resolved" != "$prefix" ]]; then
-    cyder_prefix_has_live_session_pids "$prefix"
+    cyder_prefix_has_live_session_pids "$prefix" "$skip_session"
     return $?
   fi
   return 1
@@ -3507,7 +3510,9 @@ cyder_bounded_wine_log() {
     }
 
     while (1) {
-      my $n = read STDIN, my $buf, 65536;
+      # sysread returns what is available; read() waited for 64 KiB or EOF,
+      # and Wine helpers keep stderr open, so nothing reached the file live.
+      my $n = sysread STDIN, my $buf, 65536;
       last unless $n;
       if (!$using_ring) {
         if ($size + $n <= $max) {
@@ -3586,7 +3591,11 @@ cyder_apply_scrolling_for_exe() {
     [[ "$mode" == restore ]] || echo "Cyder scrolling helper (CyderSwift) not found; leaving UsePreciseScrolling unchanged" >&2
     return 0
   fi
-  cyder_has_running_prefix "$prefix" && running=(--prefix-running)
+  # This launch's own session is acquired before this runs and is not a running
+  # prefix. Counting it sent every launch down the reg.exe path, which started
+  # a wineserver (about 3 s, plus the preparation drain) to rewrite a value
+  # user.reg already held, and kept the helper's pending-live marker from clearing.
+  cyder_has_running_prefix "$prefix" "${CYDER_SESSION_FILE:-}" && running=(--prefix-running)
   CYDER_EXECUTION_FINAL=0 "$helper" --scrolling "$mode" "$prefix" "$wine_bin" "$name" ${running[@]+"${running[@]}"} >/dev/null
 }
 
@@ -3600,14 +3609,32 @@ cyder_launch_preparation_probe() {
   # keeps it out of the launcher's errtrace ERR trap.
   /usr/bin/perl -e 'alarm 2; exec @ARGV; exit 75' --     "$CYDER_ENVIRONMENT_HELPER" --environment-state "$prefix" "$server" 2>/dev/null || return $?
 }
+# Every wineserver start appends a line to this engine log (Cyder013's exit
+# diagnostics patch). Size and mtime unchanged since the paired "empty" probe
+# mean no server, so no Wine client, started in between.
+cyder_wineserver_start_stamp() {
+  local log="${1%/}/cyder-wineserver-diag.log"
+  [[ -f "$log" && ! -L "$log" ]] || { echo missing; return 0; }
+  /usr/bin/stat -f '%z:%m:%i' "$log" 2>/dev/null || echo missing
+}
 cyder_launch_preparation_initial_state() {
-  local observation status=0
+  local observation status=0 stamp
+  # Taken before the probe, so a server starting during the probe changes it.
+  stamp="$(cyder_wineserver_start_stamp "$1")"
   observation="$(cyder_launch_preparation_probe "$1" "$2" || exit $?)" || status=$?
   case "$status:$observation" in
     '0:cyder-environment-v1 alive') CYDER_LAUNCH_PREPARATION_INITIAL=warm ;;
-    '10:cyder-environment-v1 empty') CYDER_LAUNCH_PREPARATION_INITIAL=idle ;;
+    '10:cyder-environment-v1 empty') CYDER_LAUNCH_PREPARATION_INITIAL=idle; CYDER_LAUNCH_PREPARATION_SERVER_STAMP="$stamp" ;;
     *) return 75 ;;
   esac
+}
+# The paired "empty" proof from the start of this preparation still holds: no
+# wineserver has started for the prefix since. A missing or changed log, or a
+# warm start, never counts.
+cyder_launch_preparation_still_idle() {
+  [[ "${CYDER_LAUNCH_PREPARATION_PHASE:-}" == prepare && "${CYDER_LAUNCH_PREPARATION_INITIAL:-}" == idle ]] || return 1
+  local recorded="${CYDER_LAUNCH_PREPARATION_SERVER_STAMP:-missing}"
+  [[ "$recorded" != missing && "$(cyder_wineserver_start_stamp "$1")" == "$recorded" ]]
 }
 cyder_launch_preparation_now_ms() {
   /usr/bin/perl -MTime::HiRes=clock_gettime,CLOCK_MONOTONIC -e 'printf "%.0f\n", 1000 * clock_gettime(CLOCK_MONOTONIC)'
@@ -3616,6 +3643,9 @@ cyder_launch_preparation_drain() {
   local prefix="$1" server="$2" observation status now deadline
   [[ "${CYDER_LAUNCH_PREPARATION_INITIAL:-}" == warm ]] && return 0
   [[ "${CYDER_LAUNCH_PREPARATION_INITIAL:-}" == idle ]] || return 75
+  # Preparation usually starts no Wine at all; the paired probe would only
+  # re-prove the initial "empty" (0.5 s).
+  cyder_launch_preparation_still_idle "$prefix" && return 0
   now="$(cyder_launch_preparation_now_ms)" || return 75
   [[ "$now" =~ ^[0-9]+$ ]] || return 75
   deadline=$((now + 10000))
@@ -3704,7 +3734,8 @@ cyder_run_wine_exe() {
   cyder_wine_locale_exports
   local capture_log="${CYDER_CAPTURE_WINE_LOG:-0}"
   local wine_diagnostics="${CYDER_WINE_DIAGNOSTICS:-quiet}"
-  local wine_debug="-all"
+  # err+module names a missing DLL and the full loader status for the launch error.
+  local wine_debug="-all,err+module"
   case "$wine_diagnostics" in
     errors)
       wine_debug="-all,err+all,+timestamp,+pid,+tid"
@@ -3779,7 +3810,12 @@ cyder_run_wine_exe() {
       rm -f "$lifecycle_file" "${lifecycle_file}.tmp"
     fi
   fi
-  if declare -F cyder_check_components >/dev/null; then cyder_check_components all quick "$prefix"; fi
+  case "${CYDER_LAUNCH_PREPARATION_PHASE:-}" in
+    # Started by the launcher after graphics preparation; one scan per launch.
+    prepare) if declare -F cyder_check_components_wait >/dev/null; then cyder_check_components_wait; fi ;;
+    final) ;;
+    *) if declare -F cyder_check_components >/dev/null; then cyder_check_components all quick "$prefix"; fi ;;
+  esac
   cyder_exec_game() {
     # Run after sync/session setup, before the one-use final handoff. Registry
     # failures abort this launch instead of silently using a different mode.
@@ -4268,7 +4304,8 @@ cyder_session_acquire() {
         # One calibration for the shared prefix while this session lock is
         # held, rather than one helper / half-second pair per old launch.
         if [[ -z "$environment_live" ]]; then
-          if cyder_session_environment_live "$prefix" "${5:-}"; then environment_live=1; else environment_live=0; fi
+          if ! cyder_prefix_has_live_session_pids "$prefix" && cyder_launch_preparation_still_idle "$prefix"; then environment_live=0
+          elif cyder_session_environment_live "$prefix" "${5:-}"; then environment_live=1; else environment_live=0; fi
         fi
         if [[ "$environment_live" == 0 ]]; then rm -f "$file"; continue; fi
       else

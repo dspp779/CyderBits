@@ -118,7 +118,10 @@ final class CyderSetupPanel {
 
     func show() {
         if passive {
-            window.orderFront(nil)
+            // Finder launches leave Cyder inactive; orderFront(nil) then put
+            // the panel behind the frontmost app and the launch looked stalled.
+            // orderFrontRegardless shows it above other apps without taking focus.
+            window.orderFrontRegardless()
         } else {
             activateCyderUI(dockVisible: false)
             window.makeKeyAndOrderFront(nil)
@@ -163,6 +166,71 @@ func wineRegularAppsLaunched(since start: Date) -> [NSRunningApplication] {
 
 func isWineMacApplication(_ application: NSRunningApplication) -> Bool {
     isWineLoaderPath(application.executableURL?.path)
+}
+
+/// macOS 14 activation is cooperative: an app comes to the front only when the
+/// active app yields to it. winemac.drv (CrossOver) posts
+/// WineAppWillActivateNotification and every active Wine app in the same prefix
+/// yields. Finder hands activation to Cyder, not to Wine, so Cyder must yield
+/// the same way or a double-clicked program opens behind Finder without focus.
+func cyderShouldYieldActivation(requestPrefix: String, requesterPID: Int32, ownPID: Int32,
+                                isActive: Bool, bottlesRoot: String, sharedBottle: String) -> Bool {
+    guard isActive, requesterPID > 0, requesterPID != ownPID, !requestPrefix.isEmpty else { return false }
+    func canonical(_ path: String) -> String {
+        let standard = (path as NSString).standardizingPath
+        return standard.hasSuffix("/") && standard.count > 1 ? String(standard.dropLast()) : standard
+    }
+    let prefix = canonical(requestPrefix), root = canonical(bottlesRoot)
+    return prefix == canonical(sharedBottle) || (prefix.hasPrefix(root + "/") && !prefix.dropFirst(root.count + 1).contains("/"))
+}
+
+/// What Wine's loader logged when a program could not start (quiet launches run
+/// with `err+module`). The process exit status keeps only the low byte of the
+/// Windows status, so the log is the only place with the DLL name and full code.
+struct CyderWineLoaderFailure: Equatable {
+    var missingLibrary: String?
+    var status: String?
+}
+
+func cyderWineLoaderFailure(inLog text: String) -> CyderWineLoaderFailure? {
+    var failure = CyderWineLoaderFailure()
+    for line in text.split(whereSeparator: \.isNewline) {
+        guard line.contains("err:module:") else { continue }
+        let row = String(line)
+        if failure.missingLibrary == nil, let start = row.range(of: "err:module:import_dll Library "),
+           let end = row.range(of: " ", range: start.upperBound..<row.endIndex) {
+            failure.missingLibrary = String(row[start.upperBound..<end.lowerBound])
+        }
+        if failure.status == nil, row.contains("failed, status "), let range = row.range(of: "status ") {
+            let code = row[range.upperBound...].prefix { $0.isHexDigit }
+            if code.count == 8 { failure.status = "0x" + code.uppercased() }
+        }
+    }
+    return failure.missingLibrary == nil && failure.status == nil ? nil : failure
+}
+
+func cyderWineLoaderFailure(logURL: URL) -> CyderWineLoaderFailure? {
+    guard let handle = try? FileHandle(forReadingFrom: logURL) else { return nil }
+    defer { try? handle.close() }
+    let size = (try? handle.seekToEnd()) ?? 0
+    try? handle.seek(toOffset: size > 65_536 ? size - 65_536 : 0)
+    guard let data = try? handle.readToEnd() else { return nil }
+    return cyderWineLoaderFailure(inLog: String(decoding: data, as: UTF8.self))
+}
+
+/// Returns true when the request to bring `pid` forward was accepted.
+@discardableResult
+func yieldCyderActivation(toProcess pid: pid_t) -> Bool {
+    guard #available(macOS 14.0, *), let application = NSRunningApplication(processIdentifier: pid) else { return false }
+    NSApp.yieldActivation(to: application)
+    return application.activate(from: NSRunningApplication.current, options: [])
+}
+
+/// Accept the activation Finder (or a browser for a URI) offers with a document
+/// launch, so Cyder can pass it on to the program. When nothing was offered
+/// (a background open), macOS declines the request and focus stays put.
+func acceptCyderLaunchActivation() {
+    if #available(macOS 14.0, *) { NSApp.activate() }
 }
 
 func wineHandoffOnscreenWindows(since start: Date) -> [CyderOnscreenWindow] {
@@ -281,6 +349,18 @@ func cyderWineArgvName(pid: Int32) -> String? {
     }
     return nil
 }
+
+/// Wine's crash dialog runs as `winedbg --auto <pid> <event>`. Wine starts it
+/// detached (its parent is launchd, not the program) and shows it on a floating
+/// window layer, so neither the process tree nor the program-window scan sees it.
+func cyderIsWineCrashReporter(arguments: [String]) -> Bool {
+    let words = arguments.flatMap { $0.split(separator: " ").map(String.init) }
+    guard let first = words.first else { return false }
+    let image = (first.replacingOccurrences(of: "\\", with: "/") as NSString).lastPathComponent.lowercased()
+    return (image == "winedbg" || image == "winedbg.exe") && words.contains("--auto")
+}
+
+func isWineCrashReporterProcess(_ pid: Int32) -> Bool { cyderIsWineCrashReporter(arguments: processArguments(pid)) }
 
 private func processArguments(_ pid: Int32) -> [String] {
     var mib: [Int32] = [CTL_KERN, KERN_PROCARGS2, pid]

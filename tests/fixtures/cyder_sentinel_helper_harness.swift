@@ -44,6 +44,17 @@ precondition(late.0.isRunning)
 rootProcess.terminate() // native fixture created above, never Wine
 pump { !late.0.isRunning }
 precondition(late.0.terminationStatus == 0)
+// The launch order: the writer stays open while the root runs and closes only
+// after it exits. A dispatch read source never saw that EOF, so the helper
+// lived until Cyder quit.
+let held = Process(); held.executableURL = URL(fileURLWithPath: "/bin/sleep"); held.arguments = ["20"]
+try held.run()
+let writerHeld = helper("writer-held", pid: held.processIdentifier, keepWriter: true)
+pump { launches.contains { $0.pid == held.processIdentifier } }
+held.terminate(); held.waitUntilExit()
+close(writerHeld.1)
+pump({ !writerHeld.0.isRunning }, timeout: 3)
+precondition(writerHeld.0.terminationStatus == 0)
 // A live publisher with no PID cannot retain a helper indefinitely.
 let missing = helper("missing-pid", pid: nil, keepWriter: true)
 pump({ !missing.0.isRunning }, timeout: 5)
@@ -59,4 +70,4 @@ server.stop { stopped = true }
 pump { stopped && !attached.0.isRunning }
 precondition(survivor.isRunning && attached.0.terminationStatus == 0)
 survivor.terminate()
-print("PASS actual sentinel helper: late FIFO open, root exit, missing PID deadline, primary disconnect, root survival")
+print("PASS actual sentinel helper: late FIFO open, root exit, writer closed after root exit, missing PID deadline, primary disconnect, root survival")

@@ -86,6 +86,24 @@ if cyder_run_wine_exe "$TMP/engine/bin/wine" "$TMP/game space/MapleStory.exe" "$
 fi
 assert_not_contains "$(cat "$CYDER_SCROLL_TEST_EVENTS")" 'game;' 'Failed scrolling update must block final handoff'
 unset CYDER_SCROLL_TEST_FAIL
+# The launch's own session is not a running prefix: with it counted, every
+# launch started Wine (reg.exe) to rewrite a value user.reg already held.
+sessions="$(cyder_session_dir "$TMP/prefix")"
+mkdir -p "$sessions"
+printf 'schema=2\npid=%s\n' "$$" >"$sessions/own.session"
+export CYDER_SCROLLING_PREFERENCE=traditional
+: >"$CYDER_SCROLL_TEST_EVENTS"
+CYDER_SESSION_FILE="$sessions/own.session" \
+  cyder_apply_scrolling_for_exe "$TMP/engine/bin/wine" "$TMP/prefix" "$TMP/game space/MapleStory.exe"
+assert_contains "$(cat "$CYDER_SCROLL_TEST_EVENTS")" '--scrolling|traditional|' 'Scrolling helper must run'
+assert_not_contains "$(cat "$CYDER_SCROLL_TEST_EVENTS")" '--prefix-running' 'Own session must not mark the prefix running'
+# Another live session still does.
+printf 'schema=2\npid=%s\n' "$$" >"$sessions/other.session"
+: >"$CYDER_SCROLL_TEST_EVENTS"
+CYDER_SESSION_FILE="$sessions/own.session" \
+  cyder_apply_scrolling_for_exe "$TMP/engine/bin/wine" "$TMP/prefix" "$TMP/game space/MapleStory.exe"
+assert_contains "$(cat "$CYDER_SCROLL_TEST_EVENTS")" '--prefix-running' 'Another live session must mark the prefix running'
+rm -rf "$TMP/prefix/.cyder-runtime"
 # Scripts run from a checkout (no Cyder.app, no CyderSwift) still launch and
 # leave the prefix's value unchanged; only a failed update blocks the game.
 : >"$CYDER_SCROLL_TEST_EVENTS"

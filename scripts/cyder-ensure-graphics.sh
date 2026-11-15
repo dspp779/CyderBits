@@ -105,7 +105,8 @@ cyder_update_signed_dxmt() {
   helper="$(dirname "$resources")/MacOS/CyderSwift"
   [[ -n "$prefix" ]] || prefix="$runtime/.unused-prefix"
   if [[ "${CYDER_EXECUTION_RUNTIME_MUTATION:-}" == 1 || "${CYDER_EXECUTION_RUNTIME_MUTATION:-}" == 0 ]]; then
-    /usr/bin/ruby "$resources/ogom-scripts/cyder-graphics-update.rb" apply \
+    # SDKROOT skips the system Ruby's xcrun probe (see cyder-component-check.sh).
+    SDKROOT="${SDKROOT:-}" /usr/bin/ruby "$resources/ogom-scripts/cyder-graphics-update.rb" apply \
       --resources "$resources" --runtime "$runtime" --engine "$engines/${CYDER_ENGINE_NAME:-wine-x86_64}" --prefix "$prefix" >&2
   elif [[ -n "${CYDER_EXECUTION_OWNER_TICKET:-}" ]]; then
     echo "DXMT update deferred: global runtime scope required; retry when Windows is idle." >&2
