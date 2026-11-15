@@ -61,6 +61,29 @@ swift scripts/guarded-key.swift 12345 678 '遊戲實際視窗標題' left --hold
 - 遊戲自己的小彈出視窗（完全落在主視窗內）可在主視窗之上；其他 App 的視窗在上方則拒絕。
 - 需要「移動＋跳躍」時，可同時跑兩個指令（一個 `--hold` 方向鍵、稍後另一個送跳躍鍵）；兩者各自驗證並各自放開。
 
+## 量測卡頓（出幀停滯）
+
+不要用 ScreenCaptureKit 的「新畫格」計時：遊戲以 `kill -STOP` 停住 0.5 s 時它仍回報約 60 fps。像素雜湊也不行：安靜畫面本來就可能 1 s 不變。
+
+用 Instruments 的 Metal System Trace，看遊戲自己的 `ca-client-present-request`；加 Time Profiler 可看停滯時哪條執行緒在跑：
+
+```bash
+xcrun xctrace record --template "Metal System Trace" --instrument "Time Profiler" \
+  --attach <PID> --time-limit 13s --output run.trace
+xcrun xctrace export --input run.trace --toc > toc.xml
+xcrun xctrace export --input run.trace --xpath '/trace-toc/run[@number="1"]/data/table[@schema="ca-client-present-request"]' > presents.xml
+xcrun xctrace export --input run.trace --xpath '/trace-toc/run[@number="1"]/data/table[@schema="time-profile"]' > profile.xml
+T0=$(python3 -I scripts/xctrace-frames.py start toc.xml)
+python3 -I scripts/xctrace-frames.py gaps presents.xml <PID> "$T0"
+python3 -I scripts/xctrace-frames.py bins presents.xml <PID> "$T0" <A> <B>
+python3 -I scripts/xctrace-frames.py threads profile.xml <PID> "$T0" <A> <B>
+```
+
+- attach 會讓出幀停 0.5–4 s（長度不定）。動作前先確認出幀已回到約 60 fps；`guarded-key` 的 `down_at` 與上述時間同為 epoch 秒。
+- 停滯時遊戲主執行緒幾乎不在 CPU 上，多半是 trace attach；主執行緒忙碌才是遊戲自己的工作。
+- stack 位址未符號化（Rosetta JIT）。用 `atos -p <PID> <addr>` 查 Wine `.so`，用 `vmmap -wide <PID>` 查區段，再以 `where` 子命令統計。
+- 不要在量測時跑 `sample`：它本身會讓遊戲卡。
+
 已驗證（MapleStory，DXVK，2026-11）：方向鍵需帶 Fn／NumPad 旗標、單獨修飾鍵需帶左側 device bit，Wine 才會收到；兩者已內建。
 
 ## 權限與停止
