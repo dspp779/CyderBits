@@ -189,6 +189,24 @@ engine 分支 `claude/mono-gs-lasterror`，`patches/cyder-ntdll-mono-gs-last-err
 
 主選單出現 Paradox 使用者協議，未點選。建城、存讀檔、Mods、長時間遊玩未測。engine 尚未正式建置與打包（只替換了測試複本的 PE ntdll）；其他 Unity Mono 遊戲未測。遊戲 DLL 已還原為原檔（`050ca07a…`、`0c42b741…`），`steam_appid.txt` 仍在遊戲目錄。
 
+## 2026-11-15 遊玩測試（未修改的遊戲）
+
+環境同上（修正後的測試 engine、DXMT、Steam 同 engine 已登入、`SteamAppId` 環境變數、`-screen-fullscreen 0` 視窗模式）。測試步驟見 [testing.md](cities-skylines-2/testing.md)。
+
+| 項目 | 結果 |
+|---|---|
+| 只靠環境變數、不放 `steam_appid.txt` | 到達主選單；Steam 不再跳啟動選項 |
+| 首次啟動 | Paradox 使用者協議與隱私權政策（使用者同意後接受）；重開後不再出現 |
+| 新遊戲（一般模式、堰洲島） | 地圖約 15 秒載入完成 |
+| 儲存 | 本地存檔 29.6 MB 寫入成功 |
+| 一般關閉（WM_CLOSE）後重開、繼續遊戲 | `LoadGame` 約 11 秒載入完成 |
+| 執行 3 分鐘 | 無新錯誤；CPU 約 100%，常駐記憶體約 0.87 GB |
+| 遊戲內 退出 → 退出至桌面 | 遊戲與 crash handler 結束，Steam 維持 |
+
+未測：實際建造（道路、分區）與 20 分鐘遊玩、設定變更後重開是否保留、Paradox Mods、Cmd-Tab 與 exclusive fullscreen、正式 Cyder.app 啟動路徑（launcher 的 SteamAppId 只有單元測試）、Intel Mac。
+
+操作注意：遊戲 UI 常忽略游標剛移入就按下的點擊；先送一個按鍵再點、或可重複時點兩次即可；`Return` 可觸發預設按鈕。
+
 ## 遊戲修補判斷與前置條件
 
 以 [2026-10 修補清單](https://github.com/macgameport/cities-skylines-2-macos/blob/main/docs/patch-inventory.md) 為準，1.6.2f1／Steam build 25127643 的十項為 cohtml、colossal_io、longfile、asset_database、fshandle，以及 PDX.SDK 的 mkparent、lockbypass、longdelete、createfile、lockleak。它們跨 native plugin、Colossal.IO、AssetDatabase、mscorlib 與 PDX.SDK；不能沿用 Issue 中「4 個核心 DLL」的簡化描述或舊偏移量。

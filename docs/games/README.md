@@ -42,3 +42,4 @@ docs/games/
 - [GameToMac 與新楓之谷 pipeline 卡頓研究](gametomac-maplestory-pipeline-study.zh-TW.md) — GameToMac 安裝與獨立 DXMT archive 實驗。
 
 - [新楓之谷滾輪相容設定](maplestory-scrolling-compatibility.zh-TW.md) — Issue #9；EXE AppDefaults 自願啟用與還原、離線回歸及待實機驗收項目。
+- [Cities: Skylines II testing](cities-skylines-2/testing.md)
