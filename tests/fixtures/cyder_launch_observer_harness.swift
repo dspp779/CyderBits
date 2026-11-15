@@ -51,6 +51,32 @@ start(CyderLaunchObserver(), activatesLate, duration: 4, read: { .init(rootStatu
 DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { activatesLate.markPresented() }
 DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { activatesLate.signal() }
 pump { lateResult != nil }; precondition(lateResult == .activated, "activation within the grace was lost")
+// Wine asks Cyder to yield ~0.2 s before its window is on screen: the program
+// is frontmost first, then its window appears. That launch was activated.
+let frontFirst = WineActivationWaiter(prefix: root.path)
+var frontFirstResult: CyderLaunchObserver.Result?
+start(CyderLaunchObserver(), frontFirst, duration: 4, read: { .init(rootStatus: nil, lifecycle: "background") }) { frontFirstResult = $0 }
+DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { frontFirst.noteFrontmost(700) }
+DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { frontFirst.markPresented(process: 700) }
+pump { frontFirstResult != nil }
+precondition(frontFirstResult == .activated, "frontmost before the window was not counted: \(String(describing: frontFirstResult))")
+// The window first, then the program comes to the front.
+let windowFirst = WineActivationWaiter(prefix: root.path)
+var windowFirstResult: CyderLaunchObserver.Result?
+start(CyderLaunchObserver(), windowFirst, duration: 4, read: { .init(rootStatus: nil, lifecycle: "background") }) { windowFirstResult = $0 }
+DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { windowFirst.markPresented(process: 701) }
+DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { windowFirst.noteFrontmost(701) }
+pump { windowFirstResult != nil }
+precondition(windowFirstResult == .activated, "frontmost after the window was not counted: \(String(describing: windowFirstResult))")
+// Another app in front (Finder, or a different Wine process) is not this
+// program's activation; the launch stays presented.
+let elsewhere = WineActivationWaiter(prefix: root.path)
+var elsewhereResult: CyderLaunchObserver.Result?
+start(CyderLaunchObserver(), elsewhere, duration: 4, read: { .init(rootStatus: nil, lifecycle: "background") }) { elsewhereResult = $0 }
+DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { elsewhere.noteFrontmost(702); elsewhere.markPresented(process: 703) }
+DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { elsewhere.noteFrontmost(0) }
+pump { elsewhereResult != nil }
+precondition(elsewhereResult == .presented, "another frontmost app counted as activation: \(String(describing: elsewhereResult))")
 var windowless: CyderLaunchObserver.Result?
 start(CyderLaunchObserver(), WineActivationWaiter(prefix: root.path), duration: 1, read: { .init(rootStatus: 0, lifecycle: "stopped") }) { windowless = $0 }
 pump { windowless != nil }; precondition(windowless == .finishedWithoutWindow)
