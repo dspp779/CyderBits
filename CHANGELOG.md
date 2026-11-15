@@ -18,6 +18,7 @@ Draft notes: [繁中](docs/releases/v0.14.1.md) · [English](docs/releases/v0.14
 ### Fixed
 - Environment update crashes caused by system functions unavailable on older macOS (engine #14); engine archive fingerprints trigger the same-version update.
 - Relaunch failures when a background status update briefly holds the executor catalog.
+- The status stuck at "正在確認執行狀態…" after a restart renumbered the disk ([#24](https://github.com/dspp779/CyderBits/pull/24)).
 - Launch-monitor helper processes left running after a program exited, until Cyder quit ([#24](https://github.com/dspp779/CyderBits/pull/24)).
 - A rebuilt DXVK in a new app never replacing the installed DXVK while its version stayed 1.10.3; it now installs on the next launch with no Windows program running.
 - The launch progress window hidden behind the active app when an .exe is opened from Finder; the component integrity check runs once per launch ([#24](https://github.com/dspp779/CyderBits/pull/24)).
