@@ -107,6 +107,37 @@ CrossOver 自帶目錄 `crossover.tie` 的 Steam 項目只有 Win10 bottle 範�
 可能方向：(1) 第三階段的遊戲 DLL 修補工具（只修 `Colossal.IO.dll` 的列舉錯誤判斷，須照上方交易契約）；
 (2) 用上游 `monohost` + `filetest_net` probe 在 CX26 上量 `Marshal.GetLastWin32Error`，再決定是否值得追 engine。
 
+## 2026-11-15 修補後到達主選單
+
+同一環境（Cyder 0.14.1、Cyder013、DXMT、shared bottle、Steam 已登入）。以下三項全部做了才到主選單（`SceneFlow.log`：`MainMenu reached`）：
+
+| 項目 | 內容 | 修改 |
+|---|---|---|
+| 1 | `Colossal.IO.dll`：`LongDirectory.EnumerateFileSystemIterator[Recursive]` 在 `FindNextFile` 後的錯誤判斷改成直接走「沒有更多檔案」 | 2 處 IL；SHA-256 `050ca07a…` → `c108b8e6…` |
+| 2 | `Colossal.IO.AssetDatabase.dll`：`PopulateFromDirectory` 的 `File.Exists(".priority")` 改為 false | 1 處 IL；`0c42b741…` → `6819e4a4…` |
+| 3 | 直接啟動時讓 SteamAPI 連上已登入的 Steam：遊戲目錄加 `steam_appid.txt`（`949230`），環境變數 `SteamAppId`／`SteamGameId`／`SteamOverlayGameId=949230` | 不改二進位 |
+
+- 只做 1：`IOException` 消失，接著 `.priority` 的 `FileNotFoundException` 與 `NullReferenceException`。
+- 做 1、2：仍 `platform service integration failed` → `NullReferenceException`；這是 SteamAPI 沒連上（上游 GOTCHAS #10／#11），不是另一個檔案錯誤。
+- 做 1–3：主選單由 DXMT 0.80 繪製（Metal HUD：Direct），選單背景約 20 FPS。
+- 主選單上有一個可繼續的錯誤視窗：讀取 `C:\users\crossover\AppData\Local\JetBrains\Toolbox\settings.json` 時 `DirectoryNotFoundException`，同樣是 `File.Exists` 回報錯誤。未點選。
+- 遊戲為 exclusive fullscreen（視窗 layer 26），自動點擊工具依設計拒絕；建城、存讀檔、Mods 未測。一般關閉（WM_CLOSE）可結束遊戲，Steam 維持正常。
+
+1、2 用 `.local/cs2/` 內的嚴格版修補程式產生（完整比對 IL 序列、要求固定數量的命中、`.priority` 以 #US heap 驗證字串），原檔備份在 `.local/cs2/backup/`。這是測試用，不是產品工具；Steam「驗證檔案完整性」會還原。
+
+### 實作方向比較
+
+1、2 與 JetBrains 錯誤視窗都來自同一個問題：Win32 呼叫本身正確，但 Mono 讀到的 last error 不對。
+
+| 方向 | 優點 | 缺點 |
+|---|---|---|
+| A. engine 修正 last error 被改掉的原因 | 一次修好所有 Unity／Mono 遊戲同類問題（含上游 6 個 errno 修補）；不改遊戲檔案；遊戲更新不受影響 | 原因未知，CrossOver 26.3 本身也有；需先用 `monohost` probe 定位再 bisect；要等 Cyder014 |
+| B. Cyder 內建遊戲 DLL 修補工具（第三階段） | 已證實可到主選單；改動小 | 每次遊戲更新都可能失效；Steam 驗證會還原；需完整交易、備份、雜湊 allowlist 與同意流程；長期維護成本高 |
+| C. 只對 `Cities2.exe` 的執行期 hook（CompatDB 或 DLL proxy，不改檔案） | 不碰遊戲檔案；可隨遊戲更新存活 | 要 hook Mono 內部或 kernel32 行為，脆弱；目前 CompatDB runtime 不支援 `SET_ENV` 以外更多動作 |
+| D. 啟動層：替 `Cities2.exe` 提供 SteamAppId 環境變數與 Steam 背景執行的指引 | 純設定，可在 0.15.0 做 | 只解決第 3 項；1、2 仍需 A／B／C |
+
+建議：D 進 0.15.0（每遊戲環境變數已可設定；需確認只靠環境變數、不寫 `steam_appid.txt` 是否足夠）。A 先做 probe 判斷成本；B 只在 A 不可行時再評估。
+
 ## 遊戲修補判斷與前置條件
 
 以 [2026-10 修補清單](https://github.com/macgameport/cities-skylines-2-macos/blob/main/docs/patch-inventory.md) 為準，1.6.2f1／Steam build 25127643 的十項為 cohtml、colossal_io、longfile、asset_database、fshandle，以及 PDX.SDK 的 mkparent、lockbypass、longdelete、createfile、lockleak。它們跨 native plugin、Colossal.IO、AssetDatabase、mscorlib 與 PDX.SDK；不能沿用 Issue 中「4 個核心 DLL」的簡化描述或舊偏移量。
