@@ -201,10 +201,15 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             self.dismissLaunchProgress(for: launchID)
             waiter.signal()
         }
-        controller.onLaunchWindowPresented = { [weak self] launchID in
+        controller.onLaunchWindowPresented = { [weak self] launchID, pid in
             guard let self, let waiter = self.wineActivationWaiter, waiter.launchID == launchID else { return }
-            if !waiter.wasPresented { CyderDiagnostics.shared.info("wine launch window presented without activation") }
-            waiter.markPresented()
+            if let front = NSWorkspace.shared.frontmostApplication?.processIdentifier { waiter.noteFrontmost(front) }
+            if !waiter.wasPresented {
+                // Activation may still follow (wine-activation stage); this
+                // line no longer means the program stayed in the background.
+                CyderDiagnostics.shared.info("wine launch window presented pid=\(pid)")
+            }
+            waiter.markPresented(process: pid)
             self.dismissLaunchProgress(for: launchID)
         }
         controller.onActivityChanged = { [weak self] activity in
@@ -2426,6 +2431,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         DispatchQueue.main.async { [weak self] in
             guard let self, !self.quitTransaction, pid > 0 else { return }
             self.statusItemController.noteFrontmostApplication(pid)
+            self.wineActivationWaiter?.noteFrontmost(pid)
             guard isWine else { return }
             // No WINEPREFIX read or fallback to whichever request is waiting.
             // The actual root/descendant birth is the ownership evidence.

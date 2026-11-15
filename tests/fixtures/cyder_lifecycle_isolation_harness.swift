@@ -101,11 +101,11 @@ check(attached.snapshot.requests["committed"]?.phase == .observing && attached.s
 attached.reduce(.processObserved(attachedStamp, .init(id: process, name: "Fixture", environment: a,
     launch: "committed", ownership: .rootReceipt, existence: .alive)))
 let splash = L.Window(id: .init(process: process, source: "coregraphics", token: "23"), title: "Splash", capability: .unsupported)
-check(attached.reduce(.windowObserved(attachedStamp, splash)) == [.windowPresented("committed")],
+check(attached.reduce(.windowObserved(attachedStamp, splash)) == [.windowPresented("committed", process)],
       "an attributed splash may clear an overlay but cannot complete launch or authorize focus")
 let modal = L.Window(id: .init(process: process, source: "accessibility", token: "dialog"), title: "Program",
                      capability: .available, minimized: true, focused: false, isProgramWindow: true)
-check(attached.reduce(.windowSnapshot(attachedStamp, process, source: "accessibility", windows: [modal], capability: .available)) == [.windowPresented("committed")],
+check(attached.reduce(.windowSnapshot(attachedStamp, process, source: "accessibility", windows: [modal], capability: .available)) == [.windowPresented("committed", process)],
       "minimized discovery cannot confirm a new launch")
 var shown = modal; shown.minimized = false
 check(attached.reduce(.windowSnapshot(attachedStamp, process, source: "accessibility", windows: [shown], capability: .available)) == [.windowConfirmed("committed", process)],
@@ -232,11 +232,11 @@ precondition(clients.snapshot.processes[helpers]?.launch == nil, "a broker inher
 let first = L.ProcessID(boot: "boot", pid: 800, started: 201), second = L.ProcessID(boot: "boot", pid: 801, started: 203)
 clients.reduce(.independentProcess(groupStamp, first, name: "bluecg.exe", existence: .alive))
 clients.reduce(.windowObserved(groupStamp, compositor(first, "2"))) // window precedes root correlation
-precondition(clients.reduce(.independentProcess(groupStamp, first, name: "bluecg.exe", existence: .alive, launchGroup: g1)) == [.windowPresented(g1)])
+precondition(clients.reduce(.independentProcess(groupStamp, first, name: "bluecg.exe", existence: .alive, launchGroup: g1)) == [.windowPresented(g1, first)])
 clients.reduce(.processExited(groupStamp, parent2)) // root exit isn't proof its successor ended
 clients.reduce(.independentProcess(groupStamp, second, name: "bluecg.exe", existence: .alive, launchGroup: g2))
 let hint = clients.reduce(.windowObserved(groupStamp, compositor(second, "3")))
-precondition(hint == [.windowPresented(g2)], "presented target is running; only interactive evidence confirms readiness")
+precondition(hint == [.windowPresented(g2, second)], "presented target is running; only interactive evidence confirms readiness")
 precondition(clients.snapshot.processes[first]?.ownership == .explicitHandoff && clients.snapshot.processes[second]?.launch == g2)
 precondition(clients.snapshot.programActivity == .init(running: 2, presented: 0, launchers: 1))
 clients.reduce(.windowSnapshot(groupStamp, first, source: "coregraphics", windows: [], capability: .unsupported))

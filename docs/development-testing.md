@@ -199,9 +199,18 @@ or a 20–30 s gap in the session log.
 | Wine's own error text | Quiet launches keep `err+module`; `last-launch.log` names a missing DLL and the full status (`c0000135`). The exit status keeps only its low byte (53). |
 
 What the session log says: `wine activation yielded pid=… accepted=…` (Cyder
-passed activation on), `wine launch window presented without activation` (a
-window was seen but the program never became active), `wine crash dialog
-shown` (Wine's crash report closed the progress panel).
+passed activation on), `wine launch window presented pid=…` (a window of
+the launch is on screen), then `stage=wine-activation
+detail=notification-received` when that program is or becomes the frontmost
+app (Wine asks Cyder to yield about 0.2 s before its window appears, so the two
+arrive in either order). Without that stage line the program stayed in the
+background. `wine crash dialog shown` means Wine's crash report closed the
+progress panel.
+
+After the program and Wine have exited, `pgrep -fl sentinel-connect` must
+print nothing: a left-over helper means the launch helper missed its fifo
+closing (fixed in `c05552a`; a dispatch read source never reports EOF on a
+macOS fifo).
 
 If `release-cyder.sh` prints `universal Swift build failed; CyderSwift falls
 back to shell launcher`, the build is not usable: a source file changed during

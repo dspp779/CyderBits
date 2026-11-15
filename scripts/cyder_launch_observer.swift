@@ -7,6 +7,8 @@ final class WineActivationWaiter {
     private let lock = NSLock()
     private var activated = false
     private var presented = false
+    private var presentedPIDs: Set<Int32> = []
+    private var frontmostPID: Int32 = 0
     private var handler: (() -> Void)?
     private var presentedHandler: (() -> Void)?
     init(prefix: String, launchID: String? = nil) { self.prefix = (prefix as NSString).standardizingPath; self.launchID = launchID }
@@ -16,9 +18,22 @@ final class WineActivationWaiter {
     }
     /// A window of this launch is on screen, though it may never become the
     /// active app (a launch from the background cannot take focus).
-    func markPresented() {
-        lock.lock(); let first = !presented; presented = true; let callback = presentedHandler; lock.unlock()
+    /// `process` is the program whose window is on screen, when known.
+    func markPresented(process: Int32 = 0) {
+        lock.lock()
+        let first = !presented; presented = true
+        if process > 0 { presentedPIDs.insert(process) }
+        let nowActive = process > 0 && process == frontmostPID
+        let callback = presentedHandler; lock.unlock()
+        if nowActive { signal() }
         if first { callback?() }
+    }
+    /// The frontmost app changed to `pid`. Wine asks Cyder to yield before
+    /// its window is on screen, so activation and presentation arrive in
+    /// either order; the launch is activated once one process has both.
+    func noteFrontmost(_ pid: Int32) {
+        lock.lock(); frontmostPID = pid; let match = pid > 0 && presentedPIDs.contains(pid); lock.unlock()
+        if match { signal() }
     }
     var wasPresented: Bool { lock.lock(); defer { lock.unlock() }; return presented }
     func observe(_ callback: (() -> Void)?) {

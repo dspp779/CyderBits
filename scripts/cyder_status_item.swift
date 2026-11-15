@@ -33,7 +33,7 @@ final class CyderStatusItemController: NSObject, NSMenuDelegate {
     }
 
     var onWindowConfirmed: ((String) -> Void)?
-    var onLaunchWindowPresented: ((String) -> Void)?
+    var onLaunchWindowPresented: ((String, Int32) -> Void)?
     var onPendingWindowChange: ((Set<String>) -> Void)?
     private(set) var presentedLaunches = Set<String>()
     var onActivityChanged: ((CyderLifecycle.ProgramActivity) -> Void)?
@@ -123,7 +123,7 @@ final class CyderStatusItemController: NSObject, NSMenuDelegate {
                     self.windowAccess.activate(stamp: stamp, window: window, operation: operation)
                 }
             }
-            if case .windowPresented(let launch) = effect { self.onLaunchWindowPresented?(launch) }
+            if case .windowPresented(let launch, let process) = effect { self.onLaunchWindowPresented?(launch, process.pid) }
             if case .windowConfirmed(let launch, let process) = effect {
                 self.focusReadyWindow(launch, process: process, snapshot: snapshot)
                 self.onWindowConfirmed?(launch)

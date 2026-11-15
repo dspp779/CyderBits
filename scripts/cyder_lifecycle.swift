@@ -207,7 +207,7 @@ enum CyderLifecycle {
         case reconcile(Stamp)
         case stop(Stamp, UUID)
         case observationCompleted(String, Outcome)
-        case windowPresented(String)
+        case windowPresented(String, ProcessID)
         case windowConfirmed(String, ProcessID)
         case activateWindow(Stamp, WindowID, UUID, automatic: Bool = false)
         case restoreObservation(Stamp, String)
@@ -280,7 +280,7 @@ enum CyderLifecycle {
             if observed.contains(where: { $0.isProgramWindow && $0.minimized == false }) {
                 return [.windowConfirmed(launch, process)]
             }
-            if observed.contains(where: { $0.id.source == "coregraphics" }) { return [.windowPresented(launch)] }
+            if observed.contains(where: { $0.id.source == "coregraphics" }) { return [.windowPresented(launch, process)] }
             return []
         }
         private mutating func notePresentation(_ process: ProcessID) {

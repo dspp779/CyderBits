@@ -68,6 +68,11 @@ assert_contains "$will_activate" "self.dismissLaunchProgress(for: owner)" "the s
 starting="$(awk '/private func presentExternalLaunchStarting/{p=1} p{print} p && /^    }$/{exit}' "$ROOT/scripts/cyder_app_main.swift")"
 assert_contains "$starting" "acceptCyderLaunchActivation()" "a Finder/URI launch accepts the activation it was offered"
 assert_contains "$app" "code: \"CYD-WIN-004\"" "a missing DLL has its own error"
+# Wine yields activation before its window is on screen, so the launch is
+# activated when the presented program is or becomes the frontmost app.
+assert_contains "$app" "waiter.markPresented(process: pid)" "the presented window names its program"
+did_activate="$(awk '/@objc private func wineWorkspaceDidActivate/{p=1} p{print} p && /^    }$/{exit}' "$ROOT/scripts/cyder_app_main.swift")"
+assert_contains "$did_activate" "wineActivationWaiter?.noteFrontmost(pid)" "a program reaching the front activates its launch"
 assert_contains "$(cat "$ROOT/scripts/cyder-common.sh")" 'local wine_debug="-all,err+module"' \
   "quiet launches keep Wine's loader errors"
 
