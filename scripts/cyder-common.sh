@@ -2836,17 +2836,20 @@ cyder_apply_steam_compatibility_arguments() {
 # the running Steam client when it knows its app ID.  Without it, Cities:
 # Skylines II stops at "platform service integration failed".  Values the user
 # set (for example in the game's own environment settings) are kept.
+# Prints the app ID, or nothing.  Always succeeds: a non-zero status inside
+# $(...) would trip the launcher's ERR trap and log a false error.
 cyder_steam_app_id_for_executable() {
   case "$(basename "$1" | tr '[:upper:]' '[:lower:]')" in
     cities2.exe) echo 949230 ;;
-    *) return 1 ;;
   esac
+  return 0
 }
 
 cyder_apply_steam_game_environment() {
   local exe="$1" app_id name
   [[ "${CYDER_STEAM_COMPAT:-1}" != 0 ]] || return 0
-  app_id="$(cyder_steam_app_id_for_executable "$exe")" || return 0
+  app_id="$(cyder_steam_app_id_for_executable "$exe")"
+  [[ -n "$app_id" ]] || return 0
   for name in SteamAppId SteamGameId SteamOverlayGameId; do
     [[ -n "${!name:-}" ]] || export "$name=$app_id"
   done
