@@ -4,6 +4,8 @@
 
 **想直接在 Mac 上玩：** 請看 [macOS 玩家教學](macos-player-guide.md)。
 
+**測試（agent）：** 登入、操作與卡頓量測步驟見 [testing.md](testing.md)。
+
 本目錄其餘文件記錄台灣版楓之谷在 macOS／CrossOver 上的啟動研究。Beanfun 登入、QR code 與
 OTP 取得程式已移至獨立專案 [CitrusGate](https://github.com/dspp779/CitrusGate)，不再由本專案維護；這裡只定義遊戲啟動端所消費的資料與
 Wine/OEM runtime 的相容性契約。
