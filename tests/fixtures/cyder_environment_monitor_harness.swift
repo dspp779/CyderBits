@@ -101,6 +101,49 @@ recoveryStore.send(.visibleUI(true))
 pump { restored.visibleUI }
 precondition(restored.environments[current.id]!.existence == .alive)
 recovery.stop()
+// A restart can renumber the volume: a restored record whose prefix now
+// identifies differently, with no server in its namespace, ends instead of
+// holding the status at "checking". A bottle tracked in this session with the
+// same answer stays unknown (its prefix was replaced under it).
+let movedRoot = root.appendingPathComponent("moved")
+try FileManager.default.createDirectory(at: movedRoot, withIntermediateDirectories: true)
+let movedFile = movedRoot.appendingPathComponent("managed-environments-v1.json")
+try retainedHistory.write(to: movedFile)
+try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: movedFile.path)
+let three = root.appendingPathComponent("three")
+try FileManager.default.createDirectory(at: three, withIntermediateDirectories: true)
+let movedEpoch = UUID()
+var moved = CyderLifecycle.State(epoch: movedEpoch).snapshot
+let movedStore = CyderLifecycleStore(epoch: movedEpoch) { s, _ in moved = s }
+let movedProbe: (CyderEnvironmentProbe.Identity) -> CyderEnvironmentProbe.Result = { identity in
+    identity.prefix.hasSuffix("/two") ? input.result(identity) : .unknown(CyderEnvironmentProbe.identityChangedNoServer)
+}
+input.change { $0.now = 200 }
+let movedMonitor = CyderEnvironmentMonitor(epoch: movedEpoch, directory: movedRoot, expectedEngine: engine, waitersEnabled: false,
+    clock: input.time, probe: movedProbe, event: movedStore.send)
+var movedReady = false, threeTracked = false
+movedMonitor.restore { movedReady = true }
+pump { movedReady && moved.environments.count == 2 }
+movedMonitor.track(prefix: three, engine: engine) { _ in threeTracked = true }
+pump { threeTracked && moved.environments.count == 3 }
+let restoredOne = moved.environments.values.first { $0.prefix.hasSuffix("/one") }!
+let trackedThree = moved.environments.values.first { $0.prefix.hasSuffix("/three") }!
+for second in [201.0, 202.0] {
+    input.change { $0.now = second }
+    for environment in [restoredOne, trackedThree] {
+        movedMonitor.reconcile(.init(epoch: movedEpoch, environment: environment.id, generation: environment.generation))
+    }
+    var tick = false
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { tick = true }
+    pump { tick }
+}
+pump { moved.environments[restoredOne.id]!.existence == .exited }
+precondition(moved.environments[trackedThree.id]!.existence != .exited, "a bottle tracked this session ended on an identity change")
+precondition(moved.environments.values.first { $0.prefix.hasSuffix("/two") }!.existence == .alive)
+pump { ((try? JSONSerialization.jsonObject(with: Data(contentsOf: movedFile))) as? [String: Any])
+    .flatMap { $0["records"] as? [[String: Any]] }?
+    .contains { (($0["identity"] as? [String: Any])?["prefix"] as? String)?.hasSuffix("/one") == true } == false }
+movedMonitor.stop()
 let corruptRoot = root.appendingPathComponent("corrupt")
 try FileManager.default.createDirectory(at: corruptRoot, withIntermediateDirectories: true)
 let corruptFile = corruptRoot.appendingPathComponent("managed-environments-v1.json")
