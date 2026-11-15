@@ -170,6 +170,25 @@ Win32 寫入 last error 的地方只有 `dlls/ntdll/error.c`（`RtlSetLastWin32E
 
 建議先評估 E1：確認 macOS TSD slot 13 的使用者，在 engine repo 寫最小 patch 與 probe 測試，再用 CS2 原檔驗證。
 
+## 2026-11-15 engine 修正（E2）驗證
+
+engine 分支 `claude/mono-gs-lasterror`，`patches/cyder-ntdll-mono-gs-last-error.patch`：PE loader 載入原生 `mono.dll`／`mono-*.dll` 時（僅 macOS），
+
+1. 把 `mov r32, %gs:0x68` 改成呼叫 thunk，thunk 經 `%gs:0x30`（真正的 TEB）讀 `LastErrorValue`；
+2. 把 Mono JIT 的 `emit_get_last_error` 導向新的 emitter，讓 JIT 產生的 P/Invoke wrapper 也改用 TEB 讀取。
+
+只做第 1 項不夠：靜態程式碼改了 134 處，probe 仍得到亂值；JIT 每次產生的 wrapper 都會內嵌 `%gs:0x68`。不採用「同步寫入 `%gs:0x68`」：原生 macOS 實測 `gmtime()` 的緩衝區指標就存在 slot 13（`%gs:0x68`），寫入錯誤碼會破壞它。
+
+結果（Cyder013 只替換 PE `ntdll.dll` 的測試 engine 複本）：
+
+| 項目 | 結果 |
+|---|---|
+| probe `Marshal.GetLastWin32Error()`（`File.Exists` 不存在的檔案後） | 2（正確）；`CYDER_MONO_GS_LASTERROR=0` 時仍為亂值 |
+| 改寫數量（`WINEDEBUG=trace+module`） | `mono-2.0-bdwgc.dll` 135 處（含 JIT emitter） |
+| CS2 **未修改的** `Colossal.IO.dll`／`Colossal.IO.AssetDatabase.dll`，Steam 以同一 engine 登入，DXMT，`SteamAppId` 環境變數 | `MainMenu reached`；`FileSystem.log`、`UI.log` 無錯誤；JetBrains `settings.json` 錯誤也消失 |
+
+主選單出現 Paradox 使用者協議，未點選。建城、存讀檔、Mods、長時間遊玩未測。engine 尚未正式建置與打包（只替換了測試複本的 PE ntdll）；其他 Unity Mono 遊戲未測。遊戲 DLL 已還原為原檔（`050ca07a…`、`0c42b741…`），`steam_appid.txt` 仍在遊戲目錄。
+
 ## 遊戲修補判斷與前置條件
 
 以 [2026-10 修補清單](https://github.com/macgameport/cities-skylines-2-macos/blob/main/docs/patch-inventory.md) 為準，1.6.2f1／Steam build 25127643 的十項為 cohtml、colossal_io、longfile、asset_database、fshandle，以及 PDX.SDK 的 mkparent、lockbypass、longdelete、createfile、lockleak。它們跨 native plugin、Colossal.IO、AssetDatabase、mscorlib 與 PDX.SDK；不能沿用 Issue 中「4 個核心 DLL」的簡化描述或舊偏移量。
