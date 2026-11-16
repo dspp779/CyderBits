@@ -1316,9 +1316,10 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             } else if case .success(let prefix) = self.prefixForExecutable(URL(fileURLWithPath: launch.executable)) {
                 scope = .prefix(prefix)
             } else { return nil }
+            // A launch without decodable accepted settings is not authorized.
             guard let snapshot = launch.authorization?.settingsSnapshot,
-                  let acceptedSettings = try? JSONDecoder().decode(CyderSettings.self, from: snapshot) else { return nil }
-            return CyderGraphicsRuntime.needsGlobalScope || CyderGptk.launchNeedsGlobalScope() || acceptedSettings.moltenvkVariant.launchNeedsGlobalScope()
+                  (try? JSONDecoder().decode(CyderSettings.self, from: snapshot)) != nil else { return nil }
+            return CyderGraphicsRuntime.needsGlobalScope || CyderGptk.launchNeedsGlobalScope() || CyderMoltenvk.launchNeedsGlobalScope()
                 ? .allEnvironments : scope
         }) { [weak self] outcome in
             guard let self else { return }
@@ -2709,14 +2710,14 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    /// The launch needs a different shared graphics runtime (MoltenVK variant
-    /// or GPTK link) than the one running Wine processes use. All bottles share
+    /// The launch needs a different shared graphics runtime (MoltenVK real
+    /// link repair or GPTK link) than the one running Wine processes use. All bottles share
     /// it and games load it lazily, so it is switched only when none run.
     private func presentRuntimeInUse(_ report: CyderRuntimeUsers.Report, failure: CyderFailure) {
         func key(_ path: String) -> String { URL(fileURLWithPath: path).standardizedFileURL.path }
         let used = Set(report.users.compactMap { $0.prefix.map(key) })
         let moltenvk = report.component == "moltenvk", engine = report.component == "engine"
-        let component = engine ? "Windows 引擎" : moltenvk ? "MoltenVK 版本" : "GPTK（D3DMetal）來源"
+        let component = engine ? "Windows 引擎" : moltenvk ? "MoltenVK" : "GPTK（D3DMetal）來源"
         let stop: [URL] = onMainThread {
             // Monitor URLs are passed back unchanged; only those can be stopped.
             let stoppable = statusItemController.monitoredPrefixes.filter { used.contains(key($0.path)) }
@@ -2734,7 +2735,6 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
                 let names = Array(Set(others.map(\.name))).sorted().prefix(5)
                 text += "\n\n其他執行中的 Windows 程式（需自行結束）：" + names.joined(separator: "、")
             }
-            if moltenvk { text += "\n\n也可以在設定中改回目前使用的版本後再啟動。" }
             alert.informativeText = text
             alert.alertStyle = .warning
             if !stoppable.isEmpty { alert.addButton(withTitle: stoppable.count == 1 ? "停止這個環境" : "停止這些環境") }
@@ -2870,9 +2870,8 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
            args.indices.contains(index + 1) { scope = .prefix(URL(fileURLWithPath: args[index + 1])) }
         let prefixScope = scope
         if isLaunch {
-            let accepted = authorization?.settingsSnapshot.flatMap { try? JSONDecoder().decode(CyderSettings.self, from: $0) }
             if lease?.scope == .allEnvironments || (lease == nil &&
-                (CyderGraphicsRuntime.needsGlobalScope || CyderGptk.launchNeedsGlobalScope() || (accepted?.moltenvkVariant.launchNeedsGlobalScope() ?? false))) {
+                (CyderGraphicsRuntime.needsGlobalScope || CyderGptk.launchNeedsGlobalScope() || CyderMoltenvk.launchNeedsGlobalScope())) {
                 scope = .allEnvironments
             }
         }

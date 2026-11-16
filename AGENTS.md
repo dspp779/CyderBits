@@ -63,7 +63,7 @@ graphics only from an app it can verify as signed by the Cyder team):
 | Suite stops printing for minutes | A test opened a real alert or app | Stub `osascript` and `open` in that test |
 | A test fails once | Could be load, focus, or a stale assertion | Rerun it alone three times and read the assertion before calling it flaky |
 | Wrong archive ended up in the app | The app bundles every archive in the graphics folder; packers reuse old archives | Keep only what ships in that folder; repack with `--force` after a DXVK change |
-| Settings show `1.4.2` / `1.2.10` | Those are **MoltenVK** versions | DXVK is always 1.10.3; DXMT is upstream 0.80 with a Developer ID signature |
+| Someone quotes `1.4.2` / `1.2.10` as a DXVK version | Those are **MoltenVK** versions (0.15.0+ ships only 1.4.2) | DXVK is always 1.10.3; DXMT is upstream 0.80 with a Developer ID signature |
 | Long build hangs with no output | Checkout under `~/Documents`, `~/Desktop` or `~/Downloads` | Keep checkouts under `~/ogom` |
 
 Fixed product facts: DXVK 2 is not shipped until it passes game testing.

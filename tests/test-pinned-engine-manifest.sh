@@ -37,15 +37,16 @@ assert_eq "$(tar -xJOf "$archive" wine-x86_64/version | head -1)" \
 assert_eq "$(tar -xJOf "$archive" wine-x86_64/lib/wine/x86_64-windows/ntdll.dll | shasum -a 256 | awk '{print $1}')" \
   "$(plutil -extract ntdllSHA256 raw -o - "$manifest")" \
   "pinned NTDLL digest should match"
-# Dual-MoltenVK layout (Cyder012 and later): the wait-poll shim under the
-# unversioned name, both versioned reals, and the .real link the shim loads.
+# MoltenVK layout (Cyder014 and later): the wait-poll shim under the
+# unversioned name, the 1.4.2 real only, and the .real link the shim loads.
 unix_dir="wine-x86_64/lib/wine/x86_64-unix"
 listing="$(tar -tvf "$archive" "$unix_dir/libMoltenVK*")"
-for name in libMoltenVK.dylib libMoltenVK-1.4.2.dylib libMoltenVK-1.2.10.dylib; do
+for name in libMoltenVK.dylib libMoltenVK-1.4.2.dylib; do
   assert_contains "$listing" "$unix_dir/$name" "pinned archive should contain $name"
 done
+assert_not_contains "$listing" "libMoltenVK-1.2.10.dylib" "pinned archive must not ship the retired 1.2.10 real"
 real_line="$(grep -F "$unix_dir/libMoltenVK.real.dylib -> " <<<"$listing" || true)"
-if [[ "$real_line" != l* || "$real_line" != *"-> libMoltenVK-1."*".dylib" ]]; then
+if [[ "$real_line" != l* || "$real_line" != *"-> libMoltenVK-1.4.2.dylib" ]]; then
   echo "FAIL: libMoltenVK.real.dylib must be a link to a versioned MoltenVK real: ${real_line:-missing}" >&2
   exit 1
 fi

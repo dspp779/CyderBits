@@ -247,16 +247,19 @@ class ComponentIntegrityTest < Minitest::Test
     _, status = Open3.capture2e('/usr/bin/ruby', script, resources)
     refute status.success?, 'build must reject an archive with an invalid expected hash'
   end
-  def test_supported_moltenvk_variant_is_not_a_content_change
+  def test_moltenvk_real_link_must_point_at_the_shipped_real
     path = 'lib/wine/x86_64-unix/'
-    @contents[path + 'libMoltenVK-1.4.2.dylib'] = 'new variant'
-    @contents[path + 'libMoltenVK-1.2.10.dylib'] = 'old variant'
+    @contents[path + 'libMoltenVK-1.4.2.dylib'] = 'shipped real'
     @contents.each { |p, bytes| File.binwrite(File.join(@root, p), bytes) }
     write_archive(->(tar) { tar.add_symlink('wine-x86_64/' + path + 'libMoltenVK.real.dylib', 'libMoltenVK-1.4.2.dylib', 0777) })
     @manifest = C.inventory(@archive, Digest::SHA256.file(@archive).hexdigest, 'wine-x86_64', 'engine', 'v')
     alias_path = File.join(@root, path, 'libMoltenVK.real.dylib')
-    File.symlink('libMoltenVK-1.2.10.dylib', alias_path)
+    File.symlink('libMoltenVK-1.4.2.dylib', alias_path)
     assert_equal 'ok', scan['status']
+    # The retired 1.2.10 real is no longer an accepted target.
+    File.unlink(alias_path)
+    File.symlink('libMoltenVK-1.2.10.dylib', alias_path)
+    assert_equal 'mismatch', scan['status']
     File.unlink(alias_path)
     File.symlink('other.dylib', alias_path)
     assert_equal 'mismatch', scan['status']

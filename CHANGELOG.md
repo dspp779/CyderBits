@@ -7,8 +7,18 @@ release notes in [`docs/releases/`](docs/releases/); the engine column refers to
 
 ## [Unreleased]
 
+### Added
+- Cities: Skylines II uses DXMT automatically while its graphics setting is "default" (#10).
+- MapleStory WZ read-ahead (engine Cyder014), merged with the WZ cache into one setting,
+  "MapleStory WZ 檔案讀取最佳化", on by default.
+
+### Changed
+- Engine `CX26.3.0-W11-Cyder014`: minOS-safe build (engine #14), wineserver no longer
+  crashes when a program is killed (engine #16), Unity Mono last error fix (engine #17).
+
 ### Removed
 - Support for macOS 10.15 and 11. Releases after 0.14 require macOS 12 or later.
+- MoltenVK 1.2.10 and the MoltenVK version setting; DXVK uses MoltenVK 1.4.2.
 
 ## [0.14.1] - 2026-11-15
 

@@ -38,20 +38,19 @@ open dist/Cyder.app
 
 Engine 內嵌的 Homebrew runtime 庫（freetype／png／gnutls 鏈等）與 media stack（glib／gstreamer）皆以 `MACOSX_DEPLOYMENT_TARGET=10.15` **從原始碼**建置；不使用目前僅支援 macOS 14+ 的 brew bottles。`scripts/env-x86_64.sh` 的 `brew_x86_install_runtime` 會以 compiler wrapper 強制 `-mmacosx-version-min=10.15`；`bundle-wine-dylibs.sh` 會在打包後檢查 Mach-O `minos`，超過 10.15 即失敗。
 
-### MoltenVK dual-variant（Cyder012+）
+### MoltenVK（Cyder014 起只有 1.4.2）
 
-Cyder012 引擎同時內建：
+Cyder014 引擎內建（Cyder012／013 另含 `libMoltenVK-1.2.10.dylib`，0.15.0 起移除）：
 
 | 檔案 | 角色 |
 |------|------|
 | `libMoltenVK.dylib` | wait-poll **shim**（修 DXVK 長跑 Mach Ports；marker `cyder-moltenvk-timeline-wait-poll`） |
-| `libMoltenVK.real.dylib` | symlink → 選中的 versioned real |
+| `libMoltenVK.real.dylib` | symlink → `libMoltenVK-1.4.2.dylib` |
 | `libMoltenVK-1.4.2.dylib` | 上游 1.4.2 + capability／present；**minos 12.0** |
-| `libMoltenVK-1.2.10.dylib` | crossover-foss 1.2.10；minos 10.15（Cyder013 沿用 Cyder012 的同版 binary，因 Xcode 27 SDK 最低只能建置 macOS 12） |
 
-偏好設定 → **圖形 → MoltenVK** 可選 `1.4.2` 或 `1.2.10`（無 auto）。macOS &lt; 12 強制 1.2.10。儲存設定不會改動 engine；下一次啟動（或 ensure）才在共用 runtime 鎖內改寫 `.real` symlink。Cyder.app 不再另外建置 shim。
+偏好設定不再提供 MoltenVK 版本選項；舊設定檔的 `moltenvkVariant` 會被忽略，下次儲存時移除。若共用 runtime 的 `.real` 仍指向舊的 1.2.10，下一次啟動（或 ensure）會在共用 runtime 鎖內改回 1.4.2。Cyder.app 不另外建置 shim。
 
-`.real` 與 GPTK 連結由同一 engine 的所有環境共用，而且遊戲會在執行中才載入它們（延後建立 Vulkan device、啟動器再開遊戲本體），在執行中切換會讓同一個遊戲混用兩個版本。因此需要切換時，helper 在獨占的共用 runtime 範圍內先以 `CyderSwift --runtime-users ENGINE moltenvk|gptk` 檢查：只要有任何該 engine 的 Wine client（`wineserver` 除外）在執行就拒絕（exit 75，輸出 `CYDER-RUNTIME-IN-USE component=… pid=… prefix=… name=…`），連結不變。所有準備中的啟動都持有共用範圍直到 Wine 程序產生，所以檢查與切換之間不會有新的 Wine 程序出現。Wine 子程序（services.exe 等）會覆寫自己的參數區，讀不到 `WINEPREFIX`；helper 以其與 `wineserver` 之間的 Unix socket 對應回所屬環境。App 會列出仍在執行的環境並提供「停止這些環境」；讀不到完整程序列表時同樣拒絕。版本相同時不檢查、不需共用範圍。
+`.real` 與 GPTK 連結由同一 engine 的所有環境共用，而且遊戲會在執行中才載入它們（延後建立 Vulkan device、啟動器再開遊戲本體），在執行中切換會讓同一個遊戲混用兩個版本。因此需要修正連結時，helper 在獨占的共用 runtime 範圍內先以 `CyderSwift --runtime-users ENGINE moltenvk|gptk` 檢查：只要有任何該 engine 的 Wine client（`wineserver` 除外）在執行就拒絕（exit 75，輸出 `CYDER-RUNTIME-IN-USE component=… pid=… prefix=… name=…`），連結不變。所有準備中的啟動都持有共用範圍直到 Wine 程序產生，所以檢查與切換之間不會有新的 Wine 程序出現。Wine 子程序（services.exe 等）會覆寫自己的參數區，讀不到 `WINEPREFIX`；helper 以其與 `wineserver` 之間的 Unix socket 對應回所屬環境。App 會列出仍在執行的環境並提供「停止這些環境」；讀不到完整程序列表時同樣拒絕。連結已正確時不檢查、不需共用範圍。
 
 ### Catalina 首次安裝
 

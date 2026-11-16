@@ -75,7 +75,7 @@ bash scripts/run-bluecg.sh
 |---|---|---|
 | DirectDraw / GDI | **支援且已驗證** | BlueCG 使用 DirectDraw；預設路徑是 wined3d/OpenGL，GDI 是相容性 fallback。 |
 | wined3d / OpenGL | **目前預設** | BlueCG 驗證用 engine 含已測試的 `winemac.drv` same-view backing 修復，可支援 Retina/DPI resize。 |
-| Vulkan / MoltenVK | **由 engine 提供** | dual-variant：shim + `.real` → `1.4.2`／`1.2.10`；偏好設定可切換；macOS &lt; 12 強制 1.2.10。這不是 BlueCG 的主要繪圖路徑。 |
+| Vulkan / MoltenVK | **由 engine 提供** | MoltenVK 1.4.2，經 wait-poll shim 載入（`.real` → `1.4.2`）；0.15.0 起移除 1.2.10 與版本選項。這不是 BlueCG 的主要繪圖路徑。 |
 | DXVK | **已整合 runtime payload** | DXVK 由 Cyder.app 的 `Resources/graphics/` 外部 payload 提供，透過 CompatDB builtin + prepend 載入；DXVK 2 仍暫不出貨。 |
 | dxmt | **已整合 runtime payload** | DXMT 由 Cyder.app 的外部 payload 提供，需 macOS 15+；新楓之谷與經典版在 macOS 15+ 預設優先使用。 |
 | D3DMetal | **已接入產品 backend** | 透過 GPTK／Apple D3DMetal，需 macOS 14+ 與可用 GPTK；實際遊戲相容性需逐款驗證。 |

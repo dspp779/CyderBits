@@ -75,7 +75,7 @@ Below is a summary of tested games on Cyder / CyderBits. For detailed configurat
 |---|---|---|
 | DirectDraw / GDI | **Supported and validated** | BlueCG uses DirectDraw; the default path is wined3d/OpenGL. GDI is a compatibility fallback. |
 | wined3d / OpenGL | **Active default** | BlueCG's validated engine includes the tested `winemac.drv` same-view backing fix for Retina/DPI resize. |
-| Vulkan / MoltenVK | **Provided by the engine** | Dual-variant: wait-poll shim + `.real` → `1.4.2` / `1.2.10`; Preferences can switch; macOS &lt; 12 forces 1.2.10. Not the primary BlueCG path. |
+| Vulkan / MoltenVK | **Provided by the engine** | MoltenVK 1.4.2 behind the wait-poll shim (`.real` → `1.4.2`); 0.15.0 removed 1.2.10 and the version setting. Not the primary BlueCG path. |
 | DXVK | **Integrated as a runtime payload** | DXVK is delivered under `Resources/graphics/` and loaded through CompatDB builtin + prepend; DXVK 2 is still deferred. |
 | dxmt | **Integrated as a runtime payload** | DXMT is delivered as a separate Cyder payload and requires macOS 15+; MapleStory.exe and Maplestory_Classic.exe prefer it automatically on macOS 15+. |
 | D3DMetal | **Product backend** | Available through GPTK / Apple D3DMetal on macOS 14+ with a usable GPTK; game compatibility must be validated per title. |

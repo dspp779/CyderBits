@@ -45,6 +45,7 @@ assert_contains "$called" "args=MapleStory.exe tw.login.maplestory.beanfun.com 8
   "the game gets the Beanfun argv"
 assert_contains "$called" "cwd=$TMP/game" "the game starts in its own folder"
 assert_contains "$called" "CYDER_MAPLESTORY_FILE_CACHE=1" "the WZ cache matches a Cyder launch"
+assert_contains "$called" "CYDER_MAPLESTORY_READAHEAD=1" "the WZ read-ahead matches a Cyder launch"
 assert_not_contains "$called" "MS_OTP" "the secrets are not left in Wine's environment"
 assert_not_contains "$(cat "$TMP/game.log")" "SECRETOTP" "the log never holds the OTP"
 [[ -s "$TMP/game.log.mono" ]] || { echo "FAIL no clock offset file" >&2; exit 1; }

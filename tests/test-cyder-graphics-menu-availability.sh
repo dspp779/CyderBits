@@ -16,7 +16,7 @@ def member(source, signature):
     return source[start:end].replace('private ', '', 1)
 classes=[]
 for name,file,end,selected in [
-    ('GlobalGraphics','cyder_settings_ui.swift','        moltenvkVariant.removeAllItems()', 'graphicsBackendValue'),
+    ('GlobalGraphics','cyder_settings_ui.swift','        dxvkFrameRate.addItems(', 'graphicsBackendValue'),
     ('GameGraphics','cyder_game_library_ui.swift','        for popup in [fontMingLiu, fontSongti]', 'graphicsBackendOverride'),
 ]:
     source=(source_root/file).read_text()

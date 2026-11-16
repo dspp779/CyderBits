@@ -53,6 +53,7 @@ if [[ -f "$_moltenvk_variant_sh" ]]; then
   source "$_moltenvk_variant_sh"
 fi
 unset _moltenvk_variant_sh
+declare -F cyder_ensure_moltenvk_real >/dev/null 2>&1 || cyder_ensure_moltenvk_real() { return 0; }
 
 cyder_engine_artifacts_dir() {
   local root="${OGOM:-$(cd "$CYDER_COMMON_DIR/.." && pwd)}"
@@ -841,19 +842,6 @@ cyder_load_saved_settings() {
     value="$(plutil -extract graphicsBackend raw -o - "$settings" 2>/dev/null || true)"
     cyder_apply_graphics_preference "${value:-default}" "${CYDER_ENGINES:-}/${CYDER_ENGINE_NAME:-}"
   fi
-  if [[ -z "${CYDER_MOLTENVK_VARIANT_PREFERENCE:-}" ]]; then
-    value="$(plutil -extract moltenvkVariant raw -o - "$settings" 2>/dev/null || true)"
-    case "$value" in
-      1.4.2 | 1.2.10) export CYDER_MOLTENVK_VARIANT_PREFERENCE="$value" ;;
-      *)
-        if declare -F cyder_default_moltenvk_variant_preference >/dev/null 2>&1; then
-          export CYDER_MOLTENVK_VARIANT_PREFERENCE="$(cyder_default_moltenvk_variant_preference)"
-        else
-          export CYDER_MOLTENVK_VARIANT_PREFERENCE=1.4.2
-        fi
-        ;;
-    esac
-  fi
   value="$(plutil -extract dxvkFrameRate raw -o - "$settings" 2>/dev/null || true)"
   case "$value" in
     sixty|60) export CYDER_DXVK_FRAME_RATE_PREFERENCE=60 ;;
@@ -870,26 +858,6 @@ cyder_load_saved_settings() {
   cyder_apply_graphics_runtime_preferences
 }
 
-cyder_apply_moltenvk_variant_from_preference() {
-  local engine="${1:-}"
-  local pref="${CYDER_MOLTENVK_VARIANT_PREFERENCE:-}"
-  [[ -n "$engine" && -d "$engine" ]] || return 0
-  if [[ -z "$pref" ]]; then
-    if declare -F cyder_default_moltenvk_variant_preference >/dev/null 2>&1; then
-      pref="$(cyder_default_moltenvk_variant_preference)"
-    else
-      pref=1.4.2
-    fi
-  fi
-  if declare -F cyder_apply_moltenvk_variant_if_present >/dev/null 2>&1; then
-    cyder_apply_moltenvk_variant_if_present "$engine" "$pref" || {
-      local status=$?
-      echo "MoltenVK variant apply failed (engine=$engine pref=$pref)" >&2
-      return "$status"
-    }
-  fi
-  return 0
-}
 
 cyder_find_taskpolicy() {
   if [[ -n "${CYDER_TASKPOLICY_BIN:-}" && -x "$CYDER_TASKPOLICY_BIN" ]]; then
@@ -978,7 +946,7 @@ cyder_resolve_shared_engine() {
       if [[ ! -f "$engine/.cyder-engine-signed" ]]; then
         cyder_sign_installed_engine "$engine" || return $?
       fi
-      cyder_apply_moltenvk_variant_from_preference "$engine" || return $?
+      cyder_ensure_moltenvk_real "$engine" || return $?
       echo "Shared engine current (sidecar): $engine" >&2
       printf '%s\n' "$engine"
       return 0
@@ -1083,13 +1051,18 @@ cyder_is_maplestory_executable() {
   [[ "$lower" == "maplestory.exe" ]]
 }
 
+# "MapleStory WZ read optimization" (settings key maplestoryWZCache) drives two
+# engine switches together: the adaptive WZ cache and the Windows-style
+# read-ahead that runs inside its window fills (Cyder014+; older engines ignore
+# CYDER_MAPLESTORY_READAHEAD). Both stay off for every other executable.
 cyder_apply_maplestory_wz_cache() {
-  local exe="$1"
+  local exe="$1" value=0
   if cyder_is_maplestory_executable "$exe"; then
-    export CYDER_MAPLESTORY_FILE_CACHE="${CYDER_MAPLESTORY_FILE_CACHE_PREFERENCE:-1}"
-  else
-    export CYDER_MAPLESTORY_FILE_CACHE=0
+    value="${CYDER_MAPLESTORY_FILE_CACHE_PREFERENCE:-1}"
+    [[ "$value" == 0 ]] || value=1
   fi
+  export CYDER_MAPLESTORY_FILE_CACHE="$value"
+  export CYDER_MAPLESTORY_READAHEAD="$value"
 }
 
 cyder_wine_is_crossover_frontend() {
@@ -1817,7 +1790,7 @@ cyder_ensure_shared_engine() {
       if [[ ! -f "$dest/.cyder-engine-signed" ]]; then
         cyder_sign_installed_engine "$dest" || exit 1
       fi
-      cyder_apply_moltenvk_variant_from_preference "$dest" || exit 1
+      cyder_ensure_moltenvk_real "$dest" || exit 1
       echo "$dest"
       return 0
     fi
@@ -1866,7 +1839,7 @@ cyder_ensure_shared_engine() {
   if [[ -n "$bundled_sha" ]]; then
     printf '%s\n' "$bundled_sha" >"$dest/.cyder-engine-artifact-sha256"
   fi
-  cyder_apply_moltenvk_variant_from_preference "$dest" || exit 1
+  cyder_ensure_moltenvk_real "$dest" || exit 1
   if declare -F cyder_check_components >/dev/null; then cyder_check_components engine full; fi
   echo "$dest"
 }
@@ -2574,7 +2547,7 @@ cyder_game_environment_key_is_allowed() {
     DYLD_*|LD_*) return 1 ;;
     CYDER_SCROLLING_PREFERENCE|CYDER_LAUNCH_GROUP|CYDER_LAUNCH_PREPARATION_*) return 1 ;;
     WINEPREFIX|WINESERVER|WINEARCH|WINEDEBUG|CX_ROOT|CX_BOTTLE|CX_APPLEGPTK_LIBD3DSHARED_PATH) return 1 ;;
-    CYDER_SUPPORT|CYDER_RUNTIME_ROOT|CYDER_ENGINES|CYDER_ENGINE_NAME|CYDER_ENGINE_SRC|CYDER_SCRIPTS|CYDER_APP|CYDER_MAPLESTORY_FILE_CACHE|CYDER_MAPLESTORY_FILE_CACHE_PREFERENCE) return 1 ;;
+    CYDER_SUPPORT|CYDER_RUNTIME_ROOT|CYDER_ENGINES|CYDER_ENGINE_NAME|CYDER_ENGINE_SRC|CYDER_SCRIPTS|CYDER_APP|CYDER_MAPLESTORY_FILE_CACHE|CYDER_MAPLESTORY_FILE_CACHE_PREFERENCE|CYDER_MAPLESTORY_READAHEAD) return 1 ;;
     CYDER_WINE_*|CYDER_SESSION_*|CYDER_DIAGNOSTIC_*|CYDER_TEST_*|CYDER_EXECUTION_*|CYDER_RESULT_FILE|CYDER_PROGRESS_FILE) return 1 ;;
     CYDER_GPTK_ROOT|CYDER_GRAPHICS_*|CYDER_CNC_*|CYDER_GAME_ARGUMENTS|CYDER_MOLTENVK_VARIANT_PREFERENCE) return 1 ;;
   esac
@@ -3821,7 +3794,7 @@ cyder_run_wine_exe() {
   engine_root="$(cd "$(dirname "$wine_bin")/.." && pwd -P)"
   canonical_prefix="$(cd "$prefix" 2>/dev/null && pwd -P || printf '%s' "$prefix")"
   cyder_apply_media_launch_environment "$engine_root"
-  cyder_apply_moltenvk_variant_from_preference "$engine_root" || return $?
+  cyder_ensure_moltenvk_real "$engine_root" || return $?
   cyder_apply_gptk_launch_environment "$engine_root" || return $?
   if [[ -f "$prefix/cxbottle.conf" ]] || cyder_wine_is_crossover_frontend "$wine_bin"; then
     export CX_BOTTLE="$prefix" CX_ROOT="$engine_root" WINEARCH=win64

@@ -24,7 +24,7 @@ assert_contains "$ui" "persistDeferredSettings" \
 assert_contains "$ui" "deferredChange" \
   "preferences should distinguish deferred session settings from immediate settings"
 assert_contains "$ui" "Winetricks 元件…" "advanced tab should expose the native Winetricks component picker"
-assert_contains "$ui" "MapleStory WZ 快取" "advanced tab should expose the MapleStory WZ cache switch"
+assert_contains "$ui" "MapleStory WZ 檔案讀取最佳化" "advanced tab should expose the MapleStory WZ read optimization switch"
 assert_contains "$ui" "maplestoryWZCacheChanged" "WZ cache switch should save immediately"
 assert_contains "$ui" "cyderWinetricksComponentGroups" "Winetricks picker should use a curated component catalog"
 assert_not_contains "$ui" 'CyderWinetricksComponent(title: "Steam"' \

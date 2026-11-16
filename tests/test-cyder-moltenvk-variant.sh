@@ -41,44 +41,42 @@ build_real "$UNIX/libMoltenVK-1.4.2.dylib" 12.0
 build_real "$UNIX/libMoltenVK-1.2.10.dylib" 10.15
 build_shim "$UNIX/libMoltenVK.dylib"
 
-CYDER_MOCK_MACOS=11.0
-assert_eq "$(cyder_resolve_moltenvk_variant 1.4.2)" "1.2.10" \
-  "macOS 11 candidate retains legacy preference; compatibility is checked separately"
-
-CYDER_MOCK_MACOS=13.0
-assert_eq "$(cyder_resolve_moltenvk_variant 1.2.10)" "1.2.10" \
-  "macOS 13 must respect preference 1.2.10"
-assert_eq "$(cyder_resolve_moltenvk_variant 1.4.2)" "1.4.2" \
-  "macOS 13 must respect preference 1.4.2"
-
-CYDER_MOCK_MACOS=13.0
-cyder_apply_moltenvk_variant "$FAKE" "1.4.2"
+# A runtime left by Cyder013 has .real on the retired 1.2.10 real; the
+# launch points it back at 1.4.2 whatever macOS reports.
+ln -sfn libMoltenVK-1.2.10.dylib "$UNIX/libMoltenVK.real.dylib"
+for host in 11.0 13.0; do
+  CYDER_MOCK_MACOS="$host"
+  cyder_ensure_moltenvk_real "$FAKE"
+  assert_eq "$(readlink "$UNIX/libMoltenVK.real.dylib")" "libMoltenVK-1.4.2.dylib" \
+    "ensure must point .real at 1.4.2 (macOS $host)"
+  cyder_ensure_moltenvk_real "$FAKE"
+  assert_eq "$(readlink "$UNIX/libMoltenVK.real.dylib")" "libMoltenVK-1.4.2.dylib" \
+    "ensure twice must stay stable"
+  ln -sfn libMoltenVK-1.2.10.dylib "$UNIX/libMoltenVK.real.dylib"
+done
+# A Cyder014 engine has no 1.2.10 real at all.
+rm "$UNIX/libMoltenVK-1.2.10.dylib"
+cyder_ensure_moltenvk_real "$FAKE"
 assert_eq "$(readlink "$UNIX/libMoltenVK.real.dylib")" "libMoltenVK-1.4.2.dylib" \
-  "apply 1.4.2 must point .real at versioned dylib"
-cyder_apply_moltenvk_variant "$FAKE" "1.4.2"
-assert_eq "$(readlink "$UNIX/libMoltenVK.real.dylib")" "libMoltenVK-1.4.2.dylib" \
-  "apply twice must stay stable"
-cyder_apply_moltenvk_variant "$FAKE" "1.2.10"
-assert_eq "$(readlink "$UNIX/libMoltenVK.real.dylib")" "libMoltenVK-1.2.10.dylib" \
-  "switching preference must retarget .real"
-
+  "ensure must repair a dangling link to the removed 1.2.10 real"
+# The selection CLI and functions are gone.
+if declare -F cyder_resolve_moltenvk_variant cyder_default_moltenvk_variant_preference >/dev/null 2>&1; then
+  echo "ASSERT failed: MoltenVK variant selection must be removed" >&2; exit 1
+fi
 CYDER_MOCK_MACOS=11.0
-cyder_apply_moltenvk_variant "$FAKE" "1.4.2"
-assert_eq "$(readlink "$UNIX/libMoltenVK.real.dylib")" "libMoltenVK-1.2.10.dylib" \
-  "macOS 11 selection alone is not proof of loadability"
 
-# Soft apply on engines without dual layout must succeed.
+# Soft ensure on engines without the versioned layout must succeed.
 SINGLE="$(mktemp -d "${TMPDIR:-/tmp}/cyder-mvk-single.XXXXXX")"
 mkdir -p "$SINGLE/lib/wine/x86_64-unix"
 : >"$SINGLE/lib/wine/x86_64-unix/libMoltenVK.dylib"
-assert cyder_apply_moltenvk_variant_if_present "$SINGLE" "1.4.2"
+assert cyder_ensure_moltenvk_real "$SINGLE"
+assert cyder_ensure_moltenvk_real "$SINGLE/missing"
 rm -rf "$SINGLE"
 
 # Real Mach-O fixtures: do not mistake a version/name for loadability.
 build_real "$UNIX/libMoltenVK.dylib" 10.15
 build_real "$UNIX/libMoltenVK-1.4.2.dylib" 12.0
-build_real "$UNIX/libMoltenVK-1.2.10.dylib" 12.0
-ln -sfn libMoltenVK-1.2.10.dylib "$UNIX/libMoltenVK.real.dylib"
+ln -sfn libMoltenVK-1.4.2.dylib "$UNIX/libMoltenVK.real.dylib"
 for host in 10.15 11.0 11.7.10; do
   CYDER_MOCK_MACOS="$host"
   if cyder_validate_moltenvk_for_backend "$FAKE" dxvk 2> "$FAKE/error"; then
@@ -91,15 +89,12 @@ for host in 10.15 11.0 11.7.10; do
 done
 for host in 12.0 13.0; do
   CYDER_MOCK_MACOS="$host"
-  for variant in 1.4.2 1.2.10; do
-    assert_eq "$(cyder_resolve_moltenvk_variant "$variant")" "$variant" '12+ respects preference'
-    ln -sfn "libMoltenVK-$variant.dylib" "$UNIX/libMoltenVK.real.dylib"
-    assert cyder_validate_moltenvk_for_backend "$FAKE" dxvk
-  done
+  assert cyder_validate_moltenvk_for_backend "$FAKE" dxvk
 done
-# Legacy real and single-dylib engine remain usable on 10.15/11.
-build_real "$UNIX/libMoltenVK-1.2.10.dylib" 10.15
-ln -sfn libMoltenVK-1.2.10.dylib "$UNIX/libMoltenVK.real.dylib"
+# The gate reads the actual floor: a real built for 10.15 passes on 10.15/11,
+# and a single-dylib engine remains usable.
+build_real "$FAKE/low-real.dylib" 10.15
+ln -sfn ../../../low-real.dylib "$UNIX/libMoltenVK.real.dylib"
 for host in 10.15 11.0; do
   CYDER_MOCK_MACOS="$host"
   assert cyder_validate_moltenvk_for_backend "$FAKE" dxvk
@@ -108,7 +103,7 @@ rm "$UNIX/libMoltenVK.real.dylib"
 assert cyder_validate_moltenvk_for_backend "$FAKE" dxvk
 # Real re-export shim must not hide a missing dependency behind its 10.15 floor.
 cp "$UNIX/libMoltenVK.dylib" "$FAKE/single.dylib"
-ln -s libMoltenVK-1.2.10.dylib "$UNIX/libMoltenVK.real.dylib"
+ln -s ../../../low-real.dylib "$UNIX/libMoltenVK.real.dylib"
 "$CLANG" -arch x86_64 -isysroot "$sdk" -mmacosx-version-min=10.15 \
   -dynamiclib "$FAKE/probe.c" -Wl,-reexport_library,"$UNIX/libMoltenVK.real.dylib" \
   -o "$UNIX/libMoltenVK.dylib"
@@ -176,30 +171,25 @@ assert_contains "$(cat "$FAKE/error")" 'DXVK/Vulkan blocked' 'launch surfaces co
 
 common="$(cat "$ROOT/scripts/cyder-common.sh")"
 launcher="$(cat "$ROOT/scripts/cyder_launcher.sh")"
-assert_contains "$common" 'cyder_apply_moltenvk_variant' \
-  "common.sh must call MoltenVK variant apply"
-assert_contains "$(cat "$ROOT/scripts/cyder-common.sh")" 'cyder-moltenvk-variant.sh' \
-  "common.sh must source moltenvk variant helper"
-# Settings reads are side-effect free; explicit launch/maintenance hooks apply.
-if ! grep -Fq 'cyder_apply_moltenvk' <<<"$launcher$common"; then
-  echo "ASSERT failed: launcher path must apply MoltenVK variant" >&2
-  exit 1
-fi
+assert_contains "$common" 'cyder_ensure_moltenvk_real' \
+  "common.sh must repair the MoltenVK real link"
+assert_contains "$common" 'cyder-moltenvk-variant.sh' \
+  "common.sh must source the MoltenVK helper"
+assert_contains "$launcher" 'cyder_ensure_moltenvk_real' \
+  "launcher path must repair the MoltenVK real link"
+assert_not_contains "$common" 'moltenvkVariant' \
+  "the retired moltenvkVariant setting must not be read"
 
 settings="$(cat "$ROOT/scripts/cyder_settings.swift")"
-assert_contains "$settings" 'moltenvkVariant' "settings must store moltenvkVariant"
+assert_not_contains "$settings" 'var moltenvkVariant' "settings must not store a MoltenVK variant"
+assert_not_contains "$settings" 'CYDER_MOLTENVK_VARIANT_PREFERENCE": value' \
+  "settings must not export a MoltenVK variant"
+assert_contains "$settings" 'enum CyderMoltenvk' "launch scope must still detect a residual 1.2.10 link"
 assert_contains "$settings" 'schemaVersion = 14' "settings schema must be current"
-assert_contains "$settings" 'var menuTitle: String { rawValue }' \
-  "MoltenVK menu titles must be version numbers only"
-assert_not_contains "$settings" 'MoltenVK 1.4.2' \
-  "MoltenVK menu must not prefix titles with MoltenVK"
 
 ui="$(cat "$ROOT/scripts/cyder_settings_ui.swift")"
-assert_contains "$ui" 'moltenvkVariant' "settings UI must expose MoltenVK variant"
-assert_contains "$ui" 'showMoltenvk = backend.usesDxvkTranslation' \
-  "MoltenVK picker must only show when graphics backend is DXVK"
-assert_contains "$ui" 'moltenvkVariant.isHidden = !showMoltenvk' \
-  "MoltenVK picker visibility must follow DXVK selection"
+assert_not_contains "$ui" 'moltenvkVariant' "settings UI must not offer a MoltenVK version"
+assert_not_contains "$ui" '1.2.10' "settings UI must not mention MoltenVK 1.2.10"
 
 assert test ! -e "$FAKE/devtool-used"
 echo "PASS test-cyder-moltenvk-variant"

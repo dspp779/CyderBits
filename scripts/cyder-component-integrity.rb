@@ -267,7 +267,7 @@ module CyderIntegrity
             raise Unknown, 'invalid_link' if target.match(/[\x00-\x1f]/)
             row = {'path' => relative, 'kind' => 'symlink', 'target' => target, 'critical' => critical?(relative)}
             if component == 'engine' && relative == 'lib/wine/x86_64-unix/libMoltenVK.real.dylib'
-              row['allowedTargets'] = ['libMoltenVK-1.4.2.dylib', 'libMoltenVK-1.2.10.dylib']
+              row['allowedTargets'] = ['libMoltenVK-1.4.2.dylib']
             end
             rows << row
           elsif type == '1'
