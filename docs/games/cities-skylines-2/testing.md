@@ -18,8 +18,10 @@ and background: [support assessment](../cities-skylines-2-support-assessment.zh-
   GPU Family Mac 1, macOS 15.8) DXMT aborts at the first render pipeline
   (`failed assertion … No valid pixelFormats set`, Cyder shows `CYD-WIN-002`),
   and DXVK cannot create the game's 3D textures, then reports
-  `VK_ERROR_DEVICE_LOST` on a black screen. Check the GPU family first
-  (`MTLDevice supportsFamily:`); MoltenVK also prints it in the launch log.
+  `VK_ERROR_DEVICE_LOST` on a black screen. Since 0.15.0 Cyder checks the
+  family before Wine starts and shows `CYD-GFX-002` on such a GPU; check it
+  yourself with `Cyder.app/Contents/MacOS/CyderSwift --metal-gpu-family`
+  (`mac2`, `mac1` or `none`). MoltenVK also prints it in the launch log.
 
 ## Start the game
 

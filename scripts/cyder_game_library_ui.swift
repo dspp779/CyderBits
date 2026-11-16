@@ -1537,7 +1537,7 @@ final class CyderGameSettingsWindowController: NSWindowController, NSWindowDeleg
         if !supportsDxmtOS {
             item.toolTip = "需要 macOS 15+"
         } else if !presentation.hasDxmt {
-            item.toolTip = "需要已安裝的 DXMT 圖形元件"
+            item.toolTip = "需要支援 DXMT 的 GPU（Metal GPU Family Mac 2）與已安裝的 DXMT 圖形元件"
         } else {
             item.toolTip = nil
         }

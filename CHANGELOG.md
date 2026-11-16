@@ -13,6 +13,9 @@ release notes in [`docs/releases/`](docs/releases/); the engine column refers to
   "MapleStory WZ 檔案讀取最佳化", on by default.
 
 ### Changed
+- DXMT is used only on a GPU with Metal GPU Family Mac 2. On older Intel GPUs MapleStory
+  falls back to DXVK, the DXMT setting is disabled, and Cities: Skylines II stops before
+  launch with `CYD-GFX-002` instead of crashing.
 - Engine `CX26.3.0-W11-Cyder014`: minOS-safe build (engine #14), wineserver no longer
   crashes when a program is killed (engine #16), Unity Mono last error fix (engine #17).
 

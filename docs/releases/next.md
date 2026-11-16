@@ -21,7 +21,7 @@
 
 | 項目 | 內容 | 目前狀態 | 驗收 |
 |---|---|---|---|
-| B1 | 不以高於 minOS 下限的函式建置 engine（`pipe2`、`strchrnul`、`pcap_init`），打包時檢查 weak import（[engine PR #14](https://github.com/dspp779/cyder-wine-engine/pull/14)） | 程式與離線測試完成；待在 macOS 27／Xcode 27 建置機重建。2026-11-16 macOS 15.8（iMac12,2）：Cyder013 曾在此機 `wineboot -u` Segmentation fault（`CYD-WINEBOOT-SIGNAL`，11-14）；Cyder014 的 `wineboot -u` 與新建環境 `wineboot -i` 皆成功；已安裝 engine 無 `_pipe2`／`_strchrnul`／`_pcap_init` 匯入、無 `ntdll.so.pre-qdo` | `nm -m` 無 `_pipe2`／`_strchrnul`；兩道打包檢查通過；封存不含 `ntdll.so.pre-qdo`；macOS 15.8 bottle 更新（`wineboot -u`）成功 |
+| B1 | 不以高於 minOS 下限的函式建置 engine（`pipe2`、`strchrnul`、`pcap_init`），打包時檢查 weak import（[engine PR #14](https://github.com/dspp779/cyder-wine-engine/pull/14)） | 程式與離線測試完成。2026-11-16 建置機（macOS 27.2.1／Xcode 27.2）重建 Cyder014：封存內所有 Mach-O 以 `nm -m` 檢查，無 `_pipe2`／`_strchrnul`；`_pcap_init` 只以 weak 匯入出現在 `wpcap.so`，並列在 `weak-import-allowlist.tsv`（macOS 12.1 起才呼叫）；兩道打包檢查（minOS、weak import）通過；封存不含 `ntdll.so.pre-qdo`。macOS 15.8（iMac12,2）：Cyder013 曾在此機 `wineboot -u` Segmentation fault（`CYD-WINEBOOT-SIGNAL`，11-14）；Cyder014 的 `wineboot -u` 與新建環境 `wineboot -i` 皆成功；已安裝 engine 無 `_pipe2`／`_strchrnul`／`_pcap_init` 匯入、無 `ntdll.so.pre-qdo` | `nm -m` 無 `_pipe2`／`_strchrnul`；兩道打包檢查通過；封存不含 `ntdll.so.pre-qdo`；macOS 15.8 bottle 更新（`wineboot -u`）成功 |
 | B2 | 程式被 signal 結束時 wineserver 不再當掉（[engine #15](https://github.com/dspp779/cyder-wine-engine/issues/15)／[PR #16](https://github.com/dspp779/cyder-wine-engine/pull/16)） | Apple Silicon 上修正版 SIGTERM 3/3、SIGKILL 1/1 未當掉。2026-11-16 Intel／macOS 15.8（Cyder014，獨立 prefix、`winver.exe`）：SIGTERM 3/3、SIGKILL 2/2 未當掉，`wineserver -k` 結束碼 0；此機沒有 Cyder013 可做對照。強制結束真實遊戲未測 | Intel／macOS 15.8 重測；強制結束一款真實遊戲後 server 與 Cyder 啟動流程正常收尾 |
 | B3 | [#23](https://github.com/dspp779/CyderBits/issues/23)：MacBook Neo（A18 Pro）／macOS 26.6 的 `wineboot` Segmentation fault | 推測與 B1 同因（macOS 26 沒有 `pipe2`），未確認 | 以 Cyder014 在 macOS 26 建立環境成功，或請回報者驗證 |
 | B4 | engine 標籤升為 Cyder014、打包並匯入 CyderBits | 2026-11-16：engine `claude/cyder014`（main + #14、#16、read-ahead、MoltenVK 1.4.2 only）以 Developer ID 打包並匯入；`CX26.3.0-W11-Cyder014`，archive SHA-256 `c2504eeb4e8eb0f8fa30f383c0af73963690679ebcbfb891cf5cc7a4ca243258`，ntdll SHA-256 `d9de819e36ab2adbfb5ea234037ba08e4e5a856a6cd65c302aa7ffc84f541a8a`。未打 tag、未推送 | 依 `cyder-release` 流程；記錄 engine 版本與 ntdll SHA-256 |
@@ -35,6 +35,7 @@
 |---|---|---|---|
 | C1 | Steam 在目前 engine 上從登入、遊戲庫、下載到啟動遊戲 | 2026-11-15：圖形為 WineD3D 時可登入並下載 CS2；全域圖形選 DXVK 時不出現視窗（[說明](../games/steam/README.md)），不修改程式 | 登入、商店／遊戲庫畫面、下載、啟動一款遊戲、退出，逐步記錄 |
 | C2 | CS2 第一階段：CompatDB 規則（`Cities2.exe` 使用 DXMT）與使用指引（不經 Paradox Launcher、Steam 保持背景登入、遊戲內用 Fullscreen Window） | 2026-11-16：規則已啟用並有測試（圖形「預設」以外的選擇優先）；[使用指引](../games/cities-skylines-2/README.md) 完成 | 規則有測試；指引文件完成；不修改遊戲檔案 |
+| C4 | 選 DXMT 前檢查 GPU（至少 Metal GPU Family Mac 2） | 2026-11-16：`CyderSwift --metal-gpu-family` 回報預設 GPU 的 family，launcher 的 `cyder_dxmt_launch_allowed` 一併檢查。GPU Family Mac 1 時：新楓之谷自動選擇改用 DXVK；使用者選 DXMT 改回預設並記錄原因；設定介面的 DXMT 選項停用；CompatDB 只能用 DXMT 的遊戲（目前只有 `Cities2.exe`）在啟動 Wine 前停止，顯示 `CYD-GFX-002`。使用者自選其他圖形時照設定執行。無法取得 GPU 資訊時維持原本行為。測試：`tests/test-cyder-dxmt-gpu-gate.sh`。舊款 Intel Mac 實機未測 | Mac 1 GPU 上 CS2 顯示 `CYD-GFX-002`、新楓之谷預設以 DXVK 啟動；Apple Silicon 行為不變 |
 | C3 | CS2 第二階段：不修改遊戲檔案的實測 | 2026-11-15：DXMT 正常初始化，但遊戲在檔案列舉 `IOException` 後卡在黑畫面，未進主選單；Cyder011 與 CrossOver 26.3 官方 engine 相同。engine 修正 Mono last error（engine `claude/mono-gs-lasterror`）後，**未修改的遊戲**設定 SteamAppId 即到達主選單（[紀錄](../games/cities-skylines-2-support-assessment.zh-TW.md)）。修正需隨 Cyder014 出貨。遊玩測試：新遊戲、存檔、重開讀檔、3 分鐘執行、正常退出皆通過；建造與 Mods 未測。圖形後端：只有 DXMT 可玩（D3DMetal 城市全黑、DXVK 停在主選單）。launcher 從 Steam 的 `appmanifest` 取得直接啟動遊戲的 Steam App ID | 進主選單、新建城市、存讀檔、遊玩 20 分鐘、退出；記錄是否需要遊戲 DLL 修補 |
 
 不納入：CS2 遊戲 DLL 修補工具（第三階段）。未通過 C3 前，不宣稱 CS2 可玩。
@@ -54,7 +55,7 @@
 
 待決定（0.15.0）：
 
-- **DXMT 未檢查 GPU。** `cyder_dxmt_launch_allowed` 只看 macOS 15+ 與 engine 的 DXMT 檔案，因此 GPU Family Mac 1 的 Intel Mac 在 macOS 15+ 會被 CS2 規則與新楓之谷的自動選擇指定 DXMT。CS2 已確認因此失敗；新楓之谷在此機有既有的 DXVK 每遊戲設定，自動選擇的 DXMT 路徑未實測。建議在選 DXMT 前檢查 GPU（至少 GPU Family Mac 2），不支援時新楓之谷改用 DXVK、CS2 顯示明確的「此 Mac 的 GPU 不支援」訊息。
+- ~~**DXMT 未檢查 GPU。**~~ 已依建議處理，見 C4：GPU Family Mac 1 時新楓之谷改用 DXVK、CS2 顯示 `CYD-GFX-002`。
 - CS2 使用指引的需求寫明需要 Apple Silicon（本次只證實 GPU Family Mac 1 不可用；其他 Intel GPU 未測）。
 
 未測：A5、A11 的幀時間（該機沒有 Xcode，無法使用 Instruments）、#7 舊款 Intel 內顯、強制結束真實遊戲（B2）、新楓之谷在此機以 DXMT 啟動。該機的 Command Line Tools Swift 損壞（`redefinition of module 'SwiftBridging'`），完整測試中所有需編譯 Swift 的項目失敗，沒有有效的完整測試結果。

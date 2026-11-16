@@ -10,6 +10,7 @@ Cyder 不修改遊戲檔案，也不替你啟動 Steam 或略過任何登入。�
 | 項目 | 說明 |
 |---|---|
 | macOS | 15 以上（CS2 只能使用 DXMT 圖形，DXMT 需要 macOS 15） |
+| GPU | 支援 Metal GPU Family Mac 2（Apple Silicon 可用）。不支援時 Cyder 會在啟動前停止並顯示 `CYD-GFX-002` |
 | Cyder | 0.15.0 以上；較舊的 Windows 引擎會在啟動時出現 `IOException` 並停在黑畫面 |
 | Steam | Windows 版 Steam，安裝在 Cyder 的 Windows 環境中，並已登入、擁有 CS2 |
 
@@ -41,7 +42,7 @@ Cyder 不修改遊戲檔案，也不替你啟動 Steam 或略過任何登入。�
 
 - Paradox Launcher 與 Steam「開始遊戲」按鈕無法使用，請直接開啟 `Cities2.exe`。
 - 只有 DXMT 圖形可用，因此需要 macOS 15 以上。
-- 舊款 Intel Mac 目前無法執行：在 GTX 780M（OpenCore Legacy Patcher，macOS 15.8）上，DXMT 會在建立圖形時結束，DXVK 會在載入時黑畫面。其他 Intel GPU 尚未測試；目前請使用 Apple Silicon Mac。
+- 舊款 Intel Mac 目前無法執行：在 GTX 780M（OpenCore Legacy Patcher，macOS 15.8）上，DXMT 會在建立圖形時結束，DXVK 會在載入時黑畫面。這類 GPU 不支援 DXMT，Cyder 0.15.0 起會直接顯示 `CYD-GFX-002`，不再停在通用錯誤。其他 Intel GPU 尚未測試；目前請使用 Apple Silicon Mac。
 - Paradox Mods、長時間遊玩與設定保存尚未驗證；遇到問題請在 [#10](https://github.com/dspp779/CyderBits/issues/10) 回報，並附上 Cyder 的遊戲記錄（請勿公開 Steam ID）。
 
 開發者測試步驟見 [testing.md](testing.md)，技術背景見 [支援可行性與驗收方案](../cities-skylines-2-support-assessment.zh-TW.md)。

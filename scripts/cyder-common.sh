@@ -2549,7 +2549,7 @@ cyder_game_environment_key_is_allowed() {
     WINEPREFIX|WINESERVER|WINEARCH|WINEDEBUG|CX_ROOT|CX_BOTTLE|CX_APPLEGPTK_LIBD3DSHARED_PATH) return 1 ;;
     CYDER_SUPPORT|CYDER_RUNTIME_ROOT|CYDER_ENGINES|CYDER_ENGINE_NAME|CYDER_ENGINE_SRC|CYDER_SCRIPTS|CYDER_APP|CYDER_MAPLESTORY_FILE_CACHE|CYDER_MAPLESTORY_FILE_CACHE_PREFERENCE|CYDER_MAPLESTORY_READAHEAD) return 1 ;;
     CYDER_WINE_*|CYDER_SESSION_*|CYDER_DIAGNOSTIC_*|CYDER_TEST_*|CYDER_EXECUTION_*|CYDER_RESULT_FILE|CYDER_PROGRESS_FILE) return 1 ;;
-    CYDER_GPTK_ROOT|CYDER_GRAPHICS_*|CYDER_CNC_*|CYDER_GAME_ARGUMENTS|CYDER_MOLTENVK_VARIANT_PREFERENCE) return 1 ;;
+    CYDER_GPTK_ROOT|CYDER_GRAPHICS_*|CYDER_CNC_*|CYDER_GAME_ARGUMENTS|CYDER_MOLTENVK_VARIANT_PREFERENCE|_CYDER_*) return 1 ;;
   esac
   return 0
 }
@@ -2586,11 +2586,60 @@ cyder_dxvk_launch_allowed() {
   cyder_engine_has_dxvk_payload "$engine_root"
 }
 
+# Metal GPU family of the default device: mac2, mac1, none, or unknown when
+# the CyderSwift helper is unavailable (scripts run outside Cyder.app, tests).
+# Asked once per launcher process.
+cyder_metal_gpu_family() {
+  if [[ -z "${_CYDER_METAL_GPU_FAMILY:-}" ]]; then
+    local helper="${CYDER_ENVIRONMENT_HELPER:-}" family=""
+    if [[ -x "$helper" ]]; then
+      family="$(/usr/bin/perl -e 'alarm 5; exec @ARGV; exit 75' -- "$helper" --metal-gpu-family 2>/dev/null || true)"
+    fi
+    case "$family" in
+      mac2|mac1|none) _CYDER_METAL_GPU_FAMILY="$family" ;;
+      *) _CYDER_METAL_GPU_FAMILY=unknown ;;
+    esac
+  fi
+  printf '%s\n' "$_CYDER_METAL_GPU_FAMILY"
+}
+
+# DXMT needs Metal GPU Family Mac 2. A Mac 1 GPU (older Intel Macs, e.g. a
+# Kepler GTX 780M under OpenCore) aborts in Metal ("No valid pixelFormats
+# set") when DXMT creates its first pipeline. Unknown keeps the old behaviour.
+cyder_host_gpu_supports_dxmt() {
+  case "$(cyder_metal_gpu_family)" in
+    mac1|none) return 1 ;;
+  esac
+  return 0
+}
+
 cyder_dxmt_launch_allowed() {
   local engine_root="$1"
   declare -F cyder_macos_at_least >/dev/null 2>&1 \
     && cyder_macos_at_least 15 0 \
+    && cyder_host_gpu_supports_dxmt \
     && cyder_engine_has_dxmt_payload "$engine_root"
+}
+
+# Executables whose CompatDB rule selects DXMT inside the engine while the
+# graphics setting is "default" (compatdb/rules/games.yml; a test keeps the
+# two lists equal). No other backend runs them, so a GPU without DXMT
+# support is refused before Wine starts instead of aborting in Metal.
+cyder_compatdb_dxmt_only_executable() {
+  case "$(printf '%s' "${1##*[/\\]}" | tr '[:upper:]' '[:lower:]')" in
+    cities2.exe) return 0 ;;
+  esac
+  return 1
+}
+
+cyder_refuse_unsupported_dxmt_gpu() {
+  local exe="$1"
+  [[ -z "${CYDER_GRAPHICS_BACKEND:-}" ]] || return 0
+  cyder_compatdb_dxmt_only_executable "$exe" || return 0
+  declare -F cyder_macos_at_least >/dev/null 2>&1 && cyder_macos_at_least 15 0 || return 0
+  cyder_host_gpu_supports_dxmt && return 0
+  echo "CYD-GFX-002：${exe##*[/\\]} 只能使用 DXMT 圖形，這台 Mac 的 GPU 不支援 DXMT（需要 Metal GPU Family Mac 2）。尚未啟動遊戲。" >&2
+  return 1
 }
 
 cyder_d3dmetal_launch_allowed() {
@@ -2663,7 +2712,7 @@ cyder_apply_graphics_preference() {
         export CYDER_GRAPHICS_AUTO_POLICY=0
         export CYDER_GRAPHICS_BACKEND=dxmt CX_GRAPHICS_BACKEND=dxmt
       else
-        echo "DXMT is unavailable (requires macOS 15+ and engine lib/dxmt); using default graphics backend." >&2
+        echo "DXMT is unavailable (requires macOS 15+, a Metal GPU Family Mac 2 GPU and engine lib/dxmt); using default graphics backend." >&2
         export CYDER_GRAPHICS_PREFERENCE=default
         export CYDER_GRAPHICS_AUTO_POLICY=0
         unset CYDER_GRAPHICS_BACKEND CX_GRAPHICS_BACKEND
@@ -3067,6 +3116,7 @@ cyder_prepare_game_launch_settings() {
   cyder_load_game_settings "$exe" "$engine_root" || return $?
   cyder_apply_maplestory_wz_cache "$exe"
   cyder_resolve_effective_graphics_backend "$engine_root" "$exe"
+  cyder_refuse_unsupported_dxmt_gpu "$exe" || return $?
   cyder_prepare_cnc_game "$exe" "$prefix" "$engine_root" || return $?
   # The legacy Perl frontend can replace process-only overrides by reloading
   # cxbottle.conf. Never edit the shared bottle to force a private profile.

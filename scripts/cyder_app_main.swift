@@ -2099,6 +2099,11 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
                 // belongs to the release callback. The final phase is skipped.
                 snapshotOwnedByExecutor = true
                 if prepared.isUnconfirmed { retainTransport = true; return .unconfirmed }
+                if prepared.outputTail.contains("CYD-GFX-002") {
+                    return .failure(self.failure(code: "CYD-GFX-002", stage: .wineSpawn,
+                        summary: "這個遊戲只能使用 DXMT 圖形，這台 Mac 的 GPU 不支援 DXMT（需要 Metal GPU Family Mac 2，例如 Apple Silicon）。尚未啟動遊戲。",
+                        result: prepared))
+                }
                 return .failure(self.failure(code: "CYD-WIN-001", stage: .wineSpawn,
                     summary: "啟動前準備未完成；尚未啟動 Windows 程式。", result: prepared))
             }
@@ -3322,6 +3327,9 @@ struct CyderMain {
                 FileHandle.standardError.write(Data("\(error.localizedDescription)\n".utf8))
                 exit(1)
             }
+        }
+        if CommandLine.arguments.dropFirst().first == "--metal-gpu-family" {
+            exit(CyderMetalGPU.run(arguments: CommandLine.arguments))
         }
         if CommandLine.arguments.dropFirst().first == "--runtime-users" {
             exit(CyderRuntimeUsers.run(arguments: CommandLine.arguments))

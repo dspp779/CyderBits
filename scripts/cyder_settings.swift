@@ -1,4 +1,5 @@
 import Foundation
+import Metal
 import CoreText
 import Darwin
 
@@ -272,9 +273,15 @@ struct CyderGraphicsCapabilities: Equatable {
         return CyderGraphicsCapabilities(
             hasD3DMetal: osOK && hasGptk,
             hasDxvk: hasDxvkPayload(engineRoot: engineRoot),
-            hasDxmt: hasDxmtPayload(engineRoot: engineRoot)
+            hasDxmt: hostGPUSupportsDxmt && hasDxmtPayload(engineRoot: engineRoot)
         )
     }
+
+    /// DXMT needs Metal GPU Family Mac 2; older Intel GPUs (Mac 1) abort in
+    /// Metal when DXMT builds its first pipeline. Matches the launcher gate
+    /// (`CyderSwift --metal-gpu-family`, cyder_host_gpu_supports_dxmt).
+    static let hostGPUSupportsDxmt: Bool =
+        MTLCreateSystemDefaultDevice()?.supportsFamily(.mac2) ?? false
 
     static func hasDxvkPayload(engineRoot: URL?) -> Bool {
         let root: URL?

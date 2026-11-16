@@ -338,6 +338,7 @@ SWIFT_SOURCES=(
   "$SCRIPT_DIR/cyder_lifecycle.swift"
   "$SCRIPT_DIR/cyder_environment_probe.swift"
   "$SCRIPT_DIR/cyder_environment_command.swift"
+  "$SCRIPT_DIR/cyder_metal_gpu.swift"
   "$SCRIPT_DIR/cyder_bottle_recovery.swift"
   "$SCRIPT_DIR/cyder_process_evidence.swift"
   "$SCRIPT_DIR/cyder_environment_monitor.swift"
