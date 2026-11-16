@@ -95,6 +95,36 @@ cs2_opted_out="$(
 assert_eq "$cs2_opted_out" '<>' \
   "CYDER_STEAM_COMPAT=0 should also turn off the Steam app ID"
 
+# Run-time lookup from Steam's appmanifest, in a fake Steam library.
+STEAM_TMP="$(mktemp -d "${TMPDIR:-/tmp}/cyder-steam-appid.XXXXXX")"
+trap 'rm -rf "$STEAM_TMP"' EXIT
+apps="$STEAM_TMP/Program Files (x86)/Steam/steamapps"
+mkdir -p "$apps/common/Some Game/bin/x64" "$apps/common/No Manifest" "$apps/common/Cities Skylines II"
+printf '"AppState"\n{\n\t"appid"\t\t"4242"\n\t"name"\t\t"Some Game"\n\t"installdir"\t\t"Some Game"\n\t"SharedDepots"\n\t{\n\t\t"228989"\t\t"228980"\n\t}\n}\n' \
+  > "$apps/appmanifest_4242.acf"
+printf '"AppState"\n{\n\t"appid"\t\t"777"\n\t"installdir"\t\t"Other Game"\n}\n' > "$apps/appmanifest_777.acf"
+
+lookup() {
+  env -u SteamAppId -u SteamGameId -u SteamOverlayGameId bash -c '
+    source "$1/scripts/cyder-common.sh"
+    cyder_apply_steam_game_environment "$2"
+    printf "<%s|%s|%s>" "${SteamAppId:-}" "${SteamGameId:-}" "${SteamOverlayGameId:-}"
+  ' _ "$ROOT" "$1"
+}
+assert_eq "$(lookup "$apps/common/Some Game/bin/x64/game.exe")" '<4242|4242|4242>' \
+  "a Steam game in a subfolder should get the app ID from its appmanifest"
+assert_eq "$(lookup "$apps/common/some game/Launcher.exe")" '<4242|4242|4242>' \
+  "the installdir match should ignore case"
+assert_eq "$(lookup "$apps/common/No Manifest/game.exe")" '<||>' \
+  "a folder with no matching appmanifest should get no app ID"
+assert_eq "$(lookup "$apps/common/Cities Skylines II/Cities2.exe")" '<949230|949230|949230>' \
+  "Cities2.exe should fall back to its known app ID without a manifest"
+assert_eq "$(lookup "$STEAM_TMP/Program Files (x86)/Steam/steam.exe")" '<||>' \
+  "programs outside steamapps/common should get no app ID"
+printf '"AppState"\n{\n\t"appid"\t\t"1"\n\t"installdir"\t\t"Cities Skylines II"\n}\n' > "$apps/appmanifest_1.acf"
+assert_eq "$(lookup "$apps/common/Cities Skylines II/Cities2.exe")" '<1|1|1>' \
+  "the appmanifest should win over the built-in table"
+
 common="$(cat "$ROOT/scripts/cyder-common.sh")"
 assert_contains "$common" 'cyder_apply_steam_game_environment "$exe"' \
   "the Bash Wine launch path should apply the Steam game environment"

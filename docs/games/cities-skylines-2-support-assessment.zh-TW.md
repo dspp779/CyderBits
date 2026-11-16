@@ -207,6 +207,20 @@ engine 分支 `claude/mono-gs-lasterror`，`patches/cyder-ntdll-mono-gs-last-err
 
 操作注意：遊戲 UI 常忽略游標剛移入就按下的點擊；先送一個按鍵再點、或可重複時點兩次即可；`Return` 可觸發預設按鈕。
 
+## 2026-11-16 圖形後端比較
+
+同上環境（修正後的測試 engine、Steam 同 engine 已登入）；只換 `Cities2.exe` 的圖形後端，Steam 本身不用 DXVK。
+
+| 後端 | 主選單 | 進入城市（繼續遊戲） |
+|---|---|---|
+| DXMT 0.80 | 正常 | 正常；exclusive fullscreen 下切到 Finder 再切回，畫面仍正確 |
+| D3DMetal（GPTK 4.0 beta 3） | 正常 | 地形、水面與建築全黑，只看得到 UI 與道路線；視窗與 exclusive fullscreen 都一樣，切換視窗前就已是黑的 |
+| DXVK 1.10.3 + MoltenVK | 3D 背景會畫，虛擬材質快取建立時通知面板有破圖；UI 點擊無反應 | 無法進入 |
+
+結論：目前只有 DXMT 可玩。D3DMetal 黑畫面是獨立的繪圖問題，與切換視窗無關。
+
+未測：真正的 Cmd-Tab 按鍵（只以程式切換前景 App 一次）、最小化、Mission Control；Issue 回報的 exclusive fullscreen 切換後凍結未重現。
+
 ## 遊戲修補判斷與前置條件
 
 以 [2026-10 修補清單](https://github.com/macgameport/cities-skylines-2-macos/blob/main/docs/patch-inventory.md) 為準，1.6.2f1／Steam build 25127643 的十項為 cohtml、colossal_io、longfile、asset_database、fshandle，以及 PDX.SDK 的 mkparent、lockbypass、longdelete、createfile、lockleak。它們跨 native plugin、Colossal.IO、AssetDatabase、mscorlib 與 PDX.SDK；不能沿用 Issue 中「4 個核心 DLL」的簡化描述或舊偏移量。

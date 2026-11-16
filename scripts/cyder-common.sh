@@ -2836,9 +2836,49 @@ cyder_apply_steam_compatibility_arguments() {
 # the running Steam client when it knows its app ID.  Without it, Cities:
 # Skylines II stops at "platform service integration failed".  Values the user
 # set (for example in the game's own environment settings) are kept.
+#
+# The app ID comes from Steam's own install record: for a program under
+# .../steamapps/common/<folder>/, the steamapps/appmanifest_*.acf whose
+# "installdir" is <folder> holds its "appid".  The table below is only a
+# fallback for games whose manifest is missing (copied or moved installs).
 # Prints the app ID, or nothing.  Always succeeds: a non-zero status inside
 # $(...) would trip the launcher's ERR trap and log a false error.
+cyder_steam_app_id_from_manifest() {
+  local dir parent folder="" steamapps="" manifest app_id
+  dir="$(dirname "$1")"
+  while [[ -n "$dir" && "$dir" != / && "$dir" != . ]]; do
+    parent="$(dirname "$dir")"
+    if [[ "$(basename "$parent" | tr '[:upper:]' '[:lower:]')" == common && \
+          "$(basename "$(dirname "$parent")" | tr '[:upper:]' '[:lower:]')" == steamapps ]]; then
+      folder="$(basename "$dir")"
+      steamapps="$(dirname "$parent")"
+      break
+    fi
+    dir="$parent"
+  done
+  [[ -n "$folder" ]] || return 0
+  for manifest in "$steamapps"/appmanifest_*.acf; do
+    [[ -f "$manifest" ]] || continue
+    app_id="$(awk -F'"' -v want="$folder" '
+      tolower($2) == "appid" && id == "" { id = $4 }
+      tolower($2) == "installdir" && dir == "" { dir = $4 }
+      END { if (tolower(dir) == tolower(want) && id ~ /^[0-9]+$/) print id }
+    ' "$manifest" 2>/dev/null || true)"
+    if [[ -n "$app_id" ]]; then
+      echo "$app_id"
+      return 0
+    fi
+  done
+  return 0
+}
+
 cyder_steam_app_id_for_executable() {
+  local app_id
+  app_id="$(cyder_steam_app_id_from_manifest "$1")"
+  if [[ -n "$app_id" ]]; then
+    echo "$app_id"
+    return 0
+  fi
   case "$(basename "$1" | tr '[:upper:]' '[:lower:]')" in
     cities2.exe) echo 949230 ;;
   esac

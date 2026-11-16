@@ -10,14 +10,17 @@ and background: [support assessment](../cities-skylines-2-support-assessment.zh-
 - Windows Steam in the same bottle and engine, logged in, global graphics
   **not** DXVK (Steam then shows no window; see [Steam](../steam/README.md)).
 - Game graphics DXMT (per-game setting, or `CYDER_GRAPHICS_BACKEND=dxmt` for a
-  direct Wine run).
+  direct Wine run). D3DMetal (GPTK 4.0 beta 3) draws the city world black;
+  DXVK 1.10.3 stays on the main menu with an unresponsive UI.
 
 ## Start the game
 
 Start `Cities2.exe` directly, not with Steam's Play button (that installs and
 runs the Paradox Launcher). The Cyder launcher sets
-`SteamAppId`/`SteamGameId`/`SteamOverlayGameId=949230`; for a direct Wine run,
-set them yourself. Without them the game logs
+`SteamAppId`/`SteamGameId`/`SteamOverlayGameId` for any program under
+`steamapps/common/<folder>/`, from the `steamapps/appmanifest_*.acf` whose
+`installdir` is `<folder>` (949230 for CS2; built-in fallback when the manifest
+is missing). For a direct Wine run, set them yourself. Without them the game logs
 `platform service integration failed` and then throws `NullReferenceException`.
 `steam_appid.txt` is not needed.
 
