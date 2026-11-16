@@ -52,7 +52,8 @@ result, because packers reuse what is already on disk:
    confirm the archive is new. A reused archive silently ships the old DXVK.
 3. Signed DXMT is reused, never overwritten. Re-sign only when upstream DXMT or
    the signing policy changes, after moving the old archive aside.
-4. Check the macOS floor of both MoltenVK files in the packed engine with
+4. Check the macOS floor of the MoltenVK shim and its 1.4.2 real (the only
+   versioned real since Cyder014) in the packed engine with
    `otool -l <file> | grep -A3 LC_BUILD_VERSION`. A from-scratch build with a
    current Xcode SDK cannot target below macOS 12.
 

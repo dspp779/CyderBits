@@ -167,7 +167,7 @@ bash scripts/release-cyder.sh --channel release --skip-notarize
 - [ ] Engine：不含 `lib/dxvk`、`lib/dxvk2`、`lib/dxmt`；圖形 payload 位於 App `Resources/graphics`
 - [ ] 圖形目錄只有要出貨的檔案：`dxvk-1.10.3.tar.zst` 與 Developer ID 簽署的 `dxmt-0.80.tar.zst`；不含 `dxvk2-*`、舊的未簽署 DXMT 或 `cyder.N` 檔（App 會打包該目錄的所有封存檔）
 - [ ] DXVK 2 在通過遊戲實測前不出貨（`create-cyder-app.sh` 與 verify 會拒絕）
-- [ ] Engine：host Mach-O minos ≤ 10.15（版本化的 MoltenVK real 例外，上限 12.0）。0.14／Cyder013 是最後支援 macOS 10.15／11 的版本，其 MoltenVK 1.2.10 沿用 Cyder012 的 10.15 建置；之後的版本僅支援 macOS 12+
+- [ ] Engine：host Mach-O minos ≤ 10.15（版本化的 MoltenVK real 例外，上限 12.0）。0.14／Cyder013 是最後支援 macOS 10.15／11 的版本；0.15.0／Cyder014 起僅支援 macOS 12+，且只打包 MoltenVK 1.4.2（不得出現 `libMoltenVK-1.2.10.dylib`）
 - [ ] `import-engine-release` 通過；`config/cyder-engine-version.txt` 與預期 label 一致  
 - [ ] App 版本字串正確（正式勿帶 `-dev`／誤用未宣告的 rc 當 GA）  
 - [ ] `codesign --verify --deep --strict`  
