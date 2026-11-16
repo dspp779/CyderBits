@@ -20,8 +20,8 @@ expect_failure() {
 }
 
 python3 "$TOOL" validate "$RULES" >"$TEST_TMP/validate.txt"
-assert_contains "$(cat "$TEST_TMP/validate.txt")" "5 authoring rules, 3 enabled" \
-  "validation should include the disabled CS2 candidate"
+assert_contains "$(cat "$TEST_TMP/validate.txt")" "5 authoring rules, 4 enabled" \
+  "validation should count the enabled CS2 DXMT rule"
 
 python3 "$TOOL" compile "$RULES" -o "$TEST_TMP/first.cdb" >/dev/null
 python3 "$TOOL" compile "$RULES" -o "$TEST_TMP/second.cdb" >/dev/null
@@ -34,8 +34,10 @@ assert cmp -s \
   "$ROOT/compatdb/compiled/compatdb.cdb"
 
 inspection="$(python3 "$TOOL" inspect "$TEST_TMP/first.cdb" --json)"
-assert_contains "$inspection" '"rule_count": 3' \
+assert_contains "$inspection" '"rule_count": 4' \
   "only enabled rules should be emitted"
+assert_contains "$inspection" '"game.cities-skylines-2.dxmt"' \
+  "CS2 DXMT rule should be emitted"
 assert_contains "$inspection" '"launcher.steam.webhelper.cef-gpu"' \
   "Steam WebHelper rule should be emitted"
 assert_contains "$inspection" '"game.richman-4.cnc-ddraw"' \
@@ -166,11 +168,6 @@ open(sys.argv[2], "wb").write(data)
 expect_failure "declared file size mismatch must be rejected" \
   python3 "$TOOL" inspect "$TEST_TMP/bad-size.cdb"
 
-# CS2 is authorable, but the bundled database must stay byte-identical.
-if [[ "$inspection" == *"game.cities-skylines-2.dxmt"* ]]; then
-  echo "unvalidated CS2 rule was emitted" >&2
-  exit 1
-fi
 python3 - "$ROOT" "$TEST_TMP" <<'PYTEST'
 import copy, importlib.util, pathlib, sys
 root, temp = map(pathlib.Path, sys.argv[1:])
@@ -179,11 +176,12 @@ module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(module)
 rules = module.load_rules([str(root / "compatdb/rules")])
 cs2 = next(r for r in rules if r["id"] == "game.cities-skylines-2.dxmt")
-assert not cs2["enabled"]
-candidate = copy.deepcopy(cs2)
-candidate["enabled"] = True
-decoded = module.decode(module.encode([candidate]))
+assert cs2["enabled"], "CS2 DXMT rule must ship enabled (issue #10, 0.15.0 C2)"
+decoded = module.decode(module.encode([cs2]))
 assert decoded["rules"][0]["graphics_backend"] == "dxmt"
+# The shipped database carries the enabled rule.
+shipped = module.decode((root / "compatdb/compiled/compatdb.cdb").read_bytes())
+assert any(r["id"] == "game.cities-skylines-2.dxmt" and r["graphics_backend"] == "dxmt" and r["path_suffixes"][0].endswith("cities2.exe") for r in shipped["rules"]), shipped
 # v1 rejects attempts to smuggle a shell hook or DLL writer into a rule.
 import yaml
 source = yaml.safe_load((root / "compatdb/rules/games.yml").read_text())
@@ -201,6 +199,16 @@ PYTEST
 
 # Direct game selection must not acquire Steam-only launch arguments.
 source "$ROOT/scripts/cyder-common.sh"
+# The CS2 rule applies only while graphics is "default"; any other choice is
+# forced through CYDER_GRAPHICS_BACKEND, which cxcompatdb applies before rules.
+cyder_engine_has_dxvk_payload() { return 0; }
+cyder_apply_graphics_preference default /engine
+[[ -z "${CYDER_GRAPHICS_BACKEND:-}" ]]
+cyder_apply_graphics_preference dxvk /engine
+[[ "$CYDER_GRAPHICS_BACKEND" == dxvk ]]
+cyder_apply_graphics_preference wined3d /engine
+[[ "$CYDER_GRAPHICS_BACKEND" == wined3d ]]
+unset CYDER_GRAPHICS_BACKEND CX_GRAPHICS_BACKEND
 cyder_apply_steam_compatibility_arguments '/games/Cities Skylines II/Cities2.exe' '-screen-fullscreen' '0'
 [[ "${#CYDER_STEAM_ARGUMENTS[@]}" == 2 ]]
 [[ "${CYDER_STEAM_ARGUMENTS[0]}" == '-screen-fullscreen' ]]

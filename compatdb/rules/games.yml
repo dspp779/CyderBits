@@ -31,12 +31,14 @@ rules:
           command_line:
             - game.exe
 
-  # Issue #10: candidate only; enable after Cyder-specific game acceptance.
+  # Issue #10: only DXMT draws CS2 (D3DMetal renders the city black; DXVK
+  # stops at the main menu). A global or per-game graphics choice other than
+  # "default" still wins: the launcher forces it through CYDER_GRAPHICS_BACKEND.
   # Does not start Steam, bypass a launcher, or modify game DLLs.
   - id: game.cities-skylines-2.dxmt
-    description: Candidate DXMT selection for Cities Skylines II; not compatibility certification.
+    description: Select DXMT for Cities Skylines II; not compatibility certification.
     priority: 100
-    enabled: false
+    enabled: true
     stability: experimental
     applies_to:
       platform: macos

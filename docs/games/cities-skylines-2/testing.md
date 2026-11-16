@@ -9,8 +9,10 @@ and background: [support assessment](../cities-skylines-2-support-assessment.zh-
   Without it the unmodified game stops at start-up with `IOException`.
 - Windows Steam in the same bottle and engine, logged in, global graphics
   **not** DXVK (Steam then shows no window; see [Steam](../steam/README.md)).
-- Game graphics DXMT (per-game setting, or `CYDER_GRAPHICS_BACKEND=dxmt` for a
-  direct Wine run). D3DMetal (GPTK 4.0 beta 3) draws the city world black;
+- Game graphics DXMT. Since 0.15.0 the CompatDB rule
+  `game.cities-skylines-2.dxmt` selects it while the global and per-game
+  graphics are "default"; any other choice wins. For a direct Wine run set
+  `CYDER_GRAPHICS_BACKEND=dxmt`. D3DMetal (GPTK 4.0 beta 3) draws the city world black;
   DXVK 1.10.3 stays on the main menu with an unresponsive UI.
 
 ## Start the game

@@ -17,6 +17,7 @@
 | 皮卡丘打排球 | MSync、ESync 與含空白的 Wine runtime 路徑均列為相容性問題；目前以無同步、無空白實體 runtime 作為 workaround | [皮卡丘排球](pikachu-volleyball/README.md) |
 | 楓之谷（台灣 Beanfun／經典版） | 正式 Cyder + CX26 可跑新楓之谷；OEM-25 僅歷史紀錄 | [研究入口](maplestory/README.md) · [經典版凍結](../maplestory-classic-wineserver-hang.md) · [GRAP 殘留](maplestory/grap-core64-residual-process-analysis.md) |
 | Steam | 自動套用 system compositor 與 CEF sandbox 相容參數；Windows 遊戲仍需逐款驗證 | [Steam](steam/README.md) |
+| Cities: Skylines II | 0.15.0 起自動使用 DXMT（macOS 15+）；不經 Paradox Launcher、直接開啟 `Cities2.exe`；測試中，尚未宣稱可玩 | [使用指引](cities-skylines-2/README.md) · [測試步驟](cities-skylines-2/testing.md) |
 | 世紀帝國 II／IV | Rosetta、Wine 例外處理與週期性卡頓研究；尚未納入正式 workaround | [研究文件](age-of-empires-rosetta-wine-stutter-research.zh-TW.md) |
 
 ## 建議文件結構
