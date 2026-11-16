@@ -457,7 +457,7 @@ cat > "$CONTENTS/Info.plist" <<PLIST
   <key>CFBundleVersion</key>
   <string>${CYDER_APP_BUILD:-$CYDER_APP_VERSION}</string>
   <key>LSMinimumSystemVersion</key>
-  <string>10.15</string>
+  <string>12.0</string>
   <key>LSUIElement</key>
   <true/>
   <key>LSArchitecturePriority</key>
