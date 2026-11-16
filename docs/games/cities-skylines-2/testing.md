@@ -14,6 +14,12 @@ and background: [support assessment](../cities-skylines-2-support-assessment.zh-
   graphics are "default"; any other choice wins. For a direct Wine run set
   `CYDER_GRAPHICS_BACKEND=dxmt`. D3DMetal (GPTK 4.0 beta 3) draws the city world black;
   DXVK 1.10.3 stays on the main menu with an unresponsive UI.
+- A GPU with Metal GPU Family Mac 2 or later. On an iMac12,2 (GTX 780M, OCLP,
+  GPU Family Mac 1, macOS 15.8) DXMT aborts at the first render pipeline
+  (`failed assertion … No valid pixelFormats set`, Cyder shows `CYD-WIN-002`),
+  and DXVK cannot create the game's 3D textures, then reports
+  `VK_ERROR_DEVICE_LOST` on a black screen. Check the GPU family first
+  (`MTLDevice supportsFamily:`); MoltenVK also prints it in the launch log.
 
 ## Start the game
 

@@ -58,6 +58,7 @@ swift scripts/guarded-key.swift 12345 678 '遊戲實際視窗標題' left --hold
 - 不輸入文字；不要用逐鍵方式在遊戲內聊天或填表。
 - 輸出含 `down_at`（epoch 秒），可與畫格或 I/O 時間軸對齊。
 - 遊戲已在最前方時不重新啟動視窗：重新 activate 會讓 MapleStory 停頓約 200 ms，污染卡頓量測。
+- 終端機程序用 `NSRunningApplication activate` 抬升 Wine 視窗時，macOS 15 可能不理會（最前方仍是原本的 App）。改用 Accessibility：`osascript -e 'tell application "System Events" to set frontmost of (first process whose unix id is <pid>) to true'`，再驗證最前方後送出。
 - 遊戲自己的小彈出視窗（完全落在主視窗內）可在主視窗之上；其他 App 的視窗在上方則拒絕。
 - 需要「移動＋跳躍」時，可同時跑兩個指令（一個 `--hold` 方向鍵、稍後另一個送跳躍鍵）；兩者各自驗證並各自放開。
 
