@@ -25,6 +25,7 @@
 | B2 | 程式被 signal 結束時 wineserver 不再當掉（[engine #15](https://github.com/dspp779/cyder-wine-engine/issues/15)／[PR #16](https://github.com/dspp779/cyder-wine-engine/pull/16)） | Apple Silicon 上修正版 SIGTERM 3/3、SIGKILL 1/1 未當掉 | Intel／macOS 15.8 重測；強制結束一款真實遊戲後 server 與 Cyder 啟動流程正常收尾 |
 | B3 | [#23](https://github.com/dspp779/CyderBits/issues/23)：MacBook Neo（A18 Pro）／macOS 26.6 的 `wineboot` Segmentation fault | 推測與 B1 同因（macOS 26 沒有 `pipe2`），未確認 | 以 Cyder014 在 macOS 26 建立環境成功，或請回報者驗證 |
 | B4 | engine 標籤升為 Cyder014、打包並匯入 CyderBits | 未開始 | 依 `cyder-release` 流程；記錄 engine 版本與 ntdll SHA-256 |
+| B5 | 移除 MoltenVK 1.2.10，只保留 1.4.2（0.15.0 已要求 macOS 12+，舊系統理由不再存在）：engine 只打包 1.4.2；移除偏好設定選項、`cyder-moltenvk-variant.sh` 選版與相關測試；殘留的 1.2.10 設定改回 1.4.2 | 條件未滿足：1.2.10 目前是 [#7](https://github.com/dspp779/CyderBits/issues/7) 舊款 Intel 內顯（Iris Plus 640，macOS 13）世界層黑畫面唯一已知可用的設定；1.4.2 是否修正未確認。Intel Mac 只能用 DXVK，影響最大 | 舊款 Intel 內顯以 1.4.2 跑新楓之谷經典版畫面正常（可與 A5／A11 的 Intel 量測合併，或請 #7 回報者驗證）；未通過則保留 1.2.10 |
 
 ### C. Steam 與 Cities: Skylines II（[#10](https://github.com/dspp779/CyderBits/issues/10)）
 
