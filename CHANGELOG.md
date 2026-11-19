@@ -18,6 +18,8 @@ release notes in [`docs/releases/`](docs/releases/); the engine column refers to
 - A fullscreen game that was force-quit no longer shows "程式在顯示視窗前就結束了"
   (`CYD-WIN-002`), and a fullscreen launch no longer holds the next launch for 30 s:
   Cyder now sees Wine's raised fullscreen window levels.
+- An error dialog no longer holds later launches until it is closed, and repeated
+  requests for the same program (double-clicks) start it once instead of in a burst.
 
 ### Changed
 - DXMT is used only on a GPU with Metal GPU Family Mac 2. On older Intel GPUs MapleStory

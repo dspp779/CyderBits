@@ -574,3 +574,23 @@ enum CyderWineLaunchTarget {
     case link
     case reg
 }
+
+/// Identity of a launch request for de-duplication: the same program with the
+/// same arguments. A Beanfun login or a URI carries new arguments, so it differs.
+func cyderLaunchKey(executable: String, arguments: [String]?, isURI: Bool) -> String {
+    let target = isURI ? "uri:" + executable : (executable as NSString).standardizingPath.lowercased()
+    return ([target] + (arguments ?? [])).joined(separator: "\u{1F}")
+}
+
+/// Repeated requests for one program (double-clicks, or requests made while an
+/// error dialog was open) used to run one after another, each opening another
+/// copy. Drop a request whose key is already waiting, being prepared, being
+/// launched, or was started within `recentWindow` seconds.
+func cyderIsDuplicateLaunch(_ key: String, queued: [String], preparing: [String], launching: String?,
+                            recentStarts: [String: TimeInterval], now: TimeInterval,
+                            recentWindow: TimeInterval = 10) -> Bool {
+    if queued.contains(key) || preparing.contains(key) || launching == key { return true }
+    if let started = recentStarts[key], now - started < recentWindow { return true }
+    return false
+}
+

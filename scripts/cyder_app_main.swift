@@ -93,7 +93,13 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         var isURI = false
         var authorization: CyderRequestRegistry.Record? = nil
         var lease: CyderOperationGate.Lease? = nil
+        var key: String { cyderLaunchKey(executable: executable, arguments: arguments, isURI: isURI) }
     }
+    /// De-duplication state (cyderIsDuplicateLaunch): keys being prepared by
+    /// request, the key now launching, and when each key last started.
+    private var preparingLaunchKeys: [String: String] = [:]
+    private var launchingKey: String?
+    private var recentLaunchStarts: [String: TimeInterval] = [:]
 
     private var queuedLaunches: [QueuedLaunch] = [] {
         didSet { statusItemController.setIngressPending(libraryLaunchInProgress || !queuedLaunches.isEmpty || activeProcessOperations > 0 || !pendingLaunchAcquisitions.isEmpty) }
@@ -1207,6 +1213,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         guard !quitTransaction, !readOnlyMode, isPrimaryInstance, !environmentPreparationInProgress else {
             if let lease { operationGate.release(lease) }
             if environmentPreparationInProgress { finishRequestPart(authorization, failed: true) }
+            launchingKey = nil
             return
         }
         if authorization == nil {
@@ -1228,6 +1235,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             if let lease { operationGate.release(lease) }
             finishRequestPart(authorization, failed: true)
             statusItemController.finishLaunchIngress()
+            launchingKey = nil
             showAlert("無法啟動遊戲", "Cyder 缺少必要的 Resources 目錄。")
             launchNextQueuedExecutableIfReady()
             return
@@ -1265,27 +1273,30 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             DispatchQueue.main.async {
                 if !outcome.isUnconfirmed, let lease { self.operationGate.release(lease) }
                 self.libraryLaunchInProgress = false
+                self.launchingKey = nil
                 self.finishRequestPart(authorization, failed: outcome.requestFailed, uncertain: outcome.isUnconfirmed)
                 self.statusItemController.finishLaunchIngress()
                 guard !self.quitTransaction else { return }
                 self.hideSetup()
+                // Start the next queued launch before any dialog: an error
+                // dialog reports this launch, it must not hold the others.
+                self.launchNextQueuedExecutableIfReady()
                 switch outcome {
                 case .success, .cancelled, .unconfirmed:
                     break
                 case .environmentNotReady:
-                    self.showAlert(
+                    self.presentLaunchDialog { self.showAlert(
                         "遊戲尚未準備完成",
                         "請開啟 Cyder，等待環境自動準備；若顯示錯誤請按「重試」，有可用引擎更新時請按「更新」。完成後再重新啟動遊戲。"
-                    )
+                    ) }
                 case .graphicsNotReady:
-                    self.showAlert(
+                    self.presentLaunchDialog { self.showAlert(
                         "圖形元件尚未準備完成",
                         "請先重新開啟 Cyder.app 準備圖形元件，再重新啟動遊戲。"
-                    )
+                    ) }
                 case .failure(let failure):
-                    self.presentFailure(failure)
+                    self.presentLaunchDialog { self.presentFailure(failure) }
                 }
-                self.launchNextQueuedExecutableIfReady()
             }
         }
     }
@@ -1306,6 +1317,19 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
 
     private func prepareQueuedLaunch(_ launch: QueuedLaunch) {
         guard let requestID = launch.authorization?.id else { return }
+        let key = launch.key
+        if cyderIsDuplicateLaunch(key, queued: queuedLaunches.map(\.key), preparing: Array(preparingLaunchKeys.values),
+                                  launching: launchingKey, recentStarts: recentLaunchStarts,
+                                  now: ProcessInfo.processInfo.systemUptime) {
+            // Already waiting, launching or just started: one copy is enough.
+            CyderDiagnostics.shared.info("launch request dropped: same program and arguments already requested")
+            finishRequestPart(launch.authorization)
+            if !libraryLaunchInProgress && pendingLaunchAcquisitions.isEmpty && queuedLaunches.isEmpty {
+                settleLaunchIngressIfIdle()
+            }
+            return
+        }
+        preparingLaunchKeys[requestID] = key
         pendingLaunchAcquisitions.insert(requestID)
         pendingPreparation[requestID] = launchPreparation.resolve(work: { [weak self] in
             guard let self else { return nil }
@@ -1324,6 +1348,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         }) { [weak self] outcome in
             guard let self else { return }
             self.pendingPreparation.removeValue(forKey: requestID)
+            self.preparingLaunchKeys.removeValue(forKey: requestID)
             guard !self.quitTransaction else {
                 self.pendingLaunchAcquisitions.remove(requestID); return
             }
@@ -1338,7 +1363,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
                 }
                 CyderDiagnostics.shared.warning("launch withdrawn: environment scope unavailable")
                 self.hideSetup()
-                self.showAlert("無法啟動遊戲", "Cyder 無法確認這個遊戲使用的 Windows 環境，程式尚未執行。請確認遊戲檔案仍在原位置後再啟動一次。")
+                self.presentLaunchDialog { self.showAlert("無法啟動遊戲", "Cyder 無法確認這個遊戲使用的 Windows 環境，程式尚未執行。請確認遊戲檔案仍在原位置後再啟動一次。") }
                 return
             }
             // Wait in memory while a conflicting stop or mutation owns this
@@ -1361,6 +1386,10 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
               wineActivationWaiter == nil, !queuedLaunches.isEmpty else { return }
         libraryLaunchInProgress = true
         let launch = queuedLaunches.removeFirst()
+        let now = ProcessInfo.processInfo.systemUptime
+        launchingKey = launch.key
+        recentLaunchStarts = recentLaunchStarts.filter { now - $0.value < 60 }
+        recentLaunchStarts[launch.key] = now
         guard let queued = launch.authorization else {
             if let lease = launch.lease { operationGate.release(lease) }
             libraryLaunchInProgress = false
@@ -1372,6 +1401,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             guard !self.quitTransaction, !self.environmentPreparationInProgress, let authorization else {
                 if let lease = launch.lease { self.operationGate.release(lease) }
                 if self.environmentPreparationInProgress { self.finishRequestPart(launch.authorization, failed: true) }
+                self.launchingKey = nil
                 self.launchNextQueuedExecutableIfReady(); return
             }
             if #available(macOS 11.0, *), launch.isURI {
@@ -2611,6 +2641,17 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    /// Show a launch dialog after the current main-queue block returns.
+    /// NSAlert.runModal inside a DispatchQueue.main block holds the serial main
+    /// queue for as long as the dialog is open, so request delivery, launch
+    /// preparation and the environment lock (all delivered on .main) stopped,
+    /// and every launch made meanwhile ran in a burst once it closed. A
+    /// run-loop block keeps the main queue running under the dialog.
+    private func presentLaunchDialog(_ present: @escaping () -> Void) {
+        RunLoop.main.perform(inModes: [.common], block: present)
+        CFRunLoopWakeUp(CFRunLoopGetMain())
+    }
+
     @discardableResult
     private func presentFailure(
         _ failure: CyderFailure,
@@ -3227,6 +3268,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         guard !quitTransaction, !readOnlyMode, isPrimaryInstance, !environmentPreparationInProgress else {
             if let lease { operationGate.release(lease) }
             if environmentPreparationInProgress { finishRequestPart(authorization, failed: true) }
+            launchingKey = nil
             return
         }
         guard let resourcePath = Bundle.main.resourcePath else {
@@ -3234,6 +3276,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             hideSetup()
             finishRequestPart(authorization, failed: true)
             statusItemController.finishLaunchIngress()
+            launchingKey = nil
             showAlert("無法開啟 gamaniagames://", "Cyder 缺少必要的 Resources 目錄。")
             launchNextQueuedExecutableIfReady()
             return
@@ -3261,12 +3304,13 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             DispatchQueue.main.async {
                 if !outcome.isUnconfirmed, let lease { self.operationGate.release(lease) }
                 self.libraryLaunchInProgress = false
+                self.launchingKey = nil
                 self.finishRequestPart(authorization, failed: outcome.requestFailed, uncertain: outcome.isUnconfirmed)
                 self.statusItemController.finishLaunchIngress()
                 guard !self.quitTransaction else { return }
                 self.hideSetup()
-                if case .failure(let failure) = outcome { self.presentFailure(failure) }
                 self.launchNextQueuedExecutableIfReady()
+                if case .failure(let failure) = outcome { self.presentLaunchDialog { self.presentFailure(failure) } }
             }
         }
     }

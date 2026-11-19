@@ -70,6 +70,26 @@ check(!accepts(0, onscreen: false), "an off-screen (hidden helper) window does n
 check(!accepts(0, alpha: 0), "a transparent window does not count")
 check(!accepts(26, w: 500, h: 40) && !accepts(0, w: 79, h: 300), "a window under 80 x 80 does not count")
 check(cyderIsWineWindowLevel(Int(CGShieldingWindowLevel()) + 1), "the real shielding level is used by default")
+// Duplicate launch requests (same program and arguments) are dropped while one
+// is waiting, preparing, launching or started in the last 10 s.
+let exe = "/Users/u/Library/Application Support/Cyder/bottles/shared/drive_c/Games/Game.exe"
+let k = cyderLaunchKey(executable: exe, arguments: nil, isURI: false)
+check(k == cyderLaunchKey(executable: exe.uppercased(), arguments: nil, isURI: false), "path case does not make a new request")
+check(k == cyderLaunchKey(executable: exe.replacingOccurrences(of: "/Games/", with: "/Games/./"), arguments: nil, isURI: false), "an equivalent path is the same key")
+check(k != cyderLaunchKey(executable: exe, arguments: ["-otp", "123"], isURI: false), "new arguments (a Beanfun login) are a new request")
+check(cyderLaunchKey(executable: exe, arguments: ["a b"], isURI: false) != cyderLaunchKey(executable: exe, arguments: ["a", "b"], isURI: false), "argument boundaries are kept")
+check(cyderLaunchKey(executable: "gamaniagames://x", arguments: nil, isURI: true) != cyderLaunchKey(executable: "gamaniagames://y", arguments: nil, isURI: true), "different URIs differ")
+func dup(queued: [String] = [], preparing: [String] = [], launching: String? = nil, started: TimeInterval? = nil, now: TimeInterval = 100) -> Bool {
+    cyderIsDuplicateLaunch(k, queued: queued, preparing: preparing, launching: launching,
+                           recentStarts: started.map { [k: $0] } ?? [:], now: now)
+}
+check(!dup(), "a first request runs")
+check(dup(queued: [k]), "a request already waiting in the queue is dropped")
+check(dup(preparing: [k]), "a request being prepared is dropped")
+check(dup(launching: k), "a request for the program now launching is dropped")
+check(dup(started: 95), "a request 5 s after the same program started is dropped")
+check(!dup(started: 85), "a request 15 s after the program started runs (a second copy on purpose)")
+check(!dup(queued: ["other"], preparing: ["other"], launching: "other", started: nil), "other programs do not block it")
 print("ok")
 EOF
 swiftc -module-cache-path "$TMP/mc" -o "$TMP/harness" "$ROOT/scripts/cyder_launch_support.swift" "$TMP/main.swift" 2>"$TMP/build.log" || {
@@ -94,3 +114,46 @@ assert_contains "$(cat "$ROOT/scripts/cyder-common.sh")" 'local wine_debug="-all
   "quiet launches keep Wine's loader errors"
 
 echo "PASS: launches yield activation to the program, close progress for a crash dialog and name a missing DLL"
+
+# Each launch completion moves the queue before it shows a dialog: an error
+# dialog used to hold every later request until it was closed.
+python3 - "$ROOT/scripts/cyder_app_main.swift" <<'PY'
+import re, sys
+src = open(sys.argv[1]).read()
+for marker in ("case .failure(let failure):\n                    self.presentLaunchDialog { self.presentFailure(failure) }",
+               "if case .failure(let failure) = outcome { self.presentLaunchDialog { self.presentFailure(failure) } }"):
+    i = src.index(marker)
+    block = src[src.rindex("DispatchQueue.main.async {", 0, i):i]
+    assert "self.launchNextQueuedExecutableIfReady()" in block, f"queue must advance before: {marker}"
+    tail = src[i:src.index("\n    }\n", i)]
+    assert "launchNextQueuedExecutableIfReady" not in tail, f"queue advanced again after dialog: {marker}"
+assert "cyderIsDuplicateLaunch(key" in src, "queued requests are de-duplicated"
+# A dialog run inside a DispatchQueue.main block holds the main queue (request
+# delivery and the environment lock) until it closes; launch dialogs go
+# through a run-loop block instead.
+assert "RunLoop.main.perform(inModes: [.common], block: present)" in src
+for bad in ("case .failure(let failure):\n                    self.presentFailure(failure)",
+            "= outcome { self.presentFailure(failure) }"):
+    assert bad not in src, "launch failure shown inside a main-queue block: " + bad
+print("queue order ok")
+PY
+
+# The mechanism itself: main-queue work runs under a dialog opened from a
+# run-loop block, and does not under one opened inside a main-queue block.
+cat >"$TMP/modal.swift" <<'SWIFT'
+import Cocoa
+let inline = CommandLine.arguments[1] == "inline"
+signal(SIGALRM) { _ in print("blocked"); exit(0) }
+alarm(5)
+let app = NSApplication.shared; app.setActivationPolicy(.accessory)
+func show() {
+    DispatchQueue.global().asyncAfter(deadline: .now() + 0.3) { DispatchQueue.main.async { print("ran"); exit(0) } }
+    let alert = NSAlert(); alert.window.alphaValue = 0; _ = alert.runModal()
+}
+DispatchQueue.main.async { if inline { show() } else { RunLoop.main.perform(inModes: [.common]) { show() } } }
+app.run()
+SWIFT
+swiftc -module-cache-path "$TMP/mc" -o "$TMP/modal" "$TMP/modal.swift" 2>>"$TMP/build.log"
+assert_eq "$("$TMP/modal" perform)" ran "main-queue work runs under a dialog opened from a run-loop block"
+assert_eq "$("$TMP/modal" inline)" blocked "a dialog inside a main-queue block holds the main queue (why presentLaunchDialog exists)"
+

@@ -65,7 +65,34 @@ shows `CYD-WIN-002`. Tests: `tests/test-cyder-launch-activation.sh`.
 | A launcher hands off to a child and exits non-zero before the child's window appears | `rootFailed` → `CYD-WIN-002` although the child may still start | Open. Handoff executables are listed per launch (`expectsHandoff`) |
 | Root exits non-zero after the 30 s observation | Observation already ended (`unconfirmed`); no dialog | By design |
 | Wine's activation request without a visible window | Treated as a hint only: the tree and a visible window must be confirmed | By design; relaxing it would accept unverified processes |
-| An error dialog is open | Later launch requests wait until it is closed | Unchanged; a real `CYD-WIN-002` still blocks the queue |
+| An error dialog is open | Fixed in 0.15.0, see below | — |
+
+## Fixed: an error dialog held every later launch (0.15.0)
+
+Launch dialogs were opened from the launch-completion block, a
+`DispatchQueue.main.async` closure. `NSAlert.runModal` inside a main-queue
+block holds the serial main queue for as long as the dialog is open. Request
+delivery (`CyderRequestRegistry`), launch preparation and the environment lock
+(`CyderOperationGate`) all deliver on `.main`, so a request made meanwhile
+stopped right after `open-urls received`. When the dialog closed, every
+waiting request ran one after another, so a few double-clicks became several
+copies of the game. (A dialog opened outside a main-queue block does not hold
+the queue; that is why a simple probe looked fine.)
+
+Now:
+
+- `presentLaunchDialog` opens launch dialogs from a run-loop block
+  (`RunLoop.main.perform(inModes: [.common])`), and the completion moves the
+  queue (`launchNextQueuedExecutableIfReady`) before the dialog. Measured: with
+  the `find.exe` error dialog open, the next game started 4 s after its request.
+- `cyderIsDuplicateLaunch` drops a request for the same program and arguments
+  while one is queued, being prepared, launching, or started less than 10 s
+  ago. Different arguments (a new Beanfun login, another URI) still run. A
+  second copy on purpose works after 10 s. Measured: four requests 0.7 s apart
+  started one copy and logged `launch request dropped` three times.
+
+Other dialogs opened from main-queue blocks (settings, Winetricks, environment
+actions) still hold the main queue while open; they are not on the launch path.
 
 ## Checking a case
 
