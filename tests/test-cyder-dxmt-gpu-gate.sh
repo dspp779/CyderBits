@@ -92,8 +92,8 @@ out="$(run mac1 "cyder_macos_at_least() { false; }; unset CYDER_GRAPHICS_BACKEND
 assert_eq "$out" ok "the GPU refusal only applies where DXMT could run (macOS 15+)"
 
 common="$(cat "$ROOT/scripts/cyder-common.sh")"
-assert_contains "$common" $'cyder_resolve_effective_graphics_backend "$engine_root" "$exe"\n  cyder_refuse_unsupported_dxmt_gpu "$exe" || return $?' \
-  "game launch preparation refuses an unsupported GPU right after backend resolution"
+assert_contains "$common" $'cyder_resolve_effective_graphics_backend "$engine_root" "$exe"\n  cyder_apply_compatdb_dxmt_fallback "$exe" "$engine_root"\n  cyder_refuse_unsupported_dxmt_gpu "$exe" || return $?' \
+  "game launch preparation checks the GPU right after backend resolution"
 
 out="$(bash -c 'source "$1/scripts/cyder-common.sh"; cyder_game_environment_key_is_allowed _CYDER_METAL_GPU_FAMILY && echo allowed || echo blocked' _ "$ROOT")"
 assert_eq "$out" blocked "per-game environment cannot fake the GPU family"
@@ -104,11 +104,32 @@ shipped="$(python3 "$ROOT/scripts/cyder-compatdb.py" inspect "$ROOT/compatdb/com
 for r in json.load(sys.stdin)["rules"]:
     if r["enabled"] and r["graphics_backend"] == "dxmt":
         for s in r["path_suffixes"]: print(s.rsplit("\\",1)[-1])' | sort)"
-assert_eq "$shipped" "cities2.exe" "the shipped CompatDB DXMT rules are the ones the launcher knows"
+assert_eq "$shipped" $'cities2.exe\npenguinhotel-win64-shipping.exe' \
+  "the shipped CompatDB DXMT rules are the ones the launcher knows"
 for exe in $shipped; do
-  out="$(bash -c 'source "$1/scripts/cyder-common.sh"; cyder_compatdb_dxmt_only_executable "C:\\x\\$2" && echo yes' _ "$ROOT" "$exe")"
-  assert_eq "$out" yes "cyder_compatdb_dxmt_only_executable knows $exe"
+  out="$(bash -c 'source "$1/scripts/cyder-common.sh"
+    cyder_compatdb_dxmt_only_executable "C:\\x\\$2" && echo only
+    cyder_compatdb_dxmt_preferred_executable "C:\\x\\$2" && echo preferred
+    true' _ "$ROOT" "$exe")"
+  [[ "$out" == only || "$out" == preferred ]] || { echo "FAIL: launcher must know $exe exactly once (got '$out')" >&2; exit 1; }
 done
+
+# --- DXMT-preferring rule (MECCHA CHAMELEON) falls back where DXMT cannot run
+meccha='/x/drive_c/Steam/steamapps/common/MECCHA CHAMELEON/PenguinHotel.exe'
+fallback() { run "$1" "cyder_preferred_gptk_root() { $2; }; $3; cyder_apply_compatdb_dxmt_fallback '$meccha' \"\$ENGINE\"; echo \"backend=\${CYDER_GRAPHICS_BACKEND:-none}\""; }
+out="$(fallback mac2 'echo /gptk' 'unset CYDER_GRAPHICS_BACKEND')"
+assert_contains "$out" "backend=none" "a Mac 2 GPU keeps the CompatDB DXMT choice"
+out="$(fallback mac1 'echo /gptk' 'unset CYDER_GRAPHICS_BACKEND')"
+assert_contains "$out" "backend=d3dmetal" "a Mac 1 GPU with GPTK falls back to D3DMetal"
+assert_contains "$out" "uses d3dmetal instead" "the fallback is logged"
+out="$(fallback mac1 'return 1' 'unset CYDER_GRAPHICS_BACKEND')"
+assert_contains "$out" "backend=dxvk" "a Mac 1 GPU without GPTK falls back to DXVK"
+out="$(fallback mac1 'echo /gptk' 'export CYDER_GRAPHICS_BACKEND=wined3d')"
+assert_contains "$out" "backend=wined3d" "a user-chosen backend is kept"
+out="$(run mac1 "unset CYDER_GRAPHICS_BACKEND; cyder_apply_compatdb_dxmt_fallback '/x/game.exe' \"\$ENGINE\"; echo \"backend=\${CYDER_GRAPHICS_BACKEND:-none}\"")"
+assert_contains "$out" "backend=none" "other games are untouched"
+out="$(run mac1 "unset CYDER_GRAPHICS_BACKEND; cyder_refuse_unsupported_dxmt_gpu '$meccha' && echo ok")"
+assert_eq "$out" ok "a DXMT-preferring game is never refused"
 
 # --- Swift: CyderSwift --metal-gpu-family and the CYD-GFX-002 alert --------
 cat >"$TEST_DIR/main.swift" <<'EOF'

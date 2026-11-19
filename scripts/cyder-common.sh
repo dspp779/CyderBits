@@ -2632,6 +2632,35 @@ cyder_compatdb_dxmt_only_executable() {
   return 1
 }
 
+# Executables whose CompatDB rule prefers DXMT but which also run elsewhere
+# (compatdb/rules/games.yml). Matches the bootstrap and the shipping binary.
+cyder_compatdb_dxmt_preferred_executable() {
+  case "$(printf '%s' "${1##*[/\\]}" | tr '[:upper:]' '[:lower:]')" in
+    penguinhotel.exe|penguinhotel-win64-shipping.exe) return 0 ;;
+  esac
+  return 1
+}
+
+# Where DXMT cannot run (macOS < 15, GPU Family Mac 1, no payload), replace a
+# DXMT-preferring rule with D3DMetal, else DXVK, while graphics is "default".
+# The exported backend outranks the CompatDB rule; its other actions (-dx11)
+# still apply.
+cyder_apply_compatdb_dxmt_fallback() {
+  local exe="$1" engine_root="$2"
+  [[ -z "${CYDER_GRAPHICS_BACKEND:-}" ]] || return 0
+  cyder_compatdb_dxmt_preferred_executable "$exe" || return 0
+  cyder_dxmt_launch_allowed "$engine_root" && return 0
+  if cyder_d3dmetal_launch_allowed "$engine_root"; then
+    cyder_apply_graphics_preference d3dmetal "$engine_root"
+  elif cyder_dxvk_launch_allowed "$engine_root"; then
+    cyder_apply_graphics_preference dxvk "$engine_root"
+  else
+    return 0
+  fi
+  cyder_apply_graphics_runtime_preferences
+  echo "DXMT is unavailable on this Mac; ${exe##*[/\\]} uses ${CYDER_GRAPHICS_BACKEND} instead." >&2
+}
+
 cyder_refuse_unsupported_dxmt_gpu() {
   local exe="$1"
   [[ -z "${CYDER_GRAPHICS_BACKEND:-}" ]] || return 0
@@ -3116,6 +3145,7 @@ cyder_prepare_game_launch_settings() {
   cyder_load_game_settings "$exe" "$engine_root" || return $?
   cyder_apply_maplestory_wz_cache "$exe"
   cyder_resolve_effective_graphics_backend "$engine_root" "$exe"
+  cyder_apply_compatdb_dxmt_fallback "$exe" "$engine_root"
   cyder_refuse_unsupported_dxmt_gpu "$exe" || return $?
   cyder_prepare_cnc_game "$exe" "$prefix" "$engine_root" || return $?
   # The legacy Perl frontend can replace process-only overrides by reloading

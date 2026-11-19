@@ -20,8 +20,8 @@ expect_failure() {
 }
 
 python3 "$TOOL" validate "$RULES" >"$TEST_TMP/validate.txt"
-assert_contains "$(cat "$TEST_TMP/validate.txt")" "5 authoring rules, 4 enabled" \
-  "validation should count the enabled CS2 DXMT rule"
+assert_contains "$(cat "$TEST_TMP/validate.txt")" "6 authoring rules, 5 enabled" \
+  "validation should count the enabled CS2 and MECCHA CHAMELEON rules"
 
 python3 "$TOOL" compile "$RULES" -o "$TEST_TMP/first.cdb" >/dev/null
 python3 "$TOOL" compile "$RULES" -o "$TEST_TMP/second.cdb" >/dev/null
@@ -34,10 +34,12 @@ assert cmp -s \
   "$ROOT/compatdb/compiled/compatdb.cdb"
 
 inspection="$(python3 "$TOOL" inspect "$TEST_TMP/first.cdb" --json)"
-assert_contains "$inspection" '"rule_count": 4' \
+assert_contains "$inspection" '"rule_count": 5' \
   "only enabled rules should be emitted"
 assert_contains "$inspection" '"game.cities-skylines-2.dxmt"' \
   "CS2 DXMT rule should be emitted"
+assert_contains "$inspection" '"game.meccha-chameleon.dxmt-dx11"' \
+  "MECCHA CHAMELEON DXMT/-dx11 rule should be emitted"
 assert_contains "$inspection" '"launcher.steam.webhelper.cef-gpu"' \
   "Steam WebHelper rule should be emitted"
 assert_contains "$inspection" '"game.richman-4.cnc-ddraw"' \
@@ -182,6 +184,10 @@ assert decoded["rules"][0]["graphics_backend"] == "dxmt"
 # The shipped database carries the enabled rule.
 shipped = module.decode((root / "compatdb/compiled/compatdb.cdb").read_bytes())
 assert any(r["id"] == "game.cities-skylines-2.dxmt" and r["graphics_backend"] == "dxmt" and r["path_suffixes"][0].endswith("cities2.exe") for r in shipped["rules"]), shipped
+meccha = next(r for r in shipped["rules"] if r["id"] == "game.meccha-chameleon.dxmt-dx11")
+assert meccha["graphics_backend"] == "dxmt", meccha
+assert meccha["append_args"] == ["-dx11"], meccha
+assert meccha["path_suffixes"] == ["\\chameleon\\binaries\\win64\\penguinhotel-win64-shipping.exe"], meccha
 # v1 rejects attempts to smuggle a shell hook or DLL writer into a rule.
 import yaml
 source = yaml.safe_load((root / "compatdb/rules/games.yml").read_text())

@@ -9,6 +9,8 @@ release notes in [`docs/releases/`](docs/releases/); the engine column refers to
 
 ### Added
 - Cities: Skylines II uses DXMT automatically while its graphics setting is "default" (#10).
+- MECCHA CHAMELEON uses DXMT and `-dx11` automatically while its graphics setting is "default"
+  (DXVK leaves the main-menu scene black). Where DXMT cannot run it uses D3DMetal, else DXVK.
 - MapleStory WZ read-ahead (engine Cyder014), merged with the WZ cache into one setting,
   "MapleStory WZ 檔案讀取最佳化", on by default.
 

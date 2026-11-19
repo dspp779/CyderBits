@@ -18,6 +18,7 @@
 | **單機** | 魔獸爭霸 3 | - | 🟢 可玩 | 啟動參數 `-nativefullscr` | 帶入 `-nativefullscr` 參數可確保開啟螢幕最高解析度 |
 | **單機** | 小朋友齊打交 2 | 1.9c | 🟢 可玩 | 無特別依賴 | 可直接執行遊玩 |
 | **單機** | 小朋友齊打交 2 | 2.0a | 🟡 需 winetricks | `vcrun2005`, `wmp9`, `quartz`, `devenum`, `vb6run` | 需透過 winetricks 安裝上述 VC/VB 運行庫與 Windows Media 組件 |
+| **線上** | MECCHA CHAMELEON（Steam） | 4.2.1 | 🟡 需 DXMT／D3DMetal | 0.15.0 起自動使用 DXMT 與 `-dx11`；從 Cyder 開啟 `PenguinHotel.exe`，Steam 保持背景登入 | DXVK 下主選單背景全黑；DXMT 或 D3DMetal 正常。不加 `-dx11` 時 UE5 走 DirectX 12，D3DMetal 的 GPU 時間約兩倍。只驗證到主選單 |
 | **線上** | 水藍魔力 | - | 🟢 可玩 | DirectDraw / GDI | 專案驗證基準，可正常登入遊玩 (驗證 same-view backing sync) |
 | **線上** | 新楓之谷 | - | 🟢 可玩 | 搭配 MapleStory Launcher 引擎 & [CitrusGate](https://github.com/dspp779/CitrusGate) | 需搭配 CitrusGate 傳送登入 OTP 參數 |
 | **線上** | 新楓之谷 經典版 | - | 🟢 可玩 | 搭配 [CitrusGate](https://github.com/dspp779/CitrusGate) | 需搭配 CitrusGate 傳送登入 OTP 參數 |
