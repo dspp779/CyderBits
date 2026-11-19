@@ -9,8 +9,9 @@ Wine engine builds are in the sibling `cyder-wine-engine` repo.
 
 | Change | Minimum check |
 |---|---|
-| Shell / Ruby / Python script | The narrowest `tests/test-*`, then `bash tests/run.sh` |
-| Swift source (`scripts/cyder_*.swift`) | Typecheck all app sources, the tests that compile that file, then the suite |
+| Shell / Ruby / Python script | `bash tests/run.sh --changed` |
+| Swift source (`scripts/cyder_*.swift`) | Typecheck all app sources, then `bash tests/run.sh --changed` |
+| Documentation only | Nothing (`--changed` selects no tests) |
 | Settings or game-options UI, alerts | Suite **and** click through a test build (tests cannot see layout or main-thread traps) |
 | Launch path, graphics install, engine handling | Suite **and** launch a real game from a Developer ID signed test build |
 | DirectDraw / cnc-ddraw | The above with BlueCG ([guide](games/bluecg/testing.md)) |
@@ -22,16 +23,42 @@ runs. Say "not game-tested" in the report when no game was launched.
 ## Offline tests
 
 ```bash
-bash tests/run.sh                 # whole suite, about 160 tests
+bash tests/run.sh --changed       # tests affected by changes against main
+bash tests/run.sh --changed REF   # ... against another base
 bash tests/run.sh graphics dxmt   # tests whose name contains a word
+bash tests/run.sh                 # whole suite
 bash tests/run.sh --list
 ```
 
 Run a single test directly with `bash tests/test-<name>.sh`,
 `python3 tests/test-<name>.py` or `ruby tests/test-<name>.rb`. The runner writes
 one log per test and prints the log directory; pass `--log-dir` to choose it.
-The whole suite takes about 12 minutes on the development Mac (many tests
-compile Swift), so run it in the background and keep working.
+
+When to run what:
+
+| Moment | Run |
+|---|---|
+| While editing | The test you are changing, then `--changed` |
+| Before each push | The whole suite once, on the committed tree; note the commit it ran on. Skip it when only documentation changed |
+| Release | `CYDER_TEST_FULL_TIMING=1 bash tests/run.sh` on an idle Mac |
+
+`--changed` (`tests/select-changed.py`) takes the files changed against the
+base (committed, uncommitted and untracked) and selects every test whose text
+names one of them, by path or file name, or names a `scripts/` file that uses
+one (a launcher sourcing `cyder-common.sh`). It adds the tests that run a
+selected test, and for a Swift change the tests that build the app from
+`create-cyder-app.sh`. Documentation selects nothing; a change to the runner, or
+to a file no test names, runs everything. Word filters pick by test name only,
+so they miss tests that compile a file under another name; prefer `--changed`.
+
+The whole suite takes several minutes, so run it in the background. All
+`swiftc` calls in a run share one module cache (`tests/lib/swiftc`, first on
+`PATH`), so SDK modules are built once instead of once per test.
+
+A test that exits 77 is reported as `skip` with its last log line and does not
+fail the run. With `CYDER_TEST_FULL_TIMING=1` a skip is a failure, and timing
+tests wait out the real limits (the 120 s preparation deadline in
+`test-cyder-launch-preparation-budget`; 2 s otherwise).
 
 Prerequisites on the development Mac:
 
@@ -73,9 +100,9 @@ Baseline on `main` after 0.14.0 (2026-11-12): 157 of 158 pass. Known noise —
 rerun a lone failure by itself before treating it as a regression:
 
 - `test-cyder-window-native` opens real windows and reads them through
-  Accessibility. It reports `unconfirmed` and fails when another app holds the
-  front (for example while someone is using the Mac) or Accessibility is not
-  granted to the terminal running it.
+  Accessibility. It skips unless the desktop has been idle for 60 s
+  (`CYDER_TEST_DESKTOP=1` forces it). It still fails when another app holds the
+  front or Accessibility is not granted to the terminal running it.
 - `test-cyder-launch-generation` is timing sensitive under load.
 
 ## Typecheck the Swift app without building it

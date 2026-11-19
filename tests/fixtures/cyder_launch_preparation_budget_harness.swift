@@ -73,15 +73,19 @@ check(observed == .activated && (observedBudget ?? 0) > 29.8, "preparation consu
 print("PASS real >30s preparation: elapsed=\(positiveElapsed), profile=mutation/120s; final child and fresh 30s observation succeeded")
 fflush(stdout)
 
-// Exercise the actual 120-second bound, without a fake clock or an injected
-// shorter budget. The child exits late; it must never release a late final spawn.
+// The deadline contract on a real clock. By default a 2 s budget keeps the
+// suite fast (the 120 s value itself is asserted above);
+// CYDER_TEST_FULL_TIMING=1 waits out the actual 120 s bound (release runs).
+// The child exits late; it must never release a late final spawn.
+let fullTiming = ProcessInfo.processInfo.environment["CYDER_TEST_FULL_TIMING"] == "1"
+let timeoutBudget: TimeInterval = fullTiming ? prep.deadline! : 2
 let timeoutRunner = CyderProcessRunner()
-let timeoutChild = process(["delay", "122", "timeout.prepared"])
+let timeoutChild = process(["delay", String(timeoutBudget + 2), "timeout.prepared"])
 var timed: CyderProcessRunner.Outcome?, timeoutReleased = false, timeoutReplies = 0, finalCalls = 0
 let timeoutStart = ProcessInfo.processInfo.systemUptime
 Task {
     timed = await CyderWineLaunchSequence.run(prepare: {
-        let result = await timeoutRunner.run(process: timeoutChild, policy: prep.policy, deadline: prep.deadline,
+        let result = await timeoutRunner.run(process: timeoutChild, policy: prep.policy, deadline: timeoutBudget,
             onRelease: { timeoutReleased = true })
         timeoutReplies += 1
         return result == .exited(0, signalled: false) ? nil : result
@@ -90,13 +94,13 @@ Task {
         return await timeoutRunner.run(process: process(["marker", "timeout.final"]), policy: final.policy, deadline: final.deadline)
     })
 }
-pump(timeout: 125) { timed != nil }
+pump(timeout: timeoutBudget + 5) { timed != nil }
 let timeoutElapsed = ProcessInfo.processInfo.systemUptime - timeoutStart
-check(timed == .unconfirmed && timeoutElapsed >= 119.8 && timeoutElapsed < 122, "the actual 120s preparation deadline was not observed")
+check(timed == .unconfirmed && timeoutElapsed >= timeoutBudget - 0.2 && timeoutElapsed < timeoutBudget + 2, "the \(timeoutBudget)s preparation deadline was not observed")
 check(timeoutChild.isRunning && !timeoutReleased && finalCalls == 0, "deadline killed the child, released ownership or spawned final")
 pump { timeoutReleased }
 check(timeoutReplies == 1 && finalCalls == 0 && !FileManager.default.fileExists(atPath: root.appendingPathComponent("timeout.final").path), "late successful preparation replayed final spawn")
-print("PASS real 120s timeout: elapsed=\(timeoutElapsed); physical mutation retained until actual exit, no late final spawn")
+print("PASS real \(timeoutBudget)s timeout: elapsed=\(timeoutElapsed); physical mutation retained until actual exit, no late final spawn")
 fflush(stdout)
 
 let cancelledRunner = CyderProcessRunner()
@@ -130,7 +134,7 @@ pump { refused != nil && refusedRelease }
 check(refused == .cancelledBeforeSpawn && !FileManager.default.fileExists(atPath: root.appendingPathComponent("cancel.forbidden").path), "quiesced preparation spawned a new child")
 print("PASS cancellation contract: observation cancellation keeps physical owner; quiesce refuses unstarted work; neither dispatches final")
 let result: [String: Any] = ["status": "PASS", "positivePreparationSeconds": positiveElapsed,
-    "preparationBudgetSeconds": prep.deadline!, "timeoutObservedSeconds": timeoutElapsed,
+    "preparationBudgetSeconds": prep.deadline!, "timeoutBudgetSeconds": timeoutBudget, "timeoutObservedSeconds": timeoutElapsed,
     "finalBudgetSeconds": final.deadline!, "windowObservationBudgetSeconds": observedBudget!,
     "timeoutReplies": timeoutReplies, "lateFinalSpawns": finalCalls]
 try JSONSerialization.data(withJSONObject: result, options: [.prettyPrinted, .sortedKeys]).write(to: root.appendingPathComponent("result.json"))

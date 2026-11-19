@@ -2,6 +2,14 @@
 # Opt-in desktop test: creates two windows belonging only to its native helper.
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# It brings real windows to the front, which fails while someone is using the
+# Mac. Skip (exit 77) unless the desktop has been idle for 60 s, or
+# CYDER_TEST_DESKTOP=1 / CYDER_TEST_FULL_TIMING=1 asks to run it anyway.
+idle_ns="$(ioreg -c IOHIDSystem -d 4 | awk '/HIDIdleTime/ {print $NF; exit}')"
+if [[ "${CYDER_TEST_DESKTOP:-}" != 1 && "${CYDER_TEST_FULL_TIMING:-}" != 1 && "${idle_ns:-0}" -lt 60000000000 ]]; then
+  echo "needs an idle desktop (idle $(( ${idle_ns:-0} / 1000000000 )) s; set CYDER_TEST_DESKTOP=1 to force)"
+  exit 77
+fi
 TEST_DIR="$(mktemp -d /private/tmp/cy-window-native.XXXXXX)"
 trap 'rm -rf "$TEST_DIR"' EXIT
 cp "$ROOT/tests/fixtures/cyder_window_native_harness.swift" "$TEST_DIR/main.swift"
