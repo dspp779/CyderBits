@@ -35,7 +35,7 @@
 |---|---|---|---|
 | C1 | Steam 在目前 engine 上從登入、遊戲庫、下載到啟動遊戲 | 2026-11-15：圖形為 WineD3D 時可登入並下載 CS2；全域圖形選 DXVK 時不出現視窗（[說明](../games/steam/README.md)），不修改程式 | 登入、商店／遊戲庫畫面、下載、啟動一款遊戲、退出，逐步記錄 |
 | C2 | CS2 第一階段：CompatDB 規則（`Cities2.exe` 使用 DXMT）與使用指引（不經 Paradox Launcher、Steam 保持背景登入、遊戲內用 Fullscreen Window） | 2026-11-16：規則已啟用並有測試（圖形「預設」以外的選擇優先）；[使用指引](../games/cities-skylines-2/README.md) 完成 | 規則有測試；指引文件完成；不修改遊戲檔案 |
-| C4 | 選 DXMT 前檢查 GPU（至少 Metal GPU Family Mac 2） | 2026-11-16：`CyderSwift --metal-gpu-family` 回報預設 GPU 的 family，launcher 的 `cyder_dxmt_launch_allowed` 一併檢查。GPU Family Mac 1 時：新楓之谷自動選擇改用 DXVK；使用者選 DXMT 改回預設並記錄原因；設定介面的 DXMT 選項停用；CompatDB 只能用 DXMT 的遊戲（目前只有 `Cities2.exe`）在啟動 Wine 前停止，顯示 `CYD-GFX-002`。使用者自選其他圖形時照設定執行。無法取得 GPU 資訊時維持原本行為。測試：`tests/test-cyder-dxmt-gpu-gate.sh`。2026-11-19 Apple Silicon（M4）：`--metal-gpu-family` 回報 `mac2`；全域與每遊戲圖形為「預設」時，Cyder 啟動的 `Cities2.exe` 載入 `winemetal.so`／`winemetal.dll` 並使用 DXMT shader cache，行為不變。GPU Family Mac 1 實機未測 | Mac 1 GPU 上 CS2 顯示 `CYD-GFX-002`、新楓之谷預設以 DXVK 啟動；Apple Silicon 行為不變 |
+| C4 | 選 DXMT 前檢查 GPU（至少 Metal GPU Family Mac 2） | 2026-11-16：`CyderSwift --metal-gpu-family` 回報預設 GPU 的 family，launcher 的 `cyder_dxmt_launch_allowed` 一併檢查。GPU Family Mac 1 時：新楓之谷自動選擇改用 DXVK；使用者選 DXMT 改回預設並記錄原因；設定介面的 DXMT 選項停用；CompatDB 只能用 DXMT 的遊戲（目前只有 `Cities2.exe`）在啟動 Wine 前停止，顯示 `CYD-GFX-002`。使用者自選其他圖形時照設定執行。無法取得 GPU 資訊時維持原本行為。測試：`tests/test-cyder-dxmt-gpu-gate.sh`。2026-11-19 Apple Silicon（M4）：`--metal-gpu-family` 回報 `mac2`；全域與每遊戲圖形為「預設」時，Cyder 啟動的 `Cities2.exe` 載入 `winemetal.so`／`winemetal.dll` 並使用 DXMT shader cache，行為不變。2026-11-19 GPU Family Mac 1 實機（iMac12,2）通過，見[舊款 Intel Mac 實測](#舊款-intel-mac-實測2026-11-16) | Mac 1 GPU 上 CS2 顯示 `CYD-GFX-002`、新楓之谷預設以 DXVK 啟動；Apple Silicon 行為不變 |
 | C3 | CS2 第二階段：不修改遊戲檔案的實測 | 2026-11-15：DXMT 正常初始化，但遊戲在檔案列舉 `IOException` 後卡在黑畫面，未進主選單；Cyder011 與 CrossOver 26.3 官方 engine 相同。engine 修正 Mono last error（engine `claude/mono-gs-lasterror`）後，**未修改的遊戲**設定 SteamAppId 即到達主選單（[紀錄](../games/cities-skylines-2-support-assessment.zh-TW.md)）。修正需隨 Cyder014 出貨。遊玩測試：新遊戲、存檔、重開讀檔、3 分鐘執行、正常退出皆通過；建造與 Mods 未測。圖形後端：只有 DXMT 可玩（D3DMetal 城市全黑、DXVK 停在主選單）。launcher 從 Steam 的 `appmanifest` 取得直接啟動遊戲的 Steam App ID | 進主選單、新建城市、存讀檔、遊玩 20 分鐘、退出；記錄是否需要遊戲 DLL 修補 |
 
 不納入：CS2 遊戲 DLL 修補工具（第三階段）。未通過 C3 前，不宣稱 CS2 可玩。
@@ -74,7 +74,21 @@
 - ~~**DXMT 未檢查 GPU。**~~ 已依建議處理，見 C4：GPU Family Mac 1 時新楓之谷改用 DXVK、CS2 顯示 `CYD-GFX-002`。
 - CS2 使用指引的需求寫明需要 Apple Silicon（本次只證實 GPU Family Mac 1 不可用；其他 Intel GPU 未測）。
 
-未測：A5、A11 的幀時間（該機沒有 Xcode，無法使用 Instruments）、#7 舊款 Intel 內顯、強制結束真實遊戲（B2）、新楓之谷在此機以 DXMT 啟動。該機的 Command Line Tools Swift 損壞（`redefinition of module 'SwiftBridging'`），完整測試中所有需編譯 Swift 的項目失敗，沒有有效的完整測試結果。
+2026-11-19 C4 實機確認（同一台 iMac12,2，含 c12028a 的 `0.15.0-dev` 測試版，Developer ID、universal）：
+
+| 檢查 | 結果 |
+|---|---|
+| `CyderSwift --metal-gpu-family` | `mac1` |
+| CS2，圖形「預設」 | 啟動 Wine 前停止，顯示 `CYD-GFX-002`（「這個遊戲只能使用 DXMT 圖形，這台 Mac 的 GPU 不支援 DXMT…尚未啟動遊戲。」）；沒有啟動 wineserver 或 `Cities2.exe` |
+| 偏好設定 → 圖形 → 圖形轉譯 | DXMT 停用；預設、DXVK、WineD3D 可選（D3DMetal 因未安裝 GPTK 停用） |
+| 遊戲選項（Steam）→ 顯示 → 圖形轉譯 | DXMT 停用 |
+| 新楓之谷，每遊戲圖形「預設」，由 Beanfun 啟動 | launcher 自動選 DXVK（`graphics backend=dxvk`，無 DXMT），啟動記錄無錯誤，載入畫面正常繪製 |
+
+小問題（不阻擋出貨）：DXMT 停用時介面沒有說明原因（D3DMetal 有「不可用：…」說明）；圖形分頁說明仍寫「MapleStory 會依 macOS 版本自動選 DXMT 或 DXVK」，Mac 1 GPU 上一律是 DXVK。只為了啟動 CS2 而開啟 Cyder 時，關閉 `CYD-GFX-002` 對話框後 Cyder 會結束，與其他啟動錯誤相同。
+
+C4 未測：`test-cyder-dxmt-gpu-gate.sh` 的 Swift 部分（該機無法編譯 Swift；shell 部分通過）、0.15.0 以前已儲存「DXMT」設定的使用者（只以 shell 函式確認改回預設）、新楓之谷載入畫面之後的遊玩。
+
+未測：A5、A11 的幀時間（該機沒有 Xcode，無法使用 Instruments）、#7 舊款 Intel 內顯、強制結束真實遊戲（B2）。該機的 Command Line Tools Swift 損壞（`redefinition of module 'SwiftBridging'`），完整測試中所有需編譯 Swift 的項目失敗，沒有有效的完整測試結果。
 
 ## 延後（未納入 0.15.0）
 
