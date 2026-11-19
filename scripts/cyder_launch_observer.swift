@@ -96,8 +96,42 @@ final class CyderLaunchObserver {
     private var drainRequest: ((String) -> Void)?
     private var drainRequested = false
     private var environmentEnded = false
+    /// A launcher may start the real program and exit non-zero before that
+    /// program's window appears. A root failure is reported only after
+    /// `successorSettle` and only while no other user program of the launch
+    /// is alive; otherwise the observation continues (window, activation, the
+    /// successors ending, or the deadline decides).
+    private let successorSettle: TimeInterval
+    private var successorsAlive = false
+    private var rootFailure: Int32?
+    private var rootFailureSettled = false
 
-    init(authority: Authority? = nil) { self.authority = authority }
+    init(authority: Authority? = nil, successorSettle: TimeInterval = 2) {
+        self.authority = authority
+        self.successorSettle = successorSettle
+    }
+
+    /// Whether a user program of this launch other than the root is alive
+    /// (from the lifecycle snapshot; Wine helpers such as conhost do not count).
+    func noteSuccessors(alive: Bool) {
+        queue.async { [self] in
+            successorsAlive = alive
+            settleRootFailure()
+        }
+    }
+    private func failRoot(_ status: Int32) {
+        guard !finished, rootFailure == nil else { return }
+        rootFailure = status
+        queue.asyncAfter(deadline: .now() + successorSettle) { [weak self] in
+            guard let self else { return }
+            self.rootFailureSettled = true
+            self.settleRootFailure()
+        }
+    }
+    private func settleRootFailure() {
+        guard !finished, rootFailureSettled, let status = rootFailure, !successorsAlive else { return }
+        finish(.rootFailed(status))
+    }
 
     func receive(_ root: NativeRoot) {
         guard authority == root.authority else { return }
@@ -146,8 +180,8 @@ final class CyderLaunchObserver {
             request(scope)
         }
         guard completion != nil else { return }
-        if root.signalled == true { finish(.rootFailed(128 + status)) }
-        else if status != 0 { finish(.rootFailed(status)) }
+        if root.signalled == true { failRoot(128 + status) }
+        else if status != 0 { failRoot(status) }
         else if environmentEnded { finish(.finishedWithoutWindow) }
         // Root zero alone keeps the original deadline for a late successor.
     }
@@ -204,7 +238,7 @@ final class CyderLaunchObserver {
             queue.async {
                 self.reading = false
                 guard !self.finished else { return }
-                if let status = sample.rootStatus, status != 0 { self.finish(.rootFailed(status)) }
+                if let status = sample.rootStatus, status != 0 { self.failRoot(status) }
                 else if sample.rootStatus == 0 && sample.lifecycle == "stopped" { self.finish(.finishedWithoutWindow) }
             }
         }

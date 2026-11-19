@@ -218,6 +218,12 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             waiter.markPresented(process: pid)
             self.dismissLaunchProgress(for: launchID)
         }
+        controller.onLiveSuccessorsChange = { [weak self] launches in
+            guard let self, let waiter = self.wineActivationWaiter, let observer = self.wineLaunchObserver else { return }
+            let alive = waiter.launchID.map { launches.contains($0) } ?? false
+            CyderDiagnostics.shared.info("wine launch successors alive=\(alive)")
+            observer.noteSuccessors(alive: alive)
+        }
         controller.onActivityChanged = { [weak self] activity in
             self?.existingLibraryController?.updateProgramActivity(activity.summary)
             self?.prepareEnvironmentAutomaticallyIfNeeded()

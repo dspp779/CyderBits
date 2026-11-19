@@ -281,3 +281,23 @@ precondition(clients.snapshot.processes[laterClient]?.launch == nil,
 clients.reduce(.windowObserved(groupStamp, compositor(laterClient, "99")))
 precondition(clients.snapshot.programActivity.running == 1, "the independently verified client still counts")
 print("PASS stale broker group cannot claim a later game for a completed launch after all its programs exited")
+
+// A launcher's successor: a live user program of the launch other than the
+// root receipt. Wine helpers and the root itself do not count.
+var handoff = fresh(); dispatch(&handoff)
+let handoffStamp = handoff.stamp(for: a)!
+let launcherRoot = L.ProcessID(boot: "boot", pid: 70, started: 5)
+handoff.reduce(.processObserved(handoffStamp, .init(id: launcherRoot, name: "Launcher", environment: a,
+    launch: "launch", ownership: .rootReceipt, existence: .alive)))
+precondition(handoff.snapshot.launchesWithLiveSuccessors.isEmpty, "the root alone is not a successor")
+let helper = L.ProcessID(boot: "boot", pid: 71, started: 6)
+handoff.reduce(.processObserved(handoffStamp, .init(id: helper, name: "conhost.exe", environment: a,
+    launch: "launch", ownership: .processTree, existence: .alive, executableName: "conhost.exe")))
+precondition(handoff.snapshot.launchesWithLiveSuccessors.isEmpty, "a Wine helper is not a successor")
+let successor = L.ProcessID(boot: "boot", pid: 72, started: 7)
+handoff.reduce(.processObserved(handoffStamp, .init(id: successor, name: "Game.exe", environment: a,
+    launch: "launch", ownership: .processTree, existence: .alive, executableName: "Game.exe")))
+precondition(handoff.snapshot.launchesWithLiveSuccessors == ["launch"], "a live child program of the launch is a successor")
+handoff.reduce(.processExited(handoffStamp, successor))
+precondition(handoff.snapshot.launchesWithLiveSuccessors.isEmpty, "an exited successor no longer holds the launch")
+print("PASS launches with live successors exclude the root and Wine helpers")

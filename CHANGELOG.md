@@ -20,6 +20,8 @@ release notes in [`docs/releases/`](docs/releases/); the engine column refers to
   Cyder now sees Wine's raised fullscreen window levels.
 - An error dialog no longer holds later launches until it is closed, and repeated
   requests for the same program (double-clicks) start it once instead of in a burst.
+- A launcher that starts the game and exits with an error code no longer shows
+  `CYD-WIN-002` while the game is still opening.
 
 ### Changed
 - DXMT is used only on a GPU with Metal GPU Family Mac 2. On older Intel GPUs MapleStory

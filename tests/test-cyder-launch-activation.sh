@@ -157,3 +157,48 @@ swiftc -module-cache-path "$TMP/mc" -o "$TMP/modal" "$TMP/modal.swift" 2>>"$TMP/
 assert_eq "$("$TMP/modal" perform)" ran "main-queue work runs under a dialog opened from a run-loop block"
 assert_eq "$("$TMP/modal" inline)" blocked "a dialog inside a main-queue block holds the main queue (why presentLaunchDialog exists)"
 
+
+# A launcher that exits non-zero while its successor (the real program) is
+# alive is not a failure until the successor ends without a window.
+mkdir -p "$TMP/handoff-src"
+cat >"$TMP/handoff-src/main.swift" <<'SWIFT'
+import Foundation
+let mode = CommandLine.arguments[1]
+let observer = CyderLaunchObserver(successorSettle: 0.3)
+let waiter = WineActivationWaiter(prefix: "/tmp/p")
+let start = ProcessInfo.processInfo.systemUptime
+let lock = NSLock(); var rootStatusValue: Int32? = nil
+func rootStatus() -> Int32? { lock.lock(); defer { lock.unlock() }; return rootStatusValue }
+DispatchQueue.global().asyncAfter(deadline: .now() + 0.1) { lock.lock(); rootStatusValue = 3; lock.unlock() }
+switch mode {
+case "successor-window":   // successor alive, then its window appears
+    observer.noteSuccessors(alive: true)
+    DispatchQueue.global().asyncAfter(deadline: .now() + 1.0) { waiter.markPresented() }
+case "successor-ends":     // successor alive, exits without a window
+    DispatchQueue.global().asyncAfter(deadline: .now() + 0.2) { observer.noteSuccessors(alive: true) }
+    DispatchQueue.global().asyncAfter(deadline: .now() + 1.0) { observer.noteSuccessors(alive: false) }
+case "late-successor":     // successor recorded shortly after the root exit
+    DispatchQueue.global().asyncAfter(deadline: .now() + 0.25) { observer.noteSuccessors(alive: true) }
+case "successor-forever":  // successor never shows a window
+    observer.noteSuccessors(alive: true)
+default: break             // no successor
+}
+let deadline = start + (mode == "successor-forever" ? 1.5 : 5)
+Task {
+    let result = await observer.wait(until: deadline, signal: waiter, read: { .init(rootStatus: rootStatus(), lifecycle: nil) })
+    let elapsed = ProcessInfo.processInfo.systemUptime - start
+    print("\(result) \(elapsed >= 0.9 ? "late" : "early")")
+    exit(0)
+}
+dispatchMain()
+SWIFT
+swiftc -module-cache-path "$TMP/mc" -o "$TMP/handoff" "$ROOT/scripts/cyder_execution_phase.swift" \
+    "$ROOT/scripts/cyder_launch_observer.swift" "$TMP/handoff-src/main.swift" 2>>"$TMP/build.log" || {
+    cat "$TMP/build.log"; exit 1; }
+assert_eq "$("$TMP/handoff" none)" "rootFailed(3) early" "a root failure with no successor is still reported after the settle time"
+assert_eq "$("$TMP/handoff" late-successor)" "unconfirmed late" "a successor recorded during the settle time holds the failure"
+assert_eq "$("$TMP/handoff" successor-window)" "presented late" "a successor's window after the launcher failed is a started launch"
+assert_eq "$("$TMP/handoff" successor-ends)" "rootFailed(3) late" "the failure is reported when the successor ends without a window"
+assert_eq "$("$TMP/handoff" successor-forever)" "unconfirmed late" "a successor alive until the deadline ends unconfirmed, no dialog"
+assert_contains "$app" "observer.noteSuccessors(alive: alive)" "the app tells the observer when the launch has a live successor"
+assert_contains "$(cat "$ROOT/scripts/cyder_status_item.swift")" "onLiveSuccessorsChange?(successors)" "the status item reports launches with live successors"

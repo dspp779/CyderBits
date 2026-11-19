@@ -16,7 +16,8 @@ launch is observed at a time; the next queued launch waits for the result.
 | A window of the tree is on screen, not active | window scan (`windowPresented`) + 1 s grace | `presented`: started |
 | The root (the program Cyder started) exits 0 and the environment ends | native root receipt | `finishedWithoutWindow`: no error |
 | The root exits non-zero **after** a window was presented | root receipt | `exitedAfterWindow`: no error |
-| The root exits non-zero (or by a signal) before any window | root receipt | `rootFailed` → `CYD-WIN-002`/`-003`/`-004` dialog |
+| The root exits non-zero (or by a signal) before any window, and no other user program of the launch is alive 2 s later | root receipt + lifecycle snapshot | `rootFailed` → `CYD-WIN-002`/`-003`/`-004` dialog |
+| The root exits non-zero while another user program of the launch (a successor) is alive | root receipt + `launchesWithLiveSuccessors` | observation continues: a window → `presented`/`activated`; the successors end without one → `rootFailed`; deadline → `unconfirmed` |
 | 30 s pass with none of the above | deadline | `unconfirmed`: no dialog |
 
 A window is read from `CGWindowListCopyWindowInfo(.optionOnScreenOnly)`, owned
@@ -62,7 +63,9 @@ shows `CYD-WIN-002`. Tests: `tests/test-cyder-launch-activation.sh`.
 | Case | What happens | Status |
 |---|---|---|
 | Window on another Space, or minimized before the scan sees it | `onscreen = false`, the same as Wine's hidden helper windows (a 500 × 500 off-screen window exists in every Wine process), so it is not counted | Open. Counting off-screen windows would also count hidden helpers |
-| A launcher hands off to a child and exits non-zero before the child's window appears | `rootFailed` → `CYD-WIN-002` although the child may still start | Open. Handoff executables are listed per launch (`expectsHandoff`) |
+| A launcher hands off to a child and exits non-zero before the child's window appears | Fixed in 0.15.0, see below | — |
+| A successor is recorded more than 2 s after the root fails | `rootFailed` dialog, as before | Open; the lifecycle snapshot usually records a child within the fork event |
+| A successor stays alive without a window (a background broker started by a failing launcher) | No dialog; `unconfirmed` at the deadline | By design: a living child is not proof of failure |
 | Root exits non-zero after the 30 s observation | Observation already ended (`unconfirmed`); no dialog | By design |
 | Wine's activation request without a visible window | Treated as a hint only: the tree and a visible window must be confirmed | By design; relaxing it would accept unverified processes |
 | An error dialog is open | Fixed in 0.15.0, see below | — |
@@ -93,6 +96,26 @@ Now:
 
 Other dialogs opened from main-queue blocks (settings, Winetricks, environment
 actions) still hold the main queue while open; they are not on the launch path.
+
+## Fixed: a launcher that exits non-zero before its child's window (0.15.0)
+
+The observer used to report `rootFailed` as soon as the root exited non-zero.
+A launcher that starts the real program and exits with an error code then
+showed `CYD-WIN-002` while the program was still opening. Reproduced with a
+`.bat` running `start "" notepad.exe` then `exit 3`: `cmd` exited 3 and the
+Notepad window appeared 0.3 s later, after the dialog.
+
+Now a non-zero root exit is held for `successorSettle` (2 s). The status item
+reports which launches have a live user program other than the root receipt
+(`Snapshot.launchesWithLiveSuccessors`; Wine helpers such as `conhost.exe` do
+not count) through `onLiveSuccessorsChange` → `CyderLaunchObserver.noteSuccessors`.
+While a successor is alive the failure stays held; a window or activation ends
+the observation as started, the successors ending reports the failure, and the
+deadline ends it unconfirmed without a dialog. The session log records
+`wine launch successors alive=true|false`. A real failure with no successor
+(`find.exe` exiting 2) shows the dialog 2 s later than before.
+Tests: `tests/test-cyder-launch-activation.sh` (observer timing),
+`tests/test-cyder-lifecycle-isolation.sh` (which processes count).
 
 ## Checking a case
 

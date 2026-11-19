@@ -35,6 +35,8 @@ final class CyderStatusItemController: NSObject, NSMenuDelegate {
     var onWindowConfirmed: ((String) -> Void)?
     var onLaunchWindowPresented: ((String, Int32) -> Void)?
     var onPendingWindowChange: ((Set<String>) -> Void)?
+    var onLiveSuccessorsChange: ((Set<String>) -> Void)?
+    private var liveSuccessorLaunches: Set<String> = []
     private(set) var presentedLaunches = Set<String>()
     var onActivityChanged: ((CyderLifecycle.ProgramActivity) -> Void)?
     private var lastActivity: CyderLifecycle.ProgramActivity?
@@ -352,6 +354,11 @@ final class CyderStatusItemController: NSObject, NSMenuDelegate {
         if shown != presentedLaunches {
             presentedLaunches = shown
             onPendingWindowChange?(shown)
+        }
+        let successors = snapshot.launchesWithLiveSuccessors
+        if successors != liveSuccessorLaunches {
+            liveSuccessorLaunches = successors
+            onLiveSuccessorsChange?(successors)
         }
         windowAccess.update(snapshot)
         considerCooperativeFocus(snapshot)

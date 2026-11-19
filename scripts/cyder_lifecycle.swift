@@ -163,6 +163,15 @@ enum CyderLifecycle {
             }
             return result
         }
+        /// Launches with a live user program other than the root receipt: a
+        /// launcher's successor (Wine helpers do not count).
+        var launchesWithLiveSuccessors: Set<String> {
+            Set(processes.values.compactMap { process -> String? in
+                guard let id = process.launch, process.existence == .alive, process.ownership != .rootReceipt,
+                      process.isUserProgram(in: launches[id]) else { return nil }
+                return id
+            })
+        }
         var hasActiveWork: Bool { restoring || ingressPending || requests.values.contains { $0.phase.isActive }
             || (windowAction != nil && windowAction?.result != .shown) }
         var hasEnvironment: Bool { environments.values.contains { $0.existence != .exited } }

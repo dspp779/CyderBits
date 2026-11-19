@@ -50,6 +50,7 @@
 | B4／B5 | 已安裝的 Cyder013 經 Cyder「更新」升為 Cyder014：`libMoltenVK-1.2.10.dylib` 移除，`.real` 指向 1.4.2；`ntdll.dll` SHA-256 與釘選值相符 |
 | B2 | 見上表：SIGKILL 真實遊戲後 server 與 Steam 正常。另以 MECCHA CHAMELEON（UE5，經 Cyder 啟動）逐次測 SIGKILL 3 次、SIGTERM 3 次：遊戲 1–2 秒內結束，wineserver PID 不變、Steam 繼續執行、無新的 wineserver 當機報告，下一次啟動約 4 秒出現遊戲 |
 | 新問題（已修正） | **強制結束全螢幕遊戲後誤報 `CYD-WIN-002`。** 原因：Wine 的全螢幕視窗在遊戲成為使用中 App 時升到 level 26（`NSStatusWindowLevel + 1`），Cyder 只認 level 0，因此看不到視窗；遊戲被強制結束、啟動器以結束代碼 1 結束時誤報，對話框關閉前新的啟動都會等待（實測 64 秒）；不結束時則要等滿 30 秒才放行下一個啟動。修正後接受 Wine 的視窗層級（0、3、26、27、shielding + 1／+ 2）：啟動約 3.5 秒即確認，20 秒後強制結束 3/3 無對話框；真正失敗（`find.exe` 結束代碼 2、無視窗）仍顯示 `CYD-WIN-002`。另外：錯誤對話框原本在主佇列的區塊內開啟，開著時所有新的啟動要求都停住，關閉後一次全部執行（同一遊戲開出多個）；改為在 run loop 區塊開啟並先推進佇列，對話框開著時下一個遊戲 4 秒內啟動；重複的啟動要求（同程式、同參數，排隊中、啟動中或 10 秒內剛啟動）只執行一次。說明與未涵蓋的情況見 [launch-detection.md](../launch-detection.md) |
+| 新問題（已修正） | **啟動器先以錯誤碼結束、遊戲視窗稍後才出現時誤報 `CYD-WIN-002`。** 以 `.bat`（`start "" notepad.exe` 後 `exit 3`）重現：`cmd` 結束代碼 3，0.3 秒後 Notepad 視窗出現，仍顯示對話框。修正後，程式以錯誤碼結束時先等 2 秒，若同一次啟動還有其他使用者程式在執行（Wine 輔助程式不算）就繼續觀察：出現視窗即視為已啟動，這些程式都結束仍無視窗才顯示錯誤。M4 測試版 3/3 無對話框；`find.exe` 結束代碼 2 仍顯示 `CYD-WIN-002`（依設計晚 2 秒顯示）。見 [launch-detection.md](../launch-detection.md) |
 | C4 | 見上表：預設圖形下 CS2 使用 DXMT |
 | C3 | **未能進主選單：帳號目前沒有 CS2 授權。** 免費遊玩期已於 11-16 結束。以 App ID 949230 啟動（經 Cyder 或直接 Wine）時 `SteamAPI.Init() failed`，Steam 未登記遊戲程序，接著 `NullReferenceException`；同一執行檔改用 App ID 480（Spacewar）時 Steam 登記遊戲（`Game process added : AppID 480`），表示 Cyder014 上的 Steam IPC 正常，不是 engine 問題 |
 
