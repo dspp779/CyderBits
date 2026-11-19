@@ -84,7 +84,8 @@ read the `SKILL.md` before starting that kind of work.
 | Wine engine work | `cyder-wine-engine-redirect` |
 
 References: `docs/development-testing.md`, `docs/release-pipeline.zh-TW.md`,
-`docs/release-signing.zh-TW.md`.
+`docs/release-signing.zh-TW.md`, `docs/launch-detection.md` (when Cyder shows
+`CYD-WIN-002`).
 
 `AGENTS.md` is the only instruction file. `CLAUDE.md` is a one-line
 `@AGENTS.md` import because Claude Code reads `CLAUDE.md`; add no other

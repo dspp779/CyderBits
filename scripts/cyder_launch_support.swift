@@ -308,6 +308,26 @@ func cyderVisibleSurfaces(ownedBy pids: Set<Int32>) -> [Int32: [UInt32]]? {
     return Dictionary(grouping: windows.filter { pids.contains($0.pid) }, by: \.pid).mapValues { $0.map(\.windowID) }
 }
 
+/// Window levels winemac.drv gives a Wine window (cocoa_window.m,
+/// `minimumLevelForActive:`): normal 0, topmost NSFloatingWindowLevel, and an
+/// active fullscreen window NSStatusWindowLevel + 1 or, with the displays
+/// captured, CGShieldingWindowLevel() + 1 (each one higher when topmost).
+/// A fullscreen game is raised to 26 as soon as it becomes the active app;
+/// accepting only level 0 made it look windowless, so a force-quit game was
+/// reported as CYD-WIN-002 and an untouched one held the launch queue 30 s.
+func cyderIsWineWindowLevel(_ layer: Int, shieldingLevel: Int = Int(CGShieldingWindowLevel())) -> Bool {
+    let floating = Int(CGWindowLevelForKey(.floatingWindow))
+    let fullscreen = Int(CGWindowLevelForKey(.statusWindow)) + 1
+    return [0, floating, fullscreen, fullscreen + 1, shieldingLevel + 1, shieldingLevel + 2].contains(layer)
+}
+
+/// Whether a CoreGraphics window record is a usable Wine program window.
+func cyderAcceptsWineWindow(layer: Int, onscreen: Bool, alpha: Double, width: Double, height: Double,
+                            shieldingLevel: Int = Int(CGShieldingWindowLevel())) -> Bool {
+    onscreen && alpha != 0 && width >= 80 && height >= 80
+        && cyderIsWineWindowLevel(layer, shieldingLevel: shieldingLevel)
+}
+
 private func readCyderOnscreenWindows() -> [CyderOnscreenWindow]? {
     guard let info = CGWindowListCopyWindowInfo(
         [.optionOnScreenOnly, .excludeDesktopElements],
@@ -321,11 +341,12 @@ private func readCyderOnscreenWindows() -> [CyderOnscreenWindow]? {
         guard pid > 0, let number = window[kCGWindowNumber as String] as? NSNumber,
               number.uint32Value != 0 else { continue }
         let layer = window[kCGWindowLayer as String] as? Int ?? 0
-        guard layer == 0, (window[kCGWindowAlpha as String] as? NSNumber)?.doubleValue != 0 else { continue }
+        let alpha = (window[kCGWindowAlpha as String] as? NSNumber)?.doubleValue ?? 1
         let bounds = window[kCGWindowBounds as String] as? NSDictionary
         let width = (bounds?["Width"] as? NSNumber)?.doubleValue ?? 0
         let height = (bounds?["Height"] as? NSNumber)?.doubleValue ?? 0
-        guard width >= 80, height >= 80 else { continue }
+        // The list is already on-screen only (.optionOnScreenOnly).
+        guard cyderAcceptsWineWindow(layer: layer, onscreen: true, alpha: alpha, width: width, height: height) else { continue }
         let ownerName = window[kCGWindowOwnerName as String] as? String ?? ""
         windows.append(CyderOnscreenWindow(pid: pid, ownerName: ownerName, windowID: number.uint32Value))
     }

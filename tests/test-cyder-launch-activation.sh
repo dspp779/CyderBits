@@ -18,6 +18,7 @@ trap 'rm -rf "$TMP"' EXIT
 
 cat >"$TMP/main.swift" <<'EOF'
 import Foundation
+import CoreGraphics
 func check(_ ok: Bool, _ message: String) { if !ok { print("FAIL: \(message)"); exit(1) } }
 let root = "/Users/u/Library/Application Support/Cyder/bottles"
 let shared = root + "/shared"
@@ -53,6 +54,22 @@ check(cyderIsWineCrashReporter(arguments: ["C:\\windows\\system32\\winedbg.exe",
 check(!cyderIsWineCrashReporter(arguments: ["winedbg"]), "an interactive winedbg is not a crash dialog")
 check(!cyderIsWineCrashReporter(arguments: ["C:\\games\\SteamSetup.exe"]), "a program is not a crash dialog")
 check(!cyderIsWineCrashReporter(arguments: []), "unreadable arguments are not a crash dialog")
+// Wine window levels (winemac.drv minimumLevelForActive:). A fullscreen game
+// that became the active app sits on 26; it must still count as a window.
+let shield = 1000
+func accepts(_ layer: Int, onscreen: Bool = true, alpha: Double = 1, w: Double = 1680, h: Double = 945) -> Bool {
+    cyderAcceptsWineWindow(layer: layer, onscreen: onscreen, alpha: alpha, width: w, height: h, shieldingLevel: shield)
+}
+check(accepts(0), "a normal Wine window counts")
+check(accepts(3), "a topmost (floating) Wine window counts")
+check(accepts(26), "an active fullscreen Wine window (NSStatusWindowLevel + 1) counts")
+check(accepts(27), "an active topmost fullscreen Wine window counts")
+check(accepts(shield + 1) && accepts(shield + 2), "a window over captured displays counts")
+check(!accepts(25) && !accepts(101) && !accepts(-20) && !accepts(shield), "other levels are not Wine program windows")
+check(!accepts(0, onscreen: false), "an off-screen (hidden helper) window does not count")
+check(!accepts(0, alpha: 0), "a transparent window does not count")
+check(!accepts(26, w: 500, h: 40) && !accepts(0, w: 79, h: 300), "a window under 80 x 80 does not count")
+check(cyderIsWineWindowLevel(Int(CGShieldingWindowLevel()) + 1), "the real shielding level is used by default")
 print("ok")
 EOF
 swiftc -module-cache-path "$TMP/mc" -o "$TMP/harness" "$ROOT/scripts/cyder_launch_support.swift" "$TMP/main.swift" 2>"$TMP/build.log" || {

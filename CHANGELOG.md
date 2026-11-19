@@ -14,6 +14,11 @@ release notes in [`docs/releases/`](docs/releases/); the engine column refers to
 - MapleStory WZ read-ahead (engine Cyder014), merged with the WZ cache into one setting,
   "MapleStory WZ 檔案讀取最佳化", on by default.
 
+### Fixed
+- A fullscreen game that was force-quit no longer shows "程式在顯示視窗前就結束了"
+  (`CYD-WIN-002`), and a fullscreen launch no longer holds the next launch for 30 s:
+  Cyder now sees Wine's raised fullscreen window levels.
+
 ### Changed
 - DXMT is used only on a GPU with Metal GPU Family Mac 2. On older Intel GPUs MapleStory
   falls back to DXVK, the DXMT setting is disabled, and Cities: Skylines II stops before
