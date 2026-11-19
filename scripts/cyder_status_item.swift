@@ -35,8 +35,8 @@ final class CyderStatusItemController: NSObject, NSMenuDelegate {
     var onWindowConfirmed: ((String) -> Void)?
     var onLaunchWindowPresented: ((String, Int32) -> Void)?
     var onPendingWindowChange: ((Set<String>) -> Void)?
-    var onLiveSuccessorsChange: ((Set<String>) -> Void)?
-    private var liveSuccessorLaunches: Set<String> = []
+    var onLiveSuccessorsChange: (([String: [String]]) -> Void)?
+    private var liveSuccessorLaunches: [String: [String]] = [:]
     private(set) var presentedLaunches = Set<String>()
     var onActivityChanged: ((CyderLifecycle.ProgramActivity) -> Void)?
     private var lastActivity: CyderLifecycle.ProgramActivity?

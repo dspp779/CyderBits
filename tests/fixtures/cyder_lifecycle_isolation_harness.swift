@@ -297,7 +297,7 @@ precondition(handoff.snapshot.launchesWithLiveSuccessors.isEmpty, "a Wine helper
 let successor = L.ProcessID(boot: "boot", pid: 72, started: 7)
 handoff.reduce(.processObserved(handoffStamp, .init(id: successor, name: "Game.exe", environment: a,
     launch: "launch", ownership: .processTree, existence: .alive, executableName: "Game.exe")))
-precondition(handoff.snapshot.launchesWithLiveSuccessors == ["launch"], "a live child program of the launch is a successor")
+precondition(handoff.snapshot.launchesWithLiveSuccessors == ["launch": ["Game.exe"]], "a live child program of the launch is a successor")
 handoff.reduce(.processExited(handoffStamp, successor))
 precondition(handoff.snapshot.launchesWithLiveSuccessors.isEmpty, "an exited successor no longer holds the launch")
 print("PASS launches with live successors exclude the root and Wine helpers")

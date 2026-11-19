@@ -66,6 +66,8 @@ shows `CYD-WIN-002`. Tests: `tests/test-cyder-launch-activation.sh`.
 | A launcher hands off to a child and exits non-zero before the child's window appears | Fixed in 0.15.0, see below | — |
 | A successor is recorded more than 2 s after the root fails | `rootFailed` dialog, as before | Open; the lifecycle snapshot usually records a child within the fork event |
 | A successor stays alive without a window (a background broker started by a failing launcher) | No dialog; `unconfirmed` at the deadline | By design: a living child is not proof of failure |
+| The root fails in the last 2 s of the 30 s observation | The hold outlasts the deadline; `finish` turns any result after the deadline into `unconfirmed`, so no dialog | Accepted; before 0.15.0 this showed `CYD-WIN-002` |
+| A non-launch dialog (settings, Winetricks, environment actions) is open on the main queue when the successor appears | The successor signal is delivered on main and arrives after the 2 s hold, so the false `CYD-WIN-002` can return | Open; same cause as the dialog fix below |
 | Root exits non-zero after the 30 s observation | Observation already ended (`unconfirmed`); no dialog | By design |
 | Wine's activation request without a visible window | Treated as a hint only: the tree and a visible window must be confirmed | By design; relaxing it would accept unverified processes |
 | An error dialog is open | Fixed in 0.15.0, see below | — |
@@ -111,9 +113,20 @@ reports which launches have a live user program other than the root receipt
 not count) through `onLiveSuccessorsChange` → `CyderLaunchObserver.noteSuccessors`.
 While a successor is alive the failure stays held; a window or activation ends
 the observation as started, the successors ending reports the failure, and the
-deadline ends it unconfirmed without a dialog. The session log records
-`wine launch successors alive=true|false`. A real failure with no successor
-(`find.exe` exiting 2) shows the dialog 2 s later than before.
+deadline ends it unconfirmed without a dialog. Once a successor has been
+seen, "none alive" must last `successorDebounce` (1 s) before the failure is
+reported. The batch file's own `cmd.exe` counts as a successor while it runs
+and ends just before the receipt arrives, so the count can go to none and back
+to `notepad.exe` within a second. The session log records
+`wine launch root exited status=… holding 2.0s for a successor`,
+`wine launch successors alive=true|false <names>` and, when reported,
+`wine launch successors ended without a window`. Measured on M4 / macOS 27.2.1 (test build,
+3 runs): Notepad was recorded 0.23 s, 0.79 s and 0.74 s after the root exit
+(margin about 1.2 s to the hold), and no dialog appeared. A real failure with
+no successor (`find.exe` exiting 2) still shows the dialog, 3.6 s after the
+root exit. Not measured on Intel or a busy Mac; if the gap there comes close to
+2 s, count a live unnamed child of the launch as a successor rather than
+lengthening the hold.
 Tests: `tests/test-cyder-launch-activation.sh` (observer timing),
 `tests/test-cyder-lifecycle-isolation.sh` (which processes count).
 

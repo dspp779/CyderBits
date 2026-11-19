@@ -220,8 +220,9 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         }
         controller.onLiveSuccessorsChange = { [weak self] launches in
             guard let self, let waiter = self.wineActivationWaiter, let observer = self.wineLaunchObserver else { return }
-            let alive = waiter.launchID.map { launches.contains($0) } ?? false
-            CyderDiagnostics.shared.info("wine launch successors alive=\(alive)")
+            let names = waiter.launchID.flatMap { launches[$0] } ?? []
+            let alive = !names.isEmpty
+            CyderDiagnostics.shared.info("wine launch successors alive=\(alive) \(names.sorted().joined(separator: ","))")
             observer.noteSuccessors(alive: alive)
         }
         controller.onActivityChanged = { [weak self] activity in
@@ -1962,6 +1963,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         }
         let activationWaiter = WineActivationWaiter(prefix: prefix.path, launchID: launchID)
         let observer = CyderLaunchObserver(authority: authority)
+        observer.log = { CyderDiagnostics.shared.info($0) }
         onMainThread {
             wineActivationWaiter = activationWaiter
             wineLaunchObserver = observer

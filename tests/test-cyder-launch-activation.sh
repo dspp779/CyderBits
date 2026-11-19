@@ -164,7 +164,7 @@ mkdir -p "$TMP/handoff-src"
 cat >"$TMP/handoff-src/main.swift" <<'SWIFT'
 import Foundation
 let mode = CommandLine.arguments[1]
-let observer = CyderLaunchObserver(successorSettle: 0.3)
+let observer = CyderLaunchObserver(successorSettle: 0.3, successorDebounce: 0.5)
 let waiter = WineActivationWaiter(prefix: "/tmp/p")
 let start = ProcessInfo.processInfo.systemUptime
 let lock = NSLock(); var rootStatusValue: Int32? = nil
@@ -179,6 +179,11 @@ case "successor-ends":     // successor alive, exits without a window
     DispatchQueue.global().asyncAfter(deadline: .now() + 1.0) { observer.noteSuccessors(alive: false) }
 case "late-successor":     // successor recorded shortly after the root exit
     DispatchQueue.global().asyncAfter(deadline: .now() + 0.25) { observer.noteSuccessors(alive: true) }
+case "flicker":            // successor briefly missing after the wait, then its window
+    observer.noteSuccessors(alive: true)
+    DispatchQueue.global().asyncAfter(deadline: .now() + 0.6) { observer.noteSuccessors(alive: false) }
+    DispatchQueue.global().asyncAfter(deadline: .now() + 0.8) { observer.noteSuccessors(alive: true) }
+    DispatchQueue.global().asyncAfter(deadline: .now() + 1.2) { waiter.markPresented() }
 case "successor-forever":  // successor never shows a window
     observer.noteSuccessors(alive: true)
 default: break             // no successor
@@ -199,6 +204,7 @@ assert_eq "$("$TMP/handoff" none)" "rootFailed(3) early" "a root failure with no
 assert_eq "$("$TMP/handoff" late-successor)" "unconfirmed late" "a successor recorded during the settle time holds the failure"
 assert_eq "$("$TMP/handoff" successor-window)" "presented late" "a successor's window after the launcher failed is a started launch"
 assert_eq "$("$TMP/handoff" successor-ends)" "rootFailed(3) late" "the failure is reported when the successor ends without a window"
+assert_eq "$("$TMP/handoff" flicker)" "presented late" "a successor missing briefly after the wait does not report the failure"
 assert_eq "$("$TMP/handoff" successor-forever)" "unconfirmed late" "a successor alive until the deadline ends unconfirmed, no dialog"
-assert_contains "$app" "observer.noteSuccessors(alive: alive)" "the app tells the observer when the launch has a live successor"
+assert_contains "$app" "observer.noteSuccessors(alive: alive)"  "the app tells the observer when the launch has a live successor"
 assert_contains "$(cat "$ROOT/scripts/cyder_status_item.swift")" "onLiveSuccessorsChange?(successors)" "the status item reports launches with live successors"
