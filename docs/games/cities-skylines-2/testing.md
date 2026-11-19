@@ -34,6 +34,13 @@ is missing). For a direct Wine run, set them yourself. Without them the game log
 `platform service integration failed` and then throws `NullReferenceException`.
 `steam_appid.txt` is not needed.
 
+The same `SteamAPI.Init() failed. Is Steam running?` line also appears when the
+logged-in account does not own CS2 (for example after a free weekend). Steam's
+`logs/console_log.txt` then has no `Game process added : AppID 949230` line.
+To tell the two apart, run the game once directly with `SteamAppId=480`
+(Spacewar, owned by every account): if Steam logs `Game process added : AppID
+480`, Steam IPC works and the cause is the licence, not the engine.
+
 For automated clicking add `-screen-fullscreen 0`: the default exclusive
 fullscreen window is on layer 26 and `guarded-click` refuses it on purpose.
 
