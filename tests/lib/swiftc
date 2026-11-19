@@ -1,0 +1,12 @@
+#!/bin/bash
+# tests/run.sh puts this first on PATH. Every swiftc call in a run shares one
+# module cache (CYDER_TEST_MODULE_CACHE), so SDK modules such as AppKit are
+# built once per run instead of once per test (about 3 s each).
+args=()
+while [[ $# -gt 0 ]]; do
+  if [[ "$1" == "-module-cache-path" && -n "${CYDER_TEST_MODULE_CACHE:-}" ]]; then
+    args+=("$1" "$CYDER_TEST_MODULE_CACHE"); shift 2; continue
+  fi
+  args+=("$1"); shift
+done
+exec /usr/bin/swiftc "${args[@]}"

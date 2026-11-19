@@ -36,7 +36,7 @@ engine checkout.
 
 | Task | Steps |
 |---|---|
-| Run tests | `bash tests/run.sh <word>` for matching tests, then `bash tests/run.sh` (about 12 minutes; run it in the background). |
+| Run tests | `bash tests/run.sh --changed` while working; the whole suite (`bash tests/run.sh`, in the background) once before each push, not for docs-only changes. Release: `CYDER_TEST_FULL_TIMING=1` on an idle Mac. |
 | Try a change in the app | Skill `cyder-dev-test`: build with `--channel test` into a folder outside `dist/`, pick the signature, check the app, read the logs. |
 | Test a game | Skills `cyder-dev-test` then `wine-game-compat-testing`; per-game steps in `docs/games/<game>/testing.md`. |
 | Ship a release | Skill `cyder-release`, start to finish. Never skip `cyder-release-verify`. |

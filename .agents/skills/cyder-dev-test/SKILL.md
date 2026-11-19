@@ -19,23 +19,28 @@ needed only when the change is visible in the app or affects launching.
 ## 1. Run the tests
 
 ```bash
-bash tests/run.sh <word-from-the-test-names>
+bash tests/run.sh --changed
 ```
 
 ```bash
 bash tests/run.sh
 ```
 
-1. Run the narrow set first, then the whole suite in the background (about
-   12 minutes). The runner prints each failing test's log path.
+1. While working, run `--changed`: the tests that name a changed file, the
+   tests that run those, and for Swift the app-build tests. Run the whole suite
+   in the background once before each push, on the committed tree, and say
+   which commit it ran on. Skip both for documentation-only changes. The runner
+   prints each failing test's log path; `skip` lines are tests that need an
+   idle desktop.
 2. After editing Swift, typecheck every app source (command in the reference)
    and grep `tests/` for tests that compile a file you split or renamed. They
    compile a subset of the app, so a new file must be added to each of them.
 3. If a test fails: rerun it alone three times and read its assertion.
    - Fails every time → a regression or a stale assertion. Fix it; do not call
      it flaky.
-   - `test-cyder-window-native` and `test-cyder-launch-generation` depend on
-     window focus and load; they may fail while the Mac is in use.
+   - `test-cyder-window-native` skips unless the Mac has been idle for 60 s;
+     `test-cyder-launch-generation` depends on load and may fail while the
+     Mac is busy.
 4. If the suite prints nothing for minutes, a test has opened a real alert.
    Stub `osascript` and `open` in that test; do not wait or click it away.
 
