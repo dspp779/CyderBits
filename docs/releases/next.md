@@ -11,9 +11,9 @@
 
 | 項目 | 內容 | 目前狀態 | 驗收 |
 |---|---|---|---|
-| A1 | WZ read-ahead（`CYDER_MAPLESTORY_READAHEAD`）正式納入 engine：patch 套用清單、`build-wine.sh`、`engine-release.json` 與測試；決定是否預設開啟 | 2026-11-16：已納入 Cyder014 release stack（engine `claude/cyder014`）並有 patch 測試；App 將它與 WZ cache 合併為「MapleStory WZ 檔案讀取最佳化」單一設定，預設開啟。各後端各量一次，讀取等待約減少 70%（DXVK 388 → 108 ms）；A5 多次量測未做 | 有 patch 測試；A5 量測確認效果後再決定預設值 |
-| A5 | 各後端（DXVK／DXMT／D3DMetal）多次冷快取量測，並在舊款 Intel Mac 量測 | 目前每格只有一次 | 同角色、地圖、技能，每格至少 3 次；記錄讀取等待、最長 Present 空窗與 p95／p99 幀時間 |
-| A11 | 舊款 Intel Mac 走圖卡頓：型態、WZ cache 開／關、DXVK state cache 是否寫入並在下次生效 | 2026-11-16 iMac12,2：WZ cache 與 read-ahead 的環境變數確實傳到遊戲；DXVK state cache 沿用 11-11 的檔案，短時間遊玩未新增項目。幀時間未量測（該機沒有 Xcode，無法使用 Metal System Trace）。見[舊款 Intel Mac 實測](#舊款-intel-mac-實測2026-11-16) | 有量測紀錄與結論；若需修改另開項目 |
+| A1 | WZ read-ahead（`CYDER_MAPLESTORY_READAHEAD`）正式納入 engine：patch 套用清單、`build-wine.sh`、`engine-release.json` 與測試；決定是否預設開啟 | 2026-11-16：已納入 Cyder014 release stack（engine `claude/cyder014`）並有 patch 測試；App 將它與 WZ cache 合併為「MapleStory WZ 檔案讀取最佳化」單一設定，預設開啟。各後端各量一次，讀取等待約減少 70%（DXVK 388 → 108 ms）。**2026-11-19 決定：預設開啟，不等 A5** | 完成 |
+| A5 | 各後端（DXVK／DXMT／D3DMetal）多次冷快取量測，並在舊款 Intel Mac 量測 | **不做（2026-11-19 決定）**；每格一次的結果見 A1 | 同角色、地圖、技能，每格至少 3 次；記錄讀取等待、最長 Present 空窗與 p95／p99 幀時間 |
+| A11 | 舊款 Intel Mac 走圖卡頓：型態、WZ cache 開／關、DXVK state cache 是否寫入並在下次生效 | 2026-11-16 iMac12,2：WZ cache 與 read-ahead 的環境變數確實傳到遊戲；DXVK state cache 沿用 11-11 的檔案，短時間遊玩未新增項目。幀時間不量測（2026-11-19 決定；該機沒有 Xcode，無法使用 Metal System Trace）。見[舊款 Intel Mac 實測](#舊款-intel-mac-實測2026-11-16) | 有量測紀錄與結論；若需修改另開項目 |
 
 不納入：read-ahead 後 256 KiB 補讀視窗、cache 命中去除 `lseek`、mutex 外補讀，以及下方 DXMT resource lab 各項。
 
