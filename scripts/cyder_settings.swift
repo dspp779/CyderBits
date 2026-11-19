@@ -283,6 +283,18 @@ struct CyderGraphicsCapabilities: Equatable {
     static let hostGPUSupportsDxmt: Bool =
         MTLCreateSystemDefaultDevice()?.supportsFamily(.mac2) ?? false
 
+    /// Why DXMT cannot be chosen on this Mac, for the settings text; nil when it can.
+    static func dxmtUnavailableReason(
+        osMajorVersion: Int = ProcessInfo.processInfo.operatingSystemVersion.majorVersion,
+        gpuSupportsDxmt: Bool = hostGPUSupportsDxmt,
+        hasDxmt: Bool
+    ) -> String? {
+        if osMajorVersion < 15 { return "DXMT 不可用：需要 macOS 15+" }
+        if !gpuSupportsDxmt { return "DXMT 不可用：這台 Mac 的 GPU 不支援（需要 Metal GPU Family Mac 2）" }
+        if !hasDxmt { return "DXMT 不可用：找不到已安裝的 DXMT 圖形元件" }
+        return nil
+    }
+
     static func hasDxvkPayload(engineRoot: URL?) -> Bool {
         let root: URL?
         if let engineRoot {

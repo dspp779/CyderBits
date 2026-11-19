@@ -1603,10 +1603,11 @@ final class CyderSettingsWindowController: NSWindowController, NSWindowDelegate,
         dxvkHudFrametimes.isEnabled = enableDxvkFrametimes && !environmentBusy
         (dxvkHudFrametimes.superview as? NSStackView)?.isHidden = !showDxvkFrametimes
         graphicsHelp.stringValue = switch backend {
-        case .default: "帶入預載的遊戲專屬設定；MapleStory 會依 macOS 版本自動選 DXMT 或 DXVK。"
+        case .default: "帶入預載的遊戲專屬設定；MapleStory 在 macOS 與 GPU 支援時自動選 DXMT，否則使用 DXVK。"
+            + (CyderGraphicsCapabilities.dxmtUnavailableReason(hasDxmt: presentation.hasDxmt).map { "\n" + $0 } ?? "")
         case .wined3d: "使用 Wine 內建 Direct3D；相容性較廣，但效能通常較差。"
         case .dxvk: "使用 DXVK 將 Direct3D 轉為 Vulkan，再由 MoltenVK 轉為 Metal。"
-        case .dxmt: "使用 DXMT 將 Direct3D 直接轉為 Metal；需要 macOS 15+ 與引擎內建 DXMT。"
+        case .dxmt: "使用 DXMT 將 Direct3D 直接轉為 Metal；需要 macOS 15+、支援的 GPU（Metal GPU Family Mac 2）與引擎內建 DXMT。"
         case .d3dmetal: "使用 Apple D3DMetal／GPTK；需要 macOS 14+ 與可用的 GPTK。"
         }
         gptkNote.stringValue = "D3DMetal 可使用本機 CrossOver 內附的 GPTK，或自行從 Apple 下載並安裝；若兩者皆有，Cyder 優先使用已安裝版本。"

@@ -72,8 +72,10 @@ assert_contains "$library_ui" "需要 macOS 15+" "game DXMT gating should explai
 assert_contains "$ui" 'case .dxmt:' "help text must cover DXMT"
 assert_contains "$ui" "使用 DXMT 將 Direct3D 直接轉為 Metal；需要 macOS 15+" \
   "DXMT help text must reflect the macOS 15+ requirement"
-assert_contains "$ui" "MapleStory 會依 macOS 版本自動選 DXMT 或 DXVK" \
+assert_contains "$ui" "MapleStory 在 macOS 與 GPU 支援時自動選 DXMT，否則使用 DXVK" \
   "default graphics help should explain MapleStory platform selection"
+assert_contains "$ui" 'CyderGraphicsCapabilities.dxmtUnavailableReason(hasDxmt: presentation.hasDxmt)' \
+  "default graphics help should say why DXMT is unavailable"
 assert_contains "$ui" "顯示畫面流暢度" "prefs should expose a smoothness HUD selector"
 assert_contains "$ui" "顯示 frametimes" "prefs should expose a DXVK frametimes toggle"
 assert_contains "$ui" "makeDiagnosticsTab()" "preferences should provide a dedicated diagnostics tab"

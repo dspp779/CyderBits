@@ -125,9 +125,16 @@ check(printed == ["none"], "no device prints none")
 printed = []
 _ = CyderMetalGPU.run(arguments: ["CyderSwift", "--metal-gpu-family"], output: { printed.append($0) })
 check(printed == ["mac2"] || printed == ["mac1"], "the real device prints a family: \(printed)")
+let reason = CyderGraphicsCapabilities.dxmtUnavailableReason
+check(reason(15, true, true) == nil, "DXMT available has no reason")
+check(reason(14, false, false) == "DXMT 不可用：需要 macOS 15+", "macOS reason comes first")
+check(reason(15, false, true) == "DXMT 不可用：這台 Mac 的 GPU 不支援（需要 Metal GPU Family Mac 2）", "GPU reason")
+check(reason(15, true, false) == "DXMT 不可用：找不到已安裝的 DXMT 圖形元件", "payload reason")
 print("ok")
 EOF
-swiftc -module-cache-path "$TEST_DIR/cache" "$ROOT/scripts/cyder_metal_gpu.swift" "$TEST_DIR/main.swift" -o "$TEST_DIR/gpu"
+swiftc -module-cache-path "$TEST_DIR/cache" "$ROOT/scripts/cyder_metal_gpu.swift" \
+  "$ROOT/scripts/cyder_paths.swift" "$ROOT/scripts/cyder_settings.swift" "$ROOT/scripts/cyder_gptk.swift" \
+  "$ROOT/tests/fixtures/cyder_settings_diagnostics_stub.swift" "$TEST_DIR/main.swift" -o "$TEST_DIR/gpu"
 assert_eq "$("$TEST_DIR/gpu")" ok "CyderMetalGPU reports the family"
 
 app="$(cat "$ROOT/scripts/cyder_app_main.swift")"
