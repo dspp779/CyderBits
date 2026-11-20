@@ -9,8 +9,8 @@ Wine engine builds are in the sibling `cyder-wine-engine` repo.
 
 | Change | Minimum check |
 |---|---|
-| Shell / Ruby / Python script | `bash tests/run.sh --changed` |
-| Swift source (`scripts/cyder_*.swift`) | Typecheck all app sources, then `bash tests/run.sh --changed` |
+| Shell / Ruby / Python script | The test for that change; `--changed` before the push |
+| Swift source (`scripts/cyder_*.swift`) | `bash tests/lib/typecheck-app.sh` and the test for that change; `--changed` before the push |
 | Documentation only | Nothing (`--changed` selects no tests) |
 | Settings or game-options UI, alerts | Suite **and** click through a test build (tests cannot see layout or main-thread traps) |
 | Launch path, graphics install, engine handling | Suite **and** launch a real game from a Developer ID signed test build |
@@ -23,10 +23,11 @@ runs. Say "not game-tested" in the report when no game was launched.
 ## Offline tests
 
 ```bash
-bash tests/run.sh --changed       # tests affected by changes against main
-bash tests/run.sh --changed REF   # ... against another base
-bash tests/run.sh graphics dxmt   # tests whose name contains a word
-bash tests/run.sh                 # whole suite
+bash tests/run.sh test-cyder-foo.sh  # one test (any word in the name works)
+bash tests/lib/typecheck-app.sh      # typecheck every app Swift source (~15 s)
+bash tests/run.sh --changed          # before a push: unpushed work only
+bash tests/run.sh --changed REF      # ... against another base
+bash tests/run.sh                    # whole suite: merges to main, releases
 bash tests/run.sh --list
 ```
 
@@ -36,27 +37,44 @@ one log per test and prints the log directory; pass `--log-dir` to choose it.
 
 When to run what:
 
-| Moment | Run |
-|---|---|
-| While editing | The test you are changing, then `--changed` |
-| Before each push | The whole suite once, on the committed tree; note the commit it ran on. Skip it when only documentation changed |
-| Release | `CYDER_TEST_FULL_TIMING=1 bash tests/run.sh` on an idle Mac |
+| Moment | Run | Typical cost |
+|---|---|---|
+| Each edit | The test written for the change; after a Swift edit also `tests/lib/typecheck-app.sh`. If you changed wording, a constant or a menu's shape, grep `tests/` for short fragments of the old text | Seconds |
+| Same edit, only if cheap | `python3 tests/select-changed.py --files <files you edited>`: run the list when it is about ten tests or fewer, otherwise leave it for the push | Under a minute |
+| Before each push or PR | `bash tests/run.sh --changed` once, on the committed tree; note the commit it ran on. Skip it when only documentation changed | Minutes |
+| Merge to `main` | The whole suite | About 8 min |
+| Release candidate | `CYDER_TEST_FULL_TIMING=1 bash tests/run.sh` on an idle Mac | About 12 min |
+
+Do not rerun `--changed` or the whole suite after each small edit: on a branch
+that touches the core Swift files it costs minutes each time and repeats work
+already covered.
 
 `--changed` (`tests/select-changed.py`) takes the files changed against the
-base (committed, uncommitted and untracked) and selects every test whose text
-names one of them, by path or file name, or names a `scripts/` file that uses
-one (a launcher sourcing `cyder-common.sh`). It adds the tests that run a
-selected test, and for a Swift change the tests that build the app from
-`create-cyder-app.sh`. Documentation selects nothing; a change to the runner, or
-to a file no test names, runs everything. Word filters pick by test name only,
-so they miss tests that compile a file under another name; prefer `--changed`.
+base and selects every test whose text names one of them, by path or file name,
+or names a `scripts/` file that uses one (a launcher sourcing
+`cyder-common.sh`), plus the tests that run a selected test. Without `REF` the
+base is the branch's upstream, so only work not yet pushed is covered (a branch
+with no upstream uses `main`). Changed files include uncommitted and untracked
+ones. When a Swift file changed, the whole app is typechecked first instead of
+running every app-build test; a Swift file no test names is covered by that
+typecheck. Documentation selects nothing; a change to the runner, or to another
+file no test names, runs everything. Word filters pick by test name only, so
+they miss tests that compile a file under another name.
+
+The runner prints the number of tests and an estimate from earlier runs
+(durations are kept in `.tmp-tests/durations.tsv`). Each test has a 240 s limit
+(600 s with `CYDER_TEST_FULL_TIMING=1`; `--timeout` overrides); the slowest
+normal test takes about a minute, so a hang no longer costs 15 minutes.
 
 The whole suite takes several minutes, so run it in the background. All
 `swiftc` calls in a run share one module cache (`tests/lib/swiftc`, first on
 `PATH`), so SDK modules are built once instead of once per test.
 
 A test that exits 77 is reported as `skip` with its last log line and does not
-fail the run. With `CYDER_TEST_FULL_TIMING=1` a skip is a failure, and timing
+fail the run. A skipped test is not verified: when your change touches what it
+checks (for `test-cyder-window-native`, menu or window code), run it alone with
+`CYDER_TEST_DESKTOP=1 bash tests/run.sh --timeout 120 window-native`, or report
+it as not verified. With `CYDER_TEST_FULL_TIMING=1` a skip is a failure, and timing
 tests wait out the real limits (the 120 s preparation deadline in
 `test-cyder-launch-preparation-budget`; 2 s otherwise).
 
