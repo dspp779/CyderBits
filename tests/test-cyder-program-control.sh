@@ -33,22 +33,11 @@ assert_contains "$app" 'let libraryTitle = Self.libraryTitle(forExecutable: exe)
 assert_contains "$app" 'statusItemController.setProgramTitle(libraryTitle, launch: launchID)' "rows and dialogs use the library title"
 echo "PASS library titles"
 
-# Phase 2 notifications live in the app only (the notification centre aborts
-# outside an app bundle); the status item just emits ProgramNotice.
-notes="$(cat "$ROOT/scripts/cyder_notifications.swift")"
+# Phase 2 shows results in the menu only: no notifications (removed 2026-11-21).
 status="$(cat "$ROOT/scripts/cyder_status_item.swift")"
-assert_not_contains "$status" "UserNotifications" "the status item never touches the notification centre"
-assert_contains "$(cat "$ROOT/scripts/create-cyder-app.sh")" 'cyder_notifications.swift' "the app builds the notification poster"
-assert_contains "$notes" 'content.title = "\(name) 意外結束"' "a crash says which program ended unexpectedly"
-assert_contains "$notes" 'content.title = "\(shared) 仍在背景執行"' "Steam left alone is announced"
-assert_contains "$notes" 'title: "查看紀錄"' "the crash notice opens the log"
-assert_contains "$notes" 'completionHandler([.banner, .list])' "banners show while Cyder is active"
-assert_contains "$app" 'CyderNotifications.shared.install()' "the delegate is set at launch"
-assert_contains "$app" 'self?.statusItemController.endSharedProgram(prefix: prefix, shared: shared)' \
-  "ending Steam from a notification goes through the confirmed 結束"
-assert_contains "$status" 'requestProgramControl(launch: launch, force: false)' "endSharedProgram asks first"
-assert_contains "$app" 'if CyderNotifications.shared.isPosting {' "Cyder does not quit while a notification is being posted"
-echo "PASS phase 2 notification wiring"
+assert_not_contains "$status" "UserNotifications" "no notification centre in the status item"
+assert_not_contains "$(cat "$ROOT/scripts/create-cyder-app.sh")" 'cyder_notifications.swift' "no notification poster in the app"
+echo "PASS no notifications"
 assert_contains "$app" 'if crashReporter { self.statusItemController.noteCrashReporter(pid: pid) }' \
   "Wine's crash dialog marks its launch as ended unexpectedly"
 echo "PASS crash dialog wiring"

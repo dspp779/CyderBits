@@ -83,10 +83,8 @@ Cyder
 becomes 顯示 (brings the window forward instead of launching a second copy,
 which 0.15.0 would drop anyway), with 結束… next to it (confirmed like the menu).
 
-**Notifications, only when something needs attention.**
-
-- 「MECCHA CHAMELEON 意外結束」 with 查看紀錄 (phase 2).
-- 「Steam 仍在背景執行」 after the last game it served ends, with 結束 (phase 2).
+**Notifications:** none. Phase 2 first added two (意外結束, Steam still running);
+they were removed on 2026-11-21 as unnecessary.
 
 **Quitting Cyder** keeps games running (0.14 behaviour). Reopening Cyder shows
 them again.
@@ -121,8 +119,8 @@ them again.
    `taskkill /im`) and 強制結束, each with confirmation, 沒有回應 escalation; the
    dependency warning for Steam; library 顯示 / 結束 buttons and the 執行中 badge;
    leftover background rows.
-2. **Phase 2:** 意外結束 and 「仍在背景執行」 notifications; 已結束 result shown
-   briefly in the row.
+2. **Phase 2:** the 已結束／意外結束／已由你結束 result shown briefly in the row
+   (notifications were tried and removed).
 3. **Phase 3:** `+process` trace for names and launcher/child grouping, after
    measuring its log volume on more games.
 
@@ -134,26 +132,15 @@ them again.
   `winedbg --auto` has no `.exe` name for the process scan), else 已結束.
   A launch whose outcome is `failed` already showed `CYD-WIN-…` and gets no
   row. Ended rows are a separate disabled list, not program rows.
-- Notifications (`scripts/cyder_notifications.swift`, app-only because the
-  notification centre aborts outside an app bundle; the status item emits
-  `ProgramNotice` through `onProgramNotice`):
-  - 「X 意外結束」 with 查看紀錄 (opens the session log).
-  - 「Steam 仍在背景執行」 when the last game with a window that Steam served
-    ends: either a separately launched game, or a game started inside Steam
-    (same row). Not sent while the environment is being stopped. Its 結束…
-    goes through the confirmed 結束.
-  - Permission is asked on the first notice; when declined, the row text and
-    the session log remain. Banners also show while Cyder is active. Cyder's
-    quit-when-idle waits until a notice has been handed to the system.
+- No notifications. A first version posted 「X 意外結束」 and 「Steam 仍在背景執行」
+  as macOS notifications; it was removed on 2026-11-21 as unnecessary. The
+  ended row and the session log carry the result.
 - Steam's own tools (`vulkandriverquery64.exe`, `gldriverquery64.exe`,
   `steamerrorreporter*.exe`) count as part of Steam, so they neither appear
   in the Steam warning nor look like a game ending.
 
 Hands-on (test build `0.16.0-dev`, M4): a program that crashes on purpose
-opened Wine's crash dialog; closing it gave 「crashme — 意外結束」. Steam plus
-Notepad, then Notepad ended: 「Steam 仍在背景執行」 was raised. Both notices
-were refused by macOS (Cyder not allowed to show notifications on this Mac),
-so the banners and their buttons were not seen.
+opened Wine's crash dialog; closing it gave 「crashme — 意外結束」.
 
 ## Phase 3 measurements and decision (2026-11-20)
 

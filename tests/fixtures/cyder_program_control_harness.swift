@@ -96,14 +96,8 @@ precondition(warning.shared == "Steam" && warning.others == ["PenguinHotel-Win64
              "Steam warning: \(warning)")
 print("PASS program control menu: rows, confirmations, close and force targets, Steam warning")
 
-// Phase 2: ended rows show the result briefly; a crash and Steam left alone are announced.
-var notices: [CyderStatusItemController.ProgramNotice] = []
-controller.onProgramNotice = { notices.append($0) }
+// Phase 2: ended rows show the result briefly.
 func exit(_ id: L.ProcessID) { controller.receiveLifecycleEvent(.processExited(stamp, id)) }
-func showWindow(_ id: L.ProcessID, _ token: String) {
-    controller.receiveLifecycleEvent(.windowObserved(stamp, .init(id: .init(process: id, source: "accessibility", token: token),
-        title: "Game", capability: .available, minimized: false, focused: false, isProgramWindow: true)))
-}
 func endedTitles() -> [String] { menu().items.map(\.title).filter { $0.hasSuffix("已結束") || $0.hasSuffix("意外結束") || $0.hasSuffix("已由你結束") } }
 
 // The force-quit game (fake signal above) now actually exits: ended by the player.
@@ -117,7 +111,6 @@ controller.receiveLifecycleEvent(.observationFinished(stamp, launch: "plain", ou
 pump("plain row") { CyderProgramControl.programs(launch: "plain", in: controller.lifecycleSnapshot).count == 1 }
 exit(plain)
 pump("plain ended") { endedTitles().contains("Plain.exe — 已結束") }
-precondition(!notices.contains(.unexpectedEnd(name: "Plain.exe")), "a plain end is not announced")
 
 // A crash: Wine's crash dialog appears for the launch, then everything ends.
 attach("crash", "Crashy.exe")
@@ -128,7 +121,6 @@ let dialog = observe(44002, "winedbg.exe", launch: "crash", root: false)
 pump("crash dialog seen") { CyderProgramControl.crashed(launch: "crash", in: controller.lifecycleSnapshot) }
 exit(crashy)
 pump("crash ended") { endedTitles().contains("Crashy.exe — 意外結束") }
-precondition(notices.contains(.unexpectedEnd(name: "Crashy.exe")), "a crash is announced: \(notices)")
 exit(dialog)
 
 // Wine's real crash dialog runs as `winedbg --auto`, which the scan cannot
@@ -152,13 +144,5 @@ exit(broken)
 var settled = false; DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { settled = true }; pump("settle") { settled }
 precondition(!endedTitles().contains { $0.hasPrefix("Broken.exe") }, "a failed launch gets no ended row")
 
-// A game with a window ends while Steam keeps running: 「Steam 仍在背景執行」.
-attach("game2", "Game2.exe")
-let game2 = observe(46001, "Game2.exe", launch: "game2", root: true)
-controller.receiveLifecycleEvent(.observationFinished(stamp, launch: "game2", outcome: .confirmedStarted))
-showWindow(game2, "g2")
-pump("game2 shown") { controller.lifecycleSnapshot.processes[game2]?.hasPresentedProgram == true }
-exit(game2)
-pump("Steam left alone") { notices.contains(.sharedStillRunning(shared: "Steam", launch: "steam", prefix: "/fixture/program")) }
-print("PASS program control phase 2: ended rows, crash and Steam notices")
+print("PASS program control phase 2: ended rows with results")
 exit(0)
