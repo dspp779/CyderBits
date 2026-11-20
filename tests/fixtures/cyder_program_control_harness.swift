@@ -82,14 +82,17 @@ precondition(Set(signalled) == [gameRoot, gameChild], "force targets: \(signalle
 
 // Steam while a game runs: the warning replaces the plain question.
 attach("steam", "steam.exe")
+controller.setProgramTitle("Steam", launch: "steam")    // the library title
 _ = observe(42001, "steam.exe", launch: "steam", root: true)
 _ = observe(42002, "steamwebhelper.exe", launch: "steam", root: false)
 controller.receiveLifecycleEvent(.observationFinished(stamp, launch: "steam", outcome: .unconfirmed))
 pump("steam row") { CyderProgramControl.programs(launch: "steam", in: controller.lifecycleSnapshot).count == 2 }
 answer = false
-click("結束…", in: row("steam.exe — "))
+precondition(menu().items.contains { $0.title.hasPrefix("Steam — ") } && !menu().items.contains { $0.title.hasPrefix("steam.exe — ") },
+             "a library game's row uses its library title")
+click("結束…", in: row("Steam — "))
 let warning = confirmations.last!
-precondition(warning.shared == "Steam" && warning.others == ["PenguinHotel-Win64-Shipping.exe"] && warning.title == "仍要結束「steam.exe」？",
+precondition(warning.shared == "Steam" && warning.others == ["PenguinHotel-Win64-Shipping.exe"] && warning.title == "仍要結束「Steam」？",
              "Steam warning: \(warning)")
 print("PASS program control menu: rows, confirmations, close and force targets, Steam warning")
 exit(0)

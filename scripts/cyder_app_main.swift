@@ -85,6 +85,11 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
     static func programExecutableKey(_ path: String) -> String {
         (URL(fileURLWithPath: path).standardizedFileURL.path as NSString).lowercased
     }
+    static func libraryTitle(forExecutable path: String,
+                             games: @autoclosure () -> [CyderGameRecord] = CyderGameLibraryStore().games) -> String? {
+        let key = programExecutableKey(path)
+        return games().first { programExecutableKey($0.executablePath) == key }?.displayName
+    }
     private func runningLaunch(forExecutable url: URL) -> String? {
         let key = Self.programExecutableKey(url.path)
         let live = statusItemController.controllableLaunches
@@ -2194,8 +2199,11 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             return .unconfirmed
         }
         let lifecycleController = onMainThread { statusItemController }
+        // The library title (「Steam」), read off the main thread from the saved list.
+        let libraryTitle = Self.libraryTitle(forExecutable: exe)
         onMainThread {
             programLaunchExecutables[launchID] = Self.programExecutableKey(exe)
+            statusItemController.setProgramTitle(libraryTitle, launch: launchID)
             statusItemController.beginLaunch(id: launchID, prefix: prefix, executableName: executableName,
                 authority: authority, stamp: stamp,
                 committedRequest: .init(id: authorization.id, digest: authorization.digest, environment: stamp.environment,

@@ -29,3 +29,6 @@ assert_contains "$library" 'selectionEndButton.title = phase == .notResponding ?
 assert_contains "$library" 'if programClosePhase?(launch) == .notResponding { onForceQuitProgram?(launch) } else { onEndProgram?(launch) }' \
   "the library's 強制結束… goes through the confirmed force path"
 echo "PASS library escalation"
+assert_contains "$app" 'let libraryTitle = Self.libraryTitle(forExecutable: exe)' "a launch looks up its library title"
+assert_contains "$app" 'statusItemController.setProgramTitle(libraryTitle, launch: launchID)' "rows and dialogs use the library title"
+echo "PASS library titles"

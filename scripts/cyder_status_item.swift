@@ -47,6 +47,14 @@ final class CyderStatusItemController: NSObject, NSMenuDelegate {
     }
     private var closeRequests: [String: TimeInterval] = [:]
     private var lastControllableLaunches: Set<String> = []
+    /// Library titles of launches, shown instead of the .exe name.
+    private var programTitles: [String: String] = [:]
+    func setProgramTitle(_ title: String?, launch: String) {
+        precondition(Thread.isMainThread)
+        let trimmed = title?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        programTitles[launch] = trimmed.isEmpty ? nil : String(trimmed.prefix(80))
+        refresh()
+    }
     /// The set of running programs changed (the library's buttons follow it).
     var onProgramsChanged: (() -> Void)?
     var onLiveSuccessorsChange: (([String: [String]]) -> Void)?
@@ -355,6 +363,7 @@ final class CyderStatusItemController: NSObject, NSMenuDelegate {
         hasLifecycleSnapshot = true
         latestLifecycle = snapshot
         closeRequests = closeRequests.filter { !CyderProgramControl.programs(launch: $0.key, in: snapshot).isEmpty }
+        programTitles = programTitles.filter { snapshot.launches[$0.key] != nil || sessions[$0.key] != nil }
         let controllable = controllableLaunches
         if controllable != lastControllableLaunches { lastControllableLaunches = controllable; onProgramsChanged?() }
         let activity = snapshot.programActivity
@@ -455,6 +464,7 @@ final class CyderStatusItemController: NSObject, NSMenuDelegate {
             let launcher = members.contains { $0.hasPresentedProgram && $0.executableName?.lowercased() == "bluelauncher.exe" }
             let name: String
             if games.count > 1 { name = "BlueCG × \(games.count)" }
+            else if let title = programTitles[launch.id] { name = title }
             else { name = games.isEmpty ? launch.name : "BlueCG" }
             _ = launcher
             let phase = CyderProgramControl.closePhase(requestedAt: closeRequests[launch.id], now: ProcessInfo.processInfo.systemUptime)
