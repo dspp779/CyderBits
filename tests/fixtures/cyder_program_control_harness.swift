@@ -131,6 +131,18 @@ pump("crash ended") { endedTitles().contains("Crashy.exe — 意外結束") }
 precondition(notices.contains(.unexpectedEnd(name: "Crashy.exe")), "a crash is announced: \(notices)")
 exit(dialog)
 
+// Wine's real crash dialog runs as `winedbg --auto`, which the scan cannot
+// name: the app reports it by PID when its window asks to activate.
+attach("crash2", "Crashy2.exe")
+let crashy2 = observe(44101, "Crashy2.exe", launch: "crash2", root: true)
+let unnamedDialog = observe(44102, nil, launch: "crash2", root: false)
+controller.receiveLifecycleEvent(.observationFinished(stamp, launch: "crash2", outcome: .confirmedStarted))
+pump("crash2 row") { CyderProgramControl.programs(launch: "crash2", in: controller.lifecycleSnapshot).count == 1 }
+precondition(!CyderProgramControl.crashed(launch: "crash2", in: controller.lifecycleSnapshot), "an unnamed process is not a crash by itself")
+controller.noteCrashReporter(pid: 44102)
+exit(crashy2); exit(unnamedDialog)
+pump("crash2 ended") { endedTitles().contains("Crashy2.exe — 意外結束") }
+
 // A failed launch already showed CYD-WIN-002: no row, no notice.
 attach("failed", "Broken.exe")
 let broken = observe(45001, "Broken.exe", launch: "failed", root: true)

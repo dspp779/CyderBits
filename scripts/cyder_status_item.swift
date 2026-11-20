@@ -1231,6 +1231,14 @@ final class CyderStatusItemController: NSObject, NSMenuDelegate {
         guard let target, let app = NSRunningApplication(processIdentifier: target.id.pid) else { refresh(); return }
         app.activate(options: [.activateAllWindows])
     }
+    /// Wine's crash dialog opened (`winedbg --auto`, which the process scan
+    /// cannot name): mark the launch it belongs to as ended unexpectedly.
+    func noteCrashReporter(pid: Int32) {
+        precondition(Thread.isMainThread)
+        let owners = latestLifecycle.processes.values.filter { $0.id.pid == pid && $0.existence == .alive }.compactMap(\.launch)
+        for launch in owners { crashedLaunches.insert(launch) }
+        CyderDiagnostics.shared.info("program control: crash dialog pid=\(pid) launches=\(owners.count)")
+    }
     /// From the 「Steam 仍在背景執行」 notification: the confirmed 結束 of that
     /// environment's shared program, if it is still running.
     func endSharedProgram(prefix: String, shared: String) {

@@ -49,3 +49,6 @@ assert_contains "$app" 'self?.statusItemController.endSharedProgram(prefix: pref
 assert_contains "$status" 'requestProgramControl(launch: launch, force: false)' "endSharedProgram asks first"
 assert_contains "$app" 'if CyderNotifications.shared.isPosting {' "Cyder does not quit while a notification is being posted"
 echo "PASS phase 2 notification wiring"
+assert_contains "$app" 'if crashReporter { self.statusItemController.noteCrashReporter(pid: pid) }' \
+  "Wine's crash dialog marks its launch as ended unexpectedly"
+echo "PASS crash dialog wiring"

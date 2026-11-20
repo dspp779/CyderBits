@@ -674,7 +674,7 @@ enum CyderProgramControl {
     /// How long an ended program's row stays, showing its result.
     static let endedRowSeconds: TimeInterval = 8
     /// Wine's crash dialog: a program of the launch crashed.
-    static let crashReporters: Set<String> = ["winedbg.exe", "werfault.exe"]
+    static let crashReporters: Set<String> = ["winedbg", "winedbg.exe", "werfault", "werfault.exe"]
     enum EndResult: String, Equatable { case ended = "已結束", unexpected = "意外結束", byPlayer = "已由你結束" }
     /// Player-stopped first (a stop can trigger a crash dialog), then crash, then a plain end.
     static func endResult(stoppedByPlayer: Bool, crashed: Bool) -> EndResult {
