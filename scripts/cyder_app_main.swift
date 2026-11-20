@@ -375,6 +375,8 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         controller.runningLaunch = { [weak self] executable in self?.runningLaunch(forExecutable: executable) }
         controller.onShowProgram = { [weak self] launch in self?.statusItemController.showProgram(launch: launch) }
         controller.onEndProgram = { [weak self] launch in self?.statusItemController.requestProgramControl(launch: launch, force: false) }
+        controller.onForceQuitProgram = { [weak self] launch in self?.statusItemController.requestProgramControl(launch: launch, force: true) }
+        controller.programClosePhase = { [weak self] launch in self?.statusItemController.closePhase(launch: launch) ?? .none }
         controller.onRemoveProfile = { [weak self] executable, completion in
             guard let self else { completion(false); return }
             self.removeIndependentProfile(for: executable, completion: completion)

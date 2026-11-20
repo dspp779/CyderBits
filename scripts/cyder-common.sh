@@ -3300,7 +3300,12 @@ cyder_close_prefix_program() {
     cyder_prefix_client_environment "$wine_bin" "$prefix"
     export WINEDEBUG=-all
     cd "$prefix"
-    cyder_exec_wine "$wine_bin" taskkill /im "$image"
+    local status=0
+    cyder_exec_wine "$wine_bin" taskkill /im "$image" || status=$?
+    # 128: no window of that image to close (already gone, or windowless).
+    # Not a failure: the app's escalation offers 強制結束 if it keeps running.
+    [[ "$status" -eq 128 ]] && status=0
+    exit "$status"
   ) </dev/null >>"$CYDER_SUPPORT/Logs/program-control.log" 2>&1
 }
 

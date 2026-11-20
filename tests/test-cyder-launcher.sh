@@ -378,6 +378,7 @@ elif [[ "${1:-}" == wineboot ]]; then
   : >"$WINEPREFIX/drive_c/windows/system32/kernel32.dll"
 elif [[ ( "${1:-}" == taskmgr || "${1:-}" == taskkill ) && -n "${CYDER_TEST_TASKMGR_LOG:-}" ]]; then
   printf '%s|%s|%s|%s\n' "${WINEPREFIX:-}" "$*" "${WINEMSYNC:-}" "${WINEESYNC:-}" >>"$CYDER_TEST_TASKMGR_LOG"
+  if [[ "${1:-}" == taskkill && -n "${CYDER_TEST_TASKKILL_STATUS:-}" ]]; then exit "$CYDER_TEST_TASKKILL_STATUS"; fi
 fi
 SH
 chmod +x "$TMP/runtime/Engines/wine-x86_64/bin/wine"
@@ -510,6 +511,9 @@ CYDER_SUPPORT="$profile_support" CYDER_TEST_TASKMGR_LOG="$close_log" \
 assert_contains "$(cat "$close_log")" "$session_prefix|taskkill /im Game (x64).exe|1|" \
   "close-program should run taskkill without /f in the bottle with its sync protocol"
 assert_not_contains "$(cat "$close_log")" " /f" "close-program must never force"
+CYDER_SUPPORT="$profile_support" CYDER_TEST_TASKMGR_LOG="$close_log" CYDER_TEST_TASKKILL_STATUS=128 \
+  bash "$ROOT/scripts/cyder_launcher.sh" --close-program-prefix "$session_prefix" "gone.exe" \
+  || { echo "taskkill finding no window (128) must not fail close-program" >&2; exit 1; }
 if CYDER_SUPPORT="$profile_support" CYDER_TEST_TASKMGR_LOG="$close_log" \
   bash "$ROOT/scripts/cyder_launcher.sh" --close-program-prefix "$session_prefix" "game.exe /f" >/dev/null 2>&1; then
   echo "close-program accepted an image with arguments" >&2

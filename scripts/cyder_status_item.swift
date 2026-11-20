@@ -1128,8 +1128,15 @@ final class CyderStatusItemController: NSObject, NSMenuDelegate {
             CyderDiagnostics.shared.info("program control: close launch=\(launch) images=\(images.count)")
             onCloseProgram?(URL(fileURLWithPath: environment.prefix), images, launch)
             refresh()
-            DispatchQueue.main.asyncAfter(deadline: .now() + CyderProgramControl.closeGrace + 0.1) { [weak self] in self?.refresh() }
+            onProgramsChanged?()
+            DispatchQueue.main.asyncAfter(deadline: .now() + CyderProgramControl.closeGrace + 0.1) { [weak self] in
+                self?.refresh(); self?.onProgramsChanged?()
+            }
         }
+    }
+    func closePhase(launch: String) -> CyderProgramControl.ClosePhase {
+        precondition(Thread.isMainThread)
+        return CyderProgramControl.closePhase(requestedAt: closeRequests[launch], now: ProcessInfo.processInfo.systemUptime)
     }
     /// Launches a player can 顯示 or 結束 now.
     var controllableLaunches: Set<String> {

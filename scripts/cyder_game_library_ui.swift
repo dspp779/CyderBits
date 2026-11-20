@@ -1675,19 +1675,27 @@ final class CyderGameLibraryWindowController: NSWindowController, NSWindowDelega
     var runningLaunch: ((URL) -> String?)?
     var onShowProgram: ((String) -> Void)?
     var onEndProgram: ((String) -> Void)?
+    var onForceQuitProgram: ((String) -> Void)?
+    var programClosePhase: ((String) -> CyderProgramControl.ClosePhase)?
     private var selectedRunningLaunch: String? { selectedGame.flatMap { runningLaunch?($0.executableURL) } }
     /// Follow the running state: 啟動遊戲 becomes 顯示, and 結束… appears.
     func refreshRunningState() {
-        let running = selectedRunningLaunch != nil
+        let launch = selectedRunningLaunch, running = launch != nil
+        let phase = launch.flatMap { programClosePhase?($0) } ?? .none
         selectionLaunchButton.title = running ? "顯示" : "啟動遊戲"
         selectionLaunchButton.toolTip = running ? "這個遊戲正在執行；顯示它的視窗" : nil
         selectionEndButton.isHidden = !running
+        // After a 結束 the program did not follow, offer 強制結束 (still confirmed).
+        selectionEndButton.title = phase == .notResponding ? "強制結束…" : "結束…"
+        selectionEndButton.toolTip = phase == .notResponding ? "立即結束，未儲存的進度會遺失；會先詢問。" : "像按下視窗的關閉鈕一樣結束；會先詢問。"
         let name = selectedGame?.displayName ?? ""
-        selectionTitle.stringValue = running ? "\(name)・執行中" : name
+        let word = phase == .notResponding ? "沒有回應" : (phase == .closing ? "正在結束…" : "執行中")
+        selectionTitle.stringValue = running ? "\(name)・\(word)" : name
         refreshInteractionAvailability()
     }
     @objc private func endSelection() {
-        if let launch = selectedRunningLaunch { onEndProgram?(launch) } else { refreshRunningState() }
+        guard let launch = selectedRunningLaunch else { refreshRunningState(); return }
+        if programClosePhase?(launch) == .notResponding { onForceQuitProgram?(launch) } else { onEndProgram?(launch) }
     }
     private let emptyAddButton = NSButton()
     private let emptyState = NSStackView()

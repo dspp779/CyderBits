@@ -24,3 +24,8 @@ assert_contains "$app" 'let alive = self.onMainThread { self.statusItemControlle
   "taskkill runs only while the launch still has a live program"
 assert_contains "$app" 'self.wineLaunchObserver?.cancel()' "ending a starting program cancels its launch observation"
 echo "PASS library and app wiring"
+assert_contains "$library" 'selectionEndButton.title = phase == .notResponding ? "強制結束…" : "結束…"' \
+  "after 結束 is ignored, the library offers 強制結束…"
+assert_contains "$library" 'if programClosePhase?(launch) == .notResponding { onForceQuitProgram?(launch) } else { onEndProgram?(launch) }' \
+  "the library's 強制結束… goes through the confirmed force path"
+echo "PASS library escalation"
