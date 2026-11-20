@@ -19,9 +19,12 @@ matters is what is running, what has ended, and how it ended.
 
 ## Decisions (2026-11-20)
 
+- **Every 結束 asks for confirmation.** A game may lose unsaved progress
+  even when it closes politely.
 - **強制結束 always asks for confirmation**, like macOS Force Quit.
 - **Ending a program that others may depend on always warns first** (Steam
-  while a Steam game runs). There is no "don't ask again".
+  while a Steam game runs); the warning replaces the plain 結束 confirmation.
+  There is no "don't ask again" for any of these.
 - Wine's own background programs are never shown
   (`ProcessRecord.wineHelpers`, see launch-detection.md).
 
@@ -48,12 +51,12 @@ reporter) appear as their own 在背景執行 rows so they can be ended.
 | Action | Behaviour | Confirmation |
 |---|---|---|
 | 顯示視窗 | Bring the program's window to the front (exists) | None |
-| 結束 | Polite close, like the window's ✕: the program can save and exit | None, except the dependency warning below |
+| 結束 | Polite close, like the window's ✕: the program can save and exit | Always: 「結束 X？」 [結束] [取消]; the dependency warning below when it applies |
 | 強制結束 | Kill the program's processes immediately | Always: 「強制結束 X？未儲存的進度會遺失。」 [強制結束] [取消] |
 | 結束所有 Windows 程式… | Today's 停止 Windows 環境, under 進階 | Always (exists) |
 
-**結束 escalates.** If the program is still running 5 s after 結束, the row
-shows 沒有回應 and offers 強制結束 (still confirmed). The player never has to
+**結束 escalates.** If the program is still running 5 s after the confirmed
+結束, the row shows 沒有回應 and offers 強制結束 (confirmed again). The player never has to
 judge up front whether a game is frozen.
 
 **Dependency warning.** Before 結束 or 強制結束 on a program that other running
@@ -69,7 +72,7 @@ to the CompatDB rules so more can be added without code changes.
 
 ```
 Cyder
-├ MECCHA CHAMELEON      執行中     ▸ 顯示視窗 / 結束 / 強制結束…
+├ MECCHA CHAMELEON      執行中     ▸ 顯示視窗 / 結束… / 強制結束…
 ├ Steam                 在背景執行 ▸ 結束… / 強制結束…
 ├ ─────
 ├ 遊戲庫… / 偏好設定…
@@ -78,7 +81,7 @@ Cyder
 
 **Game library.** A running game shows a 執行中 badge; its 開啟 button
 becomes 顯示 (brings the window forward instead of launching a second copy,
-which 0.15.0 would drop anyway), with 結束 next to it.
+which 0.15.0 would drop anyway), with 結束… next to it (confirmed like the menu).
 
 **Notifications, only when something needs attention.**
 
@@ -115,7 +118,7 @@ them again.
 ## Phases
 
 1. **Phase 1:** menu rows with the statuses above; 結束 (Accessibility, then
-   `taskkill /im`), 強制結束 with confirmation, 沒有回應 escalation; the
+   `taskkill /im`) and 強制結束, each with confirmation, 沒有回應 escalation; the
    dependency warning for Steam; library 顯示 / 結束 buttons and the 執行中 badge;
    leftover background rows.
 2. **Phase 2:** 意外結束 and 「仍在背景執行」 notifications; 已結束 result shown
@@ -127,8 +130,8 @@ them again.
 
 - Status words per state: unit tests over lifecycle snapshots
   (`tests/test-cyder-lifecycle-*`).
-- 強制結束 and the dependency warning always show their dialog; 結束 does not
-  (except the warning); dialogs open through `presentLaunchDialog`-style
+- 結束, 強制結束 and the dependency warning always show their dialog (the
+  warning instead of the plain 結束 one when it applies); dialogs open through `presentLaunchDialog`-style
   run-loop blocks so they do not hold launches.
 - 結束 escalation timing with a fake clock.
 - `taskkill` runs only while a program of the environment is alive.
