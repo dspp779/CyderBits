@@ -1,7 +1,7 @@
 # 0.15.0 規劃
 
-> 更新：2026-11-16
-> 狀態：範圍已選定，開發中。列入不代表一定出貨；每項需通過下方驗收才進正式 release note。
+> 更新：2026-11-20
+> 狀態：**Draft 已建置**（`Cyder-0.15.0.zip`，見 [建置紀錄](../build-records/0.15.0-draft-20261120.md) 與 [發布說明](v0.15.0.md)），尚未發布。仍未完成：B5 舊款 Intel 內顯（#7）、B3 macOS 26、Intel 上強制結束真實遊戲；A5、A11 幀時間與 C3 長時間遊玩已決定不做。下表保留各項當時的紀錄。
 
 0.15.0 需要 macOS 12 以上（0.14 系列是最後支援 macOS 10.15／11 的版本）。
 
@@ -38,7 +38,7 @@
 | C4 | 選 DXMT 前檢查 GPU（至少 Metal GPU Family Mac 2） | 2026-11-16：`CyderSwift --metal-gpu-family` 回報預設 GPU 的 family，launcher 的 `cyder_dxmt_launch_allowed` 一併檢查。GPU Family Mac 1 時：新楓之谷自動選擇改用 DXVK；使用者選 DXMT 改回預設並記錄原因；設定介面的 DXMT 選項停用；CompatDB 只能用 DXMT 的遊戲（目前只有 `Cities2.exe`）在啟動 Wine 前停止，顯示 `CYD-GFX-002`。使用者自選其他圖形時照設定執行。無法取得 GPU 資訊時維持原本行為。測試：`tests/test-cyder-dxmt-gpu-gate.sh`。2026-11-19 Apple Silicon（M4）：`--metal-gpu-family` 回報 `mac2`；全域與每遊戲圖形為「預設」時，Cyder 啟動的 `Cities2.exe` 載入 `winemetal.so`／`winemetal.dll` 並使用 DXMT shader cache，行為不變。2026-11-19 GPU Family Mac 1 實機（iMac12,2）通過，見[舊款 Intel Mac 實測](#舊款-intel-mac-實測2026-11-16) | Mac 1 GPU 上 CS2 顯示 `CYD-GFX-002`、新楓之谷預設以 DXVK 啟動；Apple Silicon 行為不變 |
 | C3 | CS2 第二階段：不修改遊戲檔案的實測 | 2026-11-15：DXMT 正常初始化，但遊戲在檔案列舉 `IOException` 後卡在黑畫面，未進主選單；Cyder011 與 CrossOver 26.3 官方 engine 相同。engine 修正 Mono last error（engine `claude/mono-gs-lasterror`）後，**未修改的遊戲**設定 SteamAppId 即到達主選單（[紀錄](../games/cities-skylines-2-support-assessment.zh-TW.md)）。修正需隨 Cyder014 出貨。遊玩測試：新遊戲、存檔、重開讀檔、3 分鐘執行、正常退出皆通過；建造與 Mods 未測。圖形後端：只有 DXMT 可玩（D3DMetal 城市全黑、DXVK 停在主選單）。launcher 從 Steam 的 `appmanifest` 取得直接啟動遊戲的 Steam App ID | 進主選單、新建城市、存讀檔、遊玩 20 分鐘、退出；記錄是否需要遊戲 DLL 修補 |
 
-不納入：CS2 遊戲 DLL 修補工具（第三階段）。未通過 C3 前，不宣稱 CS2 可玩。
+不納入：CS2 遊戲 DLL 修補工具（第三階段）。C3 以目前結果結案（2026-11-19）：發布說明只宣稱 Apple Silicon 上可進主選單、新建城市、存檔與讀檔，不宣稱長時間遊玩。
 
 ### Apple Silicon 實測（2026-11-19）
 

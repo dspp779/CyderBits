@@ -151,19 +151,27 @@ bash scripts/release-cyder.sh --channel release --skip-notarize
 
 上傳 GitHub Release 的是 **staple 之後** 的 `Cyder-<version>.zip`（與 `Cyder.app.zip` 內容相同），不是送審用的 `Cyder-notarize.zip`。
 
+0.15.0 的經驗：
+
+- **輸出到 `--out-dir dist/release-X.Y.Z`** 時，該目錄裡沒有上一版 zip，verify 會略過體積比較（log：`no Cyder-*.zip baseline`）。完成後另跑一次 `verify-cyder-release.sh --baseline dist/release-<上一版>/Cyder-<上一版>.zip`。
+- **體積比上一版小超過 1 MiB** 時 verify 會失敗。先找原因再決定：解開兩個 zip，比較 App 內大於 500 KB 的檔案。0.15.0 小了 1.56 MB，全部來自引擎封裝少了 `libMoltenVK-1.2.10.dylib`，屬預期，記在建置紀錄。
+- **`SHA256SUMS.txt` 由手動產生**：`shasum -a 256 Cyder-X.Y.Z.zip > SHA256SUMS.txt`（只列最終 zip），並以 `shasum -a 256 -c` 確認。
+- **版本號**：改 `config/cyder-app-version.txt` 時，同時更新 `tests/test-release-cyder.sh` 的版本斷言。
+- **建置紀錄**寫在 `docs/build-records/X.Y.Z-draft-<日期>.md`：commit、引擎、zip 大小與雜湊、公證 submission、verify 結果、測試與遊戲實測；重建時把舊的輸出移到 `dist/superseded-<日期>-<原因>/` 並在紀錄中說明。
+
 ### 發佈到 GitHub
 
 打 tag、push 與建立 Release 都是對外動作，需使用者明確要求才進行：
 
 1. 發佈說明、`CHANGELOG.md`、`docs/README.md` 已填入最終 zip 的大小與 SHA-256；由最終 zip 重新產生 `dist/SHA256SUMS.txt`。
 2. 兩個 repo 合併到 `main` 並 push；在 Cyderbits `main` 打 `vX.Y.Z` tag（說明中的版本比較連結要有 tag 才有效）。
-3. 先用 `gh release view vX.Y.Z` 檢查是否已有舊 Draft：舊 Draft 可能帶著過期的 zip 或指向舊 commit，須換成 `Cyder-<version>.zip` 與 `SHA256SUMS.txt`。
+3. 先用 `gh release view vX.Y.Z` 檢查是否已有舊 Draft：舊 Draft 可能帶著過期的 zip 或指向舊 commit，須換成 `Cyder-<version>.zip` 與 `SHA256SUMS.txt`（`gh release upload --clobber`）。建立 Draft 時 `gh release create --target` 不接受短 SHA，請用分支名稱或完整 SHA；Draft 會在發布時於該分支最新 commit 建立 tag。
 4. Release 內文使用繁中發佈說明，最上方加下載段落（沿用上一版格式），並連到英文版。
 5. 發佈後從 GitHub 把 zip 下載回來執行 `shasum -a 256 -c`，並開啟英文說明與版本比較連結確認。
 
 ## 發佈前檢查清單
 
-- [ ] `bash tests/run.sh` 全數通過
+- [ ] 在閒置的 Mac 上以發行模式跑完整測試：`CYDER_TEST_FULL_TIMING=1 bash tests/run.sh` 全數通過（含需要閒置桌面的視窗測試與實際 120 秒的 preparation 期限）
 - [ ] Engine：不含 `lib/dxvk`、`lib/dxvk2`、`lib/dxmt`；圖形 payload 位於 App `Resources/graphics`
 - [ ] 圖形目錄只有要出貨的檔案：`dxvk-1.10.3.tar.zst` 與 Developer ID 簽署的 `dxmt-0.80.tar.zst`；不含 `dxvk2-*`、舊的未簽署 DXMT 或 `cyder.N` 檔（App 會打包該目錄的所有封存檔）
 - [ ] DXVK 2 在通過遊戲實測前不出貨（`create-cyder-app.sh` 與 verify 會拒絕）

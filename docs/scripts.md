@@ -54,6 +54,7 @@
 | `cyder-prefetch-bootstrap-msi.sh` | 預先下載 pinned Wine Mono/Gecko MSI（`--download-only`）；初始化不再安裝這兩個元件，此腳本僅供手動／量測 |
 | `cyder-create-mac-launcher.sh` | 在指定路徑建立精簡 macOS `.app`，轉交 Cyder.app 開啟指定 EXE（遊戲庫「加入 macOS 應用程式」底層） |
 | `cyder_mac_launcher.swift` | 編譯進 CyderSwift；遊戲庫右鍵安裝／更新 `~/Applications/Cyder/` 捷徑 |
+| `cyder_metal_gpu.swift` | 編譯進 CyderSwift；`CyderSwift --metal-gpu-family` 回報預設 GPU 的 Metal family（`mac2`／`mac1`／`none`），launcher 以此決定能否使用 DXMT（0.15.0） |
 | `cyder-winetricks.sh` | 以 Cyder engine 的 unattended CLI 安裝固定版 Winetricks 元件；目標為 SharedPrefix，供 Cyder 原生元件選擇器呼叫 |
 | `cyder_app_main.swift` | 編譯為 `Cyder.app/Contents/MacOS/Cyder`（Universal）；無 `.exe` 時顯示設定頁，有 `.exe` 時直接啟動 Wine，收到 same-prefix 的 `ActivatingAppPID` Foreground 通知後 activate 並退出 |
 | `create-cyder-pid-test-app.sh` | 建立 `dist/CyderPIDTest.app` Universal 測試工具 |

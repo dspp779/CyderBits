@@ -4,9 +4,9 @@
 
 # CyderBits
 
-**Run legacy Windows games on Mac — Cyder 0.14.0 uses DirectDraw and GDI as its validation baseline, with selectable graphics backends.**
+**Run Windows games on Mac — Cyder 0.15.0 keeps DirectDraw and GDI as its validation baseline and adds per-game graphics choices (DXVK, DXMT, D3DMetal).**
 
-The validated path remains classic 2D Win32 graphics: **DirectDraw → Wine wined3d/OpenGL** and GDI. Cyder 0.14.0 uses the `CX26.3.0-W11-Cyder013` engine (dual MoltenVK); DXVK and DXMT are delivered as separate graphics payloads, while D3DMetal is available through GPTK. Actual compatibility still depends on the game, macOS version, and selected backend.
+The validated path remains classic 2D Win32 graphics: **DirectDraw → Wine wined3d/OpenGL** and GDI. Cyder 0.15.0 uses the `CX26.3.0-W11-Cyder014` engine with MoltenVK 1.4.2 and requires **macOS 12 or later**; DXVK and DXMT are delivered as separate graphics payloads, while D3DMetal is available through GPTK. Actual compatibility still depends on the game, macOS version, GPU, and selected backend.
 
 This repo (CyderBits) is currently the **application layer**: the Cyder launcher, game library, settings, CompatDB, and packager. The Wine engine that actually runs Windows `.exe` files lives in [cyder-wine-engine](https://github.com/dspp779/cyder-wine-engine).
 
@@ -22,10 +22,7 @@ This project ships two tools: **Cyder** — a one-click `.exe` launcher — and 
 | **Engine** | Shared Wine under `~/.cyder/runtime/Engines/` (kept free of spaces) |
 | **Docs** | [docs/cyder.md](docs/cyder.md) |
 
-```bash
-bash scripts/create-cyder-app.sh
-open dist/Cyder.app
-```
+Build a test app as in [Quick start](#quick-start), or download a release from [GitHub Releases](https://github.com/dspp779/CyderBits/releases).
 
 ## CyderBits (packager)
 
@@ -64,6 +61,8 @@ Below is a summary of tested games on Cyder / CyderBits. For detailed configurat
 | **Single-player** | Warcraft III | 🟢 Playable | Add `-nativefullscr` launch argument for native resolution |
 | **Single-player** | Little Fighter 2 (1.9c) | 🟢 Playable | Works directly out of the box |
 | **Single-player** | Little Fighter 2 (2.0a) | 🟡 Winetricks deps | Requires `vcrun2005`, `wmp9`, `quartz`, `devenum`, `vb6run` via winetricks |
+| **Online** | MECCHA CHAMELEON (Steam) | 🟡 Needs DXMT / D3DMetal | From 0.15.0, uses DXMT with `-dx11` automatically (DXVK leaves the main-menu background black) |
+| **Single-player** | Cities: Skylines II | 🟡 Apple Silicon only | From 0.15.0, uses DXMT automatically; reaches the main menu, new city, save and load. Building and long sessions not tested; Intel Macs with GPU Family Mac 1 cannot run it ([guide](docs/games/cities-skylines-2/README.md)) |
 | **Online** | BlueCG (水藍魔力) | 🟢 Playable | Project baseline validation (DirectDraw / GDI) |
 | **Online** | MapleStory (新楓之谷) | 🟡 Partially validated | Requires the MapleStory Launcher, [CitrusGate](https://github.com/dspp779/CitrusGate), and a valid OTP; CX26 still needs map-level validation |
 | **Online** | MapleStory Classic | 🟡 Partially validated | Requires [CitrusGate](https://github.com/dspp779/CitrusGate); QDO workaround and background-process cleanup remain limited |
@@ -75,9 +74,9 @@ Below is a summary of tested games on Cyder / CyderBits. For detailed configurat
 |---|---|---|
 | DirectDraw / GDI | **Supported and validated** | BlueCG uses DirectDraw; the default path is wined3d/OpenGL. GDI is a compatibility fallback. |
 | wined3d / OpenGL | **Active default** | BlueCG's validated engine includes the tested `winemac.drv` same-view backing fix for Retina/DPI resize. |
-| Vulkan / MoltenVK | **Provided by the engine** | MoltenVK 1.4.2 behind the wait-poll shim (`.real` → `1.4.2`); 0.15.0 removed 1.2.10 and the version setting. Not the primary BlueCG path. |
+| Vulkan / MoltenVK | **Provided by the engine** | MoltenVK 1.4.2 behind the wait-poll shim (`.real` → `1.4.2`). 0.15.0 removed 1.2.10 and the version setting; older Intel integrated graphics have not been tested with 1.4.2 yet ([#7](https://github.com/dspp779/CyderBits/issues/7)). Not the primary BlueCG path. |
 | DXVK | **Integrated as a runtime payload** | DXVK is delivered under `Resources/graphics/` and loaded through CompatDB builtin + prepend; DXVK 2 is still deferred. |
-| dxmt | **Integrated as a runtime payload** | DXMT is delivered as a separate Cyder payload and requires macOS 15+; MapleStory.exe and Maplestory_Classic.exe prefer it automatically on macOS 15+. |
+| DXMT | **Integrated as a runtime payload** | Upstream DXMT 0.80, Developer ID signed, delivered as a separate payload. Needs macOS 15+ **and** a GPU with Metal GPU Family Mac 2 (Apple Silicon). With graphics on "default", MapleStory, MapleStory Classic, Cities: Skylines II and MECCHA CHAMELEON use it automatically; on other Macs MapleStory falls back to DXVK, MECCHA CHAMELEON to D3DMetal or DXVK, and Cities: Skylines II stops before launch with `CYD-GFX-002`. |
 | D3DMetal | **Product backend** | Available through GPTK / Apple D3DMetal on macOS 14+ with a usable GPTK; game compatibility must be validated per title. |
 
 See [Wine configure and graphics options](docs/wine-configure-options.md) for build choices and limitations.
@@ -88,11 +87,11 @@ The runtime that actually executes `.exe` files is [cyder-wine-engine](https://g
 
 ## Requirements
 
-- **Support policy:** Cyder **0.14** (engine **Cyder013**) is the **last release that supports macOS 10.15 and 11**. Later releases require **macOS 12+**.
-- **Cyder.app:** macOS 10.15+ (`LSMinimumSystemVersion`); Game Library / settings UI on **11+** (10.15 performs first-run setup in a visible Terminal, then uses Bash file selection / launch)
+- **Cyder.app:** **macOS 12+** (`LSMinimumSystemVersion` 12.0). On macOS 10.15 or 11, use [Cyder 0.14.1](docs/releases/v0.14.1.en.md), the last release for those systems.
+- **Graphics:** DXMT needs macOS 15+ and Metal GPU Family Mac 2; D3DMetal needs macOS 14+ with GPTK.
 - **Game location:** `~/Games` is recommended; macOS may allow the selected EXE but deny sibling DLLs under Documents, Desktop, Downloads, cloud storage, or external volumes
 - **Development / build:** macOS 12+ recommended (13+ for day-to-day work)
-- Apple Silicon + Rosetta 2 (Wine is an **x86_64** build; Rosetta required on Apple Silicon from macOS 11+)
+- Apple Silicon needs Rosetta 2 (Wine is an **x86_64** build)
 - Several GB disk for Wine sources, `.brew-x86`, and build outputs (most paths are `.gitignore`d)
 
 ## Quick start
@@ -154,8 +153,9 @@ open dist/CyderBits.app
 ## Tests
 
 ```bash
-bash tests/run.sh <word>   # tests whose name contains <word>
-bash tests/run.sh          # whole suite, about 12 minutes
+bash tests/run.sh --changed   # tests affected by your changes (against main)
+bash tests/run.sh <word>      # tests whose name contains <word>
+bash tests/run.sh             # whole suite: once before each push, in the background
 ```
 
 Which check fits which change, test builds, signing and real-app checks: [docs/development-testing.md](docs/development-testing.md).
@@ -163,12 +163,14 @@ Which check fits which change, test builds, signing and real-app checks: [docs/d
 ## Documentation
 
 - [CHANGELOG.md](CHANGELOG.md) — changes per version
-- [Cyder 0.14.0 release notes](docs/releases/v0.14.0.en.md) — Cyder013 engine, quit without stopping games, per-game cnc-ddraw, DXVK black-texture fix; last release for macOS 10.15 and 11
+- [Cyder 0.15.0 release notes](docs/releases/v0.15.0.en.md) — Cyder014 engine, macOS 12+, Cities: Skylines II on Apple Silicon, MapleStory WZ read-ahead, DXMT GPU check, launch detection fixes
+- [Cyder 0.14.1 release notes](docs/releases/v0.14.1.en.md) — last release for macOS 10.15 and 11
 - [docs/README.md](docs/README.md) — index of all guides and earlier release notes
 - [docs/cyder.md](docs/cyder.md) — Cyder launcher
 - [docs/cyderbits.md](docs/cyderbits.md) — CyderBits packager
 - [docs/games/compatibility-matrix.md](docs/games/compatibility-matrix.md) — tested games
 - [docs/development-testing.md](docs/development-testing.md) — tests, test builds, real-app and game checks
+- [docs/launch-detection.md](docs/launch-detection.md) — how Cyder decides a launched program started (`CYD-WIN-002`)
 - [docs/release-pipeline.zh-TW.md](docs/release-pipeline.zh-TW.md) — signing, notarizing and publishing a release
 - [docs/cyder-wine-engine-project.md](docs/cyder-wine-engine-project.md) — application layer vs [cyder-wine-engine](https://github.com/dspp779/cyder-wine-engine)
 - [docs/bluecg.md](docs/bluecg.md) — BlueCG workflow

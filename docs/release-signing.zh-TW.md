@@ -91,7 +91,7 @@ xcrun notarytool store-credentials cyder-notary \
 ### 3. 取得引擎檔案
 
 建置腳本會依 `config/cyder-engine-archive.txt` 尋找已打包好的引擎 tarball（例如
-`dist/artifacts/engine-releases/engine-CX26-3-0-W11-Cyder013.tar.zst`）。
+`dist/artifacts/engine-releases/engine-CX26-3-0-W11-Cyder014.tar.zst`）。
 `dist/` 不在版本控制內,所以 clone 後不會有這個檔案 — 向 團隊成員 拿到 tarball 後放到上述路徑,
 或建置時用 `--engine-archive /path/to/engine.tar.zst` 指定。
 

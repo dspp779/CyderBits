@@ -32,7 +32,10 @@ xcrun notarytool history --keychain-profile cyder-notary
 3. `xcode-select -p` is Xcode. Otherwise prefix every build command with
    `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer` (Command Line
    Tools cannot link the Intel half of the app).
-4. `bash tests/run.sh` passes.
+4. `CYDER_TEST_FULL_TIMING=1 bash tests/run.sh` passes on an idle Mac (release
+   mode: skips count as failures, timing tests wait out real limits). Bump
+   `config/cyder-app-version.txt` and the version assertion in
+   `tests/test-release-cyder.sh` together.
 5. A real game was launched from a Developer ID signed build of this tree
    (skill `cyder-dev-test`). If not, write "not game-tested" in the notes'
    known issues and in your report.
@@ -111,8 +114,16 @@ On failure, stop and fix the cause:
 
 `RELEASE_SKIP_VERIFY=1` is for emergencies, never for a shipped build.
 
+With `--out-dir` the folder has no previous zip, so the size check is skipped;
+rerun verify with `--baseline` pointing at the previous release zip. A zip more
+than 1 MiB smaller fails: unzip both and compare files over 500 KB before
+deciding (0.15.0 was 1.56 MB smaller only because the engine dropped
+`libMoltenVK-1.2.10.dylib`), and record the reason in the build record.
+
 After it passes: fill the size and SHA-256 into the notes from the final zip
-and regenerate `dist/SHA256SUMS.txt`.
+and write `SHA256SUMS.txt` by hand (`shasum -a 256 Cyder-<version>.zip >
+SHA256SUMS.txt`, then `shasum -a 256 -c`). Record the build in
+`docs/build-records/<version>-draft-<date>.md`.
 
 ## 7. Publish (only when the user asks)
 
@@ -121,7 +132,9 @@ and regenerate `dist/SHA256SUMS.txt`.
    notes works only after this.
 3. `gh release view vX.Y.Z`: if a draft exists, check its assets and target
    commit; an old draft carries a stale zip. Upload `Cyder-<version>.zip` and
-   `SHA256SUMS.txt`, replacing anything else.
+   `SHA256SUMS.txt` with `gh release upload --clobber`, replacing anything
+   else. `gh release create --target` rejects a short SHA; pass the branch or
+   the full SHA.
 4. Title `vX.Y.Z`. Body as in "GitHub release page" in
    `docs/release-notes-guide.md`: a patch release is a collapsed `<details>`
    section above the x.y.0 notes. Bodies fetched with `gh` use CRLF line

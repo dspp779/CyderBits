@@ -45,8 +45,8 @@ Cyder 的 [`scripts/import-engine-release.sh`](../scripts/import-engine-release.
 驗證包含 sidecar schema、archive digest、archive 內的 `version`、embedded manifest，以及
 實際解出的 `ntdll.dll` digest。任一項不一致即停止，不會部分更新 pin。
 
-目前 pin 的引擎版本記錄在 `config/cyder-engine-version.txt`（Cyder 0.14.0 為
-`CX26.3.0-W11-Cyder013`）；各版本對應的引擎見 [CHANGELOG](../CHANGELOG.md)。對外發布前
+目前 pin 的引擎版本記錄在 `config/cyder-engine-version.txt`（Cyder 0.15.0 為
+`CX26.3.0-W11-Cyder014`）；各版本對應的引擎見 [CHANGELOG](../CHANGELOG.md)。對外發布前
 仍必須完成 Developer ID 簽章、公證與遊戲 smoke test
 （見 [`release-pipeline.zh-TW.md`](release-pipeline.zh-TW.md)）。
 

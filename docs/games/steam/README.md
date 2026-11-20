@@ -40,6 +40,14 @@ CYDER_COMPATDB=0
 根因。DXVK 尚未成為 Cyder 的預設圖形路徑，個別 Windows 遊戲的相容性仍需
 逐款驗證。
 
+## 從 Cyder 直接開啟 Steam 遊戲（0.15.0）
+
+從 Cyder 直接開啟 `steamapps/common/<遊戲資料夾>/` 下的 `.exe`（不經 Steam
+的「開始遊戲」）時，Cyder 會從 Steam 的 `appmanifest_*.acf` 取得這款遊戲的
+App ID，並設定 `SteamAppId`、`SteamGameId` 與 `SteamOverlayGameId`，不需要在
+遊戲資料夾放 `steam_appid.txt`。Steam 需保持背景登入。找不到對應的
+`appmanifest` 時不設定（`Cities2.exe` 另有內建值 949230）。
+
 ## 偏好設定的圖形選 DXVK 時 Steam 不出現視窗
 
 偏好設定 > 圖形若選 **DXVK**，Steam 會在背景執行，但登入視窗與主視窗都不會出現

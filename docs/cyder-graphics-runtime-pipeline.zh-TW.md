@@ -101,7 +101,7 @@ DXVK 路徑用 `otool -arch x86_64 -l` 讀取 shim 及所選 real 的實際 minO
 
 [Issue #7](https://github.com/dspp779/CyderBits/issues/7) 的 macOS 13 Intel
 GPU 黑畫面，以及回報改用 1.2.10 後仍有的間歇閃爍，屬於另行追蹤的 rendering
-驗收；0.15.0 移除 1.2.10 的前提是舊款 Intel 內顯以 1.4.2 通過此驗收。必須記錄引擎／real 雜湊、GPU、系統與相同場景 A/B；minOS 通過不代表
+驗收。0.15.0 已移除 1.2.10；舊款 Intel 內顯以 1.4.2 跑新楓之谷經典版的實測仍待完成（NVIDIA GTX 780M 已通過），若未通過需恢復 1.2.10。必須記錄引擎／real 雜湊、GPU、系統與相同場景 A/B；minOS 通過不代表
 畫面正確，也不宣告修復此 issue。
 
 ## 2. 開發機：編譯與打包
