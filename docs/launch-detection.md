@@ -109,8 +109,8 @@ Notepad window appeared 0.3 s later, after the dialog.
 
 Now a non-zero root exit is held for `successorSettle` (2 s). The status item
 reports which launches have a live user program other than the root receipt
-(`Snapshot.launchesWithLiveSuccessors`; Wine helpers such as `conhost.exe` do
-not count) through `onLiveSuccessorsChange` → `CyderLaunchObserver.noteSuccessors`.
+(`Snapshot.launchesWithLiveSuccessors`; Wine's background built-ins do not
+count) through `onLiveSuccessorsChange` → `CyderLaunchObserver.noteSuccessors`.
 While a successor is alive the failure stays held; a window or activation ends
 the observation as started, the successors ending reports the failure, and the
 deadline ends it unconfirmed without a dialog. Once a successor has been
@@ -129,6 +129,30 @@ root exit. Not measured on Intel or a busy Mac; if the gap there comes close to
 lengthening the hold.
 Tests: `tests/test-cyder-launch-activation.sh` (observer timing),
 `tests/test-cyder-lifecycle-isolation.sh` (which processes count).
+
+### Wine background built-ins
+
+`ProcessRecord.wineHelpers` in `scripts/cyder_lifecycle.swift` lists the Wine
+built-ins that start without the user asking and end with the environment.
+They never count as a program, a launch's window, or a successor. Sources:
+
+- Services `services.exe` starts (the bottle's `ControlSet001\Services` with
+  Start 2, or started on demand): `svchost.exe` (Eventlog, netsvcs),
+  `plugplay.exe`, `rpcss.exe`, `winedevice.exe` (drivers), `spoolsv.exe`,
+  `winmgmt.exe`, `wuauserv.exe`, `termsv.exe`, `presentationfontcache.exe`.
+  `services.exe` itself is started by the first program that needs it, so these
+  run under the launch's process tree. Observed: `svchost.exe` under MECCHA
+  CHAMELEON's launch, which kept a launcher failure held until the deadline.
+- Hosts and on-demand servers: `explorer.exe` (desktop), `conhost.exe`,
+  `wineconsole.exe`, `dllhost.exe` (COM surrogate), `dplaysvr.exe`, `dpnsvr.exe`.
+- Setup, shell and crash helpers: `wineboot.exe`, `winemenubuilder.exe`,
+  `winebrowser.exe`, `start.exe`, `rundll32.exe`, `winedbg.exe`, `werfault.exe`.
+
+Not listed on purpose: `cmd.exe`, `msiexec.exe` and other tools a user or a
+launcher runs as real work, and third-party services (Steam Client Service,
+Nexon NGS). A built-in opened as the launch target still counts
+(`Launch.expectsHandoff`). To check a bottle, list the services with Start ≤ 2
+in `system.reg` and the session log's `wine launch successors alive=true <names>`.
 
 ## Checking a case
 

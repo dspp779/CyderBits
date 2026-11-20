@@ -294,6 +294,14 @@ let helper = L.ProcessID(boot: "boot", pid: 71, started: 6)
 handoff.reduce(.processObserved(handoffStamp, .init(id: helper, name: "conhost.exe", environment: a,
     launch: "launch", ownership: .processTree, existence: .alive, executableName: "conhost.exe")))
 precondition(handoff.snapshot.launchesWithLiveSuccessors.isEmpty, "a Wine helper is not a successor")
+// Services that services.exe starts for any program (seen: svchost.exe under
+// MECCHA CHAMELEON's launch) and other background built-ins.
+for (offset, image) in ["svchost.exe", "services.exe", "winedevice.exe", "winemenubuilder.exe", "dllhost.exe", "SvcHost.EXE"].enumerated() {
+    let background = L.ProcessID(boot: "boot", pid: Int32(80 + offset), started: 6)
+    handoff.reduce(.processObserved(handoffStamp, .init(id: background, name: image, environment: a,
+        launch: "launch", ownership: .processTree, existence: .alive, executableName: image)))
+    precondition(handoff.snapshot.launchesWithLiveSuccessors.isEmpty, "\(image) started in the background is not a successor")
+}
 let successor = L.ProcessID(boot: "boot", pid: 72, started: 7)
 handoff.reduce(.processObserved(handoffStamp, .init(id: successor, name: "Game.exe", environment: a,
     launch: "launch", ownership: .processTree, existence: .alive, executableName: "Game.exe")))

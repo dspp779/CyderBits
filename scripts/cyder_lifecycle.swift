@@ -82,9 +82,19 @@ enum CyderLifecycle {
         var executableName: String? = nil
         var hasPresentedProgram = false
 
-        private static let wineHelpers: Set<String> = ["conhost.exe", "explorer.exe", "plugplay.exe", "rpcss.exe",
-            "rundll32.exe", "services.exe", "start.exe", "werfault.exe", "wineboot.exe",
-            "wineconsole.exe", "winedbg.exe", "winedevice.exe"]
+        /// Wine built-ins that start in the background without the user asking
+        /// and end with the environment: the service manager and the services
+        /// it starts (svchost, plugplay, rpcss, drivers in winedevice, spooler,
+        /// WMI, update, terminal services), the desktop and console hosts,
+        /// on-demand COM/DirectPlay servers, and setup/crash helpers. They are
+        /// never the game: they do not count as programs, as a launch's
+        /// window, or as a launcher's successor. Opened on purpose (the launch
+        /// target), a built-in still counts through `expectsHandoff`.
+        private static let wineHelpers: Set<String> = ["conhost.exe", "dllhost.exe", "dplaysvr.exe", "dpnsvr.exe",
+            "explorer.exe", "plugplay.exe", "presentationfontcache.exe", "rpcss.exe", "rundll32.exe",
+            "services.exe", "spoolsv.exe", "start.exe", "svchost.exe", "termsv.exe", "werfault.exe",
+            "winebrowser.exe", "wineboot.exe", "wineconsole.exe", "winedbg.exe", "winedevice.exe",
+            "winemenubuilder.exe", "winmgmt.exe", "wuauserv.exe"]
         func isUserProgram(in launch: Launch?) -> Bool {
             if ownership == .rootReceipt && executableName == nil { return true }
             let image = executableName ?? (ownership == nil ? name : "")
