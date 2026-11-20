@@ -376,7 +376,7 @@ elif [[ "${1:-}" == wineboot ]]; then
   : >"$WINEPREFIX/system.reg"
   : >"$WINEPREFIX/user.reg"
   : >"$WINEPREFIX/drive_c/windows/system32/kernel32.dll"
-elif [[ "${1:-}" == taskmgr && -n "${CYDER_TEST_TASKMGR_LOG:-}" ]]; then
+elif [[ ( "${1:-}" == taskmgr || "${1:-}" == taskkill ) && -n "${CYDER_TEST_TASKMGR_LOG:-}" ]]; then
   printf '%s|%s|%s|%s\n' "${WINEPREFIX:-}" "$*" "${WINEMSYNC:-}" "${WINEESYNC:-}" >>"$CYDER_TEST_TASKMGR_LOG"
 fi
 SH
@@ -503,8 +503,26 @@ assert_contains "$(cat "$taskmgr_log")" "$session_prefix|taskmgr" \
   "task manager should target the selected bottle"
 assert_contains "$(cat "$taskmgr_log")" "$session_prefix|taskmgr|1|" \
   "task manager should inherit the active bottle MSync protocol"
+# 結束: ask a program in a running bottle to close (taskkill without /f).
+close_log="$TMP/close-program.log"
+CYDER_SUPPORT="$profile_support" CYDER_TEST_TASKMGR_LOG="$close_log" \
+  bash "$ROOT/scripts/cyder_launcher.sh" --close-program-prefix "$session_prefix" "Game (x64).exe"
+assert_contains "$(cat "$close_log")" "$session_prefix|taskkill /im Game (x64).exe|1|" \
+  "close-program should run taskkill without /f in the bottle with its sync protocol"
+assert_not_contains "$(cat "$close_log")" " /f" "close-program must never force"
+if CYDER_SUPPORT="$profile_support" CYDER_TEST_TASKMGR_LOG="$close_log" \
+  bash "$ROOT/scripts/cyder_launcher.sh" --close-program-prefix "$session_prefix" "game.exe /f" >/dev/null 2>&1; then
+  echo "close-program accepted an image with arguments" >&2
+  exit 1
+fi
 CYDER_SUPPORT="$profile_support" \
   bash "$ROOT/scripts/cyder_launcher.sh" --session-release "$session_prefix" "$taskmgr_session"
+: >"$close_log"
+close_status=0
+CYDER_SUPPORT="$profile_support" CYDER_TEST_TASKMGR_LOG="$close_log" \
+  bash "$ROOT/scripts/cyder_launcher.sh" --close-program-prefix "$session_prefix" "game.exe" >/dev/null 2>&1 || close_status=$?
+assert_eq "$close_status" "3" "close-program must not start Wine in a bottle that is not running"
+assert_eq "$(cat "$close_log")" "" "no Wine client runs for a stopped bottle"
 prefix_stop_log="$TMP/prefix-stop.log"
 CYDER_SUPPORT="$profile_support" CYDER_TEST_STOP_LOG="$prefix_stop_log" PATH="$TMP/bin:$PATH" \
   bash "$ROOT/scripts/cyder_launcher.sh" --stop-prefix "$session_prefix"

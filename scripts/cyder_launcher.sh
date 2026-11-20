@@ -89,6 +89,7 @@ Options:
   --has-running-exes  Exit 0 if the shared prefix has running EXEs, otherwise 1
   --list-sessions     Print active Cyder bottles and sessions as an XML plist
   --taskmgr-prefix PREFIX Open Wine Task Manager for a managed bottle
+  --close-program-prefix PREFIX IMAGE  Ask IMAGE's windows in a running bottle to close (no force)
   --stop-prefix PREFIX Stop one managed bottle and report failures
   --apply-settings-only Apply saved settings without installing the environment
   --install-winetricks VERB [...]  Install selected Winetricks components into the shared prefix
@@ -128,6 +129,9 @@ HAS_RUNNING_EXES=0
 LIST_SESSIONS=0
 TASKMGR_PREFIX=""
 TASKMGR_PREFIX_SET=0
+CLOSE_PROGRAM_PREFIX=""
+CLOSE_PROGRAM_IMAGE=""
+CLOSE_PROGRAM_SET=0
 STOP_PREFIX=""
 STOP_PREFIX_SET=0
 APPLY_SETTINGS_ONLY=0
@@ -225,6 +229,13 @@ while [[ $# -gt 0 ]]; do
       TASKMGR_PREFIX="$2"
       TASKMGR_PREFIX_SET=1
       shift 2
+      ;;
+    --close-program-prefix)
+      [[ $# -ge 3 ]] || { echo "--close-program-prefix requires PREFIX IMAGE" >&2; exit 1; }
+      CLOSE_PROGRAM_PREFIX="$2"
+      CLOSE_PROGRAM_IMAGE="$3"
+      CLOSE_PROGRAM_SET=1
+      shift 3
       ;;
     --stop-prefix)
       [[ $# -ge 2 ]] || { echo "--stop-prefix requires PREFIX" >&2; exit 1; }
@@ -484,6 +495,14 @@ if [[ "$LIST_SESSIONS" -eq 1 ]]; then
   cat "$result_file"
   [[ -n "${CYDER_RESULT_FILE:-}" ]] || rm -f "$result_file"
   exit 0
+fi
+
+if [[ "$CLOSE_PROGRAM_SET" -eq 1 ]]; then
+  prefix="$(cyder_validate_bottle_prefix "$CLOSE_PROGRAM_PREFIX")" || exit 2
+  engine="$CYDER_ENGINES/$CYDER_ENGINE_NAME"
+  cyder_set_stage close-program
+  cyder_close_prefix_program "$engine/bin/wine" "$prefix" "$CLOSE_PROGRAM_IMAGE"
+  exit $?
 fi
 
 if [[ "$TASKMGR_PREFIX_SET" -eq 1 || "$STOP_PREFIX_SET" -eq 1 ]]; then

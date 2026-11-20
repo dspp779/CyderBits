@@ -309,3 +309,50 @@ precondition(handoff.snapshot.launchesWithLiveSuccessors == ["launch": ["Game.ex
 handoff.reduce(.processExited(handoffStamp, successor))
 precondition(handoff.snapshot.launchesWithLiveSuccessors.isEmpty, "an exited successor no longer holds the launch")
 print("PASS launches with live successors exclude the root and Wine helpers")
+
+// Program control (2026-11-20 design): what a row ends, its words, the
+// escalation and the Steam warning.
+typealias PC = CyderProgramControl
+precondition(PC.closePhase(requestedAt: nil, now: 9) == .none)
+precondition(PC.closePhase(requestedAt: 10, now: 14.9) == .closing && PC.closePhase(requestedAt: 10, now: 15) == .notResponding,
+             "結束 escalates to 沒有回應 after 5 s")
+precondition(PC.statusWord(stopping: false, phase: .none, starting: true, hasWindow: false) == "正在啟動…")
+precondition(PC.statusWord(stopping: false, phase: .none, starting: false, hasWindow: true) == "執行中")
+precondition(PC.statusWord(stopping: false, phase: .none, starting: false, hasWindow: false) == "在背景執行")
+precondition(PC.statusWord(stopping: false, phase: .closing, starting: false, hasWindow: true) == "正在結束…")
+precondition(PC.statusWord(stopping: true, phase: .none, starting: false, hasWindow: true) == "正在結束…")
+precondition(PC.statusWord(stopping: false, phase: .notResponding, starting: false, hasWindow: true) == "沒有回應")
+
+var control = fresh(); dispatch(&control, "PenguinHotel.exe"); dispatch(&control, "steam.exe")
+let controlStamp = control.stamp(for: a)!
+func program(_ pid: Int32, _ image: String, launch: String, root: Bool = false) -> L.ProcessID {
+    let id = L.ProcessID(boot: "boot", pid: pid, started: UInt64(pid))
+    control.reduce(.processObserved(controlStamp, .init(id: id, name: image, environment: a, launch: launch,
+        ownership: root ? .rootReceipt : .processTree, existence: .alive, executableName: image)))
+    return id
+}
+let launcherProcess = program(500, "PenguinHotel.exe", launch: "PenguinHotel.exe", root: true)
+let gameProcess = program(501, "PenguinHotel-Win64-Shipping.exe", launch: "PenguinHotel.exe")
+_ = program(502, "svchost.exe", launch: "PenguinHotel.exe")
+_ = program(503, "explorer.exe", launch: "PenguinHotel.exe")
+let rows = PC.programs(launch: "PenguinHotel.exe", in: control.snapshot)
+precondition(rows.map(\.id) == [launcherProcess, gameProcess], "a row ends its launcher and game, never Wine's background programs")
+precondition(PC.closeImages(rows) == ["PenguinHotel.exe", "PenguinHotel-Win64-Shipping.exe"])
+precondition(PC.dependency(launch: "PenguinHotel.exe", in: control.snapshot) == nil, "a game holds nothing others need")
+_ = program(600, "steam.exe", launch: "steam.exe", root: true)
+_ = program(601, "steamwebhelper.exe", launch: "steam.exe")
+precondition(PC.closeImages(PC.programs(launch: "steam.exe", in: control.snapshot)) == ["steam.exe", "steamwebhelper.exe"])
+let steamWarning = PC.dependency(launch: "steam.exe", in: control.snapshot)
+precondition(steamWarning?.shared == "Steam" && steamWarning?.others == ["PenguinHotel-Win64-Shipping.exe", "PenguinHotel.exe"],
+             "ending Steam while a game runs names the game: \(String(describing: steamWarning))")
+control.reduce(.processExited(controlStamp, launcherProcess)); control.reduce(.processExited(controlStamp, gameProcess))
+precondition(PC.dependency(launch: "steam.exe", in: control.snapshot) == nil, "Steam alone needs no warning")
+print("PASS program control: rows exclude Wine background programs; 結束 escalation; Steam dependency warning")
+
+let plainEnd = ProgramConfirmation(name: "MECCHA CHAMELEON", force: false)
+precondition(plainEnd.title == "結束「MECCHA CHAMELEON」？" && plainEnd.confirmButton == "結束" && !plainEnd.detail.contains("Steam"))
+let forceEnd = ProgramConfirmation(name: "MECCHA CHAMELEON", force: true)
+precondition(forceEnd.title.hasPrefix("強制結束") && forceEnd.detail.contains("未儲存的進度會遺失") && forceEnd.confirmButton == "強制結束")
+let steamEnd = ProgramConfirmation(name: "Steam", force: false, shared: "Steam", others: ["Game.exe"])
+precondition(steamEnd.title == "仍要結束「Steam」？" && steamEnd.detail.contains("Steam 結束後，仍在執行的 Game.exe 可能無法正常運作或存檔"))
+print("PASS program control confirmations: every 結束 and 強制結束 asks; Steam warns")
