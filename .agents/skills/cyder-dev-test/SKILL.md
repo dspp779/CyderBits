@@ -19,29 +19,37 @@ needed only when the change is visible in the app or affects launching.
 ## 1. Run the tests
 
 ```bash
-bash tests/run.sh --changed
+bash tests/lib/typecheck-app.sh          # after a Swift edit (~15 s)
+bash tests/run.sh test-cyder-foo.sh      # the test for this change
 ```
 
 ```bash
-bash tests/run.sh
+bash tests/run.sh --changed              # once, before a push or PR
 ```
 
-1. While working, run `--changed`: the tests that name a changed file, the
-   tests that run those, and for Swift the app-build tests. Run the whole suite
-   in the background once before each push, on the committed tree, and say
-   which commit it ran on. Skip both for documentation-only changes. The runner
-   prints each failing test's log path; `skip` lines are tests that need an
-   idle desktop.
-2. After editing Swift, typecheck every app source (command in the reference)
-   and grep `tests/` for tests that compile a file you split or renamed. They
-   compile a subset of the app, so a new file must be added to each of them.
-3. If a test fails: rerun it alone three times and read its assertion.
+1. **Each edit:** run the test written for the change and, after Swift edits,
+   `tests/lib/typecheck-app.sh`. If you changed wording, a constant or a menu's
+   shape, grep `tests/` for short fragments of the old text. Do not rerun
+   `--changed` or the whole suite after small edits; it costs minutes each
+   time.
+2. **Before a push or PR:** `--changed` once on the committed tree (it covers
+   only unpushed work and typechecks the app); say which commit it ran on.
+   Merges to `main` and releases run the whole suite. Nothing for
+   documentation-only changes. The runner prints the count and an estimate
+   first, and each failing test's log path.
+3. **Skipped tests are not verified.** If a skipped test checks what you
+   changed (window-native for menu or window code), run it alone with
+   `CYDER_TEST_DESKTOP=1 bash tests/run.sh --timeout 120 window-native`, or
+   report it as not verified. Grep `tests/` for tests that compile a file you
+   split or renamed; a new file must be added to each of them.
+4. If a test fails: rerun it alone three times and read its assertion.
    - Fails every time → a regression or a stale assertion. Fix it; do not call
      it flaky.
    - `test-cyder-window-native` skips unless the Mac has been idle for 60 s;
      `test-cyder-launch-generation` depends on load and may fail while the
      Mac is busy.
-4. If the suite prints nothing for minutes, a test has opened a real alert.
+5. If the suite prints nothing for minutes, a test has opened a real alert
+   (the 240 s limit now ends it).
    Stub `osascript` and `open` in that test; do not wait or click it away.
 
 When writing tests:
