@@ -3,6 +3,8 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "$ROOT/tests/assert.sh"
+# The checks below set release mode themselves; a release run must not leak in.
+unset CYDER_TEST_FULL_TIMING CYDER_TEST_DESKTOP
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 

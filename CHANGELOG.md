@@ -7,7 +7,14 @@ release notes in [`docs/releases/`](docs/releases/); the engine column refers to
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-11-20
+
+Engine `CX26.3.0-W11-Cyder014`; requires macOS 12 or later.
+Notes: [繁中](docs/releases/v0.15.0.md) · [English](docs/releases/v0.15.0.en.md).
+
 ### Added
+- Steam games opened directly from `steamapps/common/` get their Steam App ID from
+  Steam's `appmanifest`.
 - Cities: Skylines II uses DXMT automatically while its graphics setting is "default" (#10).
 - MECCHA CHAMELEON uses DXMT and `-dx11` automatically while its graphics setting is "default"
   (DXVK leaves the main-menu scene black). Where DXMT cannot run it uses D3DMetal, else DXVK.
@@ -37,7 +44,7 @@ release notes in [`docs/releases/`](docs/releases/); the engine column refers to
 ## [0.14.1] - 2026-11-15
 
 Engine `CX26.3.0-W11-Cyder013`, rebuilt for older macOS compatibility.
-Draft notes: [繁中](docs/releases/v0.14.1.md) · [English](docs/releases/v0.14.1.en.md).
+Notes: [繁中](docs/releases/v0.14.1.md) · [English](docs/releases/v0.14.1.en.md).
 
 ### Fixed
 - Updating the Windows environment crashed on older macOS such as 15.8 (engine #14).
@@ -117,8 +124,9 @@ Engine `CX26.3.0-W11-Cyder011`. [Notes](docs/releases/v0.13.0.md).
 
 Older releases: see the release table in [`docs/README.md`](docs/README.md).
 
-[Unreleased]: https://github.com/dspp779/CyderBits/compare/claude/release-0.14.1...HEAD
-[0.14.1]: https://github.com/dspp779/CyderBits/compare/v0.14.0...claude/release-0.14.1
+[Unreleased]: https://github.com/dspp779/CyderBits/compare/v0.15.0...HEAD
+[0.15.0]: https://github.com/dspp779/CyderBits/compare/v0.14.1...v0.15.0
+[0.14.1]: https://github.com/dspp779/CyderBits/compare/v0.14.0...v0.14.1
 [0.14.0]: https://github.com/dspp779/CyderBits/compare/v0.13.2...v0.14.0
 [0.13.2]: https://github.com/dspp779/CyderBits/compare/v0.13.1...v0.13.2
 [0.13.1]: https://github.com/dspp779/CyderBits/compare/v0.13.0...v0.13.1

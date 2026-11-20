@@ -17,8 +17,8 @@
 
 | 版本 | 文件 | 重點 |
 |------|------|------|
-| 0.15.0（規劃） | [範圍與驗收](releases/next.md) | 新楓之谷 WZ read-ahead 與量測、Cyder014 engine（minOS weak import、wineserver 當機）、Steam 與 Cities: Skylines II |
-| 0.14.1（Draft） | [繁中](releases/v0.14.1.md) · [English](releases/v0.14.1.en.md) | Cyder013 相容性修正重包、啟動更快更清楚；保留 macOS 10.15／11 支援 |
+| 0.15.0（Draft） | [繁中](releases/v0.15.0.md) · [English](releases/v0.15.0.en.md) · [範圍與驗收](releases/next.md) | Cyder014、**需要 macOS 12+**；Cities: Skylines II、新楓之谷 WZ 預讀、DXMT GPU 檢查、啟動偵測修正 |
+| 0.14.1 | [繁中](releases/v0.14.1.md) · [English](releases/v0.14.1.en.md) | Cyder013 相容性修正重包、啟動更快更清楚；保留 macOS 10.15／11 支援 |
 | 0.14.0 | [繁中](releases/v0.14.0.md) · [English](releases/v0.14.0.en.md) | 正式版：Cyder013、退出與停止環境分離、每遊戲 cnc-ddraw、DXVK 黑色貼圖修正；**最後支援 macOS 10.15／11** |
 | 0.13.2 | [繁中](releases/v0.13.2.md) | 正式版：引擎升級原地更新環境、DXVK 的 MoltenVK 偏好設定 |
 | 0.13.1 | [繁中](releases/v0.13.1.md) | 正式版：Cyder012、雙版本 MoltenVK、Apple Silicon Rosetta 安裝 |
