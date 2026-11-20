@@ -663,10 +663,50 @@ enum CyderProgramControl {
     static let closeGrace: TimeInterval = 5
     /// Programs other programs may need. Ending one always warns first.
     static let sharedPrograms: [(name: String, images: Set<String>)] = [
-        ("Steam", ["steam.exe", "steamwebhelper.exe", "steamservice.exe"]),
+        // Steam and its own tools (the driver queries run briefly at start-up).
+        ("Steam", ["steam.exe", "steamwebhelper.exe", "steamservice.exe", "steamerrorreporter.exe",
+                   "steamerrorreporter64.exe", "vulkandriverquery.exe", "vulkandriverquery64.exe",
+                   "gldriverquery.exe", "gldriverquery64.exe"]),
     ]
 
     enum ClosePhase: Equatable { case none, closing, notResponding }
+
+    /// How long an ended program's row stays, showing its result.
+    static let endedRowSeconds: TimeInterval = 8
+    /// Wine's crash dialog: a program of the launch crashed.
+    static let crashReporters: Set<String> = ["winedbg.exe", "werfault.exe"]
+    enum EndResult: String, Equatable { case ended = "已結束", unexpected = "意外結束", byPlayer = "已由你結束" }
+    /// Player-stopped first (a stop can trigger a crash dialog), then crash, then a plain end.
+    static func endResult(stoppedByPlayer: Bool, crashed: Bool) -> EndResult {
+        stoppedByPlayer ? .byPlayer : (crashed ? .unexpected : .ended)
+    }
+    static func crashed(launch: String, in snapshot: L.Snapshot) -> Bool {
+        snapshot.processes.values.contains {
+            $0.launch == launch && $0.existence == .alive && crashReporters.contains(($0.executableName ?? "").lowercased())
+        }
+    }
+    /// A shared program (Steam) left running with nothing else of the player's
+    /// in its environment: its name and the launch holding it.
+    static func sharedLeftAlone(environment: L.EnvironmentID, in snapshot: L.Snapshot) -> (shared: String, launch: String)? {
+        var sharedLaunch: (String, String)?
+        for process in snapshot.processes.values where process.existence == .alive && process.environment == environment {
+            let owner = process.launch.flatMap { snapshot.launches[$0] }
+            guard process.isUserProgram(in: owner), let name = (image(process) ?? process.executableName)?.lowercased() else { continue }
+            if let shared = sharedPrograms.first(where: { $0.images.contains(name) }) {
+                if let launch = process.launch { sharedLaunch = (shared.name, launch) }
+            } else {
+                return nil
+            }
+        }
+        return sharedLaunch.map { (shared: $0.0, launch: $0.1) }
+    }
+    /// Whether a launch holds a program that is not part of a shared program.
+    static func holdsGame(launch: String, in snapshot: L.Snapshot, presentedOnly: Bool) -> Bool {
+        programs(launch: launch, in: snapshot).contains { process in
+            guard let name = (image(process) ?? process.executableName)?.lowercased() else { return false }
+            return !sharedPrograms.contains { $0.images.contains(name) } && (!presentedOnly || process.hasPresentedProgram)
+        }
+    }
     static func closePhase(requestedAt: TimeInterval?, now: TimeInterval) -> ClosePhase {
         guard let requestedAt else { return .none }
         return now - requestedAt >= closeGrace ? .notResponding : .closing

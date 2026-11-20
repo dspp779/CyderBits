@@ -95,4 +95,58 @@ let warning = confirmations.last!
 precondition(warning.shared == "Steam" && warning.others == ["PenguinHotel-Win64-Shipping.exe"] && warning.title == "仍要結束「Steam」？",
              "Steam warning: \(warning)")
 print("PASS program control menu: rows, confirmations, close and force targets, Steam warning")
+
+// Phase 2: ended rows show the result briefly; a crash and Steam left alone are announced.
+var notices: [CyderStatusItemController.ProgramNotice] = []
+controller.onProgramNotice = { notices.append($0) }
+func exit(_ id: L.ProcessID) { controller.receiveLifecycleEvent(.processExited(stamp, id)) }
+func showWindow(_ id: L.ProcessID, _ token: String) {
+    controller.receiveLifecycleEvent(.windowObserved(stamp, .init(id: .init(process: id, source: "accessibility", token: token),
+        title: "Game", capability: .available, minimized: false, focused: false, isProgramWindow: true)))
+}
+func endedTitles() -> [String] { menu().items.map(\.title).filter { $0.hasSuffix("已結束") || $0.hasSuffix("意外結束") || $0.hasSuffix("已由你結束") } }
+
+// The force-quit game (fake signal above) now actually exits: ended by the player.
+exit(gameRoot); exit(gameChild)
+pump("player end row") { endedTitles().contains("PenguinHotel.exe — 已由你結束") }
+
+// A plain end, no notice.
+attach("plain", "Plain.exe")
+let plain = observe(43001, "Plain.exe", launch: "plain", root: true)
+controller.receiveLifecycleEvent(.observationFinished(stamp, launch: "plain", outcome: .confirmedStarted))
+pump("plain row") { CyderProgramControl.programs(launch: "plain", in: controller.lifecycleSnapshot).count == 1 }
+exit(plain)
+pump("plain ended") { endedTitles().contains("Plain.exe — 已結束") }
+precondition(!notices.contains(.unexpectedEnd(name: "Plain.exe")), "a plain end is not announced")
+
+// A crash: Wine's crash dialog appears for the launch, then everything ends.
+attach("crash", "Crashy.exe")
+let crashy = observe(44001, "Crashy.exe", launch: "crash", root: true)
+controller.receiveLifecycleEvent(.observationFinished(stamp, launch: "crash", outcome: .confirmedStarted))
+pump("crash row") { CyderProgramControl.programs(launch: "crash", in: controller.lifecycleSnapshot).count == 1 }
+let dialog = observe(44002, "winedbg.exe", launch: "crash", root: false)
+pump("crash dialog seen") { CyderProgramControl.crashed(launch: "crash", in: controller.lifecycleSnapshot) }
+exit(crashy)
+pump("crash ended") { endedTitles().contains("Crashy.exe — 意外結束") }
+precondition(notices.contains(.unexpectedEnd(name: "Crashy.exe")), "a crash is announced: \(notices)")
+exit(dialog)
+
+// A failed launch already showed CYD-WIN-002: no row, no notice.
+attach("failed", "Broken.exe")
+let broken = observe(45001, "Broken.exe", launch: "failed", root: true)
+pump("failed row") { CyderProgramControl.programs(launch: "failed", in: controller.lifecycleSnapshot).count == 1 }
+controller.receiveLifecycleEvent(.observationFinished(stamp, launch: "failed", outcome: .failed))
+exit(broken)
+var settled = false; DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { settled = true }; pump("settle") { settled }
+precondition(!endedTitles().contains { $0.hasPrefix("Broken.exe") }, "a failed launch gets no ended row")
+
+// A game with a window ends while Steam keeps running: 「Steam 仍在背景執行」.
+attach("game2", "Game2.exe")
+let game2 = observe(46001, "Game2.exe", launch: "game2", root: true)
+controller.receiveLifecycleEvent(.observationFinished(stamp, launch: "game2", outcome: .confirmedStarted))
+showWindow(game2, "g2")
+pump("game2 shown") { controller.lifecycleSnapshot.processes[game2]?.hasPresentedProgram == true }
+exit(game2)
+pump("Steam left alone") { notices.contains(.sharedStillRunning(shared: "Steam", launch: "steam", prefix: "/fixture/program")) }
+print("PASS program control phase 2: ended rows, crash and Steam notices")
 exit(0)

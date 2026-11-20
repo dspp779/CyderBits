@@ -126,6 +126,49 @@ them again.
 3. **Phase 3:** `+process` trace for names and launcher/child grouping, after
    measuring its log volume on more games.
 
+## Phase 2 (implemented 2026-11-20, branch `claude/program-control-phase2`)
+
+- An ended program's row stays for 8 s with its result: 已由你結束 (the
+  player's 結束/強制結束, or a stopped environment), 意外結束 (Wine's crash
+  dialog `winedbg.exe`/`werfault.exe` appeared in the launch), else 已結束.
+  A launch whose outcome is `failed` already showed `CYD-WIN-…` and gets no
+  row. Ended rows are a separate disabled list, not program rows.
+- Notifications (`scripts/cyder_notifications.swift`, app-only because the
+  notification centre aborts outside an app bundle; the status item emits
+  `ProgramNotice` through `onProgramNotice`):
+  - 「X 意外結束」 with 查看紀錄 (opens the session log).
+  - 「Steam 仍在背景執行」 when the last game with a window that Steam served
+    ends: either a separately launched game, or a game started inside Steam
+    (same row). Not sent while the environment is being stopped. Its 結束…
+    goes through the confirmed 結束.
+  - Permission is asked on the first notice; when declined, the row text and
+    the session log remain. Banners also show while Cyder is active. Cyder's
+    quit-when-idle waits until a notice has been handed to the system.
+- Steam's own tools (`vulkandriverquery64.exe`, `gldriverquery64.exe`,
+  `steamerrorreporter*.exe`) count as part of Steam, so they neither appear
+  in the Steam warning nor look like a game ending.
+
+## Phase 3 measurements and decision (2026-11-20)
+
+`WINEDEBUG=-all,+pid,+process`, M4 / macOS 27.2.1, started directly with Wine:
+
+| Program | First 30 s | Steady | Program starts seen |
+|---|---|---|---|
+| MECCHA CHAMELEON | 2,136 lines | 67 lines/s | 9 |
+| Steam | 17,909 lines | 124 lines/s | 39 |
+| 賽馬娘 Pretty Derby | 520 lines | 0 lines/s (stopped at its launcher) | 7 |
+
+Almost all lines are `NtQueryInformationProcess`, `GetEnvironmentVariableW`
+and `ExpandEnvironmentStringsW`; the channel cannot be narrowed to program
+starts. Wine's output goes to `last-wine-launch.log`, capped at 16 MiB keeping
+the newest output, so start-up lines are pushed out within tens of minutes:
+Cyder would have to read the trace live. Frame time with the trace on was not
+measured.
+
+What phase 3 would still give a player: ending one copy when several share a
+name, and separate rows for games started inside Steam. Not built; turning the
+channel on by default needs the user's decision and a frame-time check first.
+
 ## Tests and checks (phase 1)
 
 - Status words per state: unit tests over lifecycle snapshots

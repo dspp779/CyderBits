@@ -57,6 +57,21 @@ final class CyderStatusItemController: NSObject, NSMenuDelegate {
     }
     /// The set of running programs changed (the library's buttons follow it).
     var onProgramsChanged: (() -> Void)?
+    /// Something the player should hear about while not looking at the menu.
+    /// The app posts it as a macOS notification (kept out of this file: the
+    /// notification centre needs an app bundle).
+    var onProgramNotice: ((ProgramNotice) -> Void)?
+    enum ProgramNotice: Equatable {
+        case unexpectedEnd(name: String)
+        case sharedStillRunning(shared: String, launch: String, prefix: String)
+    }
+    private struct EndedRow { let name: String; let result: CyderProgramControl.EndResult; let at: TimeInterval }
+    private var endedRows: [String: EndedRow] = [:]
+    private var stoppedByPlayer: Set<String> = []
+    private var crashedLaunches: Set<String> = []
+    private var windowedLaunches: Set<String> = []
+    private var launchNames: [String: String] = [:]
+    private var sharedHadGame: Set<String> = []
     var onLiveSuccessorsChange: (([String: [String]]) -> Void)?
     private var liveSuccessorLaunches: [String: [String]] = [:]
     private(set) var presentedLaunches = Set<String>()
@@ -365,6 +380,7 @@ final class CyderStatusItemController: NSObject, NSMenuDelegate {
         closeRequests = closeRequests.filter { !CyderProgramControl.programs(launch: $0.key, in: snapshot).isEmpty }
         programTitles = programTitles.filter { snapshot.launches[$0.key] != nil || sessions[$0.key] != nil }
         let controllable = controllableLaunches
+        trackProgramEnds(snapshot, controllable: controllable)
         if controllable != lastControllableLaunches { lastControllableLaunches = controllable; onProgramsChanged?() }
         let activity = snapshot.programActivity
         if activity != lastActivity {
@@ -644,6 +660,11 @@ final class CyderStatusItemController: NSObject, NSMenuDelegate {
 
     func markStopping(prefixes: [URL]) {
         let targets = Set(prefixes.map { $0.standardizedFileURL })
+        let paths = Set(targets.map(\.path))
+        for (id, launch) in latestLifecycle.launches
+            where latestLifecycle.environments[launch.environment].map({ paths.contains(URL(fileURLWithPath: $0.prefix).standardizedFileURL.path) }) == true {
+            stoppedByPlayer.insert(id)
+        }
         for (key, var session) in sessions where targets.contains(session.prefix) {
             session.isStopping = true
             sessions[key] = session
@@ -971,6 +992,11 @@ final class CyderStatusItemController: NSObject, NSMenuDelegate {
             }.sorted { $0.title == $1.title ? $0.id.token < $1.id.token : $0.title.localizedStandardCompare($1.title) == .orderedAscending }
             addProgramRow(menu, row: row, windows: windows)
         }
+        let now = ProcessInfo.processInfo.systemUptime
+        for (_, ended) in endedRows.filter({ now - $0.value.at < CyderProgramControl.endedRowSeconds })
+            .sorted(by: { $0.value.at < $1.value.at }) {
+            menu.addItem(withTitle: "\(ended.name) — \(ended.result.rawValue)", action: nil, keyEquivalent: "").isEnabled = false
+        }
         let independent = latestLifecycle.processes.values.filter { $0.launch == nil && $0.existence != .exited }.sorted {
             let order = $0.name.localizedStandardCompare($1.name)
             if order != .orderedSame { return order == .orderedAscending }
@@ -1065,6 +1091,48 @@ final class CyderStatusItemController: NSObject, NSMenuDelegate {
         let quit = menu.addItem(withTitle: "退出 Cyder", action: #selector(quitCyder), keyEquivalent: "q")
         quit.target = self
     }
+    /// Remember what each running program looked like, and when one ends,
+    /// keep its row briefly with the result and tell the player when it matters.
+    private func trackProgramEnds(_ snapshot: CyderLifecycle.Snapshot, controllable: Set<String>) {
+        for id in controllable {
+            launchNames[id] = programTitles[id] ?? snapshot.launches[id]?.name
+            if CyderProgramControl.programs(launch: id, in: snapshot).contains(where: { $0.hasPresentedProgram }) { windowedLaunches.insert(id) }
+            if CyderProgramControl.crashed(launch: id, in: snapshot) { crashedLaunches.insert(id) }
+            // A game started inside Steam lives in Steam's row: notice when it leaves.
+            if CyderProgramControl.holdsGame(launch: id, in: snapshot, presentedOnly: true) { sharedHadGame.insert(id) }
+            if sharedHadGame.contains(id), !CyderProgramControl.holdsGame(launch: id, in: snapshot, presentedOnly: false),
+               let group = snapshot.launches[id], let environment = snapshot.environments[group.environment], environment.stop != .executing,
+               let alone = CyderProgramControl.sharedLeftAlone(environment: group.environment, in: snapshot), alone.launch == id {
+                sharedHadGame.remove(id)
+                onProgramNotice?(.sharedStillRunning(shared: alone.shared, launch: id, prefix: environment.prefix))
+            }
+        }
+        for id in lastControllableLaunches.subtracting(controllable) {
+            // The crash dialog can outlive the program it reports.
+            if CyderProgramControl.crashed(launch: id, in: snapshot) { crashedLaunches.insert(id) }
+            defer {
+                stoppedByPlayer.remove(id); crashedLaunches.remove(id); windowedLaunches.remove(id)
+                launchNames[id] = nil; sharedHadGame.remove(id)
+            }
+            guard let group = snapshot.launches[id], group.outcome != .failed else { continue } // already shown as CYD-WIN
+            let result = CyderProgramControl.endResult(stoppedByPlayer: stoppedByPlayer.contains(id), crashed: crashedLaunches.contains(id))
+            let name = launchNames[id] ?? group.name
+            endedRows[id] = .init(name: name, result: result, at: ProcessInfo.processInfo.systemUptime)
+            CyderDiagnostics.shared.info("program control: ended launch=\(id) result=\(result)")
+            if result == .unexpected { onProgramNotice?(.unexpectedEnd(name: name)) }
+            // A game launched on its own ended and only Steam is left.
+            if windowedLaunches.contains(id), let environment = snapshot.environments[group.environment], environment.stop != .executing,
+               let alone = CyderProgramControl.sharedLeftAlone(environment: group.environment, in: snapshot), alone.launch != id {
+                onProgramNotice?(.sharedStillRunning(shared: alone.shared, launch: alone.launch, prefix: environment.prefix))
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + CyderProgramControl.endedRowSeconds + 0.1) { [weak self] in
+                guard let self else { return }
+                let now = ProcessInfo.processInfo.systemUptime
+                self.endedRows = self.endedRows.filter { now - $0.value.at < CyderProgramControl.endedRowSeconds }
+                self.refresh()
+            }
+        }
+    }
     private final class ProgramTarget: NSObject {
         let launch: String
         init(_ launch: String) { self.launch = launch }
@@ -1122,6 +1190,7 @@ final class CyderStatusItemController: NSObject, NSMenuDelegate {
         guard !isQuiescing, !programs.isEmpty, let group = latestLifecycle.launches[launch],
               let environment = latestLifecycle.environments[group.environment], environment.existence == .alive else { refresh(); return }
         onProgramStopRequested?(launch)
+        stoppedByPlayer.insert(launch)
         if force {
             closeRequests[launch] = nil
             let targets = programs.map(\.id), signal = signalProgram
@@ -1161,6 +1230,20 @@ final class CyderStatusItemController: NSObject, NSMenuDelegate {
         let target = programs.first { $0.hasPresentedProgram } ?? programs.last
         guard let target, let app = NSRunningApplication(processIdentifier: target.id.pid) else { refresh(); return }
         app.activate(options: [.activateAllWindows])
+    }
+    /// From the 「Steam 仍在背景執行」 notification: the confirmed 結束 of that
+    /// environment's shared program, if it is still running.
+    func endSharedProgram(prefix: String, shared: String) {
+        precondition(Thread.isMainThread)
+        let path = URL(fileURLWithPath: prefix).standardizedFileURL.path
+        guard let images = CyderProgramControl.sharedPrograms.first(where: { $0.name == shared })?.images,
+              let launch = controllableLaunches.sorted().first(where: { id in
+                  guard let group = latestLifecycle.launches[id], let environment = latestLifecycle.environments[group.environment],
+                        URL(fileURLWithPath: environment.prefix).standardizedFileURL.path == path else { return false }
+                  return CyderProgramControl.programs(launch: id, in: latestLifecycle)
+                      .contains { images.contains((CyderProgramControl.image($0) ?? "").lowercased()) }
+              }) else { refresh(); return }
+        requestProgramControl(launch: launch, force: false)
     }
     func hasLivePrograms(launch: String) -> Bool {
         precondition(Thread.isMainThread)

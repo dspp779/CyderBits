@@ -253,6 +253,9 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             observer.noteSuccessors(alive: alive)
         }
         controller.onProgramsChanged = { [weak self] in self?.existingLibraryController?.refreshRunningState() }
+        controller.onProgramNotice = { notice in
+            CyderNotifications.shared.post(notice, logPath: CyderDiagnostics.shared.sessionLogURL.path)
+        }
         controller.onActivityChanged = { [weak self] activity in
             self?.existingLibraryController?.updateProgramActivity(activity.summary)
             self?.existingLibraryController?.refreshRunningState()
@@ -287,6 +290,12 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
                   self.existingSettingsController?.window?.isVisible != true,
                   self.existingUnavailableController?.window?.isVisible != true,
                   self.existingLibraryController?.window?.isVisible != true else { return }
+            // Let a notification being posted reach the system first, then
+            // re-check every idle condition.
+            if CyderNotifications.shared.isPosting {
+                CyderNotifications.shared.whenIdle { [weak self] in self?.statusItemController.onLifecycleIdle?() }
+                return
+            }
             NSApp.terminate(nil)
         }
         if #available(macOS 11.0, *) {
@@ -563,6 +572,11 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         // Preferences promote to the Dock via activateCyderUI; EXE/URI launches
         // stay accessory unless they need a question or error.
         NSApp.setActivationPolicy(.accessory)
+        // Before a notification click can relaunch Cyder and deliver its action.
+        CyderNotifications.shared.install()
+        CyderNotifications.shared.onEndShared = { [weak self] prefix, shared in
+            self?.statusItemController.endSharedProgram(prefix: prefix, shared: shared)
+        }
         statusItemController.beginRecovery()
         instanceCoordinator.start(onRequest: { [weak self] request in
             self?.receiveInstanceRequest(request)
