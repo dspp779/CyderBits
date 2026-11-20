@@ -154,9 +154,10 @@ open dist/CyderBits.app
 ## 測試
 
 ```bash
-bash tests/run.sh --changed   # 受目前修改影響的測試（相對於 main）
-bash tests/run.sh <關鍵字>    # 檔名包含關鍵字的測試
-bash tests/run.sh             # 全部測試：每次 push 前在背景跑一次
+bash tests/run.sh <關鍵字>         # 每次修改：這次修改的測試
+bash tests/lib/typecheck-app.sh  # 改 Swift 後（約 15 秒）
+bash tests/run.sh --changed      # push 或開 PR 前跑一次（只看尚未 push 的修改）
+bash tests/run.sh                # 全部測試：合併到 main 與發行時
 ```
 
 哪種改動該做哪種檢查、測試版建置、簽署與實機檢查：[docs/development-testing.md](docs/development-testing.md)。

@@ -153,9 +153,10 @@ open dist/CyderBits.app
 ## Tests
 
 ```bash
-bash tests/run.sh --changed   # tests affected by your changes (against main)
-bash tests/run.sh <word>      # tests whose name contains <word>
-bash tests/run.sh             # whole suite: once before each push, in the background
+bash tests/run.sh <word>         # each edit: the test for that change
+bash tests/lib/typecheck-app.sh  # after a Swift edit (~15 s)
+bash tests/run.sh --changed      # once before a push or PR (unpushed work only)
+bash tests/run.sh                # whole suite: merges to main and releases
 ```
 
 Which check fits which change, test builds, signing and real-app checks: [docs/development-testing.md](docs/development-testing.md).

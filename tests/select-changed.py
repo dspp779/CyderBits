@@ -9,9 +9,11 @@ Reasons go to stderr.
 A test is affected when its own text names a changed file (by repo path or
 basename), names a file under scripts/ that names a changed file (followed
 transitively, e.g. a launcher that sources cyder-common.sh), or calls an
-affected test. A changed Swift file also selects the tests that build the app
-from create-cyder-app.sh. Documentation (*.md, docs/, .agents/) selects
-nothing. Runner files, or any other file that no test names, select ALL.
+affected test. A changed Swift file does not pull in every app-build test:
+`tests/run.sh --changed` typechecks the whole app instead (`--swift-changed`
+says whether to), so a Swift file no test names selects nothing extra.
+Documentation (*.md, docs/, .agents/) selects nothing. Runner files, or any
+other file that no test names, select ALL.
 """
 import argparse
 import re
@@ -74,8 +76,8 @@ def select(files):
         users = users_of(f, scripts)
         hits = {name for name, text in tests.items()
                 if name == Path(f).name or any(mentions(text, u) for u in users)}
-        if f.endswith(".swift"):
-            hits |= {name for name, text in tests.items() if "create-cyder-app.sh" in text}
+        if not hits and f.startswith("scripts/") and f.endswith(".swift"):
+            continue  # covered by the whole-app typecheck
         if not hits:
             unmatched.append(f)
         selected |= hits
@@ -108,8 +110,13 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--base", default="main")
     parser.add_argument("--files", nargs="*")
+    parser.add_argument("--swift-changed", action="store_true",
+                        help="print yes when a Swift file under scripts/ changed")
     args = parser.parse_args()
     files = args.files if args.files is not None else changed_files(args.base)
+    if args.swift_changed:
+        print("yes" if any(f.startswith("scripts/") and f.endswith(".swift") for f in files) else "no")
+        return
     tests, reason = select(files)
     print(reason, file=sys.stderr)
     if tests is None:
