@@ -130,7 +130,8 @@ them again.
 
 - An ended program's row stays for 8 s with its result: 已由你結束 (the
   player's 結束/強制結束, or a stopped environment), 意外結束 (Wine's crash
-  dialog `winedbg.exe`/`werfault.exe` appeared in the launch), else 已結束.
+  dialog appeared for the launch: its activation request names the PID, since
+  `winedbg --auto` has no `.exe` name for the process scan), else 已結束.
   A launch whose outcome is `failed` already showed `CYD-WIN-…` and gets no
   row. Ended rows are a separate disabled list, not program rows.
 - Notifications (`scripts/cyder_notifications.swift`, app-only because the
@@ -147,6 +148,12 @@ them again.
 - Steam's own tools (`vulkandriverquery64.exe`, `gldriverquery64.exe`,
   `steamerrorreporter*.exe`) count as part of Steam, so they neither appear
   in the Steam warning nor look like a game ending.
+
+Hands-on (test build `0.16.0-dev`, M4): a program that crashes on purpose
+opened Wine's crash dialog; closing it gave 「crashme — 意外結束」. Steam plus
+Notepad, then Notepad ended: 「Steam 仍在背景執行」 was raised. Both notices
+were refused by macOS (Cyder not allowed to show notifications on this Mac),
+so the banners and their buttons were not seen.
 
 ## Phase 3 measurements and decision (2026-11-20)
 
