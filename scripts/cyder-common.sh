@@ -3254,10 +3254,63 @@ cyder_stop_managed_prefix() {
 # Open Wine's own task manager without keeping the native menu action blocked.
 # All stdio is detached so a caller using a pipe or Process.waitUntilExit also
 # returns as soon as the task manager has been dispatched.
-cyder_open_prefix_taskmgr() {
+# Environment for a Wine client tool (Task Manager, taskkill) joining a live
+# managed bottle. Call inside a subshell; it exports into the current shell.
+cyder_prefix_client_environment() {
   local wine_bin="$1" prefix="$2"
   local wineserver="${wine_bin%/wine}/wineserver"
   local session_file sync=""
+  export WINEPREFIX="$prefix" WINESERVER="$wineserver"
+  # A Wine client must use the same synchronization protocol as the active
+  # bottle server. Prefer the live session contract because per-game launch
+  # settings can differ from the currently saved global preference.
+  for session_file in "$(cyder_session_dir "$prefix")"/*.session; do
+    [[ -f "$session_file" && ! -L "$session_file" ]] || continue
+    sync="$(sed -n 's/^sync=//p' "$session_file" | head -1)"
+    [[ -n "$sync" ]] && break
+  done
+  [[ -n "$sync" ]] || sync="msync=${CYDER_MSYNC:-0};esync=${CYDER_ESYNC:-0};power=${CYDER_POWER_MODE:-normal}"
+  case "$sync" in
+    msync=1\;esync=0\;*) export WINEMSYNC=1; unset WINEESYNC ;;
+    msync=0\;esync=1\;*) export WINEESYNC=1; unset WINEMSYNC ;;
+    *) unset WINEMSYNC WINEESYNC ;;
+  esac
+  if [[ -f "$prefix/cxbottle.conf" ]] || cyder_wine_is_crossover_frontend "$wine_bin"; then
+    export CX_BOTTLE="$prefix" CX_ROOT="$(cd "$(dirname "$wine_bin")/.." && pwd -P)" WINEARCH=win64
+  fi
+}
+
+# Ask a running Windows program to close, like clicking its window's close
+# button: Wine's taskkill without /f posts WM_CLOSE to every top-level window
+# of each process with that image name in this bottle. A program without a
+# window is left running (the app then offers 強制結束). Runs only while the
+# caller has seen a program of this bottle alive: any Wine client starts a
+# wineserver (and services) when none is running.
+cyder_close_prefix_program() {
+  local wine_bin="$1" prefix="$2" image="$3"
+  [[ -x "$wine_bin" ]] || { echo "Cyder Wine is unavailable: $wine_bin" >&2; return 2; }
+  [[ "$image" =~ ^[A-Za-z0-9][A-Za-z0-9\ ._()+\-]{0,126}\.[Ee][Xx][Ee]$ ]] || { echo "invalid program image" >&2; return 2; }
+  if ! cyder_has_running_prefix "$prefix"; then
+    echo "no running Windows environment for this program" >&2
+    return 3
+  fi
+  mkdir -p "$CYDER_SUPPORT/Logs"
+  (
+    unset CYDER_EXECUTION_FINAL
+    cyder_prefix_client_environment "$wine_bin" "$prefix"
+    export WINEDEBUG=-all
+    cd "$prefix"
+    local status=0
+    cyder_exec_wine "$wine_bin" taskkill /im "$image" || status=$?
+    # 128: no window of that image to close (already gone, or windowless).
+    # Not a failure: the app's escalation offers 強制結束 if it keeps running.
+    [[ "$status" -eq 128 ]] && status=0
+    exit "$status"
+  ) </dev/null >>"$CYDER_SUPPORT/Logs/program-control.log" 2>&1
+}
+
+cyder_open_prefix_taskmgr() {
+  local wine_bin="$1" prefix="$2"
   local pid_file="${CYDER_WINE_PID_FILE:-}"
   [[ -x "$wine_bin" ]] || { echo "Cyder Wine is unavailable: $wine_bin" >&2; return 2; }
   if [[ -n "${CYDER_EXECUTION_OWNER_TICKET:-}" ]]; then
@@ -3265,25 +3318,8 @@ cyder_open_prefix_taskmgr() {
   fi
   mkdir -p "$CYDER_SUPPORT/Logs"
   (
-    export WINEPREFIX="$prefix" WINESERVER="$wineserver"
     if [[ -n "${CYDER_EXECUTION_OWNER_TICKET:-}" ]]; then export CYDER_EXECUTION_FINAL=1; fi
-    # A Wine client must use the same synchronization protocol as the active
-    # bottle server. Prefer the live session contract because per-game launch
-    # settings can differ from the currently saved global preference.
-    for session_file in "$(cyder_session_dir "$prefix")"/*.session; do
-      [[ -f "$session_file" && ! -L "$session_file" ]] || continue
-      sync="$(sed -n 's/^sync=//p' "$session_file" | head -1)"
-      [[ -n "$sync" ]] && break
-    done
-    [[ -n "$sync" ]] || sync="msync=${CYDER_MSYNC:-0};esync=${CYDER_ESYNC:-0};power=${CYDER_POWER_MODE:-normal}"
-    case "$sync" in
-      msync=1\;esync=0\;*) export WINEMSYNC=1; unset WINEESYNC ;;
-      msync=0\;esync=1\;*) export WINEESYNC=1; unset WINEMSYNC ;;
-      *) unset WINEMSYNC WINEESYNC ;;
-    esac
-    if [[ -f "$prefix/cxbottle.conf" ]] || cyder_wine_is_crossover_frontend "$wine_bin"; then
-      export CX_BOTTLE="$prefix" CX_ROOT="$(cd "$(dirname "$wine_bin")/.." && pwd -P)" WINEARCH=win64
-    fi
+    cyder_prefix_client_environment "$wine_bin" "$prefix"
     cd "$prefix"
     cyder_exec_wine "$wine_bin" taskmgr
   ) </dev/null >>"$CYDER_SUPPORT/Logs/taskmgr.log" 2>&1 &

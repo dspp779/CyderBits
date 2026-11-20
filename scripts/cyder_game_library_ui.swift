@@ -1647,6 +1647,7 @@ final class CyderGameLibraryWindowController: NSWindowController, NSWindowDelega
         emptyAddButton.isEnabled = canMutate && !loader.isBusy
         selectionOptionsButton.isEnabled = canMutate && selectedGame != nil
         selectionLaunchButton.isEnabled = canMutate && selectedGame != nil
+        selectionEndButton.isEnabled = canInteract && !selectionEndButton.isHidden
         collectionView.isSelectable = canInteract
         collectionView.isInteractionEnabled = canInteract
         collectionView.visibleItems().forEach { ($0 as? CyderGameTileItem)?.setInteractionEnabled(canInteract) }
@@ -1669,6 +1670,33 @@ final class CyderGameLibraryWindowController: NSWindowController, NSWindowDelega
     private let selectionTitle = NSTextField(labelWithString: "")
     private let selectionOptionsButton = NSButton()
     private let selectionLaunchButton = NSButton()
+    private let selectionEndButton = NSButton()
+    /// The running launch of a game's executable, if any.
+    var runningLaunch: ((URL) -> String?)?
+    var onShowProgram: ((String) -> Void)?
+    var onEndProgram: ((String) -> Void)?
+    var onForceQuitProgram: ((String) -> Void)?
+    var programClosePhase: ((String) -> CyderProgramControl.ClosePhase)?
+    private var selectedRunningLaunch: String? { selectedGame.flatMap { runningLaunch?($0.executableURL) } }
+    /// Follow the running state: 啟動遊戲 becomes 顯示, and 結束… appears.
+    func refreshRunningState() {
+        let launch = selectedRunningLaunch, running = launch != nil
+        let phase = launch.flatMap { programClosePhase?($0) } ?? .none
+        selectionLaunchButton.title = running ? "顯示" : "啟動遊戲"
+        selectionLaunchButton.toolTip = running ? "這個遊戲正在執行；顯示它的視窗" : nil
+        selectionEndButton.isHidden = !running
+        // After a 結束 the program did not follow, offer 強制結束 (still confirmed).
+        selectionEndButton.title = phase == .notResponding ? "強制結束…" : "結束…"
+        selectionEndButton.toolTip = phase == .notResponding ? "立即結束，未儲存的進度會遺失；會先詢問。" : "像按下視窗的關閉鈕一樣結束；會先詢問。"
+        let name = selectedGame?.displayName ?? ""
+        let word = phase == .notResponding ? "沒有回應" : (phase == .closing ? "正在結束…" : "執行中")
+        selectionTitle.stringValue = running ? "\(name)・\(word)" : name
+        refreshInteractionAvailability()
+    }
+    @objc private func endSelection() {
+        guard let launch = selectedRunningLaunch else { refreshRunningState(); return }
+        if programClosePhase?(launch) == .notResponding { onForceQuitProgram?(launch) } else { onEndProgram?(launch) }
+    }
     private let emptyAddButton = NSButton()
     private let emptyState = NSStackView()
     private var games: [CyderGameRecord] = []
@@ -1839,12 +1867,16 @@ final class CyderGameLibraryWindowController: NSWindowController, NSWindowDelega
         selectionOptionsButton.target = self; selectionOptionsButton.action = #selector(openSettingsForSelectedGame)
         selectionLaunchButton.title = "啟動遊戲"
         selectionLaunchButton.target = self; selectionLaunchButton.action = #selector(launchSelection)
+        selectionEndButton.title = "結束…"
+        selectionEndButton.target = self; selectionEndButton.action = #selector(endSelection)
+        selectionEndButton.toolTip = "像按下視窗的關閉鈕一樣結束；會先詢問。"
+        selectionEndButton.isHidden = true
         selectionTitle.font = .systemFont(ofSize: 13, weight: .semibold)
         selectionTitle.lineBreakMode = .byTruncatingTail
         selectionTitle.alignment = .right
         selectionTitle.translatesAutoresizingMaskIntoConstraints = false
         content.addSubview(selectionTitle)
-        selectionRow.setViews([selectionOptionsButton, selectionLaunchButton], in: .trailing)
+        selectionRow.setViews([selectionOptionsButton, selectionEndButton, selectionLaunchButton], in: .trailing)
         selectionRow.spacing = 8
         selectionRow.translatesAutoresizingMaskIntoConstraints = false
         content.addSubview(selectionRow)
@@ -1996,9 +2028,8 @@ final class CyderGameLibraryWindowController: NSWindowController, NSWindowDelega
     }
 
     private func updateSelectionRow() {
-        selectionTitle.stringValue = selectedGame?.displayName ?? ""
         selectionTitle.toolTip = selectedGame?.displayName
-        refreshInteractionAvailability()
+        refreshRunningState()
     }
 
     @objc private func launchSelection() {
@@ -2066,6 +2097,8 @@ final class CyderGameLibraryWindowController: NSWindowController, NSWindowDelega
 
     private func launch(_ game: CyderGameRecord) {
         guard canMutate, games.contains(where: { $0.id == game.id }) else { return }
+        // A running game is brought forward instead of started again.
+        if let launch = runningLaunch?(game.executableURL) { onShowProgram?(launch); return }
         // The accepted launch path performs file validation off AppKit.
         onLaunch?(game.executableURL, nil)
     }

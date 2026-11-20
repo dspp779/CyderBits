@@ -64,7 +64,7 @@ precondition(snapshot.requests[initial.id]?.phase == .uncertain)
 precondition(!snapshot.hasActiveWork && snapshot.launches[initial.launchID]?.outcome == .unconfirmed, "recovery manufactured new observation/dispatch")
 precondition(snapshot.processes[process]?.ownership == .rootReceipt && snapshot.processes[process]?.launch == initial.launchID)
 let menu = NSMenu(); controller.menuNeedsUpdate(menu)
-precondition(menu.items.contains { $0.title.contains("Recovered.exe") && $0.title.contains("尚未確認視窗") })
+precondition(menu.items.contains { $0.title.contains("Recovered.exe") && $0.title.contains("在背景執行") }, "a recovered program without a window is 在背景執行")
 precondition(!menu.items.contains { $0.title.contains("正在啟動") })
 // The new primary's registry has never seen the earlier request: it cannot be dispatched again.
 let registry = CyderRequestRegistry()

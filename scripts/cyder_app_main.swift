@@ -78,6 +78,23 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
     private var diagnosticsPresentation: UUID?
     private weak var existingSettingsController: CyderSettingsWindowController?
     private weak var existingLibraryController: CyderGameLibraryWindowController?
+    /// Launch ID → normalised executable path, so the library can tell which
+    /// game a running row belongs to. Launches recovered after a restart are
+    /// not in it (the library then offers 啟動遊戲 as before).
+    private var programLaunchExecutables: [String: String] = [:]
+    static func programExecutableKey(_ path: String) -> String {
+        (URL(fileURLWithPath: path).standardizedFileURL.path as NSString).lowercased
+    }
+    static func libraryTitle(forExecutable path: String,
+                             games: @autoclosure () -> [CyderGameRecord] = CyderGameLibraryStore().games) -> String? {
+        let key = programExecutableKey(path)
+        return games().first { programExecutableKey($0.executablePath) == key }?.displayName
+    }
+    private func runningLaunch(forExecutable url: URL) -> String? {
+        let key = Self.programExecutableKey(url.path)
+        let live = statusItemController.controllableLaunches
+        return programLaunchExecutables.first { $0.value == key && live.contains($0.key) }?.key
+    }
     private var pendingRequestAcquisitions: [String: UUID] = [:]
     private var pendingPreparation: [String: UUID] = [:]
     private let processRunner = CyderProcessRunner(delivery: DispatchQueue(label: "local.cyder.process-delivery", qos: .utility))
@@ -218,6 +235,16 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             waiter.markPresented(process: pid)
             self.dismissLaunchProgress(for: launchID)
         }
+        controller.onCloseProgram = { [weak self] prefix, images, launch in
+            self?.closeProgram(prefix: prefix, images: images, launch: launch)
+        }
+        controller.onProgramStopRequested = { [weak self] launch in
+            // A program the player ended is not a failed launch: stop observing
+            // it before its root exits, so no CYD-WIN dialog follows.
+            guard let self, let waiter = self.wineActivationWaiter, waiter.launchID == launch else { return }
+            CyderDiagnostics.shared.info("program control: launch observation cancelled by the player")
+            self.wineLaunchObserver?.cancel()
+        }
         controller.onLiveSuccessorsChange = { [weak self] launches in
             guard let self, let waiter = self.wineActivationWaiter, let observer = self.wineLaunchObserver else { return }
             let names = waiter.launchID.flatMap { launches[$0] } ?? []
@@ -225,8 +252,10 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             CyderDiagnostics.shared.info("wine launch successors alive=\(alive) \(names.sorted().joined(separator: ","))")
             observer.noteSuccessors(alive: alive)
         }
+        controller.onProgramsChanged = { [weak self] in self?.existingLibraryController?.refreshRunningState() }
         controller.onActivityChanged = { [weak self] activity in
             self?.existingLibraryController?.updateProgramActivity(activity.summary)
+            self?.existingLibraryController?.refreshRunningState()
             self?.prepareEnvironmentAutomaticallyIfNeeded()
         }
         controller.onOpenPreferences = { [weak self] in self?.showSettings() }
@@ -348,6 +377,11 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         controller.onLaunch = { [weak self] executable, settings in
             self?.launchGameFromLibrary(executable, settings: settings)
         }
+        controller.runningLaunch = { [weak self] executable in self?.runningLaunch(forExecutable: executable) }
+        controller.onShowProgram = { [weak self] launch in self?.statusItemController.showProgram(launch: launch) }
+        controller.onEndProgram = { [weak self] launch in self?.statusItemController.requestProgramControl(launch: launch, force: false) }
+        controller.onForceQuitProgram = { [weak self] launch in self?.statusItemController.requestProgramControl(launch: launch, force: true) }
+        controller.programClosePhase = { [weak self] launch in self?.statusItemController.closePhase(launch: launch) ?? .none }
         controller.onRemoveProfile = { [weak self] executable, completion in
             guard let self else { completion(false); return }
             self.removeIndependentProfile(for: executable, completion: completion)
@@ -2165,7 +2199,11 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             return .unconfirmed
         }
         let lifecycleController = onMainThread { statusItemController }
+        // The library title (「Steam」), read off the main thread from the saved list.
+        let libraryTitle = Self.libraryTitle(forExecutable: exe)
         onMainThread {
+            programLaunchExecutables[launchID] = Self.programExecutableKey(exe)
+            statusItemController.setProgramTitle(libraryTitle, launch: launchID)
             statusItemController.beginLaunch(id: launchID, prefix: prefix, executableName: executableName,
                 authority: authority, stamp: stamp,
                 committedRequest: .init(id: authorization.id, digest: authorization.digest, environment: stamp.environment,
@@ -2281,6 +2319,27 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             return .unconfirmed
         }
         })
+    }
+
+    /// 結束: ask each image to close with Wine's taskkill (no /f), one at a
+    /// time, and only while the launch still has a live program.
+    private func closeProgram(prefix: URL, images: [String], launch: String) {
+        guard let resourcePath = Bundle.main.resourcePath, !images.isEmpty else { return }
+        Task.detached(priority: .userInitiated) { [weak self] in
+            guard let self else { return }
+            let context = await CyderLaunchContext(resourcePath: resourcePath)
+            for image in images {
+                let alive = self.onMainThread { self.statusItemController.hasLivePrograms(launch: launch) }
+                guard alive else { break }
+                let result = await self.runLauncher(
+                    context: context,
+                    args: [context.launcher, "--close-program-prefix", prefix.path, image],
+                    stage: .wineSpawn,
+                    operation: "close-program"
+                )
+                CyderDiagnostics.shared.info("program control: close request sent ok=\(result.succeeded)")
+            }
+        }
     }
 
     private func runPrefixAction(_ action: String, prefix: URL, operation: String) {
@@ -2920,7 +2979,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         let settingsIndependent = isObservation || args.contains("--stop-prefix") || args.contains("--stop-all")
         var scope = operationScope ?? .allEnvironments
         if operationScope == nil,
-           let index = args.firstIndex(where: { $0 == "--stop-prefix" || $0 == "--taskmgr-prefix" }),
+           let index = args.firstIndex(where: { $0 == "--stop-prefix" || $0 == "--taskmgr-prefix" || $0 == "--close-program-prefix" }),
            args.indices.contains(index + 1) { scope = .prefix(URL(fileURLWithPath: args[index + 1])) }
         let prefixScope = scope
         if isLaunch {

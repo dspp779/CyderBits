@@ -49,6 +49,7 @@
 | [cyder.md](cyder.md) | 一般使用者 | Cyder 啟動器：開 `.exe`、SharedPrefix、bootstrap |
 | [cyder-gamaniagames-url-handler.zh-TW.md](cyder-gamaniagames-url-handler.zh-TW.md) | 開發 / 設計 | gamania Games Manager 的 `gamaniagames://` 偵測、使用者同意、macOS URL handler 與 GGMWebStart.exe 啟動流程 |
 | [cyder-session-process-monitoring.zh-TW.md](cyder-session-process-monitoring.zh-TW.md) | 開發 / 設計 | 選單列 session、Steam helper、同 prefix 多程式與 process monitor 設計 |
+| [superpowers/specs/2026-11-20-program-control-design.md](superpowers/specs/2026-11-20-program-control-design.md) | 開發 / 設計 | 玩家角度的程式控制：狀態文字、結束與強制結束皆需確認、Steam 相依警告、遊戲庫按鈕；不需修改 engine |
 | [cyder-graphics-backends.zh-TW.md](cyder-graphics-backends.zh-TW.md) | 一般使用者 | 圖形後端（WineD3D/DXVK/D3DMetal）、GPTK 安裝、DXVK 限幀 vs VSync |
 | [cyder-compatdb.zh-TW.md](cyder-compatdb.zh-TW.md) | 開發 / 發布 | CompatDB 架構、Engine 重包判斷、YAML 規則新增與本機測試 |
 | [cyder-wine-engine-project.md](cyder-wine-engine-project.md) | 開發 / 發布 | 應用層 vs Wine 核心邊界；[cyder-wine-engine](https://github.com/dspp779/cyder-wine-engine) manifest 契約與 Cyder 匯入流程 |
