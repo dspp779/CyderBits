@@ -1,6 +1,6 @@
 # Cyder: program control for players
 
-Date: 2026-11-20. Status: design, not implemented. Builds on the 0.15.0
+Date: 2026-11-20. Status: phase 1 shipped in 0.15.0 as a prototype (PR #30; differences from this note are listed in that PR). Builds on the 0.15.0
 launch detection ([launch-detection.md](../../launch-detection.md)) and the
 LaunchGroup menu ([2026-08-19 design](2026-08-19-launchgroup-menu-bar-design.md)).
 No engine change is required for anything marked phase 1 or 2.
