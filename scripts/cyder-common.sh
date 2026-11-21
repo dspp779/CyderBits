@@ -53,6 +53,7 @@ if [[ -f "$_moltenvk_variant_sh" ]]; then
   source "$_moltenvk_variant_sh"
 fi
 unset _moltenvk_variant_sh
+declare -F cyder_ensure_moltenvk_real >/dev/null 2>&1 || cyder_ensure_moltenvk_real() { return 0; }
 
 cyder_engine_artifacts_dir() {
   local root="${OGOM:-$(cd "$CYDER_COMMON_DIR/.." && pwd)}"
@@ -841,19 +842,6 @@ cyder_load_saved_settings() {
     value="$(plutil -extract graphicsBackend raw -o - "$settings" 2>/dev/null || true)"
     cyder_apply_graphics_preference "${value:-default}" "${CYDER_ENGINES:-}/${CYDER_ENGINE_NAME:-}"
   fi
-  if [[ -z "${CYDER_MOLTENVK_VARIANT_PREFERENCE:-}" ]]; then
-    value="$(plutil -extract moltenvkVariant raw -o - "$settings" 2>/dev/null || true)"
-    case "$value" in
-      1.4.2 | 1.2.10) export CYDER_MOLTENVK_VARIANT_PREFERENCE="$value" ;;
-      *)
-        if declare -F cyder_default_moltenvk_variant_preference >/dev/null 2>&1; then
-          export CYDER_MOLTENVK_VARIANT_PREFERENCE="$(cyder_default_moltenvk_variant_preference)"
-        else
-          export CYDER_MOLTENVK_VARIANT_PREFERENCE=1.4.2
-        fi
-        ;;
-    esac
-  fi
   value="$(plutil -extract dxvkFrameRate raw -o - "$settings" 2>/dev/null || true)"
   case "$value" in
     sixty|60) export CYDER_DXVK_FRAME_RATE_PREFERENCE=60 ;;
@@ -870,26 +858,6 @@ cyder_load_saved_settings() {
   cyder_apply_graphics_runtime_preferences
 }
 
-cyder_apply_moltenvk_variant_from_preference() {
-  local engine="${1:-}"
-  local pref="${CYDER_MOLTENVK_VARIANT_PREFERENCE:-}"
-  [[ -n "$engine" && -d "$engine" ]] || return 0
-  if [[ -z "$pref" ]]; then
-    if declare -F cyder_default_moltenvk_variant_preference >/dev/null 2>&1; then
-      pref="$(cyder_default_moltenvk_variant_preference)"
-    else
-      pref=1.4.2
-    fi
-  fi
-  if declare -F cyder_apply_moltenvk_variant_if_present >/dev/null 2>&1; then
-    cyder_apply_moltenvk_variant_if_present "$engine" "$pref" || {
-      local status=$?
-      echo "MoltenVK variant apply failed (engine=$engine pref=$pref)" >&2
-      return "$status"
-    }
-  fi
-  return 0
-}
 
 cyder_find_taskpolicy() {
   if [[ -n "${CYDER_TASKPOLICY_BIN:-}" && -x "$CYDER_TASKPOLICY_BIN" ]]; then
@@ -978,7 +946,7 @@ cyder_resolve_shared_engine() {
       if [[ ! -f "$engine/.cyder-engine-signed" ]]; then
         cyder_sign_installed_engine "$engine" || return $?
       fi
-      cyder_apply_moltenvk_variant_from_preference "$engine" || return $?
+      cyder_ensure_moltenvk_real "$engine" || return $?
       echo "Shared engine current (sidecar): $engine" >&2
       printf '%s\n' "$engine"
       return 0
@@ -1083,13 +1051,18 @@ cyder_is_maplestory_executable() {
   [[ "$lower" == "maplestory.exe" ]]
 }
 
+# "MapleStory WZ read optimization" (settings key maplestoryWZCache) drives two
+# engine switches together: the adaptive WZ cache and the Windows-style
+# read-ahead that runs inside its window fills (Cyder014+; older engines ignore
+# CYDER_MAPLESTORY_READAHEAD). Both stay off for every other executable.
 cyder_apply_maplestory_wz_cache() {
-  local exe="$1"
+  local exe="$1" value=0
   if cyder_is_maplestory_executable "$exe"; then
-    export CYDER_MAPLESTORY_FILE_CACHE="${CYDER_MAPLESTORY_FILE_CACHE_PREFERENCE:-1}"
-  else
-    export CYDER_MAPLESTORY_FILE_CACHE=0
+    value="${CYDER_MAPLESTORY_FILE_CACHE_PREFERENCE:-1}"
+    [[ "$value" == 0 ]] || value=1
   fi
+  export CYDER_MAPLESTORY_FILE_CACHE="$value"
+  export CYDER_MAPLESTORY_READAHEAD="$value"
 }
 
 cyder_wine_is_crossover_frontend() {
@@ -1817,7 +1790,7 @@ cyder_ensure_shared_engine() {
       if [[ ! -f "$dest/.cyder-engine-signed" ]]; then
         cyder_sign_installed_engine "$dest" || exit 1
       fi
-      cyder_apply_moltenvk_variant_from_preference "$dest" || exit 1
+      cyder_ensure_moltenvk_real "$dest" || exit 1
       echo "$dest"
       return 0
     fi
@@ -1866,7 +1839,7 @@ cyder_ensure_shared_engine() {
   if [[ -n "$bundled_sha" ]]; then
     printf '%s\n' "$bundled_sha" >"$dest/.cyder-engine-artifact-sha256"
   fi
-  cyder_apply_moltenvk_variant_from_preference "$dest" || exit 1
+  cyder_ensure_moltenvk_real "$dest" || exit 1
   if declare -F cyder_check_components >/dev/null; then cyder_check_components engine full; fi
   echo "$dest"
 }
@@ -2574,9 +2547,9 @@ cyder_game_environment_key_is_allowed() {
     DYLD_*|LD_*) return 1 ;;
     CYDER_SCROLLING_PREFERENCE|CYDER_LAUNCH_GROUP|CYDER_LAUNCH_PREPARATION_*) return 1 ;;
     WINEPREFIX|WINESERVER|WINEARCH|WINEDEBUG|CX_ROOT|CX_BOTTLE|CX_APPLEGPTK_LIBD3DSHARED_PATH) return 1 ;;
-    CYDER_SUPPORT|CYDER_RUNTIME_ROOT|CYDER_ENGINES|CYDER_ENGINE_NAME|CYDER_ENGINE_SRC|CYDER_SCRIPTS|CYDER_APP|CYDER_MAPLESTORY_FILE_CACHE|CYDER_MAPLESTORY_FILE_CACHE_PREFERENCE) return 1 ;;
+    CYDER_SUPPORT|CYDER_RUNTIME_ROOT|CYDER_ENGINES|CYDER_ENGINE_NAME|CYDER_ENGINE_SRC|CYDER_SCRIPTS|CYDER_APP|CYDER_MAPLESTORY_FILE_CACHE|CYDER_MAPLESTORY_FILE_CACHE_PREFERENCE|CYDER_MAPLESTORY_READAHEAD) return 1 ;;
     CYDER_WINE_*|CYDER_SESSION_*|CYDER_DIAGNOSTIC_*|CYDER_TEST_*|CYDER_EXECUTION_*|CYDER_RESULT_FILE|CYDER_PROGRESS_FILE) return 1 ;;
-    CYDER_GPTK_ROOT|CYDER_GRAPHICS_*|CYDER_CNC_*|CYDER_GAME_ARGUMENTS|CYDER_MOLTENVK_VARIANT_PREFERENCE) return 1 ;;
+    CYDER_GPTK_ROOT|CYDER_GRAPHICS_*|CYDER_CNC_*|CYDER_GAME_ARGUMENTS|CYDER_MOLTENVK_VARIANT_PREFERENCE|_CYDER_*) return 1 ;;
   esac
   return 0
 }
@@ -2613,11 +2586,89 @@ cyder_dxvk_launch_allowed() {
   cyder_engine_has_dxvk_payload "$engine_root"
 }
 
+# Metal GPU family of the default device: mac2, mac1, none, or unknown when
+# the CyderSwift helper is unavailable (scripts run outside Cyder.app, tests).
+# Asked once per launcher process.
+cyder_metal_gpu_family() {
+  if [[ -z "${_CYDER_METAL_GPU_FAMILY:-}" ]]; then
+    local helper="${CYDER_ENVIRONMENT_HELPER:-}" family=""
+    if [[ -x "$helper" ]]; then
+      family="$(/usr/bin/perl -e 'alarm 5; exec @ARGV; exit 75' -- "$helper" --metal-gpu-family 2>/dev/null || true)"
+    fi
+    case "$family" in
+      mac2|mac1|none) _CYDER_METAL_GPU_FAMILY="$family" ;;
+      *) _CYDER_METAL_GPU_FAMILY=unknown ;;
+    esac
+  fi
+  printf '%s\n' "$_CYDER_METAL_GPU_FAMILY"
+}
+
+# DXMT needs Metal GPU Family Mac 2. A Mac 1 GPU (older Intel Macs, e.g. a
+# Kepler GTX 780M under OpenCore) aborts in Metal ("No valid pixelFormats
+# set") when DXMT creates its first pipeline. Unknown keeps the old behaviour.
+cyder_host_gpu_supports_dxmt() {
+  case "$(cyder_metal_gpu_family)" in
+    mac1|none) return 1 ;;
+  esac
+  return 0
+}
+
 cyder_dxmt_launch_allowed() {
   local engine_root="$1"
   declare -F cyder_macos_at_least >/dev/null 2>&1 \
     && cyder_macos_at_least 15 0 \
+    && cyder_host_gpu_supports_dxmt \
     && cyder_engine_has_dxmt_payload "$engine_root"
+}
+
+# Executables whose CompatDB rule selects DXMT inside the engine while the
+# graphics setting is "default" (compatdb/rules/games.yml; a test keeps the
+# two lists equal). No other backend runs them, so a GPU without DXMT
+# support is refused before Wine starts instead of aborting in Metal.
+cyder_compatdb_dxmt_only_executable() {
+  case "$(printf '%s' "${1##*[/\\]}" | tr '[:upper:]' '[:lower:]')" in
+    cities2.exe) return 0 ;;
+  esac
+  return 1
+}
+
+# Executables whose CompatDB rule prefers DXMT but which also run elsewhere
+# (compatdb/rules/games.yml). Matches the bootstrap and the shipping binary.
+cyder_compatdb_dxmt_preferred_executable() {
+  case "$(printf '%s' "${1##*[/\\]}" | tr '[:upper:]' '[:lower:]')" in
+    penguinhotel.exe|penguinhotel-win64-shipping.exe) return 0 ;;
+  esac
+  return 1
+}
+
+# Where DXMT cannot run (macOS < 15, GPU Family Mac 1, no payload), replace a
+# DXMT-preferring rule with D3DMetal, else DXVK, while graphics is "default".
+# The exported backend outranks the CompatDB rule; its other actions (-dx11)
+# still apply.
+cyder_apply_compatdb_dxmt_fallback() {
+  local exe="$1" engine_root="$2"
+  [[ -z "${CYDER_GRAPHICS_BACKEND:-}" ]] || return 0
+  cyder_compatdb_dxmt_preferred_executable "$exe" || return 0
+  cyder_dxmt_launch_allowed "$engine_root" && return 0
+  if cyder_d3dmetal_launch_allowed "$engine_root"; then
+    cyder_apply_graphics_preference d3dmetal "$engine_root"
+  elif cyder_dxvk_launch_allowed "$engine_root"; then
+    cyder_apply_graphics_preference dxvk "$engine_root"
+  else
+    return 0
+  fi
+  cyder_apply_graphics_runtime_preferences
+  echo "DXMT is unavailable on this Mac; ${exe##*[/\\]} uses ${CYDER_GRAPHICS_BACKEND} instead." >&2
+}
+
+cyder_refuse_unsupported_dxmt_gpu() {
+  local exe="$1"
+  [[ -z "${CYDER_GRAPHICS_BACKEND:-}" ]] || return 0
+  cyder_compatdb_dxmt_only_executable "$exe" || return 0
+  declare -F cyder_macos_at_least >/dev/null 2>&1 && cyder_macos_at_least 15 0 || return 0
+  cyder_host_gpu_supports_dxmt && return 0
+  echo "CYD-GFX-002：${exe##*[/\\]} 只能使用 DXMT 圖形，這台 Mac 的 GPU 不支援 DXMT（需要 Metal GPU Family Mac 2）。尚未啟動遊戲。" >&2
+  return 1
 }
 
 cyder_d3dmetal_launch_allowed() {
@@ -2690,7 +2741,7 @@ cyder_apply_graphics_preference() {
         export CYDER_GRAPHICS_AUTO_POLICY=0
         export CYDER_GRAPHICS_BACKEND=dxmt CX_GRAPHICS_BACKEND=dxmt
       else
-        echo "DXMT is unavailable (requires macOS 15+ and engine lib/dxmt); using default graphics backend." >&2
+        echo "DXMT is unavailable (requires macOS 15+, a Metal GPU Family Mac 2 GPU and engine lib/dxmt); using default graphics backend." >&2
         export CYDER_GRAPHICS_PREFERENCE=default
         export CYDER_GRAPHICS_AUTO_POLICY=0
         unset CYDER_GRAPHICS_BACKEND CX_GRAPHICS_BACKEND
@@ -2829,6 +2880,69 @@ cyder_apply_steam_compatibility_arguments() {
       done
     fi
     [[ "$existing" -eq 1 ]] || CYDER_STEAM_ARGUMENTS+=("$required")
+  done
+}
+
+# A Steam game started directly (not through Steam's Play button) only finds
+# the running Steam client when it knows its app ID.  Without it, Cities:
+# Skylines II stops at "platform service integration failed".  Values the user
+# set (for example in the game's own environment settings) are kept.
+#
+# The app ID comes from Steam's own install record: for a program under
+# .../steamapps/common/<folder>/, the steamapps/appmanifest_*.acf whose
+# "installdir" is <folder> holds its "appid".  The table below is only a
+# fallback for games whose manifest is missing (copied or moved installs).
+# Prints the app ID, or nothing.  Always succeeds: a non-zero status inside
+# $(...) would trip the launcher's ERR trap and log a false error.
+cyder_steam_app_id_from_manifest() {
+  local dir parent folder="" steamapps="" manifest app_id
+  dir="$(dirname "$1")"
+  while [[ -n "$dir" && "$dir" != / && "$dir" != . ]]; do
+    parent="$(dirname "$dir")"
+    if [[ "$(basename "$parent" | tr '[:upper:]' '[:lower:]')" == common && \
+          "$(basename "$(dirname "$parent")" | tr '[:upper:]' '[:lower:]')" == steamapps ]]; then
+      folder="$(basename "$dir")"
+      steamapps="$(dirname "$parent")"
+      break
+    fi
+    dir="$parent"
+  done
+  [[ -n "$folder" ]] || return 0
+  for manifest in "$steamapps"/appmanifest_*.acf; do
+    [[ -f "$manifest" ]] || continue
+    app_id="$(awk -F'"' -v want="$folder" '
+      tolower($2) == "appid" && id == "" { id = $4 }
+      tolower($2) == "installdir" && dir == "" { dir = $4 }
+      END { if (tolower(dir) == tolower(want) && id ~ /^[0-9]+$/) print id }
+    ' "$manifest" 2>/dev/null || true)"
+    if [[ -n "$app_id" ]]; then
+      echo "$app_id"
+      return 0
+    fi
+  done
+  return 0
+}
+
+cyder_steam_app_id_for_executable() {
+  local app_id
+  app_id="$(cyder_steam_app_id_from_manifest "$1")"
+  if [[ -n "$app_id" ]]; then
+    echo "$app_id"
+    return 0
+  fi
+  case "$(basename "$1" | tr '[:upper:]' '[:lower:]')" in
+    cities2.exe) echo 949230 ;;
+  esac
+  return 0
+}
+
+cyder_apply_steam_game_environment() {
+  local exe="$1" app_id name
+  [[ "${CYDER_STEAM_COMPAT:-1}" != 0 ]] || return 0
+  app_id="$(cyder_steam_app_id_for_executable "$exe")"
+  [[ -n "$app_id" ]] || return 0
+  for name in SteamAppId SteamGameId SteamOverlayGameId; do
+    [[ -n "${!name:-}" ]] || export "$name=$app_id"
   done
 }
 
@@ -3031,6 +3145,8 @@ cyder_prepare_game_launch_settings() {
   cyder_load_game_settings "$exe" "$engine_root" || return $?
   cyder_apply_maplestory_wz_cache "$exe"
   cyder_resolve_effective_graphics_backend "$engine_root" "$exe"
+  cyder_apply_compatdb_dxmt_fallback "$exe" "$engine_root"
+  cyder_refuse_unsupported_dxmt_gpu "$exe" || return $?
   cyder_prepare_cnc_game "$exe" "$prefix" "$engine_root" || return $?
   # The legacy Perl frontend can replace process-only overrides by reloading
   # cxbottle.conf. Never edit the shared bottle to force a private profile.
@@ -3138,10 +3254,63 @@ cyder_stop_managed_prefix() {
 # Open Wine's own task manager without keeping the native menu action blocked.
 # All stdio is detached so a caller using a pipe or Process.waitUntilExit also
 # returns as soon as the task manager has been dispatched.
-cyder_open_prefix_taskmgr() {
+# Environment for a Wine client tool (Task Manager, taskkill) joining a live
+# managed bottle. Call inside a subshell; it exports into the current shell.
+cyder_prefix_client_environment() {
   local wine_bin="$1" prefix="$2"
   local wineserver="${wine_bin%/wine}/wineserver"
   local session_file sync=""
+  export WINEPREFIX="$prefix" WINESERVER="$wineserver"
+  # A Wine client must use the same synchronization protocol as the active
+  # bottle server. Prefer the live session contract because per-game launch
+  # settings can differ from the currently saved global preference.
+  for session_file in "$(cyder_session_dir "$prefix")"/*.session; do
+    [[ -f "$session_file" && ! -L "$session_file" ]] || continue
+    sync="$(sed -n 's/^sync=//p' "$session_file" | head -1)"
+    [[ -n "$sync" ]] && break
+  done
+  [[ -n "$sync" ]] || sync="msync=${CYDER_MSYNC:-0};esync=${CYDER_ESYNC:-0};power=${CYDER_POWER_MODE:-normal}"
+  case "$sync" in
+    msync=1\;esync=0\;*) export WINEMSYNC=1; unset WINEESYNC ;;
+    msync=0\;esync=1\;*) export WINEESYNC=1; unset WINEMSYNC ;;
+    *) unset WINEMSYNC WINEESYNC ;;
+  esac
+  if [[ -f "$prefix/cxbottle.conf" ]] || cyder_wine_is_crossover_frontend "$wine_bin"; then
+    export CX_BOTTLE="$prefix" CX_ROOT="$(cd "$(dirname "$wine_bin")/.." && pwd -P)" WINEARCH=win64
+  fi
+}
+
+# Ask a running Windows program to close, like clicking its window's close
+# button: Wine's taskkill without /f posts WM_CLOSE to every top-level window
+# of each process with that image name in this bottle. A program without a
+# window is left running (the app then offers 強制結束). Runs only while the
+# caller has seen a program of this bottle alive: any Wine client starts a
+# wineserver (and services) when none is running.
+cyder_close_prefix_program() {
+  local wine_bin="$1" prefix="$2" image="$3"
+  [[ -x "$wine_bin" ]] || { echo "Cyder Wine is unavailable: $wine_bin" >&2; return 2; }
+  [[ "$image" =~ ^[A-Za-z0-9][A-Za-z0-9\ ._()+\-]{0,126}\.[Ee][Xx][Ee]$ ]] || { echo "invalid program image" >&2; return 2; }
+  if ! cyder_has_running_prefix "$prefix"; then
+    echo "no running Windows environment for this program" >&2
+    return 3
+  fi
+  mkdir -p "$CYDER_SUPPORT/Logs"
+  (
+    unset CYDER_EXECUTION_FINAL
+    cyder_prefix_client_environment "$wine_bin" "$prefix"
+    export WINEDEBUG=-all
+    cd "$prefix"
+    local status=0
+    cyder_exec_wine "$wine_bin" taskkill /im "$image" || status=$?
+    # 128: no window of that image to close (already gone, or windowless).
+    # Not a failure: the app's escalation offers 強制結束 if it keeps running.
+    [[ "$status" -eq 128 ]] && status=0
+    exit "$status"
+  ) </dev/null >>"$CYDER_SUPPORT/Logs/program-control.log" 2>&1
+}
+
+cyder_open_prefix_taskmgr() {
+  local wine_bin="$1" prefix="$2"
   local pid_file="${CYDER_WINE_PID_FILE:-}"
   [[ -x "$wine_bin" ]] || { echo "Cyder Wine is unavailable: $wine_bin" >&2; return 2; }
   if [[ -n "${CYDER_EXECUTION_OWNER_TICKET:-}" ]]; then
@@ -3149,25 +3318,8 @@ cyder_open_prefix_taskmgr() {
   fi
   mkdir -p "$CYDER_SUPPORT/Logs"
   (
-    export WINEPREFIX="$prefix" WINESERVER="$wineserver"
     if [[ -n "${CYDER_EXECUTION_OWNER_TICKET:-}" ]]; then export CYDER_EXECUTION_FINAL=1; fi
-    # A Wine client must use the same synchronization protocol as the active
-    # bottle server. Prefer the live session contract because per-game launch
-    # settings can differ from the currently saved global preference.
-    for session_file in "$(cyder_session_dir "$prefix")"/*.session; do
-      [[ -f "$session_file" && ! -L "$session_file" ]] || continue
-      sync="$(sed -n 's/^sync=//p' "$session_file" | head -1)"
-      [[ -n "$sync" ]] && break
-    done
-    [[ -n "$sync" ]] || sync="msync=${CYDER_MSYNC:-0};esync=${CYDER_ESYNC:-0};power=${CYDER_POWER_MODE:-normal}"
-    case "$sync" in
-      msync=1\;esync=0\;*) export WINEMSYNC=1; unset WINEESYNC ;;
-      msync=0\;esync=1\;*) export WINEESYNC=1; unset WINEMSYNC ;;
-      *) unset WINEMSYNC WINEESYNC ;;
-    esac
-    if [[ -f "$prefix/cxbottle.conf" ]] || cyder_wine_is_crossover_frontend "$wine_bin"; then
-      export CX_BOTTLE="$prefix" CX_ROOT="$(cd "$(dirname "$wine_bin")/.." && pwd -P)" WINEARCH=win64
-    fi
+    cyder_prefix_client_environment "$wine_bin" "$prefix"
     cd "$prefix"
     cyder_exec_wine "$wine_bin" taskmgr
   ) </dev/null >>"$CYDER_SUPPORT/Logs/taskmgr.log" 2>&1 &
@@ -3690,6 +3842,7 @@ cyder_run_wine_exe() {
       else
         cyder_apply_steam_compatibility_arguments "$exe"
       fi
+      cyder_apply_steam_game_environment "$exe"
       game_args=()
       if (( ${#CYDER_STEAM_ARGUMENTS[@]} > 0 )); then
         game_args=("${CYDER_STEAM_ARGUMENTS[@]}")
@@ -3757,7 +3910,7 @@ cyder_run_wine_exe() {
   engine_root="$(cd "$(dirname "$wine_bin")/.." && pwd -P)"
   canonical_prefix="$(cd "$prefix" 2>/dev/null && pwd -P || printf '%s' "$prefix")"
   cyder_apply_media_launch_environment "$engine_root"
-  cyder_apply_moltenvk_variant_from_preference "$engine_root" || return $?
+  cyder_ensure_moltenvk_real "$engine_root" || return $?
   cyder_apply_gptk_launch_environment "$engine_root" || return $?
   if [[ -f "$prefix/cxbottle.conf" ]] || cyder_wine_is_crossover_frontend "$wine_bin"; then
     export CX_BOTTLE="$prefix" CX_ROOT="$engine_root" WINEARCH=win64

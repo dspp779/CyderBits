@@ -4,9 +4,9 @@
 
 # CyderBits
 
-**在 Mac 上跑經典 Windows 遊戲 — Cyder 0.14.0 以 DirectDraw 與 GDI 為驗證基準，並提供可選圖形 backend。**
+**在 Mac 上跑 Windows 遊戲 — Cyder 0.15.0 以 DirectDraw 與 GDI 為驗證基準，並可依遊戲選擇圖形（DXVK、DXMT、D3DMetal）。**
 
-驗證路徑仍是傳統 2D Win32 圖形：**DirectDraw → Wine wined3d/OpenGL** 與 GDI。Cyder 0.14.0 使用 `CX26.3.0-W11-Cyder013` engine（dual MoltenVK）；DXVK／DXMT 以獨立 graphics payload 提供，D3DMetal 透過 GPTK 提供。實際遊戲相容性仍需依遊戲、macOS 版本與 backend 個別驗證。
+驗證路徑仍是傳統 2D Win32 圖形：**DirectDraw → Wine wined3d/OpenGL** 與 GDI。Cyder 0.15.0 使用 `CX26.3.0-W11-Cyder014` engine 與 MoltenVK 1.4.2，需要 **macOS 12 以上**；DXVK／DXMT 以獨立 graphics payload 提供，D3DMetal 透過 GPTK 提供。實際遊戲相容性仍需依遊戲、macOS 版本、GPU 與 backend 個別驗證。
 
 本 repo（CyderBits）目前主要是**應用層**：Cyder 啟動器、遊戲庫、設定、CompatDB 與打包器。實際執行 Windows `.exe` 的 Wine 核心在獨立專案 [cyder-wine-engine](https://github.com/dspp779/cyder-wine-engine)。
 
@@ -22,10 +22,7 @@
 | **引擎** | 共用 Wine（`~/.cyder/runtime/Engines/`，刻意避免空白） |
 | **文件** | [docs/cyder.md](docs/cyder.md) |
 
-```bash
-bash scripts/create-cyder-app.sh
-open dist/Cyder.app
-```
+依[快速開始](#快速開始)建置測試版，或從 [GitHub Releases](https://github.com/dspp779/CyderBits/releases) 下載正式版。
 
 ## CyderBits（打包器）
 
@@ -64,6 +61,8 @@ bash scripts/run-bluecg.sh
 | **單機** | 魔獸爭霸 3 | 🟢 可玩 | 搭配啟動參數 `-nativefullscr` 開啟最高解析度 |
 | **單機** | 小朋友齊打交 2 (1.9c) | 🟢 可玩 | 可直接執行遊玩 |
 | **單機** | 小朋友齊打交 2 (2.0a) | 🟡 需依賴庫 | 需透過 `winetricks` 安裝 `vcrun2005`, `wmp9`, `quartz`, `devenum`, `vb6run` |
+| **線上** | MECCHA CHAMELEON（Steam） | 🟡 需 DXMT／D3DMetal | 0.15.0 起自動使用 DXMT 與 `-dx11`（DXVK 下主選單背景全黑） |
+| **單機** | Cities: Skylines II | 🟡 僅 Apple Silicon | 0.15.0 起自動使用 DXMT；可進主選單、新建城市、存檔與讀檔。建造與長時間遊玩未測；GPU Family Mac 1 的 Intel Mac 無法執行（[指引](docs/games/cities-skylines-2/README.md)） |
 | **線上** | 水藍魔力 (BlueCG) | 🟢 可玩 | 專案驗證基準 (DirectDraw / GDI) |
 | **線上** | 新楓之谷 | 🟡 部分驗證 | 需 MapleStory Launcher、[CitrusGate](https://github.com/dspp779/CitrusGate) 與有效 OTP；CX26 版本仍需完成地圖級驗收 |
 | **線上** | 新楓之谷 經典版 | 🟡 部分驗證 | 需 [CitrusGate](https://github.com/dspp779/CitrusGate) 傳送 OTP；QDO workaround 與背景程序清理仍有已知限制 |
@@ -75,9 +74,9 @@ bash scripts/run-bluecg.sh
 |---|---|---|
 | DirectDraw / GDI | **支援且已驗證** | BlueCG 使用 DirectDraw；預設路徑是 wined3d/OpenGL，GDI 是相容性 fallback。 |
 | wined3d / OpenGL | **目前預設** | BlueCG 驗證用 engine 含已測試的 `winemac.drv` same-view backing 修復，可支援 Retina/DPI resize。 |
-| Vulkan / MoltenVK | **由 engine 提供** | dual-variant：shim + `.real` → `1.4.2`／`1.2.10`；偏好設定可切換；macOS &lt; 12 強制 1.2.10。這不是 BlueCG 的主要繪圖路徑。 |
+| Vulkan / MoltenVK | **由 engine 提供** | MoltenVK 1.4.2，經 wait-poll shim 載入（`.real` → `1.4.2`）。0.15.0 起移除 1.2.10 與版本選項；舊款 Intel 內顯尚未以 1.4.2 實測（[#7](https://github.com/dspp779/CyderBits/issues/7)）。這不是 BlueCG 的主要繪圖路徑。 |
 | DXVK | **已整合 runtime payload** | DXVK 由 Cyder.app 的 `Resources/graphics/` 外部 payload 提供，透過 CompatDB builtin + prepend 載入；DXVK 2 仍暫不出貨。 |
-| dxmt | **已整合 runtime payload** | DXMT 由 Cyder.app 的外部 payload 提供，需 macOS 15+；新楓之谷與經典版在 macOS 15+ 預設優先使用。 |
+| DXMT | **已整合 runtime payload** | 上游 DXMT 0.80（Developer ID 簽署），以外部 payload 提供。需要 macOS 15+ **且** GPU 支援 Metal GPU Family Mac 2（Apple Silicon）。圖形為「預設」時，新楓之谷、經典版、Cities: Skylines II 與 MECCHA CHAMELEON 自動使用；其他 Mac 上新楓之谷改用 DXVK、MECCHA CHAMELEON 改用 D3DMetal 或 DXVK，Cities: Skylines II 在啟動前顯示 `CYD-GFX-002`。 |
 | D3DMetal | **已接入產品 backend** | 透過 GPTK／Apple D3DMetal，需 macOS 14+ 與可用 GPTK；實際遊戲相容性需逐款驗證。 |
 
 詳見 [Wine configure 與圖形選項](docs/wine-configure-options.md)、
@@ -89,11 +88,11 @@ bash scripts/run-bluecg.sh
 
 ## 系統需求
 
-- **支援政策：** Cyder **0.14**（engine **Cyder013**）是**最後支援 macOS 10.15 與 11 的版本**；之後的版本僅支援 **macOS 12+**。
-- **Cyder.app：** macOS 10.15+（`LSMinimumSystemVersion`）；遊戲庫／設定 UI 需 **11+**（10.15 首次安裝會顯示終端機，完成後以 bash 選檔／啟動）
+- **Cyder.app：** **macOS 12+**（`LSMinimumSystemVersion` 12.0）。macOS 10.15 或 11 請使用 [Cyder 0.14.1](docs/releases/v0.14.1.md)，它是最後支援這些系統的版本。
+- **圖形：** DXMT 需要 macOS 15+ 與 Metal GPU Family Mac 2；D3DMetal 需要 macOS 14+ 與 GPTK。
 - **遊戲位置：** 建議放在 `~/Games`；Documents、Desktop、Downloads、雲端或外接磁碟可能只授權 EXE，卻阻擋同資料夾的 DLL
 - **開發／建置：** 建議 macOS 12+（日常開發建議 13+）
-- Apple Silicon + Rosetta 2（Wine 為 **x86_64** build；Apple Silicon 自 macOS 11+ 起需 Rosetta）
+- Apple Silicon 需要 Rosetta 2（Wine 為 **x86_64** build）
 - 磁碟需數 GB（原始碼、`.brew-x86`、build 產物；多數在 `.gitignore`）
 
 ## 快速開始
@@ -155,8 +154,10 @@ open dist/CyderBits.app
 ## 測試
 
 ```bash
-bash tests/run.sh <關鍵字>   # 檔名包含關鍵字的測試
-bash tests/run.sh            # 全部測試，約 12 分鐘
+bash tests/run.sh <關鍵字>         # 每次修改：這次修改的測試
+bash tests/lib/typecheck-app.sh  # 改 Swift 後（約 15 秒）
+bash tests/run.sh --changed      # push 或開 PR 前跑一次（只看尚未 push 的修改）
+bash tests/run.sh                # 全部測試：合併到 main 與發行時
 ```
 
 哪種改動該做哪種檢查、測試版建置、簽署與實機檢查：[docs/development-testing.md](docs/development-testing.md)。
@@ -164,12 +165,14 @@ bash tests/run.sh            # 全部測試，約 12 分鐘
 ## 文件
 
 - [CHANGELOG.md](CHANGELOG.md) — 各版本變更摘要
-- [Cyder 0.14.0 發布說明](docs/releases/v0.14.0.md) — Cyder013 引擎、退出 Cyder 不結束遊戲、每遊戲 cnc-ddraw、DXVK 黑色貼圖修正；最後支援 macOS 10.15／11 的版本
+- [Cyder 0.15.0 發布說明](docs/releases/v0.15.0.md) — Cyder014 引擎、需要 macOS 12+、Apple Silicon 上的 Cities: Skylines II、新楓之谷 WZ 預讀、DXMT GPU 檢查、啟動偵測修正
+- [Cyder 0.14.1 發布說明](docs/releases/v0.14.1.md) — 最後支援 macOS 10.15／11 的版本
 - [docs/README.md](docs/README.md) — 所有文件與歷次發布說明的索引
 - [docs/cyder.md](docs/cyder.md) — Cyder 啟動器
 - [docs/cyderbits.md](docs/cyderbits.md) — CyderBits 打包器
 - [docs/games/compatibility-matrix.md](docs/games/compatibility-matrix.md) — 已測試遊戲
 - [docs/development-testing.md](docs/development-testing.md) — 測試、測試版建置、實機與遊戲檢查
+- [docs/launch-detection.md](docs/launch-detection.md) — Cyder 如何判斷程式已啟動（`CYD-WIN-002`，英文）
 - [docs/release-pipeline.zh-TW.md](docs/release-pipeline.zh-TW.md) — 簽署、公證與發佈流程
 - [docs/cyder-wine-engine-project.md](docs/cyder-wine-engine-project.md) — 應用層 vs [cyder-wine-engine](https://github.com/dspp779/cyder-wine-engine)
 - [docs/bluecg.md](docs/bluecg.md) — BlueCG 流程

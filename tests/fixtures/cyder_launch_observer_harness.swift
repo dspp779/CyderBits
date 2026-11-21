@@ -18,28 +18,28 @@ func start(_ observer: CyderLaunchObserver, _ signal: WineActivationWaiter, dura
 }
 let early = WineActivationWaiter(prefix: root.path); early.signal()
 var earlyResult: CyderLaunchObserver.Result?
-start(CyderLaunchObserver(), early, duration: 1, read: { .init(rootStatus: nil, lifecycle: nil) }) { earlyResult = $0 }
+start(CyderLaunchObserver(successorSettle: 0), early, duration: 1, read: { .init(rootStatus: nil, lifecycle: nil) }) { earlyResult = $0 }
 pump { earlyResult != nil }; precondition(earlyResult == .activated)
 let handoff = WineActivationWaiter(prefix: root.path)
 var handoffResult: CyderLaunchObserver.Result?
-start(CyderLaunchObserver(), handoff, duration: 1, read: { .init(rootStatus: 0, lifecycle: "background") }) { handoffResult = $0 }
+start(CyderLaunchObserver(successorSettle: 0), handoff, duration: 1, read: { .init(rootStatus: 0, lifecycle: "background") }) { handoffResult = $0 }
 DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { handoff.signal() }
 pump { handoffResult != nil }; precondition(handoffResult == .activated, "clean root exit prematurely finished observation")
 var rootFailure: CyderLaunchObserver.Result?
-start(CyderLaunchObserver(), WineActivationWaiter(prefix: root.path), duration: 1, read: { .init(rootStatus: 53, lifecycle: "background") }) { rootFailure = $0 }
+start(CyderLaunchObserver(successorSettle: 0), WineActivationWaiter(prefix: root.path), duration: 1, read: { .init(rootStatus: 53, lifecycle: "background") }) { rootFailure = $0 }
 pump { rootFailure != nil }; precondition(rootFailure == .rootFailed(53))
 // A window that was on screen but never activated (background launch): an
 // installer cancelled with status 1 ended a program the user saw.
 let shown = WineActivationWaiter(prefix: root.path); shown.markPresented()
 var shownExit: CyderLaunchObserver.Result?
-start(CyderLaunchObserver(), shown, duration: 1, read: { .init(rootStatus: 1, lifecycle: "background") }) { shownExit = $0 }
+start(CyderLaunchObserver(successorSettle: 0), shown, duration: 1, read: { .init(rootStatus: 1, lifecycle: "background") }) { shownExit = $0 }
 pump { shownExit != nil }; precondition(shownExit == .exitedAfterWindow(1), "a presented window was reported as an early exit")
 // A window on screen that never activates ends the observation after the
 // short grace instead of the full deadline, so the next queued launch can go.
 let onScreen = WineActivationWaiter(prefix: root.path)
 var onScreenResult: CyderLaunchObserver.Result?
 let onScreenStart = ProcessInfo.processInfo.systemUptime
-start(CyderLaunchObserver(), onScreen, duration: 4, read: { .init(rootStatus: nil, lifecycle: "background") }) { onScreenResult = $0 }
+start(CyderLaunchObserver(successorSettle: 0), onScreen, duration: 4, read: { .init(rootStatus: nil, lifecycle: "background") }) { onScreenResult = $0 }
 DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { onScreen.markPresented() }
 pump { onScreenResult != nil }
 precondition(onScreenResult == .presented, "a presented window held the observation: \(String(describing: onScreenResult))")
@@ -47,7 +47,7 @@ precondition(ProcessInfo.processInfo.systemUptime - onScreenStart < 3, "presente
 // Activation inside the grace still wins.
 let activatesLate = WineActivationWaiter(prefix: root.path)
 var lateResult: CyderLaunchObserver.Result?
-start(CyderLaunchObserver(), activatesLate, duration: 4, read: { .init(rootStatus: nil, lifecycle: "background") }) { lateResult = $0 }
+start(CyderLaunchObserver(successorSettle: 0), activatesLate, duration: 4, read: { .init(rootStatus: nil, lifecycle: "background") }) { lateResult = $0 }
 DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { activatesLate.markPresented() }
 DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { activatesLate.signal() }
 pump { lateResult != nil }; precondition(lateResult == .activated, "activation within the grace was lost")
@@ -55,7 +55,7 @@ pump { lateResult != nil }; precondition(lateResult == .activated, "activation w
 // is frontmost first, then its window appears. That launch was activated.
 let frontFirst = WineActivationWaiter(prefix: root.path)
 var frontFirstResult: CyderLaunchObserver.Result?
-start(CyderLaunchObserver(), frontFirst, duration: 4, read: { .init(rootStatus: nil, lifecycle: "background") }) { frontFirstResult = $0 }
+start(CyderLaunchObserver(successorSettle: 0), frontFirst, duration: 4, read: { .init(rootStatus: nil, lifecycle: "background") }) { frontFirstResult = $0 }
 DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { frontFirst.noteFrontmost(700) }
 DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { frontFirst.markPresented(process: 700) }
 pump { frontFirstResult != nil }
@@ -63,7 +63,7 @@ precondition(frontFirstResult == .activated, "frontmost before the window was no
 // The window first, then the program comes to the front.
 let windowFirst = WineActivationWaiter(prefix: root.path)
 var windowFirstResult: CyderLaunchObserver.Result?
-start(CyderLaunchObserver(), windowFirst, duration: 4, read: { .init(rootStatus: nil, lifecycle: "background") }) { windowFirstResult = $0 }
+start(CyderLaunchObserver(successorSettle: 0), windowFirst, duration: 4, read: { .init(rootStatus: nil, lifecycle: "background") }) { windowFirstResult = $0 }
 DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { windowFirst.markPresented(process: 701) }
 DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { windowFirst.noteFrontmost(701) }
 pump { windowFirstResult != nil }
@@ -72,13 +72,13 @@ precondition(windowFirstResult == .activated, "frontmost after the window was no
 // program's activation; the launch stays presented.
 let elsewhere = WineActivationWaiter(prefix: root.path)
 var elsewhereResult: CyderLaunchObserver.Result?
-start(CyderLaunchObserver(), elsewhere, duration: 4, read: { .init(rootStatus: nil, lifecycle: "background") }) { elsewhereResult = $0 }
+start(CyderLaunchObserver(successorSettle: 0), elsewhere, duration: 4, read: { .init(rootStatus: nil, lifecycle: "background") }) { elsewhereResult = $0 }
 DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { elsewhere.noteFrontmost(702); elsewhere.markPresented(process: 703) }
 DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { elsewhere.noteFrontmost(0) }
 pump { elsewhereResult != nil }
 precondition(elsewhereResult == .presented, "another frontmost app counted as activation: \(String(describing: elsewhereResult))")
 var windowless: CyderLaunchObserver.Result?
-start(CyderLaunchObserver(), WineActivationWaiter(prefix: root.path), duration: 1, read: { .init(rootStatus: 0, lifecycle: "stopped") }) { windowless = $0 }
+start(CyderLaunchObserver(successorSettle: 0), WineActivationWaiter(prefix: root.path), duration: 1, read: { .init(rootStatus: 0, lifecycle: "stopped") }) { windowless = $0 }
 pump { windowless != nil }; precondition(windowless == .finishedWithoutWindow)
 final class Counts {
     let lock = NSLock(); var reads = 0
@@ -87,7 +87,7 @@ final class Counts {
 }
 let counts = Counts(), gate = DispatchSemaphore(value: 0)
 var timed = 0
-let observers = (0..<4).map { _ in CyderLaunchObserver() }
+let observers = (0..<4).map { _ in CyderLaunchObserver(successorSettle: 0) }
 let signals = (0..<4).map { _ in WineActivationWaiter(prefix: root.path) }
 for i in 0..<4 {
     start(observers[i], signals[i], duration: 0.1, read: {
@@ -121,7 +121,7 @@ func native(_ phase: CyderSpawnPhase = .exited, authority a: CyderLaunchObserver
           status: status, signalled: signalled)
 }
 var nativeFailure: CyderLaunchObserver.Result?
-let nativeObserver = CyderLaunchObserver(authority: authority)
+let nativeObserver = CyderLaunchObserver(authority: authority, successorSettle: 0)
 nativeObserver.receive(native()) // Receipt may precede observation setup.
 start(nativeObserver, WineActivationWaiter(prefix: root.path), duration: 1,
       read: { fatalError("native launch consulted legacy sidecar") }) { nativeFailure = $0 }
@@ -132,7 +132,7 @@ let wrongAuthorities = [
     .init(request: authority.request, launch: "other", digest: authority.digest, epoch: authority.epoch),
     .init(request: authority.request, launch: authority.launch, digest: "other", epoch: authority.epoch),
     .init(request: authority.request, launch: authority.launch, digest: authority.digest, epoch: UUID())]
-let fenced = CyderLaunchObserver(authority: authority)
+let fenced = CyderLaunchObserver(authority: authority, successorSettle: 0)
 for wrong in wrongAuthorities { fenced.receive(native(authority: wrong)) }
 fenced.receive(native(.spawned, status: nil, signalled: nil))
 fenced.receive(native(started: 101)) // Same numeric PID, different birth.
@@ -141,18 +141,18 @@ start(fenced, WineActivationWaiter(prefix: root.path), duration: 0.1,
       read: { fatalError("native launch read sidecar") }) { fencedResult = $0 }
 pump { fencedResult != nil }; precondition(fencedResult == .unconfirmed)
 
-let cleanNative = CyderLaunchObserver(authority: authority), cleanSignal = WineActivationWaiter(prefix: root.path)
+let cleanNative = CyderLaunchObserver(authority: authority, successorSettle: 0), cleanSignal = WineActivationWaiter(prefix: root.path)
 var cleanResult: CyderLaunchObserver.Result?
 cleanNative.receive(native(status: 0))
 start(cleanNative, cleanSignal, duration: 1, read: { fatalError() }) { cleanResult = $0 }
 DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { cleanSignal.signal() }
 pump { cleanResult != nil }; precondition(cleanResult == .activated, "clean native root discarded a late successor")
-let signalledNative = CyderLaunchObserver(authority: authority)
+let signalledNative = CyderLaunchObserver(authority: authority, successorSettle: 0)
 var signalResult: CyderLaunchObserver.Result?
 signalledNative.receive(native(status: 9, signalled: true))
 start(signalledNative, WineActivationWaiter(prefix: root.path), duration: 1, read: { fatalError() }) { signalResult = $0 }
 pump { signalResult != nil }; precondition(signalResult == .rootFailed(137))
-let expiredNative = CyderLaunchObserver(authority: authority), expiredSignal = WineActivationWaiter(prefix: root.path)
+let expiredNative = CyderLaunchObserver(authority: authority, successorSettle: 0), expiredSignal = WineActivationWaiter(prefix: root.path)
 var expiredResult: CyderLaunchObserver.Result?
 expiredSignal.signal(); expiredNative.receive(native())
 start(expiredNative, expiredSignal, duration: -1, read: { fatalError() }) { expiredResult = $0 }
@@ -162,7 +162,7 @@ print("PASS formal launch observer: early activation, root-to-child handoff, cap
 
 // Duplicate observation registration cannot replace the first continuation or
 // extend its budget. A cancelled observer likewise cannot be restarted.
-let single = CyderLaunchObserver(), singleSignal = WineActivationWaiter(prefix: root.path)
+let single = CyderLaunchObserver(successorSettle: 0), singleSignal = WineActivationWaiter(prefix: root.path)
 var firstWait: CyderLaunchObserver.Result?, duplicateWait: CyderLaunchObserver.Result?
 Task { firstWait = await single.wait(duration: 0.3, signal: singleSignal) }
 var firstRegistered = false
@@ -171,7 +171,7 @@ pump { firstRegistered }
 Task { duplicateWait = await single.wait(duration: 5, signal: WineActivationWaiter(prefix: root.path)) }
 pump { duplicateWait != nil }; precondition(duplicateWait == .unconfirmed && firstWait == nil)
 singleSignal.signal(); pump { firstWait != nil }; precondition(firstWait == .activated)
-let noRestart = CyderLaunchObserver()
+let noRestart = CyderLaunchObserver(successorSettle: 0)
 noRestart.cancel()
 var noRestartResult: CyderLaunchObserver.Result?
 Task { noRestartResult = await noRestart.wait(duration: 5, signal: WineActivationWaiter(prefix: root.path)) }

@@ -82,9 +82,19 @@ enum CyderLifecycle {
         var executableName: String? = nil
         var hasPresentedProgram = false
 
-        private static let wineHelpers: Set<String> = ["conhost.exe", "explorer.exe", "plugplay.exe", "rpcss.exe",
-            "rundll32.exe", "services.exe", "start.exe", "werfault.exe", "wineboot.exe",
-            "wineconsole.exe", "winedbg.exe", "winedevice.exe"]
+        /// Wine built-ins that start in the background without the user asking
+        /// and end with the environment: the service manager and the services
+        /// it starts (svchost, plugplay, rpcss, drivers in winedevice, spooler,
+        /// WMI, update, terminal services), the desktop and console hosts,
+        /// on-demand COM/DirectPlay servers, and setup/crash helpers. They are
+        /// never the game: they do not count as programs, as a launch's
+        /// window, or as a launcher's successor. Opened on purpose (the launch
+        /// target), a built-in still counts through `expectsHandoff`.
+        private static let wineHelpers: Set<String> = ["conhost.exe", "dllhost.exe", "dplaysvr.exe", "dpnsvr.exe",
+            "explorer.exe", "plugplay.exe", "presentationfontcache.exe", "rpcss.exe", "rundll32.exe",
+            "services.exe", "spoolsv.exe", "start.exe", "svchost.exe", "termsv.exe", "werfault.exe",
+            "winebrowser.exe", "wineboot.exe", "wineconsole.exe", "winedbg.exe", "winedevice.exe",
+            "winemenubuilder.exe", "winmgmt.exe", "wuauserv.exe"]
         func isUserProgram(in launch: Launch?) -> Bool {
             if ownership == .rootReceipt && executableName == nil { return true }
             let image = executableName ?? (ownership == nil ? name : "")
@@ -162,6 +172,17 @@ enum CyderLifecycle {
                 }
             }
             return result
+        }
+        /// Launches with a live user program other than the root receipt (a
+        /// launcher's successor; Wine helpers do not count), with their names.
+        var launchesWithLiveSuccessors: [String: [String]] {
+            var result: [String: [String]] = [:]
+            for process in processes.values {
+                guard let id = process.launch, process.existence == .alive, process.ownership != .rootReceipt,
+                      process.isUserProgram(in: launches[id]) else { continue }
+                result[id, default: []].append(process.executableName ?? process.name)
+            }
+            return result.mapValues { $0.sorted() }
         }
         var hasActiveWork: Bool { restoring || ingressPending || requests.values.contains { $0.phase.isActive }
             || (windowAction != nil && windowAction?.result != .shown) }
@@ -630,4 +651,124 @@ final class CyderLifecycleStore {
             delivery.async { [consume] in consume(snapshot, effects) }
         }
     }
+}
+
+/// Player-facing program control (design: docs/superpowers/specs/
+/// 2026-11-20-program-control-design.md). Pure functions over a lifecycle
+/// snapshot so the menu, the library and tests agree on what a row means.
+enum CyderProgramControl {
+    typealias L = CyderLifecycle
+    /// After a confirmed 結束, a program still running this long is shown as
+    /// 沒有回應 and offered 強制結束.
+    static let closeGrace: TimeInterval = 5
+    /// Programs other programs may need. Ending one always warns first.
+    static let sharedPrograms: [(name: String, images: Set<String>)] = [
+        // Steam and its own tools (the driver queries run briefly at start-up).
+        ("Steam", ["steam.exe", "steamwebhelper.exe", "steamservice.exe", "steamerrorreporter.exe",
+                   "steamerrorreporter64.exe", "vulkandriverquery.exe", "vulkandriverquery64.exe",
+                   "gldriverquery.exe", "gldriverquery64.exe"]),
+    ]
+
+    enum ClosePhase: Equatable { case none, closing, notResponding }
+
+    /// How long an ended program's row stays, showing its result.
+    static let endedRowSeconds: TimeInterval = 8
+    /// Wine's crash dialog: a program of the launch crashed.
+    static let crashReporters: Set<String> = ["winedbg", "winedbg.exe", "werfault", "werfault.exe"]
+    enum EndResult: String, Equatable { case ended = "已結束", unexpected = "意外結束", byPlayer = "已由你結束" }
+    /// Player-stopped first (a stop can trigger a crash dialog), then crash, then a plain end.
+    static func endResult(stoppedByPlayer: Bool, crashed: Bool) -> EndResult {
+        stoppedByPlayer ? .byPlayer : (crashed ? .unexpected : .ended)
+    }
+    static func crashed(launch: String, in snapshot: L.Snapshot) -> Bool {
+        snapshot.processes.values.contains {
+            $0.launch == launch && $0.existence == .alive && crashReporters.contains(($0.executableName ?? "").lowercased())
+        }
+    }
+    static func closePhase(requestedAt: TimeInterval?, now: TimeInterval) -> ClosePhase {
+        guard let requestedAt else { return .none }
+        return now - requestedAt >= closeGrace ? .notResponding : .closing
+    }
+
+    /// The status word a player sees.
+    static func statusWord(stopping: Bool, phase: ClosePhase, starting: Bool, hasWindow: Bool) -> String {
+        if phase == .notResponding { return "沒有回應" }
+        if stopping || phase == .closing { return "正在結束…" }
+        if starting { return "正在啟動…" }
+        return hasWindow ? "執行中" : "在背景執行"
+    }
+
+    /// Live programs of one launch that a player would recognise: Wine's
+    /// background built-ins are excluded.
+    static func programs(launch: String, in snapshot: L.Snapshot) -> [L.ProcessRecord] {
+        guard let group = snapshot.launches[launch] else { return [] }
+        return snapshot.processes.values.filter {
+            $0.launch == launch && $0.existence == .alive && $0.isUserProgram(in: group)
+        }.sorted { $0.id.pid < $1.id.pid }
+    }
+
+    static func image(_ process: L.ProcessRecord) -> String? {
+        guard let name = process.executableName?.trimmingCharacters(in: .whitespaces),
+              name.lowercased().hasSuffix(".exe"), !name.contains("/"), !name.contains("\\") else { return nil }
+        return name
+    }
+
+    /// Image names 結束 asks to close (Wine's taskkill without /f, by name).
+    static func closeImages(_ programs: [L.ProcessRecord]) -> [String] {
+        var seen = Set<String>(), result: [String] = []
+        for name in programs.compactMap(image) where seen.insert(name.lowercased()).inserted { result.append(name) }
+        return result
+    }
+
+    /// 結束's images for a launch. A root not yet named by the process scan
+    /// falls back to the launch's own .exe name.
+    static func closeImages(launch: String, in snapshot: L.Snapshot) -> [String] {
+        let mine = programs(launch: launch, in: snapshot)
+        var images = closeImages(mine)
+        if let name = snapshot.launches[launch]?.name, name.lowercased().hasSuffix(".exe"), !name.contains("/"), !name.contains("\\"),
+           mine.contains(where: { $0.ownership == .rootReceipt && image($0) == nil }),
+           !images.contains(where: { $0.caseInsensitiveCompare(name) == .orderedSame }) { images.insert(name, at: 0) }
+        return images
+    }
+
+    /// When the launch holds a shared program and anything else in the same
+    /// environment is running, the shared program's name and the others'
+    /// names. Ending it may break them, so the player is always warned.
+    static func dependency(launch: String, in snapshot: L.Snapshot) -> (shared: String, others: [String])? {
+        guard let group = snapshot.launches[launch] else { return nil }
+        let mine = programs(launch: launch, in: snapshot)
+        let images = Set(mine.compactMap { image($0)?.lowercased() })
+        guard let shared = sharedPrograms.first(where: { !$0.images.isDisjoint(with: images) }) else { return nil }
+        var others = Set<String>()
+        for process in snapshot.processes.values where process.existence == .alive && process.environment == group.environment {
+            let owner = process.launch.flatMap { snapshot.launches[$0] }
+            guard process.isUserProgram(in: owner), let name = image(process) ?? process.executableName,
+                  !shared.images.contains(name.lowercased()) else { continue }
+            others.insert(name)
+        }
+        return others.isEmpty ? nil : (shared.name, others.sorted { $0.localizedStandardCompare($1) == .orderedAscending })
+    }
+}
+
+/// What a player is asked before 結束 or 強制結束.
+struct ProgramConfirmation: Equatable {
+    let name: String
+    let force: Bool
+    /// The shared program in this row (Steam) and what may need it.
+    var shared: String? = nil
+    var others: [String] = []
+
+    var title: String {
+        if force { return "強制結束「\(name)」？" }
+        return shared == nil ? "結束「\(name)」？" : "仍要結束「\(name)」？"
+    }
+    var detail: String {
+        var lines: [String] = [force ? "程式會立即結束，未儲存的進度會遺失。"
+                                     : "程式會像按下視窗的關閉鈕一樣結束，可能會先詢問是否存檔。"]
+        if let shared, !others.isEmpty {
+            lines.append("\(shared) 結束後，仍在執行的 \(others.joined(separator: "、")) 可能無法正常運作或存檔。")
+        }
+        return lines.joined(separator: "\n\n")
+    }
+    var confirmButton: String { force ? "強制結束" : "結束" }
 }

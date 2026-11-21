@@ -45,7 +45,181 @@ Steam UI 和登入要分開驗收：上游 stock 11.16 曾有黑色 storefront�
 4. 遊戲選 Fullscreen Window。若啟動前無法設定，可單獨試 Unity `-screen-fullscreen 0` 作視窗模式診斷；它不等同 borderless，尚未在 Cyder CS2 驗證，不加入自動規則。不要用 explorer virtual desktop 作預設。
 5. Steam 與遊戲要有分開的生命週期；若 App 結束一個遊戲會清掉整個 bottle，先解決執行擁有權問題再提供一鍵雙程序啟動。不可用固定 sleep 宣稱已登入；需逾時、可取消、失敗提示，沿用既有 Steam 程序，不儲存憑證。
 
-候選規則 `game.cities-skylines-2.dxmt` 保持 `enabled: false`，只有 graphics_backend，不強加 Unity 參數。名稱匹配不足以作 DLL 修補授權；即使名稱被偽裝，也不能進入任何寫入流程。
+候選規則 `game.cities-skylines-2.dxmt` 保持 `enabled: false`，只有 graphics_backend，不強加 Unity 參數。偏好設定的全域圖形若不是「預設」，engine 會以使用者設定為準、略過此規則；測試時請在 `Cities2.exe` 的遊戲設定直接選 DXMT。全域選 DXVK 也會讓 Steam 不出現視窗，見 [Steam](steam/README.md)。名稱匹配不足以作 DLL 修補授權；即使名稱被偽裝，也不能進入任何寫入流程。
+
+## 2026-11-15 原檔實測（C3）
+
+環境：Apple M4、macOS 27.2、Cyder 0.14.1（Developer ID）、engine Cyder013、shared bottle。CS2 Steam build `26404411`，未修改任何遊戲檔案：
+
+| 檔案 | SHA-256 |
+|---|---|
+| `Cities2.exe` | `c881146bac498fd7ef64d3aa2119bdeb74d8f4fa665e6d065372d29d4d451290` |
+| `UnityPlayer.dll` | `1da82d19c9b19b8b923e6018f2caab0d416e84916efba02eb58de9171b40529f` |
+| `Cities2_Data/Plugins/x86_64/cohtml_Unity3DPlugin.dll` | `a6f398a2e9371bf2730300093fffed4f628896dd81c0f679c270dfe54c6c7eb5` |
+| `Cities2_Data/Managed/mscorlib.dll` | `952703a7a04ee3711f2942c43839684f99220732814dd23d77a867673b894734` |
+
+步驟：Steam 在同一 bottle 已登入並保持背景執行；以 Cyder launcher 直接啟動 `Cities2.exe`，該次啟動圖形設為 DXMT。
+
+結果：
+
+- 圖形：遊戲程序載入的 `d3d11.dll`／`dxgi.dll`／`winemetal.dll` 均來自 DXMT 0.80 payload；視窗 1680×945，Metal HUD 顯示約 60 FPS，但畫面全黑。
+- **啟動失敗**：`GameManager.InitializePlatformManager` 中 `ContentHelper.ListContent` → `System.IO.LongDirectory.EnumerateFileSystemIterator` 拋出沒有訊息的 `IOException`，記錄為 `A platform service integration failed to initialize` 與 `[FATAL] IOException`；之後每一幀 `NullReferenceException`，無法進入主選單。
+- 這與上游修補清單中 Mono／Colossal.IO 檔案列舉類的修補對應；上游稱 Wine 11 已不需要的 errno 修補，在 Cyder 的 Wine 11.0（CX26）上仍會失敗。尚未確認是哪個資料夾、哪個 Win32 呼叫回傳了錯誤。
+- 直接啟動時 Steam 另外跳出「選擇啟動選項」視窗（一般／停用 code mods）；本次未點選。
+- 遊戲卡住後 `taskkill`（WM_CLOSE）無效，`taskkill /f` 可結束；Steam 與 wineserver 維持正常。
+
+未測：主選單之後的所有項目、Paradox Mods、Cmd-Tab、從 Steam 啟動、其他 engine。
+
+### `+file` 追蹤結果
+
+以 `WINEDEBUG=+file,+seh` 重跑（同一 bottle、同樣未修改的檔案），失敗點是遊戲列舉
+`\\?\C:\…\Cities Skylines II\Cities2_Data\Content\*`：
+
+- Wine 端正確：`FindFirstFileExW` 成功，`FindNextFileW` 依序回傳 `.`、`..`、`DeluxeRelaxRadio`、`Game`，
+  最後 `NtQueryDirectoryFile` 回 `STATUS_NO_MORE_FILES`（`80000006`），對應 `ERROR_NO_MORE_FILES`（18），是正常結束。
+- 遊戲隨即拋出沒有訊息的 `IOException`。表示 managed 端讀到的 last error 不是 18，與上游
+  [R1](https://github.com/macgameport/cities-skylines-2-macos/blob/main/cities-skylines-2/docs/wine-bugs/R1-getlasterror-garbage.md)
+  相同：Win32 層正確，錯誤發生在 Unity Mono 的 P/Invoke last-error 擷取（`Marshal.GetLastWin32Error`）。
+  上游以 `patch_colossal_io` 修改 `Colossal.IO.dll` 的 `EnumerateFileSystemIterator` 容忍此值。
+- 上游量測稱 stock Wine 11.0 已修正（10.0 為亂值、11.0 為 0），但 Cyder 的 CX26（Wine 11.0 基底）仍重現。
+  差異可能在 CrossOver／Cyder 的 ntdll 或 Rosetta 路徑，尚未確認。
+
+判斷：問題在 engine 與 Mono 的介面，不在遊戲檔案；優先找 engine 修正，遊戲 DLL 修補保留為最後手段。
+
+### Engine 對照（2026-11-15）
+
+同一份遊戲檔（以 symlink 指向 shared bottle 的安裝目錄）、各自全新的測試 prefix、不開 Steam、WineD3D：
+
+| Engine | 結果 |
+|---|---|
+| Cyder013（CX26.3／Wine 11.0） | `[FATAL] IOException`，與 shared bottle 相同 |
+| Cyder011 | 相同 |
+| CrossOver 26.3 官方 engine（直接用其 `wineloader`） | 相同 |
+| GameToMac 0.1.5 | 未測：本機只有 engine，缺少它的 `deps/Frameworks`（`libinotify.dylib`），wineserver 無法啟動 |
+
+結論：不是 Cyder 的回歸；CrossOver 26.3 本身也一樣。要讓未修改的遊戲通過，需要在 CX26 的 Wine／Rosetta 路徑找出
+last error 被改掉的原因，成本高、沒有現成 patch。上游雖測得 stock Wine 11.0 修正了 R1 的 probe，仍保留
+`patch_colossal_io`。
+
+CrossOver 自帶目錄 `crossover.tie` 的 Steam 項目只有 Win10 bottle 範本與
+`HKCU\Software\Valve\Steam\GPUAccelWebViews=0`；逐程式的執行期規則在下載後的 `compatdb-N.dat`，本機沒有。
+
+可能方向：(1) 第三階段的遊戲 DLL 修補工具（只修 `Colossal.IO.dll` 的列舉錯誤判斷，須照上方交易契約）；
+(2) 用上游 `monohost` + `filetest_net` probe 在 CX26 上量 `Marshal.GetLastWin32Error`，再決定是否值得追 engine。
+
+## 2026-11-15 修補後到達主選單
+
+同一環境（Cyder 0.14.1、Cyder013、DXMT、shared bottle、Steam 已登入）。以下三項全部做了才到主選單（`SceneFlow.log`：`MainMenu reached`）：
+
+| 項目 | 內容 | 修改 |
+|---|---|---|
+| 1 | `Colossal.IO.dll`：`LongDirectory.EnumerateFileSystemIterator[Recursive]` 在 `FindNextFile` 後的錯誤判斷改成直接走「沒有更多檔案」 | 2 處 IL；SHA-256 `050ca07a…` → `c108b8e6…` |
+| 2 | `Colossal.IO.AssetDatabase.dll`：`PopulateFromDirectory` 的 `File.Exists(".priority")` 改為 false | 1 處 IL；`0c42b741…` → `6819e4a4…` |
+| 3 | 直接啟動時讓 SteamAPI 連上已登入的 Steam：遊戲目錄加 `steam_appid.txt`（`949230`），環境變數 `SteamAppId`／`SteamGameId`／`SteamOverlayGameId=949230` | 不改二進位 |
+
+- 只做 1：`IOException` 消失，接著 `.priority` 的 `FileNotFoundException` 與 `NullReferenceException`。
+- 做 1、2：仍 `platform service integration failed` → `NullReferenceException`；這是 SteamAPI 沒連上（上游 GOTCHAS #10／#11），不是另一個檔案錯誤。
+- 做 1–3：主選單由 DXMT 0.80 繪製（Metal HUD：Direct），選單背景約 20 FPS。
+- 主選單上有一個可繼續的錯誤視窗：讀取 `C:\users\crossover\AppData\Local\JetBrains\Toolbox\settings.json` 時 `DirectoryNotFoundException`，同樣是 `File.Exists` 回報錯誤。未點選。
+- 遊戲為 exclusive fullscreen（視窗 layer 26），自動點擊工具依設計拒絕；建城、存讀檔、Mods 未測。一般關閉（WM_CLOSE）可結束遊戲，Steam 維持正常。
+
+1、2 用 `.local/cs2/` 內的嚴格版修補程式產生（完整比對 IL 序列、要求固定數量的命中、`.priority` 以 #US heap 驗證字串），原檔備份在 `.local/cs2/backup/`。這是測試用，不是產品工具；Steam「驗證檔案完整性」會還原。
+
+### 實作方向比較
+
+1、2 與 JetBrains 錯誤視窗都來自同一個問題：Win32 呼叫本身正確，但 Mono 讀到的 last error 不對。
+
+| 方向 | 優點 | 缺點 |
+|---|---|---|
+| A. engine 修正 last error 被改掉的原因 | 一次修好所有 Unity／Mono 遊戲同類問題（含上游 6 個 errno 修補）；不改遊戲檔案；遊戲更新不受影響 | 原因未知，CrossOver 26.3 本身也有；需先用 `monohost` probe 定位再 bisect；要等 Cyder014 |
+| B. Cyder 內建遊戲 DLL 修補工具（第三階段） | 已證實可到主選單；改動小 | 每次遊戲更新都可能失效；Steam 驗證會還原；需完整交易、備份、雜湊 allowlist 與同意流程；長期維護成本高 |
+| C. 只對 `Cities2.exe` 的執行期 hook（CompatDB 或 DLL proxy，不改檔案） | 不碰遊戲檔案；可隨遊戲更新存活 | 要 hook Mono 內部或 kernel32 行為，脆弱；目前 CompatDB runtime 不支援 `SET_ENV` 以外更多動作 |
+| D. 啟動層：替 `Cities2.exe` 提供 SteamAppId 環境變數與 Steam 背景執行的指引 | 純設定，可在 0.15.0 做 | 只解決第 3 項；1、2 仍需 A／B／C |
+
+建議：D 進 0.15.0（每遊戲環境變數已可設定；需確認只靠環境變數、不寫 `steam_appid.txt` 是否足夠）。A 先做 probe 判斷成本；B 只在 A 不可行時再評估。
+
+## 2026-11-15 根因：Mono 從 `%gs:0x68` 讀 last error
+
+用不啟動遊戲的 probe（`.local/cs2/probe/`，以 llvm-mingw 建置，直接載入遊戲的 `mono-2.0-bdwgc.dll` 與 `mscorlib`）在 Cyder013 量到：
+
+| 呼叫 | 結果 |
+|---|---|
+| 原生 `FindNextFile` 結束後 `GetLastError()` | 18（正確） |
+| 原生 `GetFileAttributes(不存在)` 後 `GetLastError()` | 2（正確） |
+| Mono `Marshal.GetLastWin32Error()` | `-417309568`（`0xE720A280`，像指標的亂值） |
+
+原因：
+
+1. Unity Mono 的 `mono_marshal_set_last_error`（`mono-2.0-bdwgc.dll`）第一行是 `movl %gs:0x68, %eax`，直接從 TEB 讀 `LastErrorValue`，不呼叫 `GetLastError()`。在 Windows 上 `%gs` 指向 TEB，所以沒問題。
+2. CrossOver 在 macOS x86_64 上 `%gs` 是 macOS 的 pthread TSD 區，不是 Wine 的 TEB。`dlls/ntdll/unix/signal_x86_64.c` 的 `init_syscall_frame` 只把 `Self`（0x30）、`ThreadLocalStoragePointer`（0x58）、`Peb`（0x60）寫到 `%gs`；`LastErrorValue`（0x68，即 macOS TSD slot 13）沒有同步。
+3. 驗證：`SetLastError(18)` 後 `GetLastError()`=18，但 `%gs:0x68` 在 Cyder013 是 `0xf8f04590`、CrossOver 26.3 官方 engine 是 `0x0391e4a0`。
+4. 因此 CS2 的 `IOException`、`.priority`、JetBrains `settings.json` 錯誤都是同一件事；上游 6 個 errno 修補也是。上游在 stock Wine 11.0 量到 0，應是該 slot 剛好為 0；0 仍不等於 18，所以上游仍需要 `patch_colossal_io`。
+
+相關但無關此錯誤：CW HACK 18756（`dlls/ntdll/loader.c`）在 macOS 把 64 個一般 TLS slot 全部佔用，程式只拿到 ≥64 的 expansion slot；以 `%gs:0x1780` 讀取 expansion slot 在主執行緒與新執行緒都正確。
+
+Win32 寫入 last error 的地方只有 `dlls/ntdll/error.c`（`RtlSetLastWin32Error`、`RtlSetLastWin32ErrorAndNtStatusFromNtStatus`）與 `dlls/ntdll/unix/env.c` 兩處（另有 WoW64 helper）。
+
+### 修正方式比較
+
+| 方式 | 內容 | 優點 | 缺點／風險 |
+|---|---|---|---|
+| E1. engine 同步 `%gs:0x68` | 上述寫入點在 macOS x86_64 同時寫 `%gs:0x68` | 所有用 inline TEB 讀 last error 的程式一次修好（Unity Mono 全系列）；不改遊戲 | slot 13 是 macOS libc 的 `gmtime` key；寫入小整數後若 macOS 端呼叫非 reentrant 的 `gmtime()` 可能崩潰。CrossOver 已覆寫 slot 11、12（`ttyname`、`localtime`），需先確認 slot 13 在 macOS 15–27 是否仍被使用 |
+| E2. 載入時修補 Mono 記憶體 | 載入 `mono-*.dll` 時，把 `mov r32, %gs:0x68` 改成呼叫保存暫存器的 thunk（回傳 `GetLastError()`） | 不碰 macOS TSD；不改磁碟上的檔案；可限定在 Mono DLL | 要掃描與改寫程式碼，需處理多個位置與暫存器；Mono 版本更新時要驗證 |
+| E3. 修補磁碟上的 `mono-2.0-bdwgc.dll` | 同 E2 但改檔案 | 簡單 | 與遊戲 DLL 修補有同樣的維護與 Steam 驗證問題 |
+| B. 修補遊戲 DLL（目前做法） | `Colossal.IO*.dll` 2 處 | 已到主選單 | 只修 CS2 的兩個點；其他 managed 檔案操作仍會出錯 |
+
+建議先評估 E1：確認 macOS TSD slot 13 的使用者，在 engine repo 寫最小 patch 與 probe 測試，再用 CS2 原檔驗證。
+
+## 2026-11-15 engine 修正（E2）驗證
+
+engine 分支 `claude/mono-gs-lasterror`，`patches/cyder-ntdll-mono-gs-last-error.patch`：PE loader 載入原生 `mono.dll`／`mono-*.dll` 時（僅 macOS），
+
+1. 把 `mov r32, %gs:0x68` 改成呼叫 thunk，thunk 經 `%gs:0x30`（真正的 TEB）讀 `LastErrorValue`；
+2. 把 Mono JIT 的 `emit_get_last_error` 導向新的 emitter，讓 JIT 產生的 P/Invoke wrapper 也改用 TEB 讀取。
+
+只做第 1 項不夠：靜態程式碼改了 134 處，probe 仍得到亂值；JIT 每次產生的 wrapper 都會內嵌 `%gs:0x68`。不採用「同步寫入 `%gs:0x68`」：原生 macOS 實測 `gmtime()` 的緩衝區指標就存在 slot 13（`%gs:0x68`），寫入錯誤碼會破壞它。
+
+結果（Cyder013 只替換 PE `ntdll.dll` 的測試 engine 複本）：
+
+| 項目 | 結果 |
+|---|---|
+| probe `Marshal.GetLastWin32Error()`（`File.Exists` 不存在的檔案後） | 2（正確）；`CYDER_MONO_GS_LASTERROR=0` 時仍為亂值 |
+| 改寫數量（`WINEDEBUG=trace+module`） | `mono-2.0-bdwgc.dll` 135 處（含 JIT emitter） |
+| CS2 **未修改的** `Colossal.IO.dll`／`Colossal.IO.AssetDatabase.dll`，Steam 以同一 engine 登入，DXMT，`SteamAppId` 環境變數 | `MainMenu reached`；`FileSystem.log`、`UI.log` 無錯誤；JetBrains `settings.json` 錯誤也消失 |
+
+主選單出現 Paradox 使用者協議，未點選。建城、存讀檔、Mods、長時間遊玩未測。engine 尚未正式建置與打包（只替換了測試複本的 PE ntdll）；其他 Unity Mono 遊戲未測。遊戲 DLL 已還原為原檔（`050ca07a…`、`0c42b741…`），`steam_appid.txt` 仍在遊戲目錄。
+
+## 2026-11-15 遊玩測試（未修改的遊戲）
+
+環境同上（修正後的測試 engine、DXMT、Steam 同 engine 已登入、`SteamAppId` 環境變數、`-screen-fullscreen 0` 視窗模式）。測試步驟見 [testing.md](cities-skylines-2/testing.md)。
+
+| 項目 | 結果 |
+|---|---|
+| 只靠環境變數、不放 `steam_appid.txt` | 到達主選單；Steam 不再跳啟動選項 |
+| 首次啟動 | Paradox 使用者協議與隱私權政策（使用者同意後接受）；重開後不再出現 |
+| 新遊戲（一般模式、堰洲島） | 地圖約 15 秒載入完成 |
+| 儲存 | 本地存檔 29.6 MB 寫入成功 |
+| 一般關閉（WM_CLOSE）後重開、繼續遊戲 | `LoadGame` 約 11 秒載入完成 |
+| 執行 3 分鐘 | 無新錯誤；CPU 約 100%，常駐記憶體約 0.87 GB |
+| 遊戲內 退出 → 退出至桌面 | 遊戲與 crash handler 結束，Steam 維持 |
+
+未測：實際建造（道路、分區）與 20 分鐘遊玩、設定變更後重開是否保留、Paradox Mods、Cmd-Tab 與 exclusive fullscreen、正式 Cyder.app 啟動路徑（launcher 的 SteamAppId 只有單元測試）、Intel Mac。
+
+操作注意：遊戲 UI 常忽略游標剛移入就按下的點擊；先送一個按鍵再點、或可重複時點兩次即可；`Return` 可觸發預設按鈕。
+
+## 2026-11-16 圖形後端比較
+
+同上環境（修正後的測試 engine、Steam 同 engine 已登入）；只換 `Cities2.exe` 的圖形後端，Steam 本身不用 DXVK。
+
+| 後端 | 主選單 | 進入城市（繼續遊戲） |
+|---|---|---|
+| DXMT 0.80 | 正常 | 正常；exclusive fullscreen 下切到 Finder 再切回，畫面仍正確 |
+| D3DMetal（GPTK 4.0 beta 3） | 正常 | 地形、水面與建築全黑，只看得到 UI 與道路線；視窗與 exclusive fullscreen 都一樣，切換視窗前就已是黑的 |
+| DXVK 1.10.3 + MoltenVK | 3D 背景會畫，虛擬材質快取建立時通知面板有破圖；UI 點擊無反應 | 無法進入 |
+
+結論：目前只有 DXMT 可玩。D3DMetal 黑畫面是獨立的繪圖問題，與切換視窗無關。
+
+未測：真正的 Cmd-Tab 按鍵（只以程式切換前景 App 一次）、最小化、Mission Control；Issue 回報的 exclusive fullscreen 切換後凍結未重現。
 
 ## 遊戲修補判斷與前置條件
 

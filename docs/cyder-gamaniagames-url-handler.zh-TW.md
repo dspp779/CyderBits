@@ -1,5 +1,7 @@
 # Cyder `gamaniagames://` URL Handler 設計
 
+> 2026-11-20：已實作（`scripts/cyder_uri_handler.swift`）。Cyder 0.15.0 起需要 macOS 12，下文「macOS 11+」為當時的平台範圍。
+>
 > 狀態：設計文件，尚未實作
 >
 > 目標版本：待排入 Cyder app release；不修改 Wine engine

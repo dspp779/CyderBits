@@ -78,6 +78,23 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
     private var diagnosticsPresentation: UUID?
     private weak var existingSettingsController: CyderSettingsWindowController?
     private weak var existingLibraryController: CyderGameLibraryWindowController?
+    /// Launch ID → normalised executable path, so the library can tell which
+    /// game a running row belongs to. Launches recovered after a restart are
+    /// not in it (the library then offers 啟動遊戲 as before).
+    private var programLaunchExecutables: [String: String] = [:]
+    static func programExecutableKey(_ path: String) -> String {
+        (URL(fileURLWithPath: path).standardizedFileURL.path as NSString).lowercased
+    }
+    static func libraryTitle(forExecutable path: String,
+                             games: @autoclosure () -> [CyderGameRecord] = CyderGameLibraryStore().games) -> String? {
+        let key = programExecutableKey(path)
+        return games().first { programExecutableKey($0.executablePath) == key }?.displayName
+    }
+    private func runningLaunch(forExecutable url: URL) -> String? {
+        let key = Self.programExecutableKey(url.path)
+        let live = statusItemController.controllableLaunches
+        return programLaunchExecutables.first { $0.value == key && live.contains($0.key) }?.key
+    }
     private var pendingRequestAcquisitions: [String: UUID] = [:]
     private var pendingPreparation: [String: UUID] = [:]
     private let processRunner = CyderProcessRunner(delivery: DispatchQueue(label: "local.cyder.process-delivery", qos: .utility))
@@ -93,7 +110,13 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         var isURI = false
         var authorization: CyderRequestRegistry.Record? = nil
         var lease: CyderOperationGate.Lease? = nil
+        var key: String { cyderLaunchKey(executable: executable, arguments: arguments, isURI: isURI) }
     }
+    /// De-duplication state (cyderIsDuplicateLaunch): keys being prepared by
+    /// request, the key now launching, and when each key last started.
+    private var preparingLaunchKeys: [String: String] = [:]
+    private var launchingKey: String?
+    private var recentLaunchStarts: [String: TimeInterval] = [:]
 
     private var queuedLaunches: [QueuedLaunch] = [] {
         didSet { statusItemController.setIngressPending(libraryLaunchInProgress || !queuedLaunches.isEmpty || activeProcessOperations > 0 || !pendingLaunchAcquisitions.isEmpty) }
@@ -212,8 +235,27 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             waiter.markPresented(process: pid)
             self.dismissLaunchProgress(for: launchID)
         }
+        controller.onCloseProgram = { [weak self] prefix, images, launch in
+            self?.closeProgram(prefix: prefix, images: images, launch: launch)
+        }
+        controller.onProgramStopRequested = { [weak self] launch in
+            // A program the player ended is not a failed launch: stop observing
+            // it before its root exits, so no CYD-WIN dialog follows.
+            guard let self, let waiter = self.wineActivationWaiter, waiter.launchID == launch else { return }
+            CyderDiagnostics.shared.info("program control: launch observation cancelled by the player")
+            self.wineLaunchObserver?.cancel()
+        }
+        controller.onLiveSuccessorsChange = { [weak self] launches in
+            guard let self, let waiter = self.wineActivationWaiter, let observer = self.wineLaunchObserver else { return }
+            let names = waiter.launchID.flatMap { launches[$0] } ?? []
+            let alive = !names.isEmpty
+            CyderDiagnostics.shared.info("wine launch successors alive=\(alive) \(names.sorted().joined(separator: ","))")
+            observer.noteSuccessors(alive: alive)
+        }
+        controller.onProgramsChanged = { [weak self] in self?.existingLibraryController?.refreshRunningState() }
         controller.onActivityChanged = { [weak self] activity in
             self?.existingLibraryController?.updateProgramActivity(activity.summary)
+            self?.existingLibraryController?.refreshRunningState()
             self?.prepareEnvironmentAutomaticallyIfNeeded()
         }
         controller.onOpenPreferences = { [weak self] in self?.showSettings() }
@@ -335,6 +377,11 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         controller.onLaunch = { [weak self] executable, settings in
             self?.launchGameFromLibrary(executable, settings: settings)
         }
+        controller.runningLaunch = { [weak self] executable in self?.runningLaunch(forExecutable: executable) }
+        controller.onShowProgram = { [weak self] launch in self?.statusItemController.showProgram(launch: launch) }
+        controller.onEndProgram = { [weak self] launch in self?.statusItemController.requestProgramControl(launch: launch, force: false) }
+        controller.onForceQuitProgram = { [weak self] launch in self?.statusItemController.requestProgramControl(launch: launch, force: true) }
+        controller.programClosePhase = { [weak self] launch in self?.statusItemController.closePhase(launch: launch) ?? .none }
         controller.onRemoveProfile = { [weak self] executable, completion in
             guard let self else { completion(false); return }
             self.removeIndependentProfile(for: executable, completion: completion)
@@ -1207,6 +1254,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         guard !quitTransaction, !readOnlyMode, isPrimaryInstance, !environmentPreparationInProgress else {
             if let lease { operationGate.release(lease) }
             if environmentPreparationInProgress { finishRequestPart(authorization, failed: true) }
+            launchingKey = nil
             return
         }
         if authorization == nil {
@@ -1228,6 +1276,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             if let lease { operationGate.release(lease) }
             finishRequestPart(authorization, failed: true)
             statusItemController.finishLaunchIngress()
+            launchingKey = nil
             showAlert("無法啟動遊戲", "Cyder 缺少必要的 Resources 目錄。")
             launchNextQueuedExecutableIfReady()
             return
@@ -1265,27 +1314,30 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             DispatchQueue.main.async {
                 if !outcome.isUnconfirmed, let lease { self.operationGate.release(lease) }
                 self.libraryLaunchInProgress = false
+                self.launchingKey = nil
                 self.finishRequestPart(authorization, failed: outcome.requestFailed, uncertain: outcome.isUnconfirmed)
                 self.statusItemController.finishLaunchIngress()
                 guard !self.quitTransaction else { return }
                 self.hideSetup()
+                // Start the next queued launch before any dialog: an error
+                // dialog reports this launch, it must not hold the others.
+                self.launchNextQueuedExecutableIfReady()
                 switch outcome {
                 case .success, .cancelled, .unconfirmed:
                     break
                 case .environmentNotReady:
-                    self.showAlert(
+                    self.presentLaunchDialog { self.showAlert(
                         "遊戲尚未準備完成",
                         "請開啟 Cyder，等待環境自動準備；若顯示錯誤請按「重試」，有可用引擎更新時請按「更新」。完成後再重新啟動遊戲。"
-                    )
+                    ) }
                 case .graphicsNotReady:
-                    self.showAlert(
+                    self.presentLaunchDialog { self.showAlert(
                         "圖形元件尚未準備完成",
                         "請先重新開啟 Cyder.app 準備圖形元件，再重新啟動遊戲。"
-                    )
+                    ) }
                 case .failure(let failure):
-                    self.presentFailure(failure)
+                    self.presentLaunchDialog { self.presentFailure(failure) }
                 }
-                self.launchNextQueuedExecutableIfReady()
             }
         }
     }
@@ -1306,6 +1358,19 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
 
     private func prepareQueuedLaunch(_ launch: QueuedLaunch) {
         guard let requestID = launch.authorization?.id else { return }
+        let key = launch.key
+        if cyderIsDuplicateLaunch(key, queued: queuedLaunches.map(\.key), preparing: Array(preparingLaunchKeys.values),
+                                  launching: launchingKey, recentStarts: recentLaunchStarts,
+                                  now: ProcessInfo.processInfo.systemUptime) {
+            // Already waiting, launching or just started: one copy is enough.
+            CyderDiagnostics.shared.info("launch request dropped: same program and arguments already requested")
+            finishRequestPart(launch.authorization)
+            if !libraryLaunchInProgress && pendingLaunchAcquisitions.isEmpty && queuedLaunches.isEmpty {
+                settleLaunchIngressIfIdle()
+            }
+            return
+        }
+        preparingLaunchKeys[requestID] = key
         pendingLaunchAcquisitions.insert(requestID)
         pendingPreparation[requestID] = launchPreparation.resolve(work: { [weak self] in
             guard let self else { return nil }
@@ -1316,13 +1381,15 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             } else if case .success(let prefix) = self.prefixForExecutable(URL(fileURLWithPath: launch.executable)) {
                 scope = .prefix(prefix)
             } else { return nil }
+            // A launch without decodable accepted settings is not authorized.
             guard let snapshot = launch.authorization?.settingsSnapshot,
-                  let acceptedSettings = try? JSONDecoder().decode(CyderSettings.self, from: snapshot) else { return nil }
-            return CyderGraphicsRuntime.needsGlobalScope || CyderGptk.launchNeedsGlobalScope() || acceptedSettings.moltenvkVariant.launchNeedsGlobalScope()
+                  (try? JSONDecoder().decode(CyderSettings.self, from: snapshot)) != nil else { return nil }
+            return CyderGraphicsRuntime.needsGlobalScope || CyderGptk.launchNeedsGlobalScope() || CyderMoltenvk.launchNeedsGlobalScope()
                 ? .allEnvironments : scope
         }) { [weak self] outcome in
             guard let self else { return }
             self.pendingPreparation.removeValue(forKey: requestID)
+            self.preparingLaunchKeys.removeValue(forKey: requestID)
             guard !self.quitTransaction else {
                 self.pendingLaunchAcquisitions.remove(requestID); return
             }
@@ -1337,7 +1404,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
                 }
                 CyderDiagnostics.shared.warning("launch withdrawn: environment scope unavailable")
                 self.hideSetup()
-                self.showAlert("無法啟動遊戲", "Cyder 無法確認這個遊戲使用的 Windows 環境，程式尚未執行。請確認遊戲檔案仍在原位置後再啟動一次。")
+                self.presentLaunchDialog { self.showAlert("無法啟動遊戲", "Cyder 無法確認這個遊戲使用的 Windows 環境，程式尚未執行。請確認遊戲檔案仍在原位置後再啟動一次。") }
                 return
             }
             // Wait in memory while a conflicting stop or mutation owns this
@@ -1360,6 +1427,10 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
               wineActivationWaiter == nil, !queuedLaunches.isEmpty else { return }
         libraryLaunchInProgress = true
         let launch = queuedLaunches.removeFirst()
+        let now = ProcessInfo.processInfo.systemUptime
+        launchingKey = launch.key
+        recentLaunchStarts = recentLaunchStarts.filter { now - $0.value < 60 }
+        recentLaunchStarts[launch.key] = now
         guard let queued = launch.authorization else {
             if let lease = launch.lease { operationGate.release(lease) }
             libraryLaunchInProgress = false
@@ -1371,6 +1442,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             guard !self.quitTransaction, !self.environmentPreparationInProgress, let authorization else {
                 if let lease = launch.lease { self.operationGate.release(lease) }
                 if self.environmentPreparationInProgress { self.finishRequestPart(launch.authorization, failed: true) }
+                self.launchingKey = nil
                 self.launchNextQueuedExecutableIfReady(); return
             }
             if #available(macOS 11.0, *), launch.isURI {
@@ -1925,6 +1997,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         }
         let activationWaiter = WineActivationWaiter(prefix: prefix.path, launchID: launchID)
         let observer = CyderLaunchObserver(authority: authority)
+        observer.log = { CyderDiagnostics.shared.info($0) }
         onMainThread {
             wineActivationWaiter = activationWaiter
             wineLaunchObserver = observer
@@ -2098,6 +2171,11 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
                 // belongs to the release callback. The final phase is skipped.
                 snapshotOwnedByExecutor = true
                 if prepared.isUnconfirmed { retainTransport = true; return .unconfirmed }
+                if prepared.outputTail.contains("CYD-GFX-002") {
+                    return .failure(self.failure(code: "CYD-GFX-002", stage: .wineSpawn,
+                        summary: "這個遊戲只能使用 DXMT 圖形，這台 Mac 的 GPU 不支援 DXMT（需要 Metal GPU Family Mac 2，例如 Apple Silicon）。尚未啟動遊戲。",
+                        result: prepared))
+                }
                 return .failure(self.failure(code: "CYD-WIN-001", stage: .wineSpawn,
                     summary: "啟動前準備未完成；尚未啟動 Windows 程式。", result: prepared))
             }
@@ -2121,7 +2199,11 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             return .unconfirmed
         }
         let lifecycleController = onMainThread { statusItemController }
+        // The library title (「Steam」), read off the main thread from the saved list.
+        let libraryTitle = Self.libraryTitle(forExecutable: exe)
         onMainThread {
+            programLaunchExecutables[launchID] = Self.programExecutableKey(exe)
+            statusItemController.setProgramTitle(libraryTitle, launch: launchID)
             statusItemController.beginLaunch(id: launchID, prefix: prefix, executableName: executableName,
                 authority: authority, stamp: stamp,
                 committedRequest: .init(id: authorization.id, digest: authorization.digest, environment: stamp.environment,
@@ -2237,6 +2319,27 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             return .unconfirmed
         }
         })
+    }
+
+    /// 結束: ask each image to close with Wine's taskkill (no /f), one at a
+    /// time, and only while the launch still has a live program.
+    private func closeProgram(prefix: URL, images: [String], launch: String) {
+        guard let resourcePath = Bundle.main.resourcePath, !images.isEmpty else { return }
+        Task.detached(priority: .userInitiated) { [weak self] in
+            guard let self else { return }
+            let context = await CyderLaunchContext(resourcePath: resourcePath)
+            for image in images {
+                let alive = self.onMainThread { self.statusItemController.hasLivePrograms(launch: launch) }
+                guard alive else { break }
+                let result = await self.runLauncher(
+                    context: context,
+                    args: [context.launcher, "--close-program-prefix", prefix.path, image],
+                    stage: .wineSpawn,
+                    operation: "close-program"
+                )
+                CyderDiagnostics.shared.info("program control: close request sent ok=\(result.succeeded)")
+            }
+        }
     }
 
     private func runPrefixAction(_ action: String, prefix: URL, operation: String) {
@@ -2415,7 +2518,10 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             // "starting" panel must not stay on top of it, and a second Cyder
             // alert after the user closes it would only repeat it. It never
             // confirms the launch.
-            if let owner = self.launchPanelOwner, isWineCrashReporterProcess(pid) {
+            let crashReporter = isWineCrashReporterProcess(pid)
+            // Wine's crash dialog: the program that started it ended unexpectedly.
+            if crashReporter { self.statusItemController.noteCrashReporter(pid: pid) }
+            if let owner = self.launchPanelOwner, crashReporter {
                 CyderDiagnostics.shared.warning("wine crash dialog shown pid=\(pid); closing launch progress")
                 if let waiter = self.wineActivationWaiter, waiter.launchID == owner { waiter.markPresented() }
                 self.dismissLaunchProgress(for: owner)
@@ -2605,6 +2711,17 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    /// Show a launch dialog after the current main-queue block returns.
+    /// NSAlert.runModal inside a DispatchQueue.main block holds the serial main
+    /// queue for as long as the dialog is open, so request delivery, launch
+    /// preparation and the environment lock (all delivered on .main) stopped,
+    /// and every launch made meanwhile ran in a burst once it closed. A
+    /// run-loop block keeps the main queue running under the dialog.
+    private func presentLaunchDialog(_ present: @escaping () -> Void) {
+        RunLoop.main.perform(inModes: [.common], block: present)
+        CFRunLoopWakeUp(CFRunLoopGetMain())
+    }
+
     @discardableResult
     private func presentFailure(
         _ failure: CyderFailure,
@@ -2709,14 +2826,14 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    /// The launch needs a different shared graphics runtime (MoltenVK variant
-    /// or GPTK link) than the one running Wine processes use. All bottles share
+    /// The launch needs a different shared graphics runtime (MoltenVK real
+    /// link repair or GPTK link) than the one running Wine processes use. All bottles share
     /// it and games load it lazily, so it is switched only when none run.
     private func presentRuntimeInUse(_ report: CyderRuntimeUsers.Report, failure: CyderFailure) {
         func key(_ path: String) -> String { URL(fileURLWithPath: path).standardizedFileURL.path }
         let used = Set(report.users.compactMap { $0.prefix.map(key) })
         let moltenvk = report.component == "moltenvk", engine = report.component == "engine"
-        let component = engine ? "Windows 引擎" : moltenvk ? "MoltenVK 版本" : "GPTK（D3DMetal）來源"
+        let component = engine ? "Windows 引擎" : moltenvk ? "MoltenVK" : "GPTK（D3DMetal）來源"
         let stop: [URL] = onMainThread {
             // Monitor URLs are passed back unchanged; only those can be stopped.
             let stoppable = statusItemController.monitoredPrefixes.filter { used.contains(key($0.path)) }
@@ -2734,7 +2851,6 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
                 let names = Array(Set(others.map(\.name))).sorted().prefix(5)
                 text += "\n\n其他執行中的 Windows 程式（需自行結束）：" + names.joined(separator: "、")
             }
-            if moltenvk { text += "\n\n也可以在設定中改回目前使用的版本後再啟動。" }
             alert.informativeText = text
             alert.alertStyle = .warning
             if !stoppable.isEmpty { alert.addButton(withTitle: stoppable.count == 1 ? "停止這個環境" : "停止這些環境") }
@@ -2866,13 +2982,12 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         let settingsIndependent = isObservation || args.contains("--stop-prefix") || args.contains("--stop-all")
         var scope = operationScope ?? .allEnvironments
         if operationScope == nil,
-           let index = args.firstIndex(where: { $0 == "--stop-prefix" || $0 == "--taskmgr-prefix" }),
+           let index = args.firstIndex(where: { $0 == "--stop-prefix" || $0 == "--taskmgr-prefix" || $0 == "--close-program-prefix" }),
            args.indices.contains(index + 1) { scope = .prefix(URL(fileURLWithPath: args[index + 1])) }
         let prefixScope = scope
         if isLaunch {
-            let accepted = authorization?.settingsSnapshot.flatMap { try? JSONDecoder().decode(CyderSettings.self, from: $0) }
             if lease?.scope == .allEnvironments || (lease == nil &&
-                (CyderGraphicsRuntime.needsGlobalScope || CyderGptk.launchNeedsGlobalScope() || (accepted?.moltenvkVariant.launchNeedsGlobalScope() ?? false))) {
+                (CyderGraphicsRuntime.needsGlobalScope || CyderGptk.launchNeedsGlobalScope() || CyderMoltenvk.launchNeedsGlobalScope())) {
                 scope = .allEnvironments
             }
         }
@@ -3223,6 +3338,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
         guard !quitTransaction, !readOnlyMode, isPrimaryInstance, !environmentPreparationInProgress else {
             if let lease { operationGate.release(lease) }
             if environmentPreparationInProgress { finishRequestPart(authorization, failed: true) }
+            launchingKey = nil
             return
         }
         guard let resourcePath = Bundle.main.resourcePath else {
@@ -3230,6 +3346,7 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             hideSetup()
             finishRequestPart(authorization, failed: true)
             statusItemController.finishLaunchIngress()
+            launchingKey = nil
             showAlert("無法開啟 gamaniagames://", "Cyder 缺少必要的 Resources 目錄。")
             launchNextQueuedExecutableIfReady()
             return
@@ -3257,12 +3374,13 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             DispatchQueue.main.async {
                 if !outcome.isUnconfirmed, let lease { self.operationGate.release(lease) }
                 self.libraryLaunchInProgress = false
+                self.launchingKey = nil
                 self.finishRequestPart(authorization, failed: outcome.requestFailed, uncertain: outcome.isUnconfirmed)
                 self.statusItemController.finishLaunchIngress()
                 guard !self.quitTransaction else { return }
                 self.hideSetup()
-                if case .failure(let failure) = outcome { self.presentFailure(failure) }
                 self.launchNextQueuedExecutableIfReady()
+                if case .failure(let failure) = outcome { self.presentLaunchDialog { self.presentFailure(failure) } }
             }
         }
     }
@@ -3323,6 +3441,9 @@ struct CyderMain {
                 FileHandle.standardError.write(Data("\(error.localizedDescription)\n".utf8))
                 exit(1)
             }
+        }
+        if CommandLine.arguments.dropFirst().first == "--metal-gpu-family" {
+            exit(CyderMetalGPU.run(arguments: CommandLine.arguments))
         }
         if CommandLine.arguments.dropFirst().first == "--runtime-users" {
             exit(CyderRuntimeUsers.run(arguments: CommandLine.arguments))

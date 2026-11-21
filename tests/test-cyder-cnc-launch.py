@@ -176,7 +176,7 @@ cyder_load_game_settings() { :; }
 cyder_apply_user_settings() { assert_no_pair_aliases; test -z "${CYDER_DDRAW_PATH:-}"; test -z "${CNC_DDRAW_CONFIG_FILE:-}"; test "$WINEDLLOVERRIDES" = mscoree=; }
 cyder_configure_compatdb() { :; }
 cyder_apply_moltenvk_os_floor() { :; }
-cyder_apply_moltenvk_variant_from_preference() { :; }
+cyder_ensure_moltenvk_real() { :; }
 cyder_apply_gptk_launch_environment() { :; }
 cyder_validate_moltenvk_for_backend() { :; }
 cyder_wine_is_crossover_frontend() { return 1; }

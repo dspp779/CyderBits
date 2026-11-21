@@ -17,8 +17,8 @@
 
 | 版本 | 文件 | 重點 |
 |------|------|------|
-| 下一版（規劃） | [預計改進](releases/next.md) | DXMT 初始化資料遺失、紋理批次上傳、buffer 回收、CPU／提交同步計時與新楓之谷驗收條件 |
-| 0.14.1（Draft） | [繁中](releases/v0.14.1.md) · [English](releases/v0.14.1.en.md) | Cyder013 相容性修正重包、啟動更快更清楚；保留 macOS 10.15／11 支援 |
+| 0.15.0（Draft） | [繁中](releases/v0.15.0.md) · [English](releases/v0.15.0.en.md) · [範圍與驗收](releases/next.md) | Cyder014、**需要 macOS 12+**；Cities: Skylines II、新楓之谷 WZ 預讀、DXMT GPU 檢查、啟動偵測修正、程式控制（結束／強制結束、結束結果） |
+| 0.14.1 | [繁中](releases/v0.14.1.md) · [English](releases/v0.14.1.en.md) | Cyder013 相容性修正重包、啟動更快更清楚；保留 macOS 10.15／11 支援 |
 | 0.14.0 | [繁中](releases/v0.14.0.md) · [English](releases/v0.14.0.en.md) | 正式版：Cyder013、退出與停止環境分離、每遊戲 cnc-ddraw、DXVK 黑色貼圖修正；**最後支援 macOS 10.15／11** |
 | 0.13.2 | [繁中](releases/v0.13.2.md) | 正式版：引擎升級原地更新環境、DXVK 的 MoltenVK 偏好設定 |
 | 0.13.1 | [繁中](releases/v0.13.1.md) | 正式版：Cyder012、雙版本 MoltenVK、Apple Silicon Rosetta 安裝 |
@@ -49,12 +49,15 @@
 | [cyder.md](cyder.md) | 一般使用者 | Cyder 啟動器：開 `.exe`、SharedPrefix、bootstrap |
 | [cyder-gamaniagames-url-handler.zh-TW.md](cyder-gamaniagames-url-handler.zh-TW.md) | 開發 / 設計 | gamania Games Manager 的 `gamaniagames://` 偵測、使用者同意、macOS URL handler 與 GGMWebStart.exe 啟動流程 |
 | [cyder-session-process-monitoring.zh-TW.md](cyder-session-process-monitoring.zh-TW.md) | 開發 / 設計 | 選單列 session、Steam helper、同 prefix 多程式與 process monitor 設計 |
+| [superpowers/specs/2026-11-20-program-control-design.md](superpowers/specs/2026-11-20-program-control-design.md) | 開發 / 設計 | 玩家角度的程式控制：狀態文字、結束與強制結束皆需確認、Steam 相依警告、遊戲庫按鈕；不需修改 engine |
 | [cyder-graphics-backends.zh-TW.md](cyder-graphics-backends.zh-TW.md) | 一般使用者 | 圖形後端（WineD3D/DXVK/D3DMetal）、GPTK 安裝、DXVK 限幀 vs VSync |
 | [cyder-compatdb.zh-TW.md](cyder-compatdb.zh-TW.md) | 開發 / 發布 | CompatDB 架構、Engine 重包判斷、YAML 規則新增與本機測試 |
 | [cyder-wine-engine-project.md](cyder-wine-engine-project.md) | 開發 / 發布 | 應用層 vs Wine 核心邊界；[cyder-wine-engine](https://github.com/dspp779/cyder-wine-engine) manifest 契約與 Cyder 匯入流程 |
 | [upstream-prs/README.zh-TW.md](upstream-prs/README.zh-TW.md) | 開發 / upstream | 各 Wine patch 的 PR dossier、重現方式、嚴重性、完整修正／workaround 判定與提交順序 |
 | [cyderbits.md](cyderbits.md) | 一般使用者 | CyderBits 打包器：建立 game `.app`、選項與疑難排解 |
 | [development-testing.md](development-testing.md) | 開發 / 驗證 | **開發與測試指南**：`tests/run.sh`、測試版建置、何時需要 Developer ID／公證、實機點選與遊戲驗證 |
+| [launch-detection.md](launch-detection.md) | 開發 / 驗證 | Cyder 如何判斷啟動的程式已開始執行：視窗層級、啟動器先結束、Wine 背景程式清單，以及何時顯示 `CYD-WIN-002`（英文） |
+| [build-records/](build-records/) | 開發 / 發行 | 各版 Draft 建置紀錄：commit、引擎、zip 雜湊、公證與驗證結果 |
 | [bluecg.md](bluecg.md) | 開發 / 驗證 | BlueCG 自建 Wine、執行、高解析度與已知問題 |
 | [games/bluecg/testing.md](games/bluecg/testing.md) | 開發 / 驗證 | BlueCG 測試步驟：透過 Cyder.app（cnc-ddraw、多開）與直接用引擎的兩條路徑 |
 | [wine-configure-options.md](wine-configure-options.md) | 開發 / 建置 | Wine `configure` 旗標說明與老遊戲取捨 |

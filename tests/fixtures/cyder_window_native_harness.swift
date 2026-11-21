@@ -46,6 +46,8 @@ DispatchQueue.global().async {
 }
 guard pump(8, { birth != nil }) else { print("BLOCKED: native child birth unavailable"); return 1 }
 let controller = CyderStatusItemController(); controller.setUIVisible(true)
+// A real alert would hold the suite: answer any program-control question with 取消.
+controller.confirmProgramControl = { _, reply in reply(false) }
 let activation = NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main) {
     if let application = $0.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication {
         controller.noteFrontmostApplication(application.processIdentifier)
@@ -65,7 +67,8 @@ guard pump(12, { controller.lifecycleSnapshot.windows.count == 2 }) else {
     controller.quiesce(); _ = pump { controller.lifecycleSnapshot.phase == .quiescing }; return 1
 }
 let menu = NSMenu(); controller.menuNeedsUpdate(menu)
-let children = menu.items.flatMap { $0.submenu?.items ?? [] }.filter { $0.action != nil }
+// Window items only: rows also hold 結束… and 強制結束…, which must never run here.
+let children = menu.items.flatMap { $0.submenu?.items ?? [] }.filter { $0.action != nil && !["結束…", "強制結束…"].contains($0.title) }
 print("real native AX windows=\(controller.lifecycleSnapshot.windows.count) minimized=\(controller.lifecycleSnapshot.windows.values.filter { $0.minimized == true }.count) actions=\(children.count)")
 var successes = 0
 for item in children {

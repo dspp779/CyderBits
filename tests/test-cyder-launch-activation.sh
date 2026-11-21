@@ -18,6 +18,7 @@ trap 'rm -rf "$TMP"' EXIT
 
 cat >"$TMP/main.swift" <<'EOF'
 import Foundation
+import CoreGraphics
 func check(_ ok: Bool, _ message: String) { if !ok { print("FAIL: \(message)"); exit(1) } }
 let root = "/Users/u/Library/Application Support/Cyder/bottles"
 let shared = root + "/shared"
@@ -53,6 +54,42 @@ check(cyderIsWineCrashReporter(arguments: ["C:\\windows\\system32\\winedbg.exe",
 check(!cyderIsWineCrashReporter(arguments: ["winedbg"]), "an interactive winedbg is not a crash dialog")
 check(!cyderIsWineCrashReporter(arguments: ["C:\\games\\SteamSetup.exe"]), "a program is not a crash dialog")
 check(!cyderIsWineCrashReporter(arguments: []), "unreadable arguments are not a crash dialog")
+// Wine window levels (winemac.drv minimumLevelForActive:). A fullscreen game
+// that became the active app sits on 26; it must still count as a window.
+let shield = 1000
+func accepts(_ layer: Int, onscreen: Bool = true, alpha: Double = 1, w: Double = 1680, h: Double = 945) -> Bool {
+    cyderAcceptsWineWindow(layer: layer, onscreen: onscreen, alpha: alpha, width: w, height: h, shieldingLevel: shield)
+}
+check(accepts(0), "a normal Wine window counts")
+check(accepts(3), "a topmost (floating) Wine window counts")
+check(accepts(26), "an active fullscreen Wine window (NSStatusWindowLevel + 1) counts")
+check(accepts(27), "an active topmost fullscreen Wine window counts")
+check(accepts(shield + 1) && accepts(shield + 2), "a window over captured displays counts")
+check(!accepts(25) && !accepts(101) && !accepts(-20) && !accepts(shield), "other levels are not Wine program windows")
+check(!accepts(0, onscreen: false), "an off-screen (hidden helper) window does not count")
+check(!accepts(0, alpha: 0), "a transparent window does not count")
+check(!accepts(26, w: 500, h: 40) && !accepts(0, w: 79, h: 300), "a window under 80 x 80 does not count")
+check(cyderIsWineWindowLevel(Int(CGShieldingWindowLevel()) + 1), "the real shielding level is used by default")
+// Duplicate launch requests (same program and arguments) are dropped while one
+// is waiting, preparing, launching or started in the last 10 s.
+let exe = "/Users/u/Library/Application Support/Cyder/bottles/shared/drive_c/Games/Game.exe"
+let k = cyderLaunchKey(executable: exe, arguments: nil, isURI: false)
+check(k == cyderLaunchKey(executable: exe.uppercased(), arguments: nil, isURI: false), "path case does not make a new request")
+check(k == cyderLaunchKey(executable: exe.replacingOccurrences(of: "/Games/", with: "/Games/./"), arguments: nil, isURI: false), "an equivalent path is the same key")
+check(k != cyderLaunchKey(executable: exe, arguments: ["-otp", "123"], isURI: false), "new arguments (a Beanfun login) are a new request")
+check(cyderLaunchKey(executable: exe, arguments: ["a b"], isURI: false) != cyderLaunchKey(executable: exe, arguments: ["a", "b"], isURI: false), "argument boundaries are kept")
+check(cyderLaunchKey(executable: "gamaniagames://x", arguments: nil, isURI: true) != cyderLaunchKey(executable: "gamaniagames://y", arguments: nil, isURI: true), "different URIs differ")
+func dup(queued: [String] = [], preparing: [String] = [], launching: String? = nil, started: TimeInterval? = nil, now: TimeInterval = 100) -> Bool {
+    cyderIsDuplicateLaunch(k, queued: queued, preparing: preparing, launching: launching,
+                           recentStarts: started.map { [k: $0] } ?? [:], now: now)
+}
+check(!dup(), "a first request runs")
+check(dup(queued: [k]), "a request already waiting in the queue is dropped")
+check(dup(preparing: [k]), "a request being prepared is dropped")
+check(dup(launching: k), "a request for the program now launching is dropped")
+check(dup(started: 95), "a request 5 s after the same program started is dropped")
+check(!dup(started: 85), "a request 15 s after the program started runs (a second copy on purpose)")
+check(!dup(queued: ["other"], preparing: ["other"], launching: "other", started: nil), "other programs do not block it")
 print("ok")
 EOF
 swiftc -module-cache-path "$TMP/mc" -o "$TMP/harness" "$ROOT/scripts/cyder_launch_support.swift" "$TMP/main.swift" 2>"$TMP/build.log" || {
@@ -77,3 +114,97 @@ assert_contains "$(cat "$ROOT/scripts/cyder-common.sh")" 'local wine_debug="-all
   "quiet launches keep Wine's loader errors"
 
 echo "PASS: launches yield activation to the program, close progress for a crash dialog and name a missing DLL"
+
+# Each launch completion moves the queue before it shows a dialog: an error
+# dialog used to hold every later request until it was closed.
+python3 - "$ROOT/scripts/cyder_app_main.swift" <<'PY'
+import re, sys
+src = open(sys.argv[1]).read()
+for marker in ("case .failure(let failure):\n                    self.presentLaunchDialog { self.presentFailure(failure) }",
+               "if case .failure(let failure) = outcome { self.presentLaunchDialog { self.presentFailure(failure) } }"):
+    i = src.index(marker)
+    block = src[src.rindex("DispatchQueue.main.async {", 0, i):i]
+    assert "self.launchNextQueuedExecutableIfReady()" in block, f"queue must advance before: {marker}"
+    tail = src[i:src.index("\n    }\n", i)]
+    assert "launchNextQueuedExecutableIfReady" not in tail, f"queue advanced again after dialog: {marker}"
+assert "cyderIsDuplicateLaunch(key" in src, "queued requests are de-duplicated"
+# A dialog run inside a DispatchQueue.main block holds the main queue (request
+# delivery and the environment lock) until it closes; launch dialogs go
+# through a run-loop block instead.
+assert "RunLoop.main.perform(inModes: [.common], block: present)" in src
+for bad in ("case .failure(let failure):\n                    self.presentFailure(failure)",
+            "= outcome { self.presentFailure(failure) }"):
+    assert bad not in src, "launch failure shown inside a main-queue block: " + bad
+print("queue order ok")
+PY
+
+# The mechanism itself: main-queue work runs under a dialog opened from a
+# run-loop block, and does not under one opened inside a main-queue block.
+cat >"$TMP/modal.swift" <<'SWIFT'
+import Cocoa
+let inline = CommandLine.arguments[1] == "inline"
+signal(SIGALRM) { _ in print("blocked"); exit(0) }
+alarm(5)
+let app = NSApplication.shared; app.setActivationPolicy(.accessory)
+func show() {
+    DispatchQueue.global().asyncAfter(deadline: .now() + 0.3) { DispatchQueue.main.async { print("ran"); exit(0) } }
+    let alert = NSAlert(); alert.window.alphaValue = 0; _ = alert.runModal()
+}
+DispatchQueue.main.async { if inline { show() } else { RunLoop.main.perform(inModes: [.common]) { show() } } }
+app.run()
+SWIFT
+swiftc -module-cache-path "$TMP/mc" -o "$TMP/modal" "$TMP/modal.swift" 2>>"$TMP/build.log"
+assert_eq "$("$TMP/modal" perform)" ran "main-queue work runs under a dialog opened from a run-loop block"
+assert_eq "$("$TMP/modal" inline)" blocked "a dialog inside a main-queue block holds the main queue (why presentLaunchDialog exists)"
+
+
+# A launcher that exits non-zero while its successor (the real program) is
+# alive is not a failure until the successor ends without a window.
+mkdir -p "$TMP/handoff-src"
+cat >"$TMP/handoff-src/main.swift" <<'SWIFT'
+import Foundation
+let mode = CommandLine.arguments[1]
+let observer = CyderLaunchObserver(successorSettle: 0.3, successorDebounce: 0.5)
+let waiter = WineActivationWaiter(prefix: "/tmp/p")
+let start = ProcessInfo.processInfo.systemUptime
+let lock = NSLock(); var rootStatusValue: Int32? = nil
+func rootStatus() -> Int32? { lock.lock(); defer { lock.unlock() }; return rootStatusValue }
+DispatchQueue.global().asyncAfter(deadline: .now() + 0.1) { lock.lock(); rootStatusValue = 3; lock.unlock() }
+switch mode {
+case "successor-window":   // successor alive, then its window appears
+    observer.noteSuccessors(alive: true)
+    DispatchQueue.global().asyncAfter(deadline: .now() + 1.0) { waiter.markPresented() }
+case "successor-ends":     // successor alive, exits without a window
+    DispatchQueue.global().asyncAfter(deadline: .now() + 0.2) { observer.noteSuccessors(alive: true) }
+    DispatchQueue.global().asyncAfter(deadline: .now() + 1.0) { observer.noteSuccessors(alive: false) }
+case "late-successor":     // successor recorded shortly after the root exit
+    DispatchQueue.global().asyncAfter(deadline: .now() + 0.25) { observer.noteSuccessors(alive: true) }
+case "flicker":            // successor briefly missing after the wait, then its window
+    observer.noteSuccessors(alive: true)
+    DispatchQueue.global().asyncAfter(deadline: .now() + 0.6) { observer.noteSuccessors(alive: false) }
+    DispatchQueue.global().asyncAfter(deadline: .now() + 0.8) { observer.noteSuccessors(alive: true) }
+    DispatchQueue.global().asyncAfter(deadline: .now() + 1.2) { waiter.markPresented() }
+case "successor-forever":  // successor never shows a window
+    observer.noteSuccessors(alive: true)
+default: break             // no successor
+}
+let deadline = start + (mode == "successor-forever" ? 1.5 : 5)
+Task {
+    let result = await observer.wait(until: deadline, signal: waiter, read: { .init(rootStatus: rootStatus(), lifecycle: nil) })
+    let elapsed = ProcessInfo.processInfo.systemUptime - start
+    print("\(result) \(elapsed >= 0.9 ? "late" : "early")")
+    exit(0)
+}
+dispatchMain()
+SWIFT
+swiftc -module-cache-path "$TMP/mc" -o "$TMP/handoff" "$ROOT/scripts/cyder_execution_phase.swift" \
+    "$ROOT/scripts/cyder_launch_observer.swift" "$TMP/handoff-src/main.swift" 2>>"$TMP/build.log" || {
+    cat "$TMP/build.log"; exit 1; }
+assert_eq "$("$TMP/handoff" none)" "rootFailed(3) early" "a root failure with no successor is still reported after the settle time"
+assert_eq "$("$TMP/handoff" late-successor)" "unconfirmed late" "a successor recorded during the settle time holds the failure"
+assert_eq "$("$TMP/handoff" successor-window)" "presented late" "a successor's window after the launcher failed is a started launch"
+assert_eq "$("$TMP/handoff" successor-ends)" "rootFailed(3) late" "the failure is reported when the successor ends without a window"
+assert_eq "$("$TMP/handoff" flicker)" "presented late" "a successor missing briefly after the wait does not report the failure"
+assert_eq "$("$TMP/handoff" successor-forever)" "unconfirmed late" "a successor alive until the deadline ends unconfirmed, no dialog"
+assert_contains "$app" "observer.noteSuccessors(alive: alive)"  "the app tells the observer when the launch has a live successor"
+assert_contains "$(cat "$ROOT/scripts/cyder_status_item.swift")" "onLiveSuccessorsChange?(successors)" "the status item reports launches with live successors"

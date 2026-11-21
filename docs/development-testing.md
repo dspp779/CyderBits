@@ -81,6 +81,11 @@ tests wait out the real limits (the 120 s preparation deadline in
 Prerequisites on the development Mac:
 
 - Xcode (not only Command Line Tools) for the Swift tests and app builds.
+  On a Mac with only Command Line Tools, `swiftc` can fail on every file with
+  `redefinition of module 'SwiftBridging'`; then every Swift test fails and
+  the suite result says nothing about the branch. Check one `swiftc` call
+  before starting the suite, and build small helpers there with `clang`
+  (Objective-C) instead.
 - `python3` with `PyYAML` (`test-cyder-compatdb-data`) and `Pillow`
   (`test-bluecg-cnc-profile-shader`). Both are test/tooling-only; the shipped
   app needs neither Python nor Apple's developer tools.

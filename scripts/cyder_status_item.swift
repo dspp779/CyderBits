@@ -35,6 +35,35 @@ final class CyderStatusItemController: NSObject, NSMenuDelegate {
     var onWindowConfirmed: ((String) -> Void)?
     var onLaunchWindowPresented: ((String, Int32) -> Void)?
     var onPendingWindowChange: ((Set<String>) -> Void)?
+    /// 結束: ask a launch's programs to close (prefix, image names, launch).
+    var onCloseProgram: ((URL, [String], String) -> Void)?
+    /// A player ended a launch; its launch observation must not report it as a failure.
+    var onProgramStopRequested: ((String) -> Void)?
+    /// Test seam: present a confirmation and answer it. Default: an alert.
+    var confirmProgramControl: ((ProgramConfirmation, @escaping (Bool) -> Void) -> Void)?
+    /// Test seam: SIGKILL one exact process (runs off the main thread).
+    var signalProgram: (CyderLifecycle.ProcessID) -> Bool = { process in
+        CyderProcessEvidence.live(process) && kill(process.pid, SIGKILL) == 0
+    }
+    private var closeRequests: [String: TimeInterval] = [:]
+    private var lastControllableLaunches: Set<String> = []
+    /// Library titles of launches, shown instead of the .exe name.
+    private var programTitles: [String: String] = [:]
+    func setProgramTitle(_ title: String?, launch: String) {
+        precondition(Thread.isMainThread)
+        let trimmed = title?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        programTitles[launch] = trimmed.isEmpty ? nil : String(trimmed.prefix(80))
+        refresh()
+    }
+    /// The set of running programs changed (the library's buttons follow it).
+    var onProgramsChanged: (() -> Void)?
+    private struct EndedRow { let name: String; let result: CyderProgramControl.EndResult; let at: TimeInterval }
+    private var endedRows: [String: EndedRow] = [:]
+    private var stoppedByPlayer: Set<String> = []
+    private var crashedLaunches: Set<String> = []
+    private var launchNames: [String: String] = [:]
+    var onLiveSuccessorsChange: (([String: [String]]) -> Void)?
+    private var liveSuccessorLaunches: [String: [String]] = [:]
     private(set) var presentedLaunches = Set<String>()
     var onActivityChanged: ((CyderLifecycle.ProgramActivity) -> Void)?
     private var lastActivity: CyderLifecycle.ProgramActivity?
@@ -338,6 +367,11 @@ final class CyderStatusItemController: NSObject, NSMenuDelegate {
         guard !hasLifecycleSnapshot || (snapshot.epoch == latestLifecycle.epoch && snapshot.revision > latestLifecycle.revision) else { return }
         hasLifecycleSnapshot = true
         latestLifecycle = snapshot
+        closeRequests = closeRequests.filter { !CyderProgramControl.programs(launch: $0.key, in: snapshot).isEmpty }
+        programTitles = programTitles.filter { snapshot.launches[$0.key] != nil || sessions[$0.key] != nil }
+        let controllable = controllableLaunches
+        trackProgramEnds(snapshot, controllable: controllable)
+        if controllable != lastControllableLaunches { lastControllableLaunches = controllable; onProgramsChanged?() }
         let activity = snapshot.programActivity
         if activity != lastActivity {
             lastActivity = activity
@@ -352,6 +386,11 @@ final class CyderStatusItemController: NSObject, NSMenuDelegate {
         if shown != presentedLaunches {
             presentedLaunches = shown
             onPendingWindowChange?(shown)
+        }
+        let successors = snapshot.launchesWithLiveSuccessors
+        if successors != liveSuccessorLaunches {
+            liveSuccessorLaunches = successors
+            onLiveSuccessorsChange?(successors)
         }
         windowAccess.update(snapshot)
         considerCooperativeFocus(snapshot)
@@ -405,14 +444,18 @@ final class CyderStatusItemController: NSObject, NSMenuDelegate {
     private let observationQueue = DispatchQueue(label: "local.cyder.status-observation", qos: .utility)
 
     private var visibleSessions: [Session] { sessions.values.filter { !$0.activated || !$0.adoptedPIDs.isEmpty } }
-    private struct ProgramRow { let id: String; let name: String; let prefix: String; let state: String; let starting: Bool }
+    private struct ProgramRow {
+        let id: String; let name: String; let prefix: String; let state: String; let starting: Bool
+        var controllable = false
+    }
     private var programRows: [ProgramRow] {
         // Bound launches are presented exclusively from the store snapshot.
         // Unbound sessions remain only for the legacy adapter/test seam.
         var rows = visibleSessions.filter { $0.stamp == nil }.map { session in
             ProgramRow(id: session.id, name: session.displayName, prefix: environmentPrefixes[session.prefix.path] ?? session.prefix.path,
-                state: session.isStopping ? "正在結束 Windows 程序" : (session.hasForeground ? "執行中" :
-                    (!session.activated ? "正在啟動" : "執行中；尚未確認視窗")), starting: !session.activated && !session.hasForeground)
+                state: CyderProgramControl.statusWord(stopping: session.isStopping, phase: .none,
+                    starting: !session.activated && !session.hasForeground, hasWindow: session.hasForeground),
+                starting: !session.activated && !session.hasForeground)
         }
         for launch in latestLifecycle.launches.values {
             guard let environment = latestLifecycle.environments[launch.environment], environment.existence != .exited else { continue }
@@ -427,16 +470,14 @@ final class CyderStatusItemController: NSObject, NSMenuDelegate {
             let launcher = members.contains { $0.hasPresentedProgram && $0.executableName?.lowercased() == "bluelauncher.exe" }
             let name: String
             if games.count > 1 { name = "BlueCG × \(games.count)" }
+            else if let title = programTitles[launch.id] { name = title }
             else { name = games.isEmpty ? launch.name : "BlueCG" }
-            let state: String
-            if environment.stop == .executing { state = "正在結束 Windows 程序" }
-            else if starting { state = "正在啟動" }
-            else if launcher && games.isEmpty { state = "啟動器已開啟" }
-            else if windowConfirmed { state = "已確認程式視窗" }
-            else if presented { state = "已顯示視窗，互動狀態待確認" }
-            else if members.contains(where: { $0.hasPresentedProgram }) { state = "執行中" }
-            else { state = "背景程序，尚未確認視窗" }
-            rows.append(.init(id: launch.id, name: name, prefix: environment.prefix, state: state, starting: starting))
+            _ = launcher
+            let phase = CyderProgramControl.closePhase(requestedAt: closeRequests[launch.id], now: ProcessInfo.processInfo.systemUptime)
+            let state = CyderProgramControl.statusWord(stopping: environment.stop == .executing, phase: phase, starting: starting,
+                hasWindow: windowConfirmed || presented || members.contains { $0.hasPresentedProgram })
+            rows.append(.init(id: launch.id, name: name, prefix: environment.prefix, state: state, starting: starting,
+                controllable: !CyderProgramControl.programs(launch: launch.id, in: latestLifecycle).isEmpty && environment.stop != .executing))
         }
         return rows.sorted {
             let order = $0.name.localizedStandardCompare($1.name)
@@ -609,6 +650,11 @@ final class CyderStatusItemController: NSObject, NSMenuDelegate {
 
     func markStopping(prefixes: [URL]) {
         let targets = Set(prefixes.map { $0.standardizedFileURL })
+        let paths = Set(targets.map(\.path))
+        for (id, launch) in latestLifecycle.launches
+            where latestLifecycle.environments[launch.environment].map({ paths.contains(URL(fileURLWithPath: $0.prefix).standardizedFileURL.path) }) == true {
+            stoppedByPlayer.insert(id)
+        }
         for (key, var session) in sessions where targets.contains(session.prefix) {
             session.isStopping = true
             sessions[key] = session
@@ -934,7 +980,12 @@ final class CyderStatusItemController: NSObject, NSMenuDelegate {
             let windows = latestLifecycle.windows.values.filter {
                 $0.id.source == "accessibility" && latestLifecycle.processes[$0.id.process]?.launch == row.id && $0.capability != .unsupported
             }.sorted { $0.title == $1.title ? $0.id.token < $1.id.token : $0.title.localizedStandardCompare($1.title) == .orderedAscending }
-            addProgramItem(menu, name: row.name, state: row.state, windows: windows)
+            addProgramRow(menu, row: row, windows: windows)
+        }
+        let now = ProcessInfo.processInfo.systemUptime
+        for (_, ended) in endedRows.filter({ now - $0.value.at < CyderProgramControl.endedRowSeconds })
+            .sorted(by: { $0.value.at < $1.value.at }) {
+            menu.addItem(withTitle: "\(ended.name) — \(ended.result.rawValue)", action: nil, keyEquivalent: "").isEnabled = false
         }
         let independent = latestLifecycle.processes.values.filter { $0.launch == nil && $0.existence != .exited }.sorted {
             let order = $0.name.localizedStandardCompare($1.name)
@@ -1029,6 +1080,158 @@ final class CyderStatusItemController: NSObject, NSMenuDelegate {
         menu.addItem(.separator())
         let quit = menu.addItem(withTitle: "退出 Cyder", action: #selector(quitCyder), keyEquivalent: "q")
         quit.target = self
+    }
+    /// Remember what each running program looked like, and when one ends,
+    /// keep its row briefly with the result.
+    private func trackProgramEnds(_ snapshot: CyderLifecycle.Snapshot, controllable: Set<String>) {
+        for id in controllable {
+            launchNames[id] = programTitles[id] ?? snapshot.launches[id]?.name
+            if CyderProgramControl.crashed(launch: id, in: snapshot) { crashedLaunches.insert(id) }
+        }
+        for id in lastControllableLaunches.subtracting(controllable) {
+            // The crash dialog can outlive the program it reports.
+            if CyderProgramControl.crashed(launch: id, in: snapshot) { crashedLaunches.insert(id) }
+            defer {
+                stoppedByPlayer.remove(id); crashedLaunches.remove(id)
+                launchNames[id] = nil
+            }
+            guard let group = snapshot.launches[id], group.outcome != .failed else { continue } // already shown as CYD-WIN
+            let result = CyderProgramControl.endResult(stoppedByPlayer: stoppedByPlayer.contains(id), crashed: crashedLaunches.contains(id))
+            let name = launchNames[id] ?? group.name
+            endedRows[id] = .init(name: name, result: result, at: ProcessInfo.processInfo.systemUptime)
+            CyderDiagnostics.shared.info("program control: ended launch=\(id) result=\(result)")
+            DispatchQueue.main.asyncAfter(deadline: .now() + CyderProgramControl.endedRowSeconds + 0.1) { [weak self] in
+                guard let self else { return }
+                let now = ProcessInfo.processInfo.systemUptime
+                self.endedRows = self.endedRows.filter { now - $0.value.at < CyderProgramControl.endedRowSeconds }
+                self.refresh()
+            }
+        }
+    }
+    private final class ProgramTarget: NSObject {
+        let launch: String
+        init(_ launch: String) { self.launch = launch }
+    }
+    /// One row per opened program: its status, its windows, 結束… and 強制結束….
+    private func addProgramRow(_ menu: NSMenu, row: ProgramRow, windows: [CyderLifecycle.Window]) {
+        guard row.controllable else { addProgramItem(menu, name: row.name, state: row.state, windows: windows); return }
+        let header = menu.addItem(withTitle: "\(row.name) — \(row.state)", action: nil, keyEquivalent: "")
+        let submenu = NSMenu(title: row.name); submenu.autoenablesItems = false
+        if windows.count == 1, let window = windows.first {
+            addWindowItem(submenu, window: window, title: "\(row.name) — \(window.title.isEmpty ? "視窗" : window.title)")
+        } else {
+            for (index, window) in windows.enumerated() {
+                let duplicate = windows.filter { $0.title == window.title }.count > 1
+                addWindowItem(submenu, window: window, title: window.title.isEmpty ? "視窗" : window.title,
+                    suffix: duplicate ? " (\(index + 1))" : "")
+            }
+        }
+        if !windows.isEmpty { submenu.addItem(.separator()) }
+        let end = submenu.addItem(withTitle: "結束…", action: #selector(endProgram(_:)), keyEquivalent: "")
+        end.target = self; end.representedObject = ProgramTarget(row.id)
+        end.toolTip = "像按下視窗的關閉鈕一樣結束；程式可能會先詢問是否存檔。"
+        let force = submenu.addItem(withTitle: "強制結束…", action: #selector(forceQuitProgram(_:)), keyEquivalent: "")
+        force.target = self; force.representedObject = ProgramTarget(row.id)
+        force.toolTip = "立即結束，未儲存的進度會遺失。"
+        header.submenu = submenu
+    }
+    @objc private func endProgram(_ item: NSMenuItem) {
+        guard let target = item.representedObject as? ProgramTarget else { return }
+        requestProgramControl(launch: target.launch, force: false)
+    }
+    @objc private func forceQuitProgram(_ item: NSMenuItem) {
+        guard let target = item.representedObject as? ProgramTarget else { return }
+        requestProgramControl(launch: target.launch, force: true)
+    }
+    /// Every 結束 and 強制結束 is confirmed; a program others need warns instead.
+    func requestProgramControl(launch: String, force: Bool) {
+        precondition(Thread.isMainThread)
+        guard !isQuiescing, latestLifecycle.launches[launch] != nil,
+              !CyderProgramControl.programs(launch: launch, in: latestLifecycle).isEmpty else { refresh(); return }
+        let name = programRows.first { $0.id == launch }?.name ?? latestLifecycle.launches[launch]!.name
+        let dependency = CyderProgramControl.dependency(launch: launch, in: latestLifecycle)
+        let request = ProgramConfirmation(name: name, force: force, shared: dependency?.shared, others: dependency?.others ?? [])
+        let answer: (Bool) -> Void = { [weak self] confirmed in
+            guard confirmed, let self else { return }
+            self.performProgramControl(launch: launch, force: force)
+        }
+        if let confirmProgramControl { confirmProgramControl(request, answer) } else { Self.presentConfirmation(request, answer) }
+    }
+    private func performProgramControl(launch: String, force: Bool) {
+        precondition(Thread.isMainThread)
+        // Re-read at the moment of acting: a Wine client must never be spawned
+        // for an environment with nothing running (it would start one).
+        let programs = CyderProgramControl.programs(launch: launch, in: latestLifecycle)
+        guard !isQuiescing, !programs.isEmpty, let group = latestLifecycle.launches[launch],
+              let environment = latestLifecycle.environments[group.environment], environment.existence == .alive else { refresh(); return }
+        onProgramStopRequested?(launch)
+        stoppedByPlayer.insert(launch)
+        if force {
+            closeRequests[launch] = nil
+            let targets = programs.map(\.id), signal = signalProgram
+            processQueue.async { [weak self] in
+                let signalled = targets.filter(signal)
+                DispatchQueue.main.async {
+                    CyderDiagnostics.shared.info("program control: force quit launch=\(launch) signalled=\(signalled.count)/\(targets.count)")
+                    self?.independentProcesses.refresh(); self?.refresh()
+                }
+            }
+        } else {
+            closeRequests[launch] = ProcessInfo.processInfo.systemUptime
+            let images = CyderProgramControl.closeImages(launch: launch, in: latestLifecycle)
+            CyderDiagnostics.shared.info("program control: close launch=\(launch) images=\(images.count)")
+            onCloseProgram?(URL(fileURLWithPath: environment.prefix), images, launch)
+            refresh()
+            onProgramsChanged?()
+            DispatchQueue.main.asyncAfter(deadline: .now() + CyderProgramControl.closeGrace + 0.1) { [weak self] in
+                self?.refresh(); self?.onProgramsChanged?()
+            }
+        }
+    }
+    func closePhase(launch: String) -> CyderProgramControl.ClosePhase {
+        precondition(Thread.isMainThread)
+        return CyderProgramControl.closePhase(requestedAt: closeRequests[launch], now: ProcessInfo.processInfo.systemUptime)
+    }
+    /// Launches a player can 顯示 or 結束 now.
+    var controllableLaunches: Set<String> {
+        precondition(Thread.isMainThread)
+        return Set(latestLifecycle.launches.keys.filter { !CyderProgramControl.programs(launch: $0, in: latestLifecycle).isEmpty })
+    }
+    /// 顯示: bring the launch's program forward. Each Wine process with
+    /// windows is a macOS app, so this needs no Accessibility permission.
+    func showProgram(launch: String) {
+        precondition(Thread.isMainThread)
+        let programs = CyderProgramControl.programs(launch: launch, in: latestLifecycle)
+        let target = programs.first { $0.hasPresentedProgram } ?? programs.last
+        guard let target, let app = NSRunningApplication(processIdentifier: target.id.pid) else { refresh(); return }
+        app.activate(options: [.activateAllWindows])
+    }
+    /// Wine's crash dialog opened (`winedbg --auto`, which the process scan
+    /// cannot name): mark the launch it belongs to as ended unexpectedly.
+    func noteCrashReporter(pid: Int32) {
+        precondition(Thread.isMainThread)
+        let owners = latestLifecycle.processes.values.filter { $0.id.pid == pid && $0.existence == .alive }.compactMap(\.launch)
+        for launch in owners { crashedLaunches.insert(launch) }
+        CyderDiagnostics.shared.info("program control: crash dialog pid=\(pid) launches=\(owners.count)")
+    }
+    func hasLivePrograms(launch: String) -> Bool {
+        precondition(Thread.isMainThread)
+        return !CyderProgramControl.programs(launch: launch, in: latestLifecycle).isEmpty
+    }
+    /// Opened from a run-loop block, never inside a main-queue block: a modal
+    /// alert there holds every queued launch until it closes.
+    static func presentConfirmation(_ request: ProgramConfirmation, _ answer: @escaping (Bool) -> Void) {
+        RunLoop.main.perform(inModes: [.common]) {
+            NSApp.activate(ignoringOtherApps: true)
+            let alert = NSAlert()
+            alert.alertStyle = request.force ? .critical : .warning
+            alert.messageText = request.title
+            alert.informativeText = request.detail
+            alert.addButton(withTitle: request.confirmButton)
+            alert.addButton(withTitle: "取消")
+            answer(alert.runModal() == .alertFirstButtonReturn)
+        }
+        CFRunLoopWakeUp(CFRunLoopGetMain())
     }
     private func addProgramItem(_ menu: NSMenu, name: String, state: String, windows: [CyderLifecycle.Window]) {
         if windows.count == 1, let window = windows.first {

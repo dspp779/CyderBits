@@ -17,7 +17,7 @@ for path, dpi, argument in [(snapshot, 144, '--accepted'), (live, 192, '--later'
                    ['CYDER_EXECUTION_OWNER_ROOT', 'CYDER_EXECUTION_OWNER_TICKET',
                     'CYDER_EXECUTION_OWNER_HELPER', 'CYDER_EXECUTION_FINAL']}
     environment['GAME_CUSTOM_VALUE'] = 'normal-value'
-    environment['CYDER_MOLTENVK_VARIANT_PREFERENCE'] = '1.4.2'
+    environment['CYDER_MOLTENVK_VARIANT_PREFERENCE'] = '1.2.10'
     with open(path, 'w') as f:
         json.dump({'schemaVersion': 13, 'dpi': dpi, 'retinaMode': False, 'graphicsBackend': 'default',
                    'moltenvkVariant': '1.2.10' if argument == '--accepted' else '1.4.2',
@@ -35,7 +35,8 @@ PY
   [[ "$CYDER_EXECUTION_OWNER_ROOT" == authorized-root && "$CYDER_EXECUTION_OWNER_TICKET" == authorized-ticket ]]
   [[ "$CYDER_EXECUTION_OWNER_HELPER" == authorized-helper && "$CYDER_EXECUTION_FINAL" == 1 ]]
   [[ "$GAME_CUSTOM_VALUE" == normal-value ]]
-  [[ "$CYDER_MOLTENVK_VARIANT_PREFERENCE" == 1.2.10 ]]
+  # The retired setting and a per-game override of its variable are both ignored.
+  [[ -z "${CYDER_MOLTENVK_VARIANT_PREFERENCE:-}" ]]
   [[ "$CYDER_DPI" == 144 && "${#CYDER_GAME_ARGUMENTS[@]}" == 2 ]]
   [[ "${CYDER_GAME_ARGUMENTS[0]}" == --accepted && "${CYDER_GAME_ARGUMENTS[1]}" == 'two words' ]]
   # Explicit test-launch overrides still win, without changing the saved copy.
