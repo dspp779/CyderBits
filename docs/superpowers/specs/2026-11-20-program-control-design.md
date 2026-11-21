@@ -83,10 +83,8 @@ Cyder
 becomes 顯示 (brings the window forward instead of launching a second copy,
 which 0.15.0 would drop anyway), with 結束… next to it (confirmed like the menu).
 
-**Notifications, only when something needs attention.**
-
-- 「MECCHA CHAMELEON 意外結束」 with 查看紀錄 (phase 2).
-- 「Steam 仍在背景執行」 after the last game it served ends, with 結束 (phase 2).
+**Notifications:** none. Phase 2 first added two (意外結束, Steam still running);
+they were removed on 2026-11-21 as unnecessary.
 
 **Quitting Cyder** keeps games running (0.14 behaviour). Reopening Cyder shows
 them again.
@@ -121,10 +119,49 @@ them again.
    `taskkill /im`) and 強制結束, each with confirmation, 沒有回應 escalation; the
    dependency warning for Steam; library 顯示 / 結束 buttons and the 執行中 badge;
    leftover background rows.
-2. **Phase 2:** 意外結束 and 「仍在背景執行」 notifications; 已結束 result shown
-   briefly in the row.
+2. **Phase 2:** the 已結束／意外結束／已由你結束 result shown briefly in the row
+   (notifications were tried and removed).
 3. **Phase 3:** `+process` trace for names and launcher/child grouping, after
    measuring its log volume on more games.
+
+## Phase 2 (implemented 2026-11-20, branch `claude/program-control-phase2`)
+
+- An ended program's row stays for 8 s with its result: 已由你結束 (the
+  player's 結束/強制結束, or a stopped environment), 意外結束 (Wine's crash
+  dialog appeared for the launch: its activation request names the PID, since
+  `winedbg --auto` has no `.exe` name for the process scan), else 已結束.
+  A launch whose outcome is `failed` already showed `CYD-WIN-…` and gets no
+  row. Ended rows are a separate disabled list, not program rows.
+- No notifications. A first version posted 「X 意外結束」 and 「Steam 仍在背景執行」
+  as macOS notifications; it was removed on 2026-11-21 as unnecessary. The
+  ended row and the session log carry the result.
+- Steam's own tools (`vulkandriverquery64.exe`, `gldriverquery64.exe`,
+  `steamerrorreporter*.exe`) count as part of Steam, so they neither appear
+  in the Steam warning nor look like a game ending.
+
+Hands-on (test build `0.16.0-dev`, M4): a program that crashes on purpose
+opened Wine's crash dialog; closing it gave 「crashme — 意外結束」.
+
+## Phase 3 measurements and decision (2026-11-20)
+
+`WINEDEBUG=-all,+pid,+process`, M4 / macOS 27.2.1, started directly with Wine:
+
+| Program | First 30 s | Steady | Program starts seen |
+|---|---|---|---|
+| MECCHA CHAMELEON | 2,136 lines | 67 lines/s | 9 |
+| Steam | 17,909 lines | 124 lines/s | 39 |
+| 賽馬娘 Pretty Derby | 520 lines | 0 lines/s (stopped at its launcher) | 7 |
+
+Almost all lines are `NtQueryInformationProcess`, `GetEnvironmentVariableW`
+and `ExpandEnvironmentStringsW`; the channel cannot be narrowed to program
+starts. Wine's output goes to `last-wine-launch.log`, capped at 16 MiB keeping
+the newest output, so start-up lines are pushed out within tens of minutes:
+Cyder would have to read the trace live. Frame time with the trace on was not
+measured.
+
+What phase 3 would still give a player: ending one copy when several share a
+name, and separate rows for games started inside Steam. Not built; turning the
+channel on by default needs the user's decision and a frame-time check first.
 
 ## Tests and checks (phase 1)
 

@@ -663,10 +663,28 @@ enum CyderProgramControl {
     static let closeGrace: TimeInterval = 5
     /// Programs other programs may need. Ending one always warns first.
     static let sharedPrograms: [(name: String, images: Set<String>)] = [
-        ("Steam", ["steam.exe", "steamwebhelper.exe", "steamservice.exe"]),
+        // Steam and its own tools (the driver queries run briefly at start-up).
+        ("Steam", ["steam.exe", "steamwebhelper.exe", "steamservice.exe", "steamerrorreporter.exe",
+                   "steamerrorreporter64.exe", "vulkandriverquery.exe", "vulkandriverquery64.exe",
+                   "gldriverquery.exe", "gldriverquery64.exe"]),
     ]
 
     enum ClosePhase: Equatable { case none, closing, notResponding }
+
+    /// How long an ended program's row stays, showing its result.
+    static let endedRowSeconds: TimeInterval = 8
+    /// Wine's crash dialog: a program of the launch crashed.
+    static let crashReporters: Set<String> = ["winedbg", "winedbg.exe", "werfault", "werfault.exe"]
+    enum EndResult: String, Equatable { case ended = "已結束", unexpected = "意外結束", byPlayer = "已由你結束" }
+    /// Player-stopped first (a stop can trigger a crash dialog), then crash, then a plain end.
+    static func endResult(stoppedByPlayer: Bool, crashed: Bool) -> EndResult {
+        stoppedByPlayer ? .byPlayer : (crashed ? .unexpected : .ended)
+    }
+    static func crashed(launch: String, in snapshot: L.Snapshot) -> Bool {
+        snapshot.processes.values.contains {
+            $0.launch == launch && $0.existence == .alive && crashReporters.contains(($0.executableName ?? "").lowercased())
+        }
+    }
     static func closePhase(requestedAt: TimeInterval?, now: TimeInterval) -> ClosePhase {
         guard let requestedAt else { return .none }
         return now - requestedAt >= closeGrace ? .notResponding : .closing

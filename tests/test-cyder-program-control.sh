@@ -32,3 +32,12 @@ echo "PASS library escalation"
 assert_contains "$app" 'let libraryTitle = Self.libraryTitle(forExecutable: exe)' "a launch looks up its library title"
 assert_contains "$app" 'statusItemController.setProgramTitle(libraryTitle, launch: launchID)' "rows and dialogs use the library title"
 echo "PASS library titles"
+
+# Phase 2 shows results in the menu only: no notifications (removed 2026-11-21).
+status="$(cat "$ROOT/scripts/cyder_status_item.swift")"
+assert_not_contains "$status" "UserNotifications" "no notification centre in the status item"
+assert_not_contains "$(cat "$ROOT/scripts/create-cyder-app.sh")" 'cyder_notifications.swift' "no notification poster in the app"
+echo "PASS no notifications"
+assert_contains "$app" 'if crashReporter { self.statusItemController.noteCrashReporter(pid: pid) }' \
+  "Wine's crash dialog marks its launch as ended unexpectedly"
+echo "PASS crash dialog wiring"

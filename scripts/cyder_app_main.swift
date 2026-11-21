@@ -2518,7 +2518,10 @@ final class CyderAppDelegate: NSObject, NSApplicationDelegate {
             // "starting" panel must not stay on top of it, and a second Cyder
             // alert after the user closes it would only repeat it. It never
             // confirms the launch.
-            if let owner = self.launchPanelOwner, isWineCrashReporterProcess(pid) {
+            let crashReporter = isWineCrashReporterProcess(pid)
+            // Wine's crash dialog: the program that started it ended unexpectedly.
+            if crashReporter { self.statusItemController.noteCrashReporter(pid: pid) }
+            if let owner = self.launchPanelOwner, crashReporter {
                 CyderDiagnostics.shared.warning("wine crash dialog shown pid=\(pid); closing launch progress")
                 if let waiter = self.wineActivationWaiter, waiter.launchID == owner { waiter.markPresented() }
                 self.dismissLaunchProgress(for: owner)
