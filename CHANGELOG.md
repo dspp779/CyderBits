@@ -13,10 +13,11 @@ Engine `CX26.3.0-W11-Cyder014`; requires macOS 12 or later.
 Notes: [繁中](docs/releases/v0.15.0.md) · [English](docs/releases/v0.15.0.en.md).
 
 ### Added
-- Program control (phase 1): each opened program has a menu bar row with its status and
+- Program control: each opened program has a menu bar row with its status and
   結束… / 強制結束…, both always confirmed (Steam warns when games still run); the game
   library shows 顯示 and 結束… for a running game and brings it forward instead of starting
-  it again.
+  it again. An ended program's row stays 8 s with 已結束, 意外結束 (Wine's crash dialog
+  appeared) or 已由你結束.
 - Steam games opened directly from `steamapps/common/` get their Steam App ID from
   Steam's `appmanifest`.
 - Cities: Skylines II uses DXMT automatically while its graphics setting is "default" (#10).
