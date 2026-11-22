@@ -1,8 +1,9 @@
 # MapleStory first-use stutter: test plan
 
 Tracks [issue #22](https://github.com/dspp779/CyderBits/issues/22). Status:
-**plan only, nothing run yet.** The operator steps marked *taught* will be
-filled in after the first guided session and then moved into a skill.
+runs 1–14 done (2026-11-13 to 11-15); the first-hit read waiting led to the
+WZ read-ahead shipped in 0.15.0. Summary and next steps:
+[stutter-status-and-direction.md](stutter-status-and-direction.md).
 
 ## Question
 
