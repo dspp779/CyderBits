@@ -20,8 +20,8 @@ assert_not_contains "$build_script" 'CyderLegacyUI.app' \
   "Cyder.app must not package the removed Catalina applet"
 assert_contains "$build_script" 'cp "$SCRIPT_DIR/cyder-macos-wrapper.sh" "$MACOS/Cyder"' \
   "Cyder.app entrypoint must be the OS-version wrapper"
-assert_contains "$build_script" '<string>10.15</string>' \
-  "Info.plist LSMinimumSystemVersion must match the Wine engine floor"
+assert_contains "$build_script" $'<key>LSMinimumSystemVersion</key>\n  <string>12.0</string>' \
+  "Info.plist LSMinimumSystemVersion must be macOS 12 (0.15.0 drops 10.15 and 11)"
 assert_contains "$build_script" '<key>CyderRecommendedGamesDirectory</key>' \
   "Info.plist must declare the recommended ~/Games location"
 assert_contains "$build_script" '<key>NSDocumentsFolderUsageDescription</key>' \

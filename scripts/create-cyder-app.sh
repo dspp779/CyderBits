@@ -338,6 +338,7 @@ SWIFT_SOURCES=(
   "$SCRIPT_DIR/cyder_lifecycle.swift"
   "$SCRIPT_DIR/cyder_environment_probe.swift"
   "$SCRIPT_DIR/cyder_environment_command.swift"
+  "$SCRIPT_DIR/cyder_metal_gpu.swift"
   "$SCRIPT_DIR/cyder_bottle_recovery.swift"
   "$SCRIPT_DIR/cyder_process_evidence.swift"
   "$SCRIPT_DIR/cyder_environment_monitor.swift"
@@ -457,7 +458,7 @@ cat > "$CONTENTS/Info.plist" <<PLIST
   <key>CFBundleVersion</key>
   <string>${CYDER_APP_BUILD:-$CYDER_APP_VERSION}</string>
   <key>LSMinimumSystemVersion</key>
-  <string>10.15</string>
+  <string>12.0</string>
   <key>LSUIElement</key>
   <true/>
   <key>LSArchitecturePriority</key>

@@ -28,10 +28,11 @@ assert_contains "$status_source" 'rootDisplayName' \
   "the launcher EXE name must yield to a later windowed process after it exits"
 assert_contains "$app_source" 'statusItemController.adoptWindowedProcess' \
   "Wine activation must attach MapleStory-style handoff PIDs to the monitored launch"
-assert_contains "$status_source" '正在啟動' \
+lifecycle_source="$(cat "$ROOT/scripts/cyder_lifecycle.swift")"
+assert_contains "$lifecycle_source" '"正在啟動…"' \
   "the menu must distinguish a launch that has not shown a window yet"
-assert_contains "$status_source" '正在結束 Windows 程序' \
-  "the menu must expose an in-progress managed shutdown"
+assert_contains "$status_source" 'statusWord(stopping: environment.stop == .executing' \
+  "the menu must expose an in-progress managed shutdown (正在結束…)"
 assert_contains "$status_source" '工作管理員…' \
   "the menu must expose Wine task manager"
 assert_contains "$status_source" '停止所有 Windows 環境…' \

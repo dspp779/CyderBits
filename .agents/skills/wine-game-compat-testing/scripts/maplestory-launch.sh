@@ -51,6 +51,7 @@ done
 declare -a env_args=(
   "WINEPREFIX=$prefix"
   "CYDER_MAPLESTORY_FILE_CACHE=1"     # what Cyder sets for MapleStory.exe
+  "CYDER_MAPLESTORY_READAHEAD=1"      # same setting (WZ read optimization)
 )
 case "$backend" in
   dxvk|dxmt) env_args+=("CYDER_GRAPHICS_BACKEND=$backend" "CX_GRAPHICS_BACKEND=$backend") ;;

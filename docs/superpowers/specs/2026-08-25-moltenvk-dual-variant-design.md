@@ -2,6 +2,8 @@
 
 日期：2026-08-25  
 狀態：draft（待實作計畫）  
+
+> 2026-11-20：雙版本已於 0.13／0.14 出貨；0.15.0（engine Cyder014）移除 1.2.10 與版本選項，只保留 1.4.2 與 wait-poll shim。下文描述當時的設計，不是現行行為；現行說明見 [cyder.md](../../cyder.md)。舊款 Intel 內顯以 1.4.2 的實測仍待完成（[#7](https://github.com/dspp779/CyderBits/issues/7)）。  
 相關：
 
 - GitHub：[CyderBits#7](https://github.com/dspp779/CyderBits/issues/7)（Intel 內顯 + MoltenVK 1.4.0 世界層黑畫面）

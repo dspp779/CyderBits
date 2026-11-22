@@ -90,7 +90,7 @@ cp "$tmp/prefix/cxbottle.conf" "$tmp/bottle-before"
   }
   cyder_configure_compatdb() { :; }
   cyder_apply_moltenvk_os_floor() { :; }
-  cyder_apply_moltenvk_variant_from_preference() { :; }
+  cyder_ensure_moltenvk_real() { :; }
   cyder_apply_gptk_launch_environment() { :; }
   cyder_validate_moltenvk_for_backend() { :; }
   cyder_wine_is_crossover_frontend() { return 1; }

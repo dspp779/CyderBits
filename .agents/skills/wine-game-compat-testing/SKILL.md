@@ -12,7 +12,7 @@ description: 在 macOS 上操作與測試 Wine／Cyder 遊戲相容性；適用�
 ## 1. 準備
 
 1. 讀 `AGENTS.md`：啟動層、設定、診斷在本 repo 修；Wine 原始碼與建置在 engine repo。
-2. 找該遊戲的固定步驟：`docs/games/<game>/testing.md`（BlueCG、楓之谷已有；楓之谷含登入、操作鍵與卡頓量測）、`docs/games/README.md`、`docs/games/compatibility-matrix.md`。
+2. 找該遊戲的固定步驟：`docs/games/<game>/testing.md`（BlueCG、楓之谷、Cities: Skylines II 已有；楓之谷含登入、操作鍵與卡頓量測）、`docs/games/README.md`、`docs/games/compatibility-matrix.md`。
 3. 要從 Cyder.app 啟動遊戲，測試版必須以 Developer ID 簽署（做法見 `cyder-dev-test`）。ad-hoc 版會停在圖形準備（`publisher_unverified`）。
 4. 記錄：遊戲與啟動器版本、引擎版本、圖形後端、macOS 與晶片、prefix、資料是否下載完成、重現畫面。公開報告不含本機路徑、帳號、憑證。
 5. 優先用獨立 bottle。若用既有 bottle（測試版共用使用者真正的設定與環境），先記下會被改動的設定與進度，測完還原。
@@ -30,6 +30,7 @@ Wine 視窗在 Dock 可能只叫 `wine`，沒有 bundle ID，也沒有 AX 按鈕
 1. 先用 `swiftc -O` 把要用的腳本編譯到 `$TMPDIR`（`swift 檔案` 每次要 1–2 秒，按鍵時機會跑掉）。`scripts/guarded-click.swift` 先不加 `--click` 預覽；確認目標後才加 `--click` 送出一次點擊。按鍵（移動、攻擊、技能）用 `scripts/guarded-key.swift`，先預覽，確認後加 `--send` 送出一次按鍵或一次 `--hold` 長按。
 2. 腳本會拒絕不符的 PID／window ID／標題與超界座標，且要求目標視窗在最前方。驗證失敗就回到步驟 2 重新觀測，不要盲目重試或改點其他 Wine 視窗。
 3. 點擊回傳成功只代表事件已送出；一定要再截圖確認畫面變化。
+   - 部分遊戲 UI（例如 CS2 的 Coherent Gameface）會忽略游標剛移入就按下的點擊：點擊前先送一個無作用的按鍵（`shift`），或在重複觸發無害時點兩次；`return` 常可觸發預設按鈕。exclusive fullscreen 視窗（layer ≠ 0）會被拒絕，改用遊戲的視窗模式參數。
 4. 使用者允許遊玩，不等於允許消費、抽卡、刪檔或公開發文；這些要另外取得同意。
 5. 關閉遊戲走遊戲自己的結束流程。不要用全域方式終止共享的 wineserver。
 

@@ -7,13 +7,49 @@ release notes in [`docs/releases/`](docs/releases/); the engine column refers to
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-11-20
+
+Engine `CX26.3.0-W11-Cyder014`; requires macOS 12 or later.
+Notes: [繁中](docs/releases/v0.15.0.md) · [English](docs/releases/v0.15.0.en.md).
+
+### Added
+- Program control: each opened program has a menu bar row with its status and
+  結束… / 強制結束…, both always confirmed (Steam warns when games still run); the game
+  library shows 顯示 and 結束… for a running game and brings it forward instead of starting
+  it again. An ended program's row stays 8 s with 已結束, 意外結束 (Wine's crash dialog
+  appeared) or 已由你結束.
+- Steam games opened directly from `steamapps/common/` get their Steam App ID from
+  Steam's `appmanifest`.
+- Cities: Skylines II uses DXMT automatically while its graphics setting is "default" (#10).
+- MECCHA CHAMELEON uses DXMT and `-dx11` automatically while its graphics setting is "default"
+  (DXVK leaves the main-menu scene black). Where DXMT cannot run it uses D3DMetal, else DXVK.
+- MapleStory WZ read-ahead (engine Cyder014), merged with the WZ cache into one setting,
+  "MapleStory WZ 檔案讀取最佳化", on by default.
+
+### Fixed
+- A fullscreen game that was force-quit no longer shows "程式在顯示視窗前就結束了"
+  (`CYD-WIN-002`), and a fullscreen launch no longer holds the next launch for 30 s:
+  Cyder now sees Wine's raised fullscreen window levels.
+- An error dialog no longer holds later launches until it is closed, and repeated
+  requests for the same program (double-clicks) start it once instead of in a burst.
+- A launcher that starts the game and exits with an error code no longer shows
+  `CYD-WIN-002` while the game is still opening.
+
+### Changed
+- DXMT is used only on a GPU with Metal GPU Family Mac 2. On older Intel GPUs MapleStory
+  falls back to DXVK, the DXMT setting is disabled, and Cities: Skylines II stops before
+  launch with `CYD-GFX-002` instead of crashing.
+- Engine `CX26.3.0-W11-Cyder014`: minOS-safe build (engine #14), wineserver no longer
+  crashes when a program is killed (engine #16), Unity Mono last error fix (engine #17).
+
 ### Removed
 - Support for macOS 10.15 and 11. Releases after 0.14 require macOS 12 or later.
+- MoltenVK 1.2.10 and the MoltenVK version setting; DXVK uses MoltenVK 1.4.2.
 
 ## [0.14.1] - 2026-11-15
 
 Engine `CX26.3.0-W11-Cyder013`, rebuilt for older macOS compatibility.
-Draft notes: [繁中](docs/releases/v0.14.1.md) · [English](docs/releases/v0.14.1.en.md).
+Notes: [繁中](docs/releases/v0.14.1.md) · [English](docs/releases/v0.14.1.en.md).
 
 ### Fixed
 - Updating the Windows environment crashed on older macOS such as 15.8 (engine #14).
@@ -93,8 +129,9 @@ Engine `CX26.3.0-W11-Cyder011`. [Notes](docs/releases/v0.13.0.md).
 
 Older releases: see the release table in [`docs/README.md`](docs/README.md).
 
-[Unreleased]: https://github.com/dspp779/CyderBits/compare/claude/release-0.14.1...HEAD
-[0.14.1]: https://github.com/dspp779/CyderBits/compare/v0.14.0...claude/release-0.14.1
+[Unreleased]: https://github.com/dspp779/CyderBits/compare/v0.15.0...HEAD
+[0.15.0]: https://github.com/dspp779/CyderBits/compare/v0.14.1...v0.15.0
+[0.14.1]: https://github.com/dspp779/CyderBits/compare/v0.14.0...v0.14.1
 [0.14.0]: https://github.com/dspp779/CyderBits/compare/v0.13.2...v0.14.0
 [0.13.2]: https://github.com/dspp779/CyderBits/compare/v0.13.1...v0.13.2
 [0.13.1]: https://github.com/dspp779/CyderBits/compare/v0.13.0...v0.13.1

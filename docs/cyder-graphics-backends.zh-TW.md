@@ -6,10 +6,10 @@
 
 | 選項 | 說明 |
 |------|------|
-| **default** | 跟隨 CompatDB／引擎預設；不注入一般強制後端覆寫。MapleStory.exe 與 Maplestory_Classic.exe 會另外依 macOS 版本自動選 DXMT／DXVK |
+| **default** | 跟隨 CompatDB／引擎預設；不注入一般強制後端覆寫。MapleStory.exe 與 Maplestory_Classic.exe 會另外依 macOS 版本與 GPU 自動選 DXMT／DXVK；CompatDB 規則另為 Cities: Skylines II 與 MECCHA CHAMELEON 選 DXMT（見下方） |
 | **wined3d** | Wine 內建 Direct3D；相容性較廣，效能通常較差 |
 | **dxvk** | Vulkan→Metal（MoltenVK）；需 Cyder 已安裝 DXVK runtime payload |
-| **dxmt** | Direct3D→Metal（DXMT）；需 Cyder 已安裝 DXMT runtime payload 與 macOS 15+ |
+| **dxmt** | Direct3D→Metal（DXMT）；需 Cyder 已安裝 DXMT runtime payload、macOS 15+ 與 Metal GPU Family Mac 2 的 GPU（Apple Silicon） |
 | **d3dmetal** | Apple D3DMetal／GPTK；需 macOS 14+ 且本機有可用 GPTK |
 
 個別遊戲可覆寫全域設定；選「跟隨全域」表示不覆寫。
@@ -18,8 +18,8 @@
 
 當這兩個 executable 使用 **default** 時，Cyder 在實際啟動前套用平台策略：
 
-- macOS 15+：優先使用 DXMT；若 DXMT payload 不完整，回退到可用的 DXVK。
-- macOS 14 以下：使用 DXVK。
+- macOS 15+ 且 GPU 支援 Metal GPU Family Mac 2：優先使用 DXMT；若 DXMT payload 不完整，回退到可用的 DXVK。
+- macOS 14 以下，或 GPU 只有 Metal GPU Family Mac 1（例如部分舊款 Intel Mac）：使用 DXVK。
 - 明確選擇 DXVK、DXMT、D3DMetal 或 WineD3D 時，手動設定優先於自動策略。
 - 解析結果不寫回設定檔，因此同一份設定可在不同 macOS 版本安全搬移。
 
@@ -90,6 +90,8 @@ DXMT 將 Direct3D 轉譯至 Metal。Cyder 隨 app 打包 **上游 v0.80** DXMT r
 ### 系統需求
 
 - **macOS 15（Sequoia）或更新** — macOS 14 及以下 `dxmt` 選項會灰掉（不同於 D3DMetal 的 macOS 14+ 門檻）。
+- **GPU 支援 Metal GPU Family Mac 2**（Apple Silicon；0.15.0 起檢查）— GPU Family Mac 1 的 Mac 上 `dxmt` 選項會灰掉並說明原因；舊設定若選了 DXMT，啟動時改用預設並記錄原因。可用 `Cyder.app/Contents/MacOS/CyderSwift --metal-gpu-family` 查看（回報 `mac2`、`mac1` 或 `none`）。
+- **CompatDB 自動選擇（圖形為「預設」時）：** Cities: Skylines II 只能用 DXMT，無法使用的 Mac 在啟動 Wine 前顯示 `CYD-GFX-002`；MECCHA CHAMELEON 使用 DXMT 與 `-dx11`，無法使用時改用 D3DMetal，再不行用 DXVK。
 - **DXMT runtime payload 已安裝** — 尚未解壓或 `current-dxmt` 不存在時，`dxmt` 選項會灰掉；請先開啟 Cyder.app 完成 ensure-graphics。
 
 選 **DXMT** 時限幀走 `DXMT_CONFIG`（Metal／CoreAnimation 節奏），不是 `DXVK_FRAME_RATE`。DXMT 的數值最好是螢幕刷新率的因數（例如 60Hz 上選 144 可能實際落到較低的整除值）。
@@ -122,7 +124,8 @@ D3DMetal 需要 Apple Game Porting Toolkit（GPTK）。**Cyder 不內建、不�
 | 狀況 | 處理 |
 |------|------|
 | D3DMetal 無法選取 | 確認 macOS ≥ 14；安裝 CrossOver 或從評估 DMG 安裝 GPTK |
-| DXMT 無法選取 | 確認 macOS ≥ 15；先開啟 Cyder.app，使 DXMT runtime payload 安裝完成 |
+| DXMT 無法選取 | 看選項旁的說明：macOS 需 ≥ 15、GPU 需 Metal GPU Family Mac 2，或先開啟 Cyder.app 讓 DXMT runtime payload 安裝完成 |
+| 啟動時出現 `CYD-GFX-002` | 這個遊戲只能用 DXMT，而這台 Mac 的 GPU 不支援；目前沒有替代圖形 |
 | DXVK 選項灰掉 | 先開啟 Cyder.app，使 DXVK runtime payload 安裝完成；同時確認 engine 有 MoltenVK |
 | 改後端後畫面異常 | 先改回 **default** 或 **wined3d** 再重啟遊戲 |
 | 限幀無效 | 檢查遊戲是否強制 VSync；見上方「限幀 vs VSync」 |

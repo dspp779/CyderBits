@@ -197,6 +197,7 @@ printf 'changed\\n' > "$TEST_ROOT/runtime.changed"
     molten.mkdir(parents=True)
     for version in ['1.4.2', '1.2.10']:
         (molten / f'libMoltenVK-{version}.dylib').touch()
+    # 1.2.10 is a real left by a Cyder013 runtime; the launch repairs .real.
     # Minimal x86_64 Mach-O shim: build version and the .real re-export, read by
     # the formal dependency-free reader (no otool/strings mock).
     name = b'@loader_path/libMoltenVK.real.dylib\0'
@@ -212,11 +213,11 @@ printf 'changed\\n' > "$TEST_ROOT/runtime.changed"
     # Actual settings, Mach-O validation, symlink mutation, authority and
     # final native executor are all formal.
     preamble = '''
-export CYDER_MOLTENVK_VARIANT_PREFERENCE=1.4.2 CYDER_MOCK_MACOS=13.0
+export CYDER_MOCK_MACOS=13.0
 '''
     prefix_script = runtime / 'prefix-attempt.sh'
     prefix_script.write_text(script.read_text().split('cyder_sentinel_attach()')[0] + preamble + '''
-cyder_apply_moltenvk_variant_from_preference "$TEST_ROOT/runtime"
+cyder_ensure_moltenvk_real "$TEST_ROOT/runtime"
 ''')
     prefix_owner = start(runtime, reserve(runtime, False), ['/bin/bash', str(prefix_script)])
     wait(lambda: prefix_owner.poll() is not None, 'prefix-only MoltenVK owner did not return')

@@ -104,7 +104,7 @@ for backend in dxmt d3dmetal wined3d; do
     export CYDER_CAPTURE_WINE_LOG=1 CYDER_MSYNC=0 CYDER_ESYNC=0 CYDER_POWER_MODE=normal
     export CYDER_WINE_START_MODE=direct
     # These unrelated subsystems must not touch the developer's actual runtime.
-    cyder_apply_moltenvk_variant_from_preference() { :; }
+    cyder_ensure_moltenvk_real() { :; }
     cyder_apply_gptk_launch_environment() { :; }
     cyder_validate_moltenvk_for_backend() { :; }
     cyder_apply_scrolling_for_exe() { :; }

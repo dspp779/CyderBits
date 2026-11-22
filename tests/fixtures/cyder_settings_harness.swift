@@ -203,21 +203,25 @@ struct CyderSettingsHarness {
             let completed = DispatchSemaphore(value: 0)
             var result = false
             DispatchQueue.global().async {
-                result = CyderMoltenvkVariant.hostDefault.launchNeedsGlobalScope(engineRoot: moltenEngine)
+                result = CyderMoltenvk.launchNeedsGlobalScope(engineRoot: moltenEngine)
                 completed.signal()
             }
             completed.wait()
             return result
         }
         precondition(!moltenNeedsGlobal()) // Legacy single-dylib engines need no switch.
+        // A Cyder013 runtime also has the retired 1.2.10 real.
         for name in ["libMoltenVK-1.4.2.dylib", "libMoltenVK-1.2.10.dylib", "libMoltenVK.dylib"] {
             try Data().write(to: moltenDirectory.appendingPathComponent(name))
         }
         precondition(moltenNeedsGlobal())
         let moltenLink = moltenDirectory.appendingPathComponent("libMoltenVK.real.dylib")
         try FileManager.default.createSymbolicLink(atPath: moltenLink.path,
-            withDestinationPath: "libMoltenVK-\(CyderMoltenvkVariant.hostDefault.rawValue).dylib")
+            withDestinationPath: "libMoltenVK-1.4.2.dylib")
         precondition(!moltenNeedsGlobal())
+        try FileManager.default.removeItem(at: moltenLink)
+        try FileManager.default.createSymbolicLink(atPath: moltenLink.path, withDestinationPath: "libMoltenVK-1.2.10.dylib")
+        precondition(moltenNeedsGlobal()) // A residual 1.2.10 link is repaired under the global scope.
         try FileManager.default.removeItem(at: moltenLink)
         try FileManager.default.createSymbolicLink(atPath: moltenLink.path, withDestinationPath: "missing-library")
         precondition(moltenNeedsGlobal())

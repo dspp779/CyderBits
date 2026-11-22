@@ -12,19 +12,23 @@ assert_contains "$output" "bottles/shared" "dry-run should use the shared bottle
 assert_contains "$output" "game.exe" "dry-run should show exe path"
 
 cache_scope="$(CYDER_MAPLESTORY_FILE_CACHE_PREFERENCE=1 bash -c \
-  'source "$1/scripts/cyder-common.sh"; cyder_apply_maplestory_wz_cache "$2"; printf "%s|%s\\n" "$CYDER_MAPLESTORY_FILE_CACHE" "$CYDER_MAPLESTORY_FILE_CACHE_PREFERENCE"' \
+  'source "$1/scripts/cyder-common.sh"; cyder_apply_maplestory_wz_cache "$2"; printf "%s|%s|%s\\n" "$CYDER_MAPLESTORY_FILE_CACHE" "$CYDER_MAPLESTORY_READAHEAD" "$CYDER_MAPLESTORY_FILE_CACHE_PREFERENCE"' \
   _ "$ROOT" "$TMP/MapleStory.exe")"
-assert_eq "$cache_scope" "1|1" "MapleStory launches should enable the WZ cache by default"
+assert_eq "$cache_scope" "1|1|1" "MapleStory launches should enable the WZ cache and read-ahead by default"
 cache_scope="$(CYDER_MAPLESTORY_FILE_CACHE_PREFERENCE=1 bash -c \
-  'source "$1/scripts/cyder-common.sh"; cyder_apply_maplestory_wz_cache "$2"; printf "%s\\n" "$CYDER_MAPLESTORY_FILE_CACHE"' \
+  'source "$1/scripts/cyder-common.sh"; cyder_apply_maplestory_wz_cache "$2"; printf "%s|%s\\n" "$CYDER_MAPLESTORY_FILE_CACHE" "$CYDER_MAPLESTORY_READAHEAD"' \
   _ "$ROOT" "$TMP/other-game.exe")"
-assert_eq "$cache_scope" "0" "non-MapleStory launches must disable the WZ cache"
+assert_eq "$cache_scope" "0|0" "non-MapleStory launches must disable the WZ cache and read-ahead"
+cache_scope="$(CYDER_MAPLESTORY_READAHEAD=1 CYDER_MAPLESTORY_FILE_CACHE_PREFERENCE=0 bash -c \
+  'source "$1/scripts/cyder-common.sh"; cyder_apply_maplestory_wz_cache "$2"; printf "%s|%s\\n" "$CYDER_MAPLESTORY_FILE_CACHE" "$CYDER_MAPLESTORY_READAHEAD"' \
+  _ "$ROOT" "$TMP/MapleStory.exe")"
+assert_eq "$cache_scope" "0|0" "turning the WZ read optimization off must turn off both engine switches"
 mkdir -p "$TMP/cache-support"
 printf '{"graphicsBackend":"default","maplestoryWZCache":false}\n' >"$TMP/cache-support/settings.json"
 cache_scope="$(CYDER_SUPPORT="$TMP/cache-support" bash -c \
-  'source "$1/scripts/cyder-common.sh"; cyder_init_paths "$1"; cyder_load_saved_settings; cyder_apply_maplestory_wz_cache "$2"; printf "%s\\n" "$CYDER_MAPLESTORY_FILE_CACHE"' \
+  'source "$1/scripts/cyder-common.sh"; cyder_init_paths "$1"; cyder_load_saved_settings; cyder_apply_maplestory_wz_cache "$2"; printf "%s|%s\\n" "$CYDER_MAPLESTORY_FILE_CACHE" "$CYDER_MAPLESTORY_READAHEAD"' \
   _ "$ROOT" "$TMP/MapleStory.exe")"
-assert_eq "$cache_scope" "0" "saved preference should disable the MapleStory WZ cache"
+assert_eq "$cache_scope" "0|0" "saved preference should disable the MapleStory WZ read optimization"
 set +e
 launch_out="$(bash "$ROOT/scripts/cyder_launcher.sh" --launch-exe /nonexistent/missing.exe 2>&1)"
 launch_status=$?
@@ -372,8 +376,9 @@ elif [[ "${1:-}" == wineboot ]]; then
   : >"$WINEPREFIX/system.reg"
   : >"$WINEPREFIX/user.reg"
   : >"$WINEPREFIX/drive_c/windows/system32/kernel32.dll"
-elif [[ "${1:-}" == taskmgr && -n "${CYDER_TEST_TASKMGR_LOG:-}" ]]; then
+elif [[ ( "${1:-}" == taskmgr || "${1:-}" == taskkill ) && -n "${CYDER_TEST_TASKMGR_LOG:-}" ]]; then
   printf '%s|%s|%s|%s\n' "${WINEPREFIX:-}" "$*" "${WINEMSYNC:-}" "${WINEESYNC:-}" >>"$CYDER_TEST_TASKMGR_LOG"
+  if [[ "${1:-}" == taskkill && -n "${CYDER_TEST_TASKKILL_STATUS:-}" ]]; then exit "$CYDER_TEST_TASKKILL_STATUS"; fi
 fi
 SH
 chmod +x "$TMP/runtime/Engines/wine-x86_64/bin/wine"
@@ -499,8 +504,29 @@ assert_contains "$(cat "$taskmgr_log")" "$session_prefix|taskmgr" \
   "task manager should target the selected bottle"
 assert_contains "$(cat "$taskmgr_log")" "$session_prefix|taskmgr|1|" \
   "task manager should inherit the active bottle MSync protocol"
+# 結束: ask a program in a running bottle to close (taskkill without /f).
+close_log="$TMP/close-program.log"
+CYDER_SUPPORT="$profile_support" CYDER_TEST_TASKMGR_LOG="$close_log" \
+  bash "$ROOT/scripts/cyder_launcher.sh" --close-program-prefix "$session_prefix" "Game (x64).exe"
+assert_contains "$(cat "$close_log")" "$session_prefix|taskkill /im Game (x64).exe|1|" \
+  "close-program should run taskkill without /f in the bottle with its sync protocol"
+assert_not_contains "$(cat "$close_log")" " /f" "close-program must never force"
+CYDER_SUPPORT="$profile_support" CYDER_TEST_TASKMGR_LOG="$close_log" CYDER_TEST_TASKKILL_STATUS=128 \
+  bash "$ROOT/scripts/cyder_launcher.sh" --close-program-prefix "$session_prefix" "gone.exe" \
+  || { echo "taskkill finding no window (128) must not fail close-program" >&2; exit 1; }
+if CYDER_SUPPORT="$profile_support" CYDER_TEST_TASKMGR_LOG="$close_log" \
+  bash "$ROOT/scripts/cyder_launcher.sh" --close-program-prefix "$session_prefix" "game.exe /f" >/dev/null 2>&1; then
+  echo "close-program accepted an image with arguments" >&2
+  exit 1
+fi
 CYDER_SUPPORT="$profile_support" \
   bash "$ROOT/scripts/cyder_launcher.sh" --session-release "$session_prefix" "$taskmgr_session"
+: >"$close_log"
+close_status=0
+CYDER_SUPPORT="$profile_support" CYDER_TEST_TASKMGR_LOG="$close_log" \
+  bash "$ROOT/scripts/cyder_launcher.sh" --close-program-prefix "$session_prefix" "game.exe" >/dev/null 2>&1 || close_status=$?
+assert_eq "$close_status" "3" "close-program must not start Wine in a bottle that is not running"
+assert_eq "$(cat "$close_log")" "" "no Wine client runs for a stopped bottle"
 prefix_stop_log="$TMP/prefix-stop.log"
 CYDER_SUPPORT="$profile_support" CYDER_TEST_STOP_LOG="$prefix_stop_log" PATH="$TMP/bin:$PATH" \
   bash "$ROOT/scripts/cyder_launcher.sh" --stop-prefix "$session_prefix"

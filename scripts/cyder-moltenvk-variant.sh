@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
-# Resolve and apply dual-variant MoltenVK (.real symlink) for Cyder012+.
+# Keep the engine's MoltenVK .real link on the shipped 1.4.2 real and refuse
+# DXVK when its Mach-O minOS exceeds the host. Cyder 0.15 (engine Cyder014)
+# ships only libMoltenVK-1.4.2.dylib; the user-facing 1.4.2/1.2.10 choice is
+# gone. A runtime left on libMoltenVK-1.2.10 is pointed back at 1.4.2.
 # shellcheck shell=bash
 set -euo pipefail
 
@@ -10,33 +13,19 @@ if [[ -f "$_CYDER_MVK_DIR/cyder-macos-compat.sh" ]]; then
 fi
 unset _CYDER_MVK_DIR
 
-# Prints a candidate only; version names never prove host compatibility.
-cyder_resolve_moltenvk_variant() {
-  local pref="${1:?}"
-  case "$pref" in
-    1.4.2 | 1.2.10) ;;
-    *)
-      echo "invalid moltenvk variant: $pref" >&2
-      return 2
-      ;;
-  esac
-  if ! cyder_macos_at_least 12 0; then
-    printf '1.2.10\n'
-    return 0
-  fi
-  printf '%s\n' "$pref"
-}
+CYDER_MOLTENVK_REAL_VERSION=1.4.2
 
 cyder_moltenvk_unix_lib() {
   local engine="${1:?}"
   printf '%s\n' "$engine/lib/wine/x86_64-unix"
 }
 
-# True when the engine ships the Cyder012+ dual layout.
-cyder_engine_has_moltenvk_dual_variant() {
+# True when the engine has the versioned layout (1.4.2 real + shim). Cyder012
+# and Cyder013 also carried a 1.2.10 real; it is ignored.
+cyder_engine_has_moltenvk_versioned_layout() {
   local unix
   unix="$(cyder_moltenvk_unix_lib "${1:?}")"
-  [[ -f "$unix/libMoltenVK-1.4.2.dylib" && -f "$unix/libMoltenVK-1.2.10.dylib" && -f "$unix/libMoltenVK.dylib" ]]
+  [[ -f "$unix/libMoltenVK-${CYDER_MOLTENVK_REAL_VERSION}.dylib" && -f "$unix/libMoltenVK.dylib" ]]
 }
 
 # Read Mach-O load commands without Apple's developer tools (otool, strings,
@@ -114,12 +103,11 @@ cyder_macho_reexports_real() {
   grep -Fxq 'reexport @loader_path/libMoltenVK.real.dylib' <<<"$out"
 }
 
-# sets lib/wine/x86_64-unix/libMoltenVK.real.dylib -> libMoltenVK-$resolved.dylib
-cyder_apply_moltenvk_variant() {
-  local engine="${1:?}" pref="${2:?}" unix resolved target
+# sets lib/wine/x86_64-unix/libMoltenVK.real.dylib -> libMoltenVK-1.4.2.dylib
+cyder_point_moltenvk_real() {
+  local engine="${1:?}" unix target
   unix="$(cyder_moltenvk_unix_lib "$engine")"
-  resolved="$(cyder_resolve_moltenvk_variant "$pref")"
-  target="libMoltenVK-${resolved}.dylib"
+  target="libMoltenVK-${CYDER_MOLTENVK_REAL_VERSION}.dylib"
   [[ -f "$unix/$target" ]] || {
     echo "missing $unix/$target" >&2
     return 1
@@ -150,28 +138,24 @@ cyder_apply_moltenvk_variant() {
     echo "Shared MoltenVK configuration changed; retry the launch to acquire its global operation scope." >&2
     return 75
   fi
-  # Running games load the variant lazily; never switch it under them.
+  # Running games load MoltenVK lazily; never switch it under them.
   if declare -F cyder_shared_runtime_idle >/dev/null 2>&1; then
     cyder_shared_runtime_idle "$engine" moltenvk || return $?
   fi
   ln -sfn "$target" "$unix/libMoltenVK.real.dylib"
 }
 
-# Soft apply: no-op on single-dylib engines (Cyder011 and earlier).
-cyder_apply_moltenvk_variant_if_present() {
-  local engine="${1:?}" pref="${2:?}"
-  if ! cyder_engine_has_moltenvk_dual_variant "$engine"; then
-    return 0
-  fi
-  cyder_apply_moltenvk_variant "$engine" "$pref"
-}
-
-cyder_default_moltenvk_variant_preference() {
-  if cyder_macos_at_least 12 0; then
-    printf '1.4.2\n'
-  else
-    printf '1.2.10\n'
-  fi
+# Soft form for launches and installs: no-op on single-dylib engines
+# (Cyder011 and earlier) and on a missing engine directory.
+cyder_ensure_moltenvk_real() {
+  local engine="${1:-}" status
+  [[ -n "$engine" && -d "$engine" ]] || return 0
+  cyder_engine_has_moltenvk_versioned_layout "$engine" || return 0
+  cyder_point_moltenvk_real "$engine" || {
+    status=$?
+    echo "MoltenVK real link repair failed (engine=$engine)" >&2
+    return "$status"
+  }
 }
 
 # Inspect the Wine process slice, including older LC_VERSION_MIN_MACOSX dylibs.
@@ -195,8 +179,8 @@ cyder_moltenvk_check_minos() {
   fi
 }
 
-# Call after backend resolution, before spawning Wine. Installation/preference
-# maintenance may still select a real on a host using WineD3D or D3DMetal.
+# Call after backend resolution, before spawning Wine. Installation maintenance
+# may still repair the real link on a host using WineD3D or D3DMetal.
 cyder_validate_moltenvk_for_backend() {
   local engine="${1:?}" backend="${2:-default}" unix shim real
   [[ "$backend" == dxvk ]] || return 0
@@ -217,17 +201,11 @@ cyder_validate_moltenvk_for_backend() {
 # CLI for Swift / manual use.
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
   case "${1:-}" in
-    resolve)
-      cyder_resolve_moltenvk_variant "${2:?}"
-      ;;
-    apply)
-      cyder_apply_moltenvk_variant "${2:?}" "${3:?}"
-      ;;
-    apply-if-present)
-      cyder_apply_moltenvk_variant_if_present "${2:?}" "${3:?}"
+    ensure)
+      cyder_ensure_moltenvk_real "${2:?}"
       ;;
     *)
-      echo "Usage: $0 resolve|apply|apply-if-present …" >&2
+      echo "Usage: $0 ensure ENGINE" >&2
       exit 2
       ;;
   esac

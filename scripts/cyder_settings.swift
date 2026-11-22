@@ -1,4 +1,5 @@
 import Foundation
+import Metal
 import CoreText
 import Darwin
 
@@ -204,56 +205,21 @@ enum CyderWineLocale: String, Codable, CaseIterable {
     }
 }
 
-/// Global MoltenVK dual-variant preference (Cyder012+). Raw values match
-/// versioned dylib basenames without the `libMoltenVK-` / `.dylib` wrapper.
-enum CyderMoltenvkVariant: String, Codable, CaseIterable {
-    case v142 = "1.4.2"
-    case v1210 = "1.2.10"
+/// MoltenVK real link. Cyder 0.15 (engine Cyder014) ships only
+/// libMoltenVK-1.4.2.dylib; the 1.4.2/1.2.10 setting was removed. A runtime
+/// still pointing `.real` at the old 1.2.10 real is repaired by the launcher,
+/// which needs the global operation scope for that one launch.
+enum CyderMoltenvk {
+    static let realName = "libMoltenVK-1.4.2.dylib"
 
-    static var hostSupports142: Bool {
-        ProcessInfo.processInfo.isOperatingSystemAtLeast(
-            OperatingSystemVersion(majorVersion: 12, minorVersion: 0, patchVersion: 0)
-        )
-    }
-
-    static var hostDefault: CyderMoltenvkVariant {
-        hostSupports142 ? .v142 : .v1210
-    }
-
-    static func sanitized(_ raw: String?) -> CyderMoltenvkVariant {
-        guard let raw, let value = CyderMoltenvkVariant(rawValue: raw) else {
-            return hostDefault
-        }
-        if value == .v142 && !hostSupports142 {
-            return .v1210
-        }
-        return value
-    }
-
-    func launchNeedsGlobalScope(engineRoot: URL = CyderPaths.engine) -> Bool {
+    static func launchNeedsGlobalScope(engineRoot: URL = CyderPaths.engine) -> Bool {
         precondition(!Thread.isMainThread)
         let directory = engineRoot.appendingPathComponent("lib/wine/x86_64-unix")
         let manager = FileManager.default
-        guard ["libMoltenVK-1.4.2.dylib", "libMoltenVK-1.2.10.dylib", "libMoltenVK.dylib"]
+        guard [realName, "libMoltenVK.dylib"]
             .allSatisfy({ manager.fileExists(atPath: directory.appendingPathComponent($0).path) }) else { return false }
-        let selected = Self.sanitized(rawValue)
         return (try? manager.destinationOfSymbolicLink(atPath: directory.appendingPathComponent("libMoltenVK.real.dylib").path))
-            != "libMoltenVK-\(selected.rawValue).dylib"
-    }
-
-    var menuTitle: String { rawValue }
-
-    var menuIndex: Int {
-        Self.allCases.firstIndex(of: self) ?? 0
-    }
-
-    init(menuIndex: Int) {
-        let cases = Self.allCases
-        if menuIndex >= 0, menuIndex < cases.count {
-            self = cases[menuIndex]
-        } else {
-            self = .hostDefault
-        }
+            != realName
     }
 }
 
@@ -307,8 +273,26 @@ struct CyderGraphicsCapabilities: Equatable {
         return CyderGraphicsCapabilities(
             hasD3DMetal: osOK && hasGptk,
             hasDxvk: hasDxvkPayload(engineRoot: engineRoot),
-            hasDxmt: hasDxmtPayload(engineRoot: engineRoot)
+            hasDxmt: hostGPUSupportsDxmt && hasDxmtPayload(engineRoot: engineRoot)
         )
+    }
+
+    /// DXMT needs Metal GPU Family Mac 2; older Intel GPUs (Mac 1) abort in
+    /// Metal when DXMT builds its first pipeline. Matches the launcher gate
+    /// (`CyderSwift --metal-gpu-family`, cyder_host_gpu_supports_dxmt).
+    static let hostGPUSupportsDxmt: Bool =
+        MTLCreateSystemDefaultDevice()?.supportsFamily(.mac2) ?? false
+
+    /// Why DXMT cannot be chosen on this Mac, for the settings text; nil when it can.
+    static func dxmtUnavailableReason(
+        osMajorVersion: Int = ProcessInfo.processInfo.operatingSystemVersion.majorVersion,
+        gpuSupportsDxmt: Bool = hostGPUSupportsDxmt,
+        hasDxmt: Bool
+    ) -> String? {
+        if osMajorVersion < 15 { return "DXMT 不可用：需要 macOS 15+" }
+        if !gpuSupportsDxmt { return "DXMT 不可用：這台 Mac 的 GPU 不支援（需要 Metal GPU Family Mac 2）" }
+        if !hasDxmt { return "DXMT 不可用：找不到已安裝的 DXMT 圖形元件" }
+        return nil
     }
 
     static func hasDxvkPayload(engineRoot: URL?) -> Bool {
@@ -528,10 +512,11 @@ struct CyderSettings: Codable {
     var wineDiagnostics: CyderWineDiagnostics = .quiet
     /// Unix locale for Wine process start. Default follows macOS `AppleLocale`.
     var wineLocale: CyderWineLocale = .system
-    /// Enable MapleStory-only read-ahead for read-only WZ/MS files.
+    /// "MapleStory WZ read optimization": the MapleStory-only WZ cache plus the
+    /// engine read-ahead for forward WZ scans (CYDER_MAPLESTORY_FILE_CACHE and
+    /// CYDER_MAPLESTORY_READAHEAD). The key keeps its old name so saved
+    /// settings carry over.
     var maplestoryWZCache = true
-    /// Dual-variant MoltenVK preference (`1.4.2` \| `1.2.10`). macOS &lt; 12 prefers 1.2.10; launch validates actual Mach-O minOS.
-    var moltenvkVariant: CyderMoltenvkVariant = CyderMoltenvkVariant.hostDefault
     var perExecutable: [String: CyderExecutableSettings] = [:]
     var perProfile: [String: CyderExecutableSettings] = [:]
 
@@ -543,7 +528,7 @@ struct CyderSettings: Codable {
         case graphicsBackend, dxvkFrameRate, graphicsHud, dxvkHudFrametimes, wineDiagnostics
         case wineLocale
         case maplestoryWZCache
-        case moltenvkVariant, scrolling
+        case scrolling
         case perExecutable, perProfile
         case fontPreset
     }
@@ -609,9 +594,8 @@ struct CyderSettings: Codable {
         // Global UI is a switch: old unmanaged/absent values migrate to off (N).
         scrolling = CyderScrolling.sanitized(try values.decodeIfPresent(String.self, forKey: .scrolling)) == .precise ? .precise : .traditional
         maplestoryWZCache = try values.decodeIfPresent(Bool.self, forKey: .maplestoryWZCache) ?? true
-        moltenvkVariant = CyderMoltenvkVariant.sanitized(
-            try values.decodeIfPresent(String.self, forKey: .moltenvkVariant)
-        )
+        // Schema 13 stored a MoltenVK 1.4.2/1.2.10 choice ("moltenvkVariant").
+        // It is ignored now: only 1.4.2 ships, and the next save drops the key.
         perExecutable = try values.decodeIfPresent([String: CyderExecutableSettings].self, forKey: .perExecutable) ?? [:]
         let decodedProfiles = try values.decodeIfPresent([String: CyderExecutableSettings].self, forKey: .perProfile) ?? [:]
         perProfile = decodedProfiles.reduce(into: [:]) { result, item in
@@ -653,7 +637,6 @@ struct CyderSettings: Codable {
         try container.encode(wineDiagnostics, forKey: .wineDiagnostics)
         try container.encode(wineLocale, forKey: .wineLocale)
         try container.encode(maplestoryWZCache, forKey: .maplestoryWZCache)
-        try container.encode(moltenvkVariant, forKey: .moltenvkVariant)
         try container.encode(scrolling, forKey: .scrolling)
         try container.encode(perExecutable, forKey: .perExecutable)
         try container.encode(perProfile, forKey: .perProfile)
@@ -1011,7 +994,6 @@ struct CyderSettings: Codable {
         mark("wineLocale", before.wineLocale.rawValue != after.wineLocale.rawValue)
         mark("maplestoryWZCache", before.maplestoryWZCache != after.maplestoryWZCache)
         mark("scrolling", before.scrolling != after.scrolling)
-        mark("moltenvkVariant", before.moltenvkVariant.rawValue != after.moltenvkVariant.rawValue)
 
         let profileIDs = Set(before.perProfile.keys).union(after.perProfile.keys)
         for profileID in profileIDs {
@@ -1105,7 +1087,6 @@ final class CyderSettingsStore {
         var next = value
         work(&next)
         next.schemaVersion = 14
-        next.moltenvkVariant = CyderMoltenvkVariant.sanitized(next.moltenvkVariant.rawValue)
         next.perProfile = next.perProfile.reduce(into: [:]) { result, item in
             guard CyderSettings.isValidProfileID(item.key) else { return }
             result[item.key] = CyderSettings.sanitized(item.value)
@@ -1176,7 +1157,6 @@ final class CyderSettingsStore {
             "CYDER_WINE_DIAGNOSTICS": value.wineDiagnostics.rawValue,
             "CYDER_WINE_LOCALE": value.wineLocale.unixLocale ?? "system",
             "CYDER_SCROLLING_PREFERENCE": value.scrolling.rawValue,
-            "CYDER_MOLTENVK_VARIANT_PREFERENCE": value.moltenvkVariant.rawValue,
         ]
     }
 
