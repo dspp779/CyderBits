@@ -7,7 +7,7 @@ release notes in [`docs/releases/`](docs/releases/); the engine column refers to
 
 ## [Unreleased]
 
-## [0.15.0] - 2026-11-20
+## [0.15.0] - 2026-11-22
 
 Engine `CX26.3.0-W11-Cyder014`; requires macOS 12 or later.
 Notes: [繁中](docs/releases/v0.15.0.md) · [English](docs/releases/v0.15.0.en.md).
