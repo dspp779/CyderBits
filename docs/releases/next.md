@@ -17,6 +17,8 @@
 
 不納入：read-ahead 後 256 KiB 補讀視窗、cache 命中去除 `lseek`、mutex 外補讀，以及下方 DXMT resource lab 各項。
 
+**0.16.0：** 卡頓現況與後續方向（先重複量測 DXMT 等後端的基準，再決定 engine 補讀改進、學習式預讀與舊款 Intel Mac 走圖量測）見 [新楓之谷卡頓：現況與方向](../games/maplestory/stutter-status-and-direction.md)。
+
 ### B. Wine engine Cyder014
 
 | 項目 | 內容 | 目前狀態 | 驗收 |
